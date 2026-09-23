@@ -3157,8 +3157,137 @@ function toast(message, type = 'info') {
 // ── Header Buttons ────────────────────────────────────────────
 function initHeaderButtons() {
   $('settingsBtn')?.addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
+    $('tab-btn-settings')?.click();
   });
+}
+
+// ── Sidepanel Settings Panel ──────────────────────────────────
+function initSettingsPanel() {
+  const syncSettingsUI = () => {
+    const s = State.data?.settings || {};
+    document.querySelectorAll('#tab-settings [data-setting]').forEach(el => {
+      const k = el.dataset.setting;
+      if (el.type === 'checkbox') {
+        el.checked = s[k] !== undefined ? !!s[k] : el.checked;
+      } else if (el.type === 'number') {
+        el.value = s[k] !== undefined ? s[k] : (el.value || 0);
+      } else {
+        el.value = s[k] !== undefined ? s[k] : el.value;
+      }
+    });
+
+    const curTheme = State.theme || 'dark';
+    document.querySelectorAll('#themeSeg button').forEach(b => {
+      b.classList.toggle('active', b.dataset.theme === curTheme);
+    });
+
+    updateStorageDisplay();
+  };
+
+  document.querySelectorAll('#themeSeg button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const t = btn.dataset.theme;
+      if (!['dark', 'light'].includes(t)) return;
+      State.theme = t;
+      applyTheme(t);
+      await saveUIState();
+      document.querySelectorAll('#themeSeg button').forEach(b => {
+        b.classList.toggle('active', b.dataset.theme === t);
+      });
+      toast(`${t === 'light' ? '☀️ Light' : '🌙 Dark'} mode activated`, 'info');
+    });
+  });
+
+  document.querySelectorAll('#tab-settings [data-setting]').forEach(el => {
+    const handler = async () => {
+      const k = el.dataset.setting;
+      let val;
+      if (el.type === 'checkbox') val = el.checked;
+      else if (el.type === 'number') val = parseFloat(el.value) || 0;
+      else val = el.value.trim();
+
+      const patch = { [k]: val };
+      if (!State.data.settings) State.data.settings = {};
+      State.data.settings[k] = val;
+      try {
+        await msg({ action: 'UPDATE_SETTINGS', settings: patch });
+        toast('Setting saved', 'ok');
+      } catch (_) {}
+    };
+
+    if (el.type === 'checkbox' || el.tagName === 'SELECT') {
+      el.addEventListener('change', handler);
+    } else {
+      el.addEventListener('change', handler);
+    }
+  });
+
+  function updateStorageDisplay() {
+    const el = $('spStorageDesc');
+    if (!el) return;
+    if (chrome.storage?.local?.getBytesInUse) {
+      chrome.storage.local.getBytesInUse(null, bytes => {
+        if (bytes < 1024) el.textContent = `${bytes} B used`;
+        else if (bytes < 1024 * 1024) el.textContent = `${(bytes / 1024).toFixed(1)} KB used`;
+        else el.textContent = `${(bytes / (1024 * 1024)).toFixed(2)} MB used`;
+      });
+    } else {
+      el.textContent = 'Local storage active';
+    }
+  }
+
+  $('spRefreshStorageBtn')?.addEventListener('click', () => {
+    updateStorageDisplay();
+    toast('Storage stats refreshed', 'info');
+  });
+
+  $('spBackupDataBtn')?.addEventListener('click', async () => {
+    try {
+      const d = await msg({ action: 'GET_DATA' });
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.href = url;
+      a.download = `zhunter_backup_${dateStr}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('✓ Backup downloaded!', 'ok');
+    } catch (err) {
+      toast('Backup failed: ' + (err?.message || err), 'err');
+    }
+  });
+
+  $('spResetLibraryBtn')?.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to reset the Library? This deletes all hunted products and history.')) return;
+    try {
+      await msg({ action: 'CLEAR_HISTORY' });
+      const d = await msg({ action: 'GET_DATA' });
+      if (d?.links) {
+        for (const l of d.links) {
+          await msg({ action: 'REMOVE_LINK', id: l.id });
+        }
+      }
+      await refresh();
+      toast('✓ Library reset completed', 'ok');
+    } catch (err) {
+      toast('Reset failed: ' + (err?.message || err), 'err');
+    }
+  });
+
+  $('spWipeAllBtn')?.addEventListener('click', async () => {
+    if (!confirm('DANGER: Wipe all products, queue, and history? This cannot be undone.')) return;
+    try {
+      await chrome.storage.local.remove(['zakBulkQueue', 'zakBulkResults', 'temuUploadHistory', 'zakMasterProducts']);
+      await msg({ action: 'CLEAR_HISTORY' });
+      await refresh();
+      toast('✓ All data wiped successfully', 'ok');
+    } catch (err) {
+      toast('Wipe failed: ' + (err?.message || err), 'err');
+    }
+  });
+
+  syncSettingsUI();
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -3405,6 +3534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyRipples();
   initImagesTab();
   initGroqStudio();
+  initSettingsPanel();
 
   // ── Check for pending image hunt from right-click context menu ──
   setTimeout(async () => {

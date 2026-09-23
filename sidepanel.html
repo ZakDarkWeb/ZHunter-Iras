@@ -377,11 +377,16 @@
       <div class="set">
         <div class="it"><div class="l"><b>Format</b></div><select class="sel" style="width:120px" data-setting="imageFormat"><option value="original">Original</option><option value="jpg">JPG</option><option value="png">PNG</option></select></div>
         <div class="it"><div class="l"><b>Ratio</b><span>Square for Temu and most marketplaces</span></div><select class="sel" style="width:120px" data-setting="imageRatio"><option value="original">Original</option><option value="1:1">1:1 square</option><option value="3:4">3:4</option><option value="4:3">4:3</option></select></div>
+        <div class="it"><div class="l"><b>Padding colour</b><span>Used when an image is padded</span></div><select class="sel" style="width:120px" data-setting="imageBg"><option value="original">Transparent</option><option value="white">White</option></select></div>
+        <div class="it"><div class="l"><b>Keep files under 5 MB</b><span>Recompress oversized images</span></div><label class="sw-wrap"><input type="checkbox" data-setting="imageMax5MB" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Minimum size</b><span>Skip images smaller than (0 = all)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="0" max="4000" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="imageMinSize" placeholder="0"><span class="hint">px</span></div></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg> Data</span>
       <div class="set">
+        <div class="it"><div class="l"><b>Storage used</b><span id="spStorageDesc">Calculating…</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRefreshStorageBtn">Refresh</button></div>
         <div class="it"><div class="l"><b>Backup everything</b><span>Download full data & settings JSON</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
         <div class="it"><div class="l"><b>Reset Library</b><span>Deletes hunted items & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
+        <div class="it"><div class="l"><b>Wipe everything</b><span>Products, queue & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spWipeAllBtn">Wipe all</button></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> Groq AI Engine</span>
       <div class="set" id="spGroqSettings">
@@ -401,12 +406,7 @@
           </select>
         </div>
       </div>
-      <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M10 16h.01M14 16h.01M18 16h.01"/></svg> Shortcuts</span>
-      <div class="set">
-        <div class="it"><div class="l"><b>Open Side Panel</b></div><span class="badge-tag">Ctrl + Shift + L</span></div>
-        <div class="it"><div class="l"><b>Add Tab to Queue</b></div><span class="badge-tag">Ctrl + Shift + S</span></div>
-      </div>
-      <p class="hint">ZHunter <span data-version>v9.7.5</span> · Everything stays on this computer.</p>
+      <p class="hint">ZHunter <span data-version>v9.8.0</span> · Everything stays on this computer.</p>
     </div>
   </section>
 
