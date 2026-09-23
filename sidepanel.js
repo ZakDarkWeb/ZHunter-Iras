@@ -3163,6 +3163,36 @@ function initHeaderButtons() {
   });
 }
 
+// ── Tab Visibility Management ─────────────────────────────────
+function applyTabVisibility() {
+  const s = State.data?.settings || {};
+  const tabConfigs = [
+    { key: 'showTabHunt', btnId: 'tab-btn-images' },
+    { key: 'showTabBulk', btnId: 'tab-btn-bulk' },
+    { key: 'showTabLibrary', btnId: 'tab-btn-library' },
+    { key: 'showTabSettings', btnId: 'tab-btn-settings' }
+  ];
+
+  tabConfigs.forEach(t => {
+    const isVisible = s[t.key] !== undefined ? !!s[t.key] : true;
+    const btn = $(t.btnId);
+    if (btn) {
+      btn.classList.toggle('hidden', !isVisible);
+    }
+  });
+
+  // If currently active tab is hidden, switch to the first visible tab
+  const activeBtn = document.querySelector('.tab-nav .tab-btn.active');
+  if (activeBtn && activeBtn.classList.contains('hidden')) {
+    const firstVisible = document.querySelector('.tab-nav .tab-btn:not(.hidden)');
+    if (firstVisible) {
+      firstVisible.click();
+    }
+  }
+
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+}
+
 // ── Sidepanel Settings Panel ──────────────────────────────────
 function initSettingsPanel() {
   const syncSettingsUI = () => {
@@ -3183,6 +3213,7 @@ function initSettingsPanel() {
       b.classList.toggle('active', b.dataset.theme === curTheme);
     });
 
+    applyTabVisibility();
     updateStorageDisplay();
   };
 
@@ -3208,6 +3239,21 @@ function initSettingsPanel() {
       else if (el.type === 'number') val = parseFloat(el.value) || 0;
       else val = el.value.trim();
 
+      // Guard: Ensure at least one tab remains enabled
+      if (k.startsWith('showTab') && !val) {
+        const s = State.data?.settings || {};
+        const tabKeys = ['showTabHunt', 'showTabBulk', 'showTabLibrary', 'showTabSettings'];
+        const remaining = tabKeys.filter(key => {
+          if (key === k) return false;
+          return s[key] !== undefined ? !!s[key] : true;
+        });
+        if (remaining.length === 0) {
+          el.checked = true;
+          toast('At least one tab must remain enabled', 'warn');
+          return;
+        }
+      }
+
       const patch = { [k]: val };
       if (!State.data.settings) State.data.settings = {};
       State.data.settings[k] = val;
@@ -3215,6 +3261,10 @@ function initSettingsPanel() {
         await msg({ action: 'UPDATE_SETTINGS', settings: patch });
         toast('Setting saved', 'ok');
       } catch (_) {}
+
+      if (k.startsWith('showTab')) {
+        applyTabVisibility();
+      }
     };
 
     if (el.type === 'checkbox' || el.tagName === 'SELECT') {
