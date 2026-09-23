@@ -225,6 +225,8 @@ function getFav(url) {
 
 // ── Ripple Effect ────────────────────────────────────────────
 function addRipple(btn) {
+  if (btn.dataset.hasRipple) return;
+  btn.dataset.hasRipple = '1';
   btn.addEventListener('click', function (e) {
     const ripple = document.createElement('span');
     ripple.className = 'ripple';
@@ -241,7 +243,7 @@ function addRipple(btn) {
 }
 
 function applyRipples() {
-  document.querySelectorAll('.btn, .btn-hunt-main, .btn-ai-magic, .quick-btn, .hdr-btn')
+  document.querySelectorAll('.btn, .btn-hunt-main, .btn-ai-magic, .quick-btn')
     .forEach(addRipple);
 }
 

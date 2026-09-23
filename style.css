@@ -65,7 +65,7 @@ svg.i-xs { width: 11px; height: 11px; }
 .brand-version { font: 500 10.5px var(--mono); color: var(--ink-3); }
 .stat-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); font: 500 11px var(--mono); color: var(--ink-2); }
 .stat-pill .dot, .status-line .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.hdr-btn { width: 26px; height: 26px; border-radius: 5px; display: grid; place-items: center; color: var(--ink-2); transition: background var(--dur), color var(--dur); }
+.hdr-btn { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; color: var(--ink-2); transition: background var(--dur), color var(--dur), border-color var(--dur), box-shadow var(--dur); }
 .hdr-btn:hover { background: var(--surface-2); color: var(--ink); }
 
 .tab-nav { display: flex; height: 36px; padding: 0 6px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
@@ -413,8 +413,9 @@ body.light-mode .brand-name { background: linear-gradient(125deg, #0F172A, #0369
 .stat-pill { height: 28px; padding: 0 10px; border-radius: var(--pill); border: 1px solid var(--accent-line); background: var(--accent-soft); box-shadow: inset 0 0 12px rgba(0,229,255,.05); color: var(--accent-ink); font: 700 12px var(--font); }
 .stat-pill svg.i { width: 13px; height: 13px; }
 .stat-pill .dot { display: none; }
-.hdr-btn { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); transition: transform var(--dur), box-shadow var(--dur), border-color var(--dur); }
-.hdr-btn:hover { border-color: var(--accent-line); color: var(--accent-ink); box-shadow: 0 0 14px var(--accent-glow); transform: translateY(-1px); }
+.hdr-btn { width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; transition: box-shadow var(--dur), border-color var(--dur), color var(--dur), background var(--dur); }
+.hdr-btn svg.i { width: 16px; height: 16px; display: block; margin: auto; pointer-events: none; flex-shrink: 0; }
+.hdr-btn:hover { border-color: var(--accent-line); color: var(--accent-ink); box-shadow: 0 0 14px var(--accent-glow); }
 
 /* tabs */
 .tab-nav { height: 42px; padding: 0; background: rgba(10,15,36,.5); border-bottom: 1px solid var(--line); }
@@ -569,7 +570,9 @@ html[data-fx="subtle"] .rainbow::before { animation: none; --angle: 45deg; opaci
 .btn { transition: background var(--dur), color var(--dur), border-color var(--dur), transform 90ms var(--ease), box-shadow var(--dur); }
 .btn:active:not([disabled]) { transform: translateY(1px) scale(.99); }
 .btn-primary:hover:not([disabled]) { box-shadow: 0 0 0 1px rgba(0,229,255,.35), 0 8px 26px rgba(0,229,255,.45), inset 0 1px 0 rgba(255,255,255,.25); }
-.hdr-btn:active { transform: translateY(0) scale(.96); }
+.hdr-btn:active { transform: none; }
+.ripple { position: absolute; border-radius: 50%; pointer-events: none; background: rgba(255,255,255,0.25); transform: scale(0); animation: zhRipple 0.6s linear; }
+@keyframes zhRipple { to { transform: scale(4); opacity: 0; } }
 
 /* Tabs: sliding underline (driven by --tab-x/--tab-w from shell) */
 .tab-nav { position: relative; }
