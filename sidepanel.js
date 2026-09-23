@@ -1,5 +1,5 @@
 // ============================================================
-// ZHunter PRO v11.0.4 — Side Panel Controller
+// ZHunter PRO v9.7.5 — Side Panel Controller
 // Fixes: API key removed, async tag race fixed, video support,
 //        clipboard guard, Daraz/Shein scrapers
 // ============================================================
@@ -440,8 +440,6 @@ function scrapePageData() {
       document.querySelectorAll('script:not([src])').forEach(s => {
         const t = s.textContent || '';
         if (!t.includes('colorImages') && !t.includes('hiRes') && !t.includes('ImageBlockATF')) return;
-        // Exclude any sponsored ad scripts (like Titleist or top banner ads)
-        if (t.includes('ape_Detail') || t.includes('adCreativeMetaData') || t.includes('adProgramId')) return;
 
         // Try JSON parse first — extract only colorImages.initial
         const ciMatch = t.match(/['"]?colorImages['"]?\s*:\s*(\{[^;]{20,}?\}\s*[,;])/s)
@@ -459,36 +457,22 @@ function scrapePageData() {
           } catch (_) {}
         }
 
-        // Regex fallback scoped strictly to "initial" block only
+        // Regex fallback scoped to "initial" block only
         const initM = t.match(/"initial"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/);
-        const scope = initM ? initM[1] : '';
-        if (scope) {
-          (scope.match(/"hiRes"\s*:\s*"(https?:[^"]+)"/g) || []).forEach(m => {
-            const u = (m.match(/"hiRes"\s*:\s*"(https?:[^"]+)"/) || [])[1];
-            if (u) addAmazonImg(u);
-          });
-          (scope.match(/"large"\s*:\s*"(https?:[^"]+)"/g) || []).forEach(m => {
-            const u = (m.match(/"large"\s*:\s*"(https?:[^"]+)"/) || [])[1];
-            if (u) addAmazonImg(u);
-          });
-        }
+        const scope = initM ? initM[1] : t;
+        (scope.match(/"hiRes"\s*:\s*"(https?:[^"]+)"/g) || []).forEach(m => {
+          const u = (m.match(/"hiRes"\s*:\s*"(https?:[^"]+)"/) || [])[1];
+          if (u) addAmazonImg(u);
+        });
+        (scope.match(/"large"\s*:\s*"(https?:[^"]+)"/g) || []).forEach(m => {
+          const u = (m.match(/"large"\s*:\s*"(https?:[^"]+)"/) || [])[1];
+          if (u) addAmazonImg(u);
+        });
       });
 
       // Strategy 2: DOM scan — only when colorImages JSON found nothing
       if (data.images.length === 0) {
-        document.querySelectorAll('#landingImage, #imgBlkFront, #altImages li:not(.video-item) img, #imageBlock img:not(.video-item img), img[data-old-hires]').forEach(img => {
-          if (img.closest('[id*="ape_"], [class*="ape-"], [id*="ad-"], [class*="sponsored"], [id*="sims"], [id*="similarities"], [id*="recommendations"], [id*="reviews"], #customerReviews, #va-related-videos-widget_feature_div')) return;
-          let src = img.getAttribute('data-old-hires') || img.getAttribute('data-zoom-image') || img.getAttribute('data-large-image') || img.src || img.getAttribute('data-src') || '';
-          const dynRaw = img.getAttribute('data-a-dynamic-image');
-          if (dynRaw && dynRaw.startsWith('{')) {
-            try {
-              const entries = Object.entries(JSON.parse(dynRaw));
-              entries.sort((a, b) => (b[1]?.[0] || 0) - (a[1]?.[0] || 0));
-              if (entries[0]?.[0]) src = entries[0][0];
-            } catch (_) {}
-          }
-          if (src && !/play[-_]?button|video[-_]?thumbnail/i.test(src)) addAmazonImg(src);
-        });
+        addImgs('#landingImage, #imgBlkFront, #altImages img, #imageBlock img, img[data-old-hires]');
       }
       // ── END AMAZON IMAGE FIX ─────────────────────────────────────────────
 
@@ -3150,28 +3134,6 @@ function showConfirm(title, message, btnLabel, cb) {
   setTimeout(() => $('confirmOk')?.focus(), 100);
 }
 
-function showAiDoneModal(title, message, sub) {
-  const modal = $('aiDoneModal');
-  if (!modal) return;
-  const tEl = $('aiDoneTitle');
-  const mEl = $('aiDoneMessage');
-  const sEl = $('aiDoneSub');
-  if (tEl && title) tEl.innerHTML = `<span>✨</span> ${esc(title)}`;
-  if (mEl && message) mEl.textContent = message;
-  if (sEl && sub) sEl.textContent = sub;
-  modal.style.zIndex = '999999';
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-  setTimeout(() => $('aiDoneOk')?.focus(), 100);
-}
-
-function hideAiDoneModal() {
-  const modal = $('aiDoneModal');
-  if (!modal) return;
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-}
-
 // ── Toast ─────────────────────────────────────────────────────
 function toast(message, type = 'info') {
   const stack = $('toastStack');
@@ -3194,8 +3156,237 @@ function toast(message, type = 'info') {
 
 // ── Header Buttons ────────────────────────────────────────────
 function initHeaderButtons() {
-  $('settingsBtn')?.addEventListener('click', () => { // v10.3.0: alag options page khatam — side panel ka Settings tab hi sab kuch hai
-    document.querySelector('[data-tab="settings"]')?.click();
+  $('settingsBtn')?.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════
+// ═══ UPGRADE B: Groq AI Studio Engine ═══
+// ═════════════════════════════════════════════════════════════════
+const DEFAULT_GROQ_API_KEY = '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';
+const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-20b';
+
+async function getGroqConfig() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['groqApiKey', 'groqModel'], res => {
+      let m = res?.groqModel || DEFAULT_GROQ_MODEL;
+      if (m.includes('llama') || m.includes('mixtral')) m = DEFAULT_GROQ_MODEL;
+      resolve({
+        apiKey: res?.groqApiKey || DEFAULT_GROQ_API_KEY,
+        model: m
+      });
+    });
+  });
+}
+
+async function callGroqAPI({ prompt, systemPrompt, temperature = 0.3 }) {
+  const cfg = await getGroqConfig();
+  let key = cfg.apiKey;
+  if (!key) {
+    key = window.prompt('Please enter your Groq API Key (e.g. gsk_...):');
+    if (key && key.trim()) {
+      key = key.trim();
+      await new Promise(r => chrome.storage.local.set({ groqApiKey: key }, r));
+      const inp = $('groqApiKeyInput');
+      if (inp) inp.value = key;
+      toast('Groq API Key saved!', 'ok');
+    } else {
+      throw new Error('Groq API Key is required. Please set it in Settings tab.');
+    }
+  }
+
+  let model = cfg.model || DEFAULT_GROQ_MODEL;
+  if (model.includes('llama') || model.includes('mixtral')) {
+    model = DEFAULT_GROQ_MODEL;
+    chrome.storage.local.set({ groqModel: DEFAULT_GROQ_MODEL });
+  }
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt || 'You are an expert e-commerce catalog optimizer. Return only the requested output without conversational filler.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature,
+      max_tokens: 800
+    })
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const msg = errData?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    
+    // Auto-recovery: If model doesn't exist or no access, fallback to openai/gpt-oss-20b automatically!
+    if (model !== DEFAULT_GROQ_MODEL && (msg.includes('does not exist') || msg.includes('do not have access'))) {
+      console.warn(`Model ${model} unavailable, switching to ${DEFAULT_GROQ_MODEL}`);
+      await new Promise(r => chrome.storage.local.set({ groqModel: DEFAULT_GROQ_MODEL }, r));
+      const badge = $('aiActiveModelBadge');
+      if (badge) badge.textContent = 'gpt-oss-20b';
+      return callGroqAPI({ prompt, systemPrompt, temperature });
+    }
+    throw new Error(`Groq API error: ${msg}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function runGroqBatchOptimization(actionOrInstruction) {
+  const selected = MasterUIState.selectedIds.size > 0 
+    ? (MasterUIState.allRows || []).filter(r => MasterUIState.selectedIds.has(r.id))
+    : (MasterUIState.visibleRows || []);
+
+  if (!selected.length) {
+    toast('No products to optimize. Select products or hunt some first!', 'warn');
+    return;
+  }
+
+  let instruction = actionOrInstruction;
+  if (actionOrInstruction === 'clean-brand') {
+    instruction = 'Strip all brand names, trademark symbols, store names, SKU codes, and promotional words (e.g. HOT, NEW 2024, BEST, SALE). Keep only the essential, descriptive product keywords.';
+  } else if (actionOrInstruction === 'seo-title') {
+    instruction = 'Write a high-converting, professional e-commerce product title under 80 characters. Highlight key features, material, and type.';
+  } else if (actionOrInstruction === 'uppercase-words') {
+    instruction = 'Format the title in proper Title Case (capitalize first letter of each major word). Fix any ALL-CAPS or all-lowercase text.';
+  } else if (actionOrInstruction === 'temu-bullet') {
+    instruction = 'Optimize for Temu: concise, accurate, strictly under 60 characters, no brand names, title-cased.';
+  }
+
+  MasterUIState.lastAiUndo = selected.map(r => ({ id: r.id, title: r.title }));
+  $('aiUndoBtn')?.classList.remove('hidden');
+
+  const progressStrip = $('aiStatusProgress');
+  const progressFill = $('aiProgressBarFill');
+  const progressText = $('aiProgressText');
+  if (progressStrip) progressStrip.classList.remove('hidden');
+
+  const total = selected.length;
+  let processed = 0;
+  const batchSize = 4;
+
+  toast(`⚡ Running Groq AI on ${total} products...`, 'run');
+
+  for (let i = 0; i < total; i += batchSize) {
+    const batch = selected.slice(i, i + batchSize);
+    const batchInput = batch.map(b => ({ id: b.id, title: b.title || '(untitled)' }));
+
+    const prompt = `Instruction: ${instruction}
+
+Input JSON list of products:
+${JSON.stringify(batchInput, null, 2)}
+
+Respond with ONLY a valid JSON array of objects with the exact structure:
+[
+  {"id": "...", "new_title": "..."}
+]
+Do not wrap in markdown quotes if possible, return raw JSON array only.`;
+
+    try {
+      const rawRes = await callGroqAPI({
+        prompt,
+        systemPrompt: 'You are an automated e-commerce optimization engine. You ONLY output valid JSON arrays. Never include explanations, pleasantries, or markdown wrappers.'
+      });
+
+      const cleaned = rawRes.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const results = JSON.parse(cleaned);
+
+      if (Array.isArray(results)) {
+        results.forEach(item => {
+          if (item?.id && item?.new_title) {
+            const target = MasterUIState.allRows.find(r => r.id === item.id);
+            if (target) target.title = item.new_title.trim();
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Groq batch error:', err);
+      toast(`AI error on batch: ${err.message}`, 'warn');
+    }
+
+    processed += batch.length;
+    const pct = Math.min(100, Math.round((processed / total) * 100));
+    if (progressFill) progressFill.style.width = `${pct}%`;
+    if (progressText) progressText.textContent = `Optimized ${processed}/${total} products (${pct}%)`;
+  }
+
+  await setMasterRows(MasterUIState.allRows);
+  filterAndRenderMasterRows();
+
+  if (progressText) progressText.textContent = `✓ Done! Optimized ${total} products.`;
+  setTimeout(() => {
+    if (progressStrip) progressStrip.classList.add('hidden');
+  }, 2500);
+  toast(`✓ Groq AI optimization completed!`, 'ok');
+}
+
+function initGroqStudio() {
+  chrome.storage.local.get(['groqApiKey', 'groqModel'], res => {
+    const keyInp = $('groqApiKeyInput');
+    const modelSel = $('groqModelSel');
+    const badge = $('aiActiveModelBadge');
+    const key = res?.groqApiKey || DEFAULT_GROQ_API_KEY;
+    let model = res?.groqModel || DEFAULT_GROQ_MODEL;
+    if (model.includes('llama') || model.includes('mixtral')) model = DEFAULT_GROQ_MODEL;
+    if (keyInp) keyInp.value = key;
+    if (!res?.groqApiKey) chrome.storage.local.set({ groqApiKey: key });
+    if (modelSel) modelSel.value = model;
+    if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
+  });
+
+  $('saveGroqKeyBtn')?.addEventListener('click', async () => {
+    const key = $('groqApiKeyInput')?.value?.trim() || '';
+    const model = $('groqModelSel')?.value || DEFAULT_GROQ_MODEL;
+    await new Promise(r => chrome.storage.local.set({ groqApiKey: key, groqModel: model }, r));
+    const badge = $('aiActiveModelBadge');
+    if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
+    toast('Groq Settings saved!', 'ok');
+  });
+
+  $('groqModelSel')?.addEventListener('change', async e => {
+    const model = e.target.value;
+    await new Promise(r => chrome.storage.local.set({ groqModel: model }, r));
+    const badge = $('aiActiveModelBadge');
+    if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
+  });
+
+  $('aiApplyBtn')?.addEventListener('click', () => {
+    const customPrompt = $('aiPromptInput')?.value?.trim();
+    if (!customPrompt) {
+      toast('Please enter an instruction in the prompt box', 'warn');
+      $('aiPromptInput')?.focus();
+      return;
+    }
+    runGroqBatchOptimization(customPrompt);
+  });
+
+  $('aiPromptInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('aiApplyBtn')?.click();
+  });
+
+  document.querySelectorAll('#masterAiPromptBar .ai-quick-btn[data-ai-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.aiAction;
+      runGroqBatchOptimization(action);
+    });
+  });
+
+  $('aiUndoBtn')?.addEventListener('click', async () => {
+    if (!MasterUIState.lastAiUndo || !MasterUIState.lastAiUndo.length) return;
+    MasterUIState.lastAiUndo.forEach(snap => {
+      const target = MasterUIState.allRows.find(r => r.id === snap.id);
+      if (target) target.title = snap.title;
+    });
+    await setMasterRows(MasterUIState.allRows);
+    filterAndRenderMasterRows();
+    $('aiUndoBtn')?.classList.add('hidden');
+    toast('Reverted AI changes', 'ok');
   });
 }
 
@@ -3213,6 +3404,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderAll();
   applyRipples();
   initImagesTab();
+  initGroqStudio();
 
   // ── Check for pending image hunt from right-click context menu ──
   setTimeout(async () => {
@@ -3220,8 +3412,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await msg({ action: 'GET_PENDING_IMAGE_HUNT' });
       if (res?.success && res.pending) {
         const pending = res.pending;
-        // Switch to Images tab (v10.2.3: agar Hunt tab chhupa hai to switch na karo)
-        if (!(window.zhHiddenTabs || []).includes('images')) document.querySelector('[data-tab="images"]')?.click();
+        // Switch to Images tab
+        document.querySelector('[data-tab="images"]')?.click();
         // Scrape the tab if still open
         let scraped = null;
         if (pending.tabId) {
@@ -3275,11 +3467,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (message.action === 'SHOW_TOAST') {
       toast(message.message, message.type || 'info');
-    }
-    if (message.action === 'TEMU_SESSION_UPDATED') {
-      try { restoreTemuCheckSession(); } catch (_) {}
-      try { loadMasterSheet(); } catch (_) {}
-      toast('🚀 Product added to Temu Review & Library!', 'ok');
     }
     return true;
   });
@@ -3448,8 +3635,7 @@ const BulkState = {
   CHUNK_PAUSE: 200,  // 0.2s between chunks
   MAX_RETRIES: 1,    // 1 retry
   AUTO_CLOSE_TABS: true, // close each tab immediately after successful scrape
-  TAB_GROUP: true,       // v9.5.0: product tabs → 'ZHunter' tab group
-  ANTI_BOT_DELAY: true   // Safe human jitter delay (0.8s-2.0s) to prevent bot blocks
+  TAB_GROUP: true        // v9.5.0: product tabs → 'ZHunter' tab group
 };
 
 const HUNT_STATE_KEY = 'zhunterHuntState'; // for auto-resume
@@ -3501,11 +3687,6 @@ function initBulkTab() {
       else toast('Tab group nahi bana (' + (r?.reason || 'error') + ')', 'warn');
     }
   });
-  // Anti-bot safe delay toggle
-  $('bulkAntiBotToggle')?.addEventListener('change', e => {
-    BulkState.ANTI_BOT_DELAY = !!e.target.checked;
-    msg({ action: 'UPDATE_SETTINGS', settings: { bulkAntiBotDelay: BulkState.ANTI_BOT_DELAY } }).catch(() => {});
-  });
   // Restore the persisted preference.
   msg({ action: 'GET_DATA' }).then(d => {
     const v = d?.settings?.bulkAutoCloseTabs;
@@ -3515,8 +3696,6 @@ function initBulkTab() {
     }
     BulkState.TAB_GROUP = d?.settings?.bulkTabGroup !== false;
     const g = $('bulkTabGroupToggle'); if (g) g.checked = BulkState.TAB_GROUP;
-    BulkState.ANTI_BOT_DELAY = d?.settings?.bulkAntiBotDelay !== false;
-    const ab = $('bulkAntiBotToggle'); if (ab) ab.checked = BulkState.ANTI_BOT_DELAY;
   }).catch(() => {});
   $('bulkHuntStartBtn')?.addEventListener('click', () => startBulkHunt());
 
@@ -3547,22 +3726,16 @@ function initBulkTab() {
   });
   $('masterDlPdfBtn')?.addEventListener('click', () => downloadMasterSheet('pdf'));
   $('masterResetBtn')?.addEventListener('click', resetMasterSheet);
-  $('spWipeAllBtn')?.addEventListener('click', () => { // v10.3.0 (pehle options page ke Danger zone mein tha)
-    showConfirm('Sab kuch mita dein?', 'Library, hunt history, queue aur settings — sab delete ho jayega. Temu stores/history bhi. Pehle Backup le lein.', 'Wipe everything', async () => {
-      try { await chrome.runtime.sendMessage({ action: 'CLEAR_ALL' }); await new Promise(r => chrome.storage.local.clear(r)); toast('Sab data mit gaya — panel reload ho raha hai', 'info'); setTimeout(() => location.reload(), 800); }
-      catch (_) { toast('Wipe fail', 'err'); }
-    });
-  });
   $('masterImportBtn')?.addEventListener('click', () => $('masterImportFile')?.click());
   $('masterImportFile')?.addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (file) doImport(file);
     e.target.value = '';
   });
-  $('masterSelectAllBtn')?.addEventListener('click', masterSelectAll);
-  $('masterSelectFailedBtn')?.addEventListener('click', () => masterSelectByStatus('fail'));
-  $('masterSelectPartialBtn')?.addEventListener('click', () => masterSelectByStatus('partial'));
-  $('masterDeselectAllBtn')?.addEventListener('click', masterDeselectAll);
+  $('masterSelectAllBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterSelectAll(); });
+  $('masterSelectFailedBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterSelectByStatus('fail'); });
+  $('masterSelectPartialBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterSelectByStatus('partial'); });
+  $('masterDeselectAllBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterDeselectAll(); });
   $('masterBulkDeleteBtn')?.addEventListener('click', bulkDeleteMasterRows);
   $('masterBulkCancelBtn')?.addEventListener('click', masterDeselectAll);
   $('masterBulkExportBtn')?.addEventListener('click', () => $('masterExportMenuBtn')?.click());
@@ -3577,11 +3750,25 @@ function initBulkTab() {
   });
   document.querySelectorAll('#masterFilterChips .filter-chip').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#masterFilterChips .filter-chip').forEach(b => b.classList.remove('active'));
+      if (btn.id === 'compactModeToggle') {
+        const isCompact = document.body.classList.toggle('compact-mode');
+        btn.classList.toggle('active', isCompact);
+        chrome.storage.local.set({ compactMode: isCompact });
+        return;
+      }
+      document.querySelectorAll('#masterFilterChips .filter-chip:not(#compactModeToggle)').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       MasterUIState.filterPlatform = btn.dataset.filter || 'all';
       filterAndRenderMasterRows();
     });
+  });
+
+  // Restore compact mode preference
+  chrome.storage.local.get('compactMode', res => {
+    if (res?.compactMode) {
+      document.body.classList.add('compact-mode');
+      $('compactModeToggle')?.classList.add('active');
+    }
   });
 
   // Progress modal and result downloads.
@@ -3593,197 +3780,10 @@ function initBulkTab() {
   $('bulkDlZipBtn')?.addEventListener('click', downloadBatchZip);
   $('bulkDlSeqBtn')?.addEventListener('click', downloadBatchSequential);
   $('bulkDlPdfBtn')?.addEventListener('click', () => downloadPdfCatalog(BulkState.results.filter(r => r.status !== 'fail'), 'Bulk Hunt Catalog'));
-  $('bulkRetryAllFailedBtn')?.addEventListener('click', bulkRetryAllFailed);
-
-  // Delegated actions for row focus (↗) and manual retry (🔄)
-  document.addEventListener('click', e => {
-    const focusBtn = e.target.closest('.btn-prog-focus, .bfi-act-open');
-    if (focusBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const tabId = focusBtn.dataset.tabId;
-      const url = focusBtn.dataset.url;
-      bulkFocusTab(tabId, url);
-      return;
-    }
-    const retryBtn = e.target.closest('.btn-prog-retry, .bfi-act-retry');
-    if (retryBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const tabId = retryBtn.dataset.tabId;
-      bulkRetrySingleTab(tabId);
-      return;
-    }
-  });
 
   // Queue view controls.
   $('queueAddBtn')?.addEventListener('click', onQueueAddUrl);
   $('queueAddInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') onQueueAddUrl(); });
-  // ── Multi-Line List Paste Box Controls ──
-  const qListContainer = $('queueListContainer');
-  const qListTextarea = $('queueListTextarea');
-  const qListCounter = $('queueListCounter');
-  const qListPlatforms = $('queueListPlatforms');
-  const qListSubmitBtn = $('queueListSubmitBtn');
-
-  function updateQueueListAnalysis() {
-    if (!qListTextarea || !qListCounter) return;
-    const raw = qListTextarea.value || '';
-    const urlRegex = /https?:\/\/[^\s"',;<>]+/g;
-    const matches = raw.match(urlRegex) || [];
-    const uniqueUrls = Array.from(new Set(matches.map(u => u.split('#')[0])));
-    const count = uniqueUrls.length;
-
-    if (count === 0) {
-      qListCounter.textContent = '0 links detected';
-      if (qListPlatforms) qListPlatforms.innerHTML = '';
-      if (qListSubmitBtn) {
-        qListSubmitBtn.disabled = true;
-        qListSubmitBtn.textContent = 'Add to Queue';
-      }
-      return;
-    }
-
-    const counts = {};
-    uniqueUrls.forEach(u => {
-      const plat = detectTabPlatform(u);
-      const name = plat?.name || 'Other';
-      counts[name] = (counts[name] || 0) + 1;
-    });
-
-    qListCounter.textContent = `${count} link${count === 1 ? '' : 's'} detected`;
-    if (qListPlatforms) {
-      qListPlatforms.innerHTML = Object.entries(counts)
-        .map(([name, num]) => `<span class="plat-tag">${esc(name)} (${num})</span>`)
-        .join('');
-    }
-    if (qListSubmitBtn) {
-      qListSubmitBtn.disabled = false;
-      qListSubmitBtn.textContent = `Add ${count} Link${count === 1 ? '' : 's'} to Queue`;
-    }
-  }
-
-  $('queueBulkPasteBtn')?.addEventListener('click', () => {
-    if (!qListContainer) return;
-    const isHidden = qListContainer.classList.toggle('hidden');
-    if (!isHidden) {
-      qListTextarea?.focus();
-      updateQueueListAnalysis();
-    }
-  });
-
-  qListTextarea?.addEventListener('input', updateQueueListAnalysis);
-
-  $('queueListClearBtn')?.addEventListener('click', () => {
-    if (qListTextarea) qListTextarea.value = '';
-    updateQueueListAnalysis();
-    qListTextarea?.focus();
-  });
-
-  $('queueListCloseBtn')?.addEventListener('click', () => {
-    qListContainer?.classList.add('hidden');
-  });
-
-  qListSubmitBtn?.addEventListener('click', async () => {
-    const raw = qListTextarea?.value || '';
-    const urlRegex = /https?:\/\/[^\s"',;<>]+/g;
-    const matches = raw.match(urlRegex) || [];
-    if (!matches.length) return;
-
-    const existingUrls = new Set((QueueState.items || []).map(i => (i.url || '').toLowerCase().split('#')[0]));
-    const toAdd = [];
-    for (let rawUrl of matches) {
-      let cleanUrl = rawUrl.split('#')[0];
-      try {
-        const u = new URL(cleanUrl);
-        ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid','msclkid','ref','ref_'].forEach(p => u.searchParams.delete(p));
-        cleanUrl = u.href;
-      } catch {}
-      if (existingUrls.has(cleanUrl.toLowerCase())) continue;
-      const plat = detectTabPlatform(cleanUrl);
-      existingUrls.add(cleanUrl.toLowerCase());
-      toAdd.push({
-        url: cleanUrl,
-        title: cleanUrl,
-        platform: plat?.name || null
-      });
-    }
-
-    if (!toAdd.length) {
-      toast('All detected links are already in the queue', 'warn');
-      return;
-    }
-
-    qListSubmitBtn.disabled = true;
-    qListSubmitBtn.textContent = 'Adding…';
-    try {
-      const res = await msg({ action: 'ADD_BULK_QUEUE_ITEMS', items: toAdd });
-      if (qListTextarea) qListTextarea.value = '';
-      updateQueueListAnalysis();
-      qListContainer?.classList.add('hidden');
-      await loadBulkQueue();
-      toast(`Added ${res?.addedCount || toAdd.length} link(s) to Queue`, 'ok');
-    } catch (err) {
-      toast('Failed to add links: ' + (err?.message || 'unknown error'), 'err');
-      updateQueueListAnalysis();
-    }
-  });
-
-  $('queueImportFileBtn')?.addEventListener('click', () => $('queueFileInput')?.click());
-  $('queueFileInput')?.addEventListener('change', async e => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const text = await file.text();
-      if (qListTextarea) {
-        qListTextarea.value = text;
-        qListContainer?.classList.remove('hidden');
-        updateQueueListAnalysis();
-      }
-      const urlRegex = /https?:\/\/[^\s"',;<>]+/g;
-      const matches = text.match(urlRegex) || [];
-      if (!matches.length) {
-        toast('No URLs found in selected file', 'warn');
-        return;
-      }
-      const existingUrls = new Set((QueueState.items || []).map(i => (i.url || '').toLowerCase().split('#')[0]));
-      const toAdd = [];
-      for (let rawUrl of matches) {
-        let cleanUrl = rawUrl.split('#')[0];
-        try {
-          const u = new URL(cleanUrl);
-          ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid','msclkid','ref','ref_'].forEach(p => u.searchParams.delete(p));
-          cleanUrl = u.href;
-        } catch {}
-        if (existingUrls.has(cleanUrl.toLowerCase())) continue;
-        const plat = detectTabPlatform(cleanUrl);
-        existingUrls.add(cleanUrl.toLowerCase());
-        toAdd.push({
-          url: cleanUrl,
-          title: cleanUrl,
-          platform: plat?.name || null
-        });
-      }
-      if (!toAdd.length) {
-        toast('All URLs in file are already in queue or duplicates', 'warn');
-        return;
-      }
-      const res = await msg({ action: 'ADD_BULK_QUEUE_ITEMS', items: toAdd });
-      await loadBulkQueue();
-      toast(`Imported ${res?.addedCount || toAdd.length} URLs from "${file.name}" to Queue`, 'ok');
-    } catch (err) {
-      toast('Failed to import file: ' + (err?.message || 'unknown error'), 'err');
-    }
-  });
-  document.querySelectorAll('#queueStoreChips .filter-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#queueStoreChips .filter-chip').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      QueueState.platformFilter = btn.dataset.store || 'all';
-      renderBulkQueueList();
-    });
-  });
   $('queueSelectAllBtn')?.addEventListener('click', () => toggleAllQueue(true));
   $('queueDeselectAllBtn')?.addEventListener('click', () => toggleAllQueue(false));
   $('queueClearDoneBtn')?.addEventListener('click', clearHuntedQueueItems);
@@ -3792,26 +3792,6 @@ function initBulkTab() {
   $('queueSearchInput')?.addEventListener('input', e => { QueueState.search = e.target.value || ''; renderBulkQueueList(); });
   $('queueStatusFilter')?.addEventListener('change', e => { QueueState.statusFilter = e.target.value || 'all'; renderBulkQueueList(); });
   $('bulkQueueHuntBtn')?.addEventListener('click', startQueueHunt);
-  {
-    const syncConcurrency = (val) => {
-      const v = Math.max(1, Math.min(10, parseInt(val, 10) || 1));
-      const ps = $('queueParallelSel');
-      if (ps && ps.value !== String(v)) ps.value = String(v);
-      const bs = $('bulkHuntConcurrencySel');
-      if (bs && bs.value !== String(v)) bs.value = String(v);
-      msg({ action: 'UPDATE_SETTINGS', settings: { queueParallel: v } }).catch(() => {});
-      if (State.data?.settings) State.data.settings.queueParallel = v;
-    };
-    const ps = $('queueParallelSel');
-    const bs = $('bulkHuntConcurrencySel');
-    setTimeout(() => {
-      const v = State.data?.settings?.queueParallel || 1;
-      if (ps) ps.value = String(v);
-      if (bs) bs.value = String(v);
-    }, 500);
-    ps?.addEventListener('change', () => syncConcurrency(ps.value));
-    bs?.addEventListener('change', () => syncConcurrency(bs.value));
-  }
   $('queueExportXlsxBtn')?.addEventListener('click', () => downloadBatchSheet('xlsx'));
   $('queueExportCsvBtn')?.addEventListener('click', downloadQueueCsv);
   $('queueExportHtmlBtn')?.addEventListener('click', downloadBatchHtmlCatalog);
@@ -3826,7 +3806,6 @@ function initBulkTab() {
   chrome.runtime.onMessage.addListener(m => {
     if (m?.action === 'BULK_QUEUE_UPDATED') loadBulkQueue();
     if (m?.action === 'BULK_PRODUCT_QUEUE_UPDATED') updateMasterStats();
-    if (m?.action === 'FLOW_IMAGE_CAPTURED') handleFlowImageCaptured(m.url);
   });
   document.querySelector('[data-tab="bulk"]')?.addEventListener('click', () => {
     if (BulkState.view === 'tabs') loadBulkTabs();
@@ -3865,7 +3844,7 @@ function switchBulkView(view = 'tabs') {
 // BULK QUEUE — persistent URL queue + sequential hunt
 // ══════════════════════════════════════════════════════════════
 
-const QueueState = { items: [], search: '', statusFilter: 'all', platformFilter: 'all' };
+const QueueState = { items: [], search: '', statusFilter: 'all' };
 
 async function loadBulkQueue() {
   try {
@@ -3883,18 +3862,8 @@ function renderBulkQueueList() {
   const filtered = items.filter(item => {
     const status = item.status || (item.hunted ? 'complete' : 'queued');
     const matchesStatus = QueueState.statusFilter === 'all' || status === QueueState.statusFilter;
-    let matchesStore = true;
-    if (QueueState.platformFilter && QueueState.platformFilter !== 'all') {
-      const p = (item.platform || '').toLowerCase();
-      const u = (item.url || '').toLowerCase();
-      if (QueueState.platformFilter === 'amz') matchesStore = p.includes('amazon') || u.includes('amazon.');
-      else if (QueueState.platformFilter === 'wmt') matchesStore = p.includes('walmart') || u.includes('walmart.');
-      else if (QueueState.platformFilter === 'tmu') matchesStore = p.includes('temu') || u.includes('temu.');
-      else if (QueueState.platformFilter === 'ali') matchesStore = p.includes('aliexpress') || u.includes('aliexpress.');
-      else if (QueueState.platformFilter === 'oth') matchesStore = !p.includes('amazon') && !p.includes('walmart') && !p.includes('temu') && !p.includes('aliexpress') && !u.includes('amazon.') && !u.includes('walmart.') && !u.includes('temu.') && !u.includes('aliexpress.');
-    }
     const haystack = `${item.title || ''} ${item.url || ''} ${item.platform || ''}`.toLowerCase();
-    return matchesStatus && matchesStore && (!query || haystack.includes(query));
+    return matchesStatus && (!query || haystack.includes(query));
   });
   if (items.length === 0 || filtered.length === 0) {
     list.innerHTML = items.length === 0
@@ -3916,8 +3885,7 @@ function renderBulkQueueList() {
     const row = document.createElement('div');
     row.className = 'bulk-tab-row' + (isChecked ? ' checked' : '') + (isHunted ? ' duplicate' : '');
     row.dataset.queueId = item.id;
-    const isFailed = status === 'needs_retry' || status === 'error' || status === 'fail';
-    const retryButton = isFailed
+    const retryButton = (status === 'needs_retry' || status === 'error')
       ? `<button class="queue-retry-btn" data-id="${esc(item.id)}" title="Retry this product">&#8635; Retry</button>` : '';
     // Stage progress bar for active items
     const isActive = status === 'loading' || status === 'scraping' || status === 'processing' || status === 'retrying';
@@ -3931,13 +3899,13 @@ function renderBulkQueueList() {
       : status === 'processing' ? '&#x2699;&#xFE0F; Processing…'
       : status === 'retrying' ? '&#x21BB; Retrying…'
       : status === 'needs_retry' ? '&#x26A0; Needs Retry'
-      : (status === 'error' || status === 'fail') ? '&#x26A0; Failed'
+      : status === 'error' ? '&#x26A0; Error'
       : status === 'complete' || isHunted ? '&#x2705; Done' : '&#x23F8; Queued';
     // Hero image (first image from scraped images if available)
     const heroImg = Array.isArray(item.images) && item.images.length
       ? `<img class="pq-hero-thumb" src="${esc(typeof item.images[0]==='string'?item.images[0]:item.images[0]?.url||'')}" alt="" data-onerror="hide">`
       : '';
-    row.innerHTML = `<div class="bulk-tab-checkbox"></div>${platLabel}<div class="bulk-tab-info">${heroImg}<div class="bulk-tab-platform-lbl">${esc(item.title ? trunc(item.title,50) : shortUrl)}${huntedBadge}</div><div class="bulk-tab-title">${esc(shortUrl)}</div>${stageBar}<div class="pq-stage-label">${stageLabel}</div>${item.error && isFailed ? `<div class="pq-error-msg">&#9888; ${esc(item.error)}</div>` : ''}</div>${retryButton}<button class="queue-remove-btn" data-id="${esc(item.id)}" title="Remove from queue">&#10005;</button>`;
+    row.innerHTML = `<div class="bulk-tab-checkbox"></div>${platLabel}<div class="bulk-tab-info">${heroImg}<div class="bulk-tab-platform-lbl">${esc(item.title ? trunc(item.title,50) : shortUrl)}${huntedBadge}</div><div class="bulk-tab-title">${esc(shortUrl)}</div>${stageBar}<div class="pq-stage-label">${stageLabel}</div>${item.error && (status === 'needs_retry' || status === 'error') ? `<div class="pq-error-msg">&#9888; ${esc(item.error)}</div>` : ''}</div>${retryButton}<button class="queue-remove-btn" data-id="${esc(item.id)}" title="Remove from queue">&#10005;</button>`;
     row.addEventListener('click', e => {
       if (e.target.closest('.queue-remove-btn')) return;
       item.checked = !item.checked;
@@ -4011,21 +3979,18 @@ function retrySingleQueueItem(id) {
 }
 
 function retryProblemQueueItems() {
-  let count = 0;
   QueueState.items.forEach(item => {
     const status = item.status || (item.hunted ? 'complete' : 'queued');
-    if (status === 'needs_retry' || status === 'error' || status === 'fail') {
+    if (status === 'needs_retry' || status === 'error') {
       item.hunted = false;
       item.checked = true;
       item.status = 'queued';
       item.attempts = 0;
       item.error = '';
-      count++;
     }
   });
   saveBulkQueue();
   renderBulkQueueList();
-  toast(count > 0 ? `${count} problem item(s) re-queued for retry` : 'No failed items to retry', count > 0 ? 'ok' : 'info');
 }
 
 function onQueueAddUrl() {
@@ -4033,11 +3998,7 @@ function onQueueAddUrl() {
   const raw = (input?.value || '').trim();
   if (!raw) return;
   let normUrl;
-  try {
-    const u = new URL(raw.split('#')[0]);
-    ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid','msclkid','ref','ref_'].forEach(p => u.searchParams.delete(p));
-    normUrl = u.href;
-  } catch { toast('Invalid URL', 'err'); return; }
+  try { normUrl = new URL(raw).href.split('#')[0]; } catch { toast('Invalid URL', 'err'); return; }
   const platform = detectTabPlatform(normUrl);
   msg({ action: 'ADD_TO_BULK_QUEUE', url: normUrl, title: normUrl, platform: platform?.name || null })
     .then(res => {
@@ -4146,8 +4107,7 @@ function onQueueAddUrl() {
     if (addBtn) { addBtn.disabled = true; addBtn.classList.add('is-busy'); }
 
     try {
-      const meta = await new Promise(res => chrome.storage.local.get('zhunterSheetMeta', x => res(x?.zhunterSheetMeta || {}))); // v9.13.0
-      const items = valid.map(r => ({ url: r.url, title: meta[r.url.toLowerCase()]?.title || r.url, platform: r.platform }));
+      const items = valid.map(r => ({ url: r.url, title: r.url, platform: r.platform }));
       const res = await msg({ action: 'ADD_BULK_QUEUE_ITEMS', items });
       await loadBulkQueue();
       closeBulkPasteModal();
@@ -4159,94 +4119,9 @@ function onQueueAddUrl() {
     }
   }
 
-  // v9.13.0 — purane ZHunter ki simple sheet (#, Tital, Soursing link, Price) → links + title/price fallback
-  const SHEET_META_KEY = 'zhunterSheetMeta';
-
-  // ── v10.2.0 Store Copy: Temu "Manage products → Download" export (Product_data_export*.xlsx) ──
-  // Columns: Category, Category id, Product name, Contribution Goods, SKU, Goods ID, SKU ID, Variation, Quantity, Base price, ...
-  // Contribution Goods = "<PREFIX>-<source id>" (ASIN B0… = Amazon, 8-12 digit = Walmart). Source page dobara hunt hoti hai (images/description),
-  // title/base price/variation/category Temu wali sheet se override hote hain (copy: true).
-  function parseTemuStoreExport(rows) {
-    const hi = rows.findIndex(r => r.some(c => /^product name$/i.test(c)) && r.some(c => /^contribution goods$/i.test(c)));
-    if (hi < 0) return null;
-    const h = rows[hi].map(c => c.toLowerCase().trim());
-    const col = re => h.findIndex(c => re.test(c));
-    const cTitle = col(/^product name$/), cGoods = col(/^contribution goods$/), cGid = col(/^goods id$/), cVar = col(/^variation$/), cPrice = col(/^base price$/), cCat = col(/^category$/), cQty = col(/^quantity$/), cStatus = col(/^status$/);
-    const out = [], seen = new Set();
-    rows.slice(hi + 1).forEach(r => {
-      const title = r[cTitle] || ''; const goods = r[cGoods] || ''; if (!title || !goods) return;
-      const sid = goods.replace(/^[A-Za-z]{1,8}-/, '').trim();
-      // v10.2.1 EXACT copy: Temu ka live product page (edited images/title/description) pehli tarjeeh; Amazon/Walmart sirf fallback
-      let url = '', alt = '';
-      if (cGid >= 0 && /^\d{12,}$/.test(r[cGid] || '')) url = `https://www.temu.com/goods.html?goods_id=${r[cGid]}`;
-      if (/^[A-Z0-9]{10}$/.test(sid) && /^B0/.test(sid)) alt = `https://www.amazon.com/dp/${sid}`;
-      else if (/^\d{6,13}$/.test(sid)) alt = `https://www.walmart.com/ip/${sid}`;
-      if (!url) url = alt;
-      if (!url || seen.has(url)) return; seen.add(url);
-      out.push({ url, alt, title, sid, goodsId: cGid >= 0 ? r[cGid] : '', color: cVar >= 0 ? r[cVar] : '', price: cPrice >= 0 ? String(r[cPrice]).replace(/[^\d.]/g, '') : '',
-        cat: cCat >= 0 ? String(r[cCat]).split('/').pop().trim() : '', qty: cQty >= 0 ? r[cQty] : '', status: cStatus >= 0 ? r[cStatus] : '' });
-    });
-    return out;
-  }
-  window.parseTemuStoreExport = parseTemuStoreExport; // v10.2.0: temuImportSheet (Temu tab) bhi use karta hai
-  async function importStoreCopy(list, fileName, say) {
-    const meta = {};
-    list.forEach(it => { let key; try { key = new URL(it.url).href.split('#')[0].toLowerCase(); } catch (_) { return; }
-      meta[key] = { title: it.title, price: it.price, color: it.color, cat: it.cat, goodsId: it.goodsId, alt: it.alt || '', copy: true }; });
-    const old = await new Promise(res => chrome.storage.local.get(SHEET_META_KEY, x => res(x?.[SHEET_META_KEY] || {})));
-    const merged = { ...old, ...meta }; const keys = Object.keys(merged); if (keys.length > 5000) keys.slice(0, keys.length - 5000).forEach(k => delete merged[k]);
-    await new Promise(res => chrome.storage.local.set({ [SHEET_META_KEY]: merged }, res));
-    _sheetMetaCache = null;
-    const ta = $('bulkPasteTextarea'); if (ta) { ta.value = list.map(i => i.url).join('\n'); ta.dispatchEvent(new Event('input', { bubbles: true })); }
-    const rw = $('bulkCopyRemoveWrap'); if (rw) rw.hidden = false;
-    const nt = list.filter(i => /temu\.com/.test(i.url)).length, no = list.length - nt;
-    say(`✓ Store Copy: ${list.length} products (${fileName}) — ${nt} Temu live page se (exact copy: edited images/title)${no ? `, ${no} source page se` : ''}. Queue mein add ho gaye — Bulk → "Hunt all" dabayen. Base price / variation / category Temu sheet se.`, 'ok');
-    try { renderBulkPastePreview(parsePastedLinks()); } catch (_) {}
-    try { document.querySelector('[data-tab="bulk"]')?.click(); } catch (_) {}
-    // v10.2.2: seedha queue mein daal do (paste modal band hai) — user ko sirf "Hunt all" dabana hai
-    try { await addBulkPastedLinks(); } catch (_) {}
-    toast(`Store Copy: ${list.length} products queue mein — ab Bulk mein "Hunt all" dabayen, phir Temu Export`, 'ok');
-  }
-  window.importStoreCopy = importStoreCopy;
-  async function importLinksSheet(file) {
-    const m = $('bulkPasteImportMsg'); const say = (t, k) => { if (m) { m.textContent = t; m.className = 'temu-inline-msg' + (k ? ' ' + k : ''); } };
-    try {
-      say('⏳ Sheet parh raha hoon…');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }).map(r => (r || []).map(c => String(c ?? '').trim()));
-      if (!rows.length) { say('✗ Sheet khali hai', 'bad'); return; }
-      { const sc = parseTemuStoreExport(rows); if (sc) { if (!sc.length) { say('✗ Temu export mein koi product nahi (Contribution Goods khali?)', 'bad'); return; } await importStoreCopy(sc, file.name, say); return; } } // v10.2.0
-      // link column = jis column mein sab se zyada http links; header row = pehli row jis mein link na ho
-      const ncol = Math.max(...rows.map(r => r.length));
-      const cnt = Array(ncol).fill(0);
-      rows.forEach(r => r.forEach((c, i) => { if (/^https?:\/\//i.test(c)) cnt[i]++; }));
-      const urlCol = cnt.indexOf(Math.max(...cnt));
-      if (cnt[urlCol] === 0) { say('✗ Sheet mein koi link column nahi mila', 'bad'); return; }
-      const headerIdx = rows.findIndex(r => r.some(c => /^https?:\/\//i.test(c))) - 1;
-      const header = headerIdx >= 0 ? rows[headerIdx].map(c => c.toLowerCase()) : [];
-      const findCol = (re) => header.findIndex(c => re.test(c));
-      let titleCol = findCol(/tit|name|product/), priceCol = findCol(/price|cost|\$/);
-      if (titleCol < 0) { // sab se lambi text column jo url nahi
-        const len = Array(ncol).fill(0); rows.forEach(r => r.forEach((c, i) => { if (i !== urlCol && !/^https?:/i.test(c) && !/^[\d.,$]+$/.test(c)) len[i] += c.length; })); titleCol = len.indexOf(Math.max(...len)); if (len[titleCol] === 0) titleCol = -1; }
-      if (priceCol < 0) { const num = Array(ncol).fill(0); rows.forEach(r => r.forEach((c, i) => { if (i !== urlCol && /^\$?\d+(\.\d{1,2})?$/.test(c) && parseFloat(c) > 0 && parseFloat(c) < 100000 && !/^\d{1,4}$/.test(c)) num[i]++; })); priceCol = num.indexOf(Math.max(...num)); if (num[priceCol] === 0) priceCol = -1; }
-      const meta = {}; const links = [];
-      rows.forEach(r => { const u = r[urlCol]; if (!/^https?:\/\//i.test(u)) return; let key; try { key = new URL(u).href.split('#')[0].toLowerCase(); } catch (_) { return; } links.push(u.split('#')[0]);
-        meta[key] = { title: titleCol >= 0 ? r[titleCol] : '', price: priceCol >= 0 ? r[priceCol].replace(/[^\d.]/g, '') : '' }; });
-      const old = await new Promise(res => chrome.storage.local.get(SHEET_META_KEY, x => res(x?.[SHEET_META_KEY] || {})));
-      const merged = { ...old, ...meta }; const keys = Object.keys(merged); if (keys.length > 5000) keys.slice(0, keys.length - 5000).forEach(k => delete merged[k]);
-      await new Promise(res => chrome.storage.local.set({ [SHEET_META_KEY]: merged }, res));
-      const ta = $('bulkPasteTextarea'); if (ta) { ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + links.join('\n'); ta.dispatchEvent(new Event('input', { bubbles: true })); }
-      say(`✓ ${links.length} links (${file.name})${titleCol >= 0 ? ' · title' : ''}${priceCol >= 0 ? ' · price fallback' : ''}`, 'ok');
-      renderBulkPastePreview(parsePastedLinks());
-    } catch (e) { say('✗ ' + (e?.message || e), 'bad'); }
-  }
-  $('bulkPasteImportBtn')?.addEventListener('click', () => $('bulkPasteFile')?.click());
-  $('bulkPasteFile')?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) importLinksSheet(f); e.target.value = ''; });
-
   // Wire up listeners after DOM ready
   document.addEventListener('DOMContentLoaded', () => {
+    $('queueBulkPasteBtn')?.addEventListener('click', openBulkPasteModal);
     $('bulkPasteClose')?.addEventListener('click', closeBulkPasteModal);
     $('bulkPasteCancelBtn')?.addEventListener('click', closeBulkPasteModal);
     $('bulkPastePreviewBtn')?.addEventListener('click', () => renderBulkPastePreview(parsePastedLinks()));
@@ -4287,22 +4162,11 @@ async function ensureQueueWorkerTab() {
   return created;
 }
 
-// v9.13.2 — tab band karne se pehle: agar ye window ka aakhri tab hai to pehle ek khali tab kholo,
-// warna Chrome poori window (profile) band kar deta hai — side panel bhi chala jata tha.
-async function safeRemoveTab(tabId) {
-  try {
-    const tab = await new Promise(r => chrome.tabs.get(tabId, t => r(chrome.runtime.lastError ? null : t)));
-    if (!tab) return;
-    const inWin = await chrome.tabs.query({ windowId: tab.windowId });
-    if (inWin.length <= 1) { try { await chrome.tabs.create({ windowId: tab.windowId, url: 'chrome://newtab', active: true }); } catch (_) {} }
-    await chrome.tabs.remove(tabId);
-  } catch (_) { try { chrome.tabs.remove(tabId, () => { void chrome.runtime.lastError; }); } catch (_) {} }
-}
 async function closeQueueWorkerTab() {
   const id = queueWorkerTabId;
   queueWorkerTabId = null;
   if (!id) return;
-  await safeRemoveTab(id);
+  try { await chrome.tabs.remove(id); } catch (_) {}
 }
 
 async function waitForQueueTabReady(tabId, timeoutMs = 60000) {
@@ -4332,15 +4196,6 @@ async function sendQueueScrape(tabId) {
   });
 }
 
-// v9.13.0 — sheet import ka title/price fallback (url → {title, price})
-let _sheetMetaCache = null;
-async function sheetMetaFor(url) {
-  try {
-    if (!_sheetMetaCache) _sheetMetaCache = await new Promise(res => chrome.storage.local.get('zhunterSheetMeta', x => res(x?.zhunterSheetMeta || {})));
-    let key; try { key = new URL(url).href.split('#')[0].toLowerCase(); } catch (_) { return null; }
-    return _sheetMetaCache[key] || null;
-  } catch (_) { return null; }
-}
 async function scrapeQueueItem(queueItem, workerTabId) {
   const fakeId = queueItem.id;
   setBulkRowStatus(fakeId, 'active');
@@ -4355,7 +4210,7 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     if (!ready) throw new Error(BulkState.isCancelled ? 'cancelled' : 'page_timeout');
 
     setBulkRowMeta(fakeId, 'Injecting…');
-    try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, files: ['lib/jszip.min.js', 'content.js'] }); }
+    try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, files: ['content.js'] }); }
     catch (_) { /* The script may already be present after navigation. */ }
     await sleep(500);
 
@@ -4383,8 +4238,7 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     tabId: fakeId,
     url: scraped?.url || queueItem.url,
     title: scraped?.title || queueItem.title || queueItem.url,
-    price: scraped?.price || (await sheetMetaFor(queueItem.url))?.price || '', // v9.13.0 sheet fallback
-    copy: (await sheetMetaFor(queueItem.url))?.copy ? (await sheetMetaFor(queueItem.url)) : null, // v10.2.0 Store Copy overrides
+    price: scraped?.price || '',
     platform: typeof queueItem.platform === 'string' ? queueItem.platform : (queueItem.platform?.name || 'Other'),
     images: scraped?.images || [], imagesBase64: [],
     videos: scraped?.videos || [], variants: scraped?.variants || [],
@@ -4394,69 +4248,35 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     error: status === 'fail' ? (errorCode || 'no_response') : '',
     scrapedAt: new Date().toISOString()
   };
-  if (resultItem.copy) { // v10.2.0: Temu sheet ka title / price / variation / category jeetta hai
-    const cp = resultItem.copy; let t = cp.title || resultItem.title;
-    const extra = String($('bulkCopyRemoveWords')?.value || '').split(',').map(w => w.trim()).filter(Boolean);
-    extra.forEach(w => { t = t.replace(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi'), ' '); });
-    resultItem.title = t.replace(/\s+/g, ' ').trim();
-    if (cp.price) resultItem.temuBase = cp.price;
-    if (cp.color) resultItem.copyColor = cp.color;
-    if (cp.cat) resultItem.copyCat = cp.cat;
-    resultItem.copyGoodsId = cp.goodsId || '';
-    if (status === 'fail' && resultItem.title) { resultItem.status = 'partial'; resultItem.error = ''; } // title/price to hai — images nahi
-  }
   BulkState.results.push(resultItem);
-  if (resultItem.status !== 'fail') BulkState.pendingFlush.push(resultItem);
+  if (status !== 'fail') BulkState.pendingFlush.push(resultItem);
 
   const qi = QueueState.items.find(i => i.id === fakeId);
   if (qi) {
-    qi.hunted = resultItem.status !== 'fail';
-    qi.status = resultItem.status === 'fail' ? 'needs_retry' : 'complete';
+    qi.hunted = status !== 'fail';
+    qi.status = status === 'fail' ? 'needs_retry' : 'complete';
     qi.error = resultItem.error;
     qi.attempts = Number(qi.attempts || 0) + 1;
   }
-  setBulkRowStatus(fakeId, resultItem.status, { images: Array.isArray(resultItem.images) ? resultItem.images.length : 0, error: resultItem.error });
+  setBulkRowStatus(fakeId, status, { images: Array.isArray(resultItem.images) ? resultItem.images.length : 0, error: resultItem.error });
   updateBulkProgressBar();
 }
 
 async function processQueueSequential(items) {
-  // N parallel worker tabs (Default 1 for slow net safe) — har worker apna tab, shared queue
-  const n = Math.max(1, Math.min(10, parseInt($('queueParallelSel')?.value || $('bulkHuntConcurrencySel')?.value || State.data?.settings?.queueParallel || 1, 10) || 1));
-  _sheetMetaCache = null;
-  if (n === 1) {
-    let worker = null;
-    try {
+  let worker = null;
+  try {
+    worker = await ensureQueueWorkerTab();
+    for (const item of items) {
+      while (BulkState.isPaused && !BulkState.isCancelled) await sleep(300);
+      if (BulkState.isCancelled) break;
       worker = await ensureQueueWorkerTab();
-      for (const item of items) {
-        while (BulkState.isPaused && !BulkState.isCancelled) await sleep(300);
-        if (BulkState.isCancelled) break;
-        worker = await ensureQueueWorkerTab();
-        await scrapeQueueItem(item, worker.id);
-        if (!BulkState.isCancelled) await sleep(BulkState.ANTI_BOT_DELAY ? Math.floor(Math.random() * 1200) + 800 : 500);
-      }
-    } finally { await closeQueueWorkerTab(); }
-    return;
+      await scrapeQueueItem(item, worker.id);
+      // Small cooldown prevents rapid navigation bursts on slow connections.
+      if (!BulkState.isCancelled) await sleep(500);
+    }
+  } finally {
+    await closeQueueWorkerTab();
   }
-  const workers = [];
-  let idx = 0;
-  const run = async (wi) => {
-    let tab = null;
-    try {
-      tab = await chrome.tabs.create({ url: 'about:blank', active: false }); workers.push(tab.id);
-      await sleep(wi * 400); // stagger — sab tabs ek saath Walmart par na jayen
-      while (!BulkState.isCancelled) {
-        while (BulkState.isPaused && !BulkState.isCancelled) await sleep(300);
-        if (BulkState.isCancelled) break;
-        const item = items[idx++]; if (!item) break;
-        const alive = await new Promise(res => chrome.tabs.get(tab.id, t => res(!chrome.runtime.lastError && !!t)));
-        if (!alive) { tab = await chrome.tabs.create({ url: 'about:blank', active: false }); workers.push(tab.id); }
-        await scrapeQueueItem(item, tab.id);
-        if (!BulkState.isCancelled) await sleep(BulkState.ANTI_BOT_DELAY ? Math.floor(Math.random() * 1200) + 800 : 300);
-      }
-    } catch (_) {}
-  };
-  try { await Promise.all(Array.from({ length: Math.min(n, items.length) }, (_, i) => run(i))); }
-  finally { for (const id of workers) { await safeRemoveTab(id); } }
 }
 
 function queueResultRows() {
@@ -4486,13 +4306,6 @@ function downloadQueuePdf() {
   downloadPdfCatalog(rows, 'Queue Hunt Catalog');
 }
 
-// Helper: Determine if Fast Mode is active (DOM toggle priority, no undefined fallback bug)
-function isBulkFastMode() {
-  const el = $('bulkFastToggle');
-  if (el) return !!el.checked;
-  return Boolean(State?.data?.settings?.bulkSkipImageDownload);
-}
-
 async function startQueueHunt() {
   if (BulkState.isHunting) return;
   const toHunt = QueueState.items.filter(i => i.checked && !i.hunted);
@@ -4520,37 +4333,7 @@ async function startQueueHunt() {
   try {
     updateBulkProgressTitle('Hunting products', `Processing ${toHunt.length} queued links…`);
     await processQueueSequential(toHunt);
-
-    // ── Auto-Retry Pass for Timed-out / Failed links (Zero Missed Products) ──
-    if (!BulkState.isCancelled) {
-      const failedItems = toHunt.filter(item => {
-        const res = BulkState.results.find(r => r.tabId === item.id);
-        return res && (res.status === 'fail' || res.status === 'error');
-      });
-
-      if (failedItems.length > 0) {
-        updateBulkProgressTitle('Auto-Retrying failed links', `Retrying ${failedItems.length} timed-out links with safety buffer…`);
-        toast(`Auto-retrying ${failedItems.length} timed-out link${failedItems.length > 1 ? 's' : ''}…`, 'ok');
-        await sleep(1500);
-
-        const failedIds = new Set(failedItems.map(i => i.id));
-        BulkState.results = BulkState.results.filter(r => !failedIds.has(r.tabId));
-
-        failedItems.forEach(item => {
-          setBulkRowStatus(item.id, 'active');
-          setBulkRowMeta(item.id, 'Auto-retrying…');
-        });
-
-        BulkState._isRetryPass = true;
-        try {
-          await processQueueSequential(failedItems);
-        } finally {
-          BulkState._isRetryPass = false;
-        }
-      }
-    }
-
-    if (!BulkState.isCancelled && !isBulkFastMode()) await imageDownloadPhase();
+    if (!BulkState.isCancelled) await imageDownloadPhase();
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
   const flushDeadline = Date.now() + 10000;
@@ -4596,26 +4379,6 @@ async function loadBulkTabs() {
   }
 }
 
-// v9.16.0 — open tabs list: har product tab se image + price (content PEEK), cache on tab object
-const _peekInflight = new Set();
-function bulkPeekTab(t, row) {
-  if (!t || !row || !Number.isInteger(t.tabId) || _peekInflight.has(t.tabId)) return;
-  const apply = (pk) => {
-    if (!row.isConnected) return;
-    if (pk?.image) { const w = row.querySelector('.row-thumb-wrap'); if (w) { w.innerHTML = `<img class="row-thumb-img" src="${esc(pk.image)}" alt="" onerror="this.parentElement.classList.add('thumb-err')"><span class="row-thumb-fallback" style="display:none">${esc((t.platform?.name || 'P').slice(0, 2))}</span>`; w.dataset.img = pk.image; } }
-    if (pk?.price) { const ti = row.querySelector('.bulk-tab-title'); if (ti && !row.querySelector('.bulk-tab-price')) { const pr = document.createElement('span'); pr.className = 'bulk-tab-price'; pr.textContent = pk.price; ti.after(pr); } }
-  };
-  if (t.peek) { apply(t.peek); return; }
-  _peekInflight.add(t.tabId);
-  let done = false;
-  const timer = setTimeout(() => { if (!done) { done = true; _peekInflight.delete(t.tabId); } }, 4000);
-  try {
-    chrome.tabs.sendMessage(t.tabId, { action: 'PEEK' }, r => {
-      void chrome.runtime.lastError; if (done) return; done = true; clearTimeout(timer); _peekInflight.delete(t.tabId);
-      if (r && (r.image || r.price)) { t.peek = { image: r.image || '', price: r.price || '' }; apply(t.peek); }
-    });
-  } catch (_) { _peekInflight.delete(t.tabId); }
-}
 function renderBulkTabsList() {
   const list = $('bulkTabsList');
   if (!list) return;
@@ -4635,7 +4398,7 @@ function renderBulkTabsList() {
   const sub = document.querySelector('#tab-bulk .section-banner-sub');
   if (sub) sub.textContent = `${productTabs} product tab${productTabs !== 1 ? 's' : ''} open → one sheet + ZIP`;
 
-  const frag = document.createDocumentFragment();
+  list.innerHTML = '';
   BulkState.tabs.forEach(t => {
     const isProduct = !!t.platform;
     const isChecked = BulkState.selectedIds.has(t.tabId);
@@ -4686,10 +4449,11 @@ function renderBulkTabsList() {
       toast('Copied link', 'ok');
     });
     row.querySelector('.row-thumb-wrap')?.addEventListener('click', (e) => {
-      const img = row.querySelector('.row-thumb-wrap')?.dataset?.img || t.favIconUrl;
-      if (img) { e.stopPropagation(); openLightbox(img, `${platName} — ${t.title || 'Store'}`); }
+      if (t.favIconUrl) {
+        e.stopPropagation();
+        openLightbox(t.favIconUrl, `${platName} — ${t.title || 'Store'}`);
+      }
     });
-    if (isProduct) bulkPeekTab(t, row); // v9.16.0 thumbnail + price
 
     row.addEventListener('click', (e) => {
       if (e.target.closest('.row-act-btn') || e.target.closest('.row-thumb-wrap')) return;
@@ -4703,9 +4467,8 @@ function renderBulkTabsList() {
       updateBulkSummary();
     });
 
-    frag.appendChild(row);
+    list.appendChild(row);
   });
-  list.replaceChildren(frag);
   updateBulkSummary();
 }
 
@@ -4716,18 +4479,6 @@ function toggleAllBulkTabs(selectAll) {
     );
   } else {
     BulkState.selectedIds = new Set();
-  }
-  const list = $('bulkTabsList');
-  if (list) {
-    const rows = list.querySelectorAll('.bulk-tab-row');
-    if (rows.length === BulkState.tabs.length && rows.length > 0) {
-      rows.forEach(r => {
-        const tid = Number(r.dataset.tabId);
-        r.classList.toggle('checked', BulkState.selectedIds.has(tid));
-      });
-      updateBulkSummary();
-      return;
-    }
   }
   renderBulkTabsList();
 }
@@ -4819,30 +4570,8 @@ async function startBulkHunt(tabsOverride) {
     updateBulkProgressTitle('Hunting products', `Processing ${selectedTabs.length} tabs…`);
     await processSmartQueue(selectedTabs); // Phase 1: scrape all tabs
 
-    // ── Auto-Retry Pass for Timed-out / Failed open tabs ──
+    // Phase 2: download images after all tabs scraped
     if (!BulkState.isCancelled) {
-      const failedTabs = selectedTabs.filter(t => {
-        const res = BulkState.results.find(r => r.tabId === t.tabId);
-        return res && (res.status === 'fail' || res.status === 'error');
-      });
-      if (failedTabs.length > 0) {
-        updateBulkProgressTitle('Auto-Retrying failed tabs', `Retrying ${failedTabs.length} timed-out tabs…`);
-        toast(`Auto-retrying ${failedTabs.length} timed-out tab${failedTabs.length > 1 ? 's' : ''}…`, 'ok');
-        await sleep(1500);
-        const failedTabIds = new Set(failedTabs.map(t => t.tabId));
-        BulkState.results = BulkState.results.filter(r => !failedTabIds.has(r.tabId));
-        failedTabs.forEach(t => {
-          t._started = false;
-          t._done = false;
-          setBulkRowStatus(t.tabId, 'active');
-          setBulkRowMeta(t.tabId, 'Auto-retrying…');
-        });
-        await processSmartQueue(failedTabs);
-      }
-    }
-
-    // Phase 2: download images after all tabs scraped (skip if Fast Mode is ON)
-    if (!BulkState.isCancelled && !isBulkFastMode()) {
       await imageDownloadPhase();
     }
   } catch (e) {
@@ -4920,7 +4649,7 @@ async function resumePendingHunt() {
   let reopened = 0;
   for (const t of saved) {
     let live = null;
-    if (Number.isInteger(t.tabId)) live = await new Promise(r => chrome.tabs.get(t.tabId, x => r(chrome.runtime.lastError ? null : x))); // v9.13.4: queue ke fake ids (q_…) skip
+    if (t.tabId != null) live = await new Promise(r => chrome.tabs.get(t.tabId, x => r(chrome.runtime.lastError ? null : x)));
     if (live && live.url && sameUrl(live.url, t.url)) { tabs.push({ ...t, tabId: live.id }); continue; }
     try {
       const created = await chrome.tabs.create({ url: t.url, active: false });
@@ -4947,37 +4676,11 @@ function toggleFailedList() {
   btn.textContent = (hidden ? 'Show' : 'Hide') + ' failed tabs';
 }
 
-function getHuntSpeedMode() {
-  return localStorage.getItem('zh_hunt_speed') || 'safe';
-}
-
-function setHuntSpeedMode(mode) {
-  localStorage.setItem('zh_hunt_speed', mode);
-  document.querySelectorAll('.zh-speed-pill').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.speed === mode);
-  });
-  const desc = $('zhSpeedDesc');
-  if (desc) {
-    if (mode === 'safe') desc.textContent = '🐢 Safe (1 Tab) — Slow net safe, zero freeze';
-    else if (mode === 'balanced') desc.textContent = '⚡ Balanced (2 Tabs) — Normal net';
-    else desc.textContent = '🚀 Turbo (3 Tabs) — Fast broadband';
-  }
-  const concur = mode === 'turbo' ? 3 : mode === 'balanced' ? 2 : 1;
-  const bs = $('bulkHuntConcurrencySel');
-  if (bs && bs.value !== String(concur)) bs.value = String(concur);
-  const ps = $('queueParallelSel');
-  if (ps && ps.value !== String(concur)) ps.value = String(concur);
-  if (typeof msg === 'function') msg({ action: 'UPDATE_SETTINGS', settings: { queueParallel: concur } }).catch(() => {});
-  if (window.State?.data?.settings) window.State.data.settings.queueParallel = concur;
-}
-
 async function processSmartQueue(tabs) {
   const activeDomains = {};
   const running = new Set();
-  
-  const userConcurrency = parseInt($('bulkHuntConcurrencySel')?.value || $('queueParallelSel')?.value || State.data?.settings?.queueParallel, 10);
-  let MAX_GLOBAL = userConcurrency >= 1 ? userConcurrency : 1;
-  let MAX_PER_DOMAIN = MAX_GLOBAL > 1 ? 2 : 1;
+  const MAX_GLOBAL = BulkState.PARALLEL || 8;
+  const MAX_PER_DOMAIN = 3;
 
   // Returns true if there are any tabs not yet started
   const hasUnstarted = () => tabs.some(t => !t._started);
@@ -4994,9 +4697,7 @@ async function processSmartQueue(tabs) {
         if (tabs[i]._started) continue;
         if (running.size >= MAX_GLOBAL) break;
         const host = safeHost(tabs[i].url);
-        const isStrictDomain = /walmart\.com|samsclub\.com|amazon\./i.test(host);
-        const maxForHost = isStrictDomain ? 1 : MAX_PER_DOMAIN;
-        if ((activeDomains[host] || 0) >= maxForHost) continue;
+        if ((activeDomains[host] || 0) >= MAX_PER_DOMAIN) continue;
 
         const tab = tabs[i];
         tab._started = true;
@@ -5005,27 +4706,56 @@ async function processSmartQueue(tabs) {
 
         const p = (async () => {
           try {
-            if (BulkState.ANTI_BOT_DELAY) {
-              await sleep(Math.floor(Math.random() * 200) + 250);
-            }
             await scrapeOneTab(tab);
             tab._done = true;
+            if (!BulkState.isCancelled) {
+              for (let attempt = 2; attempt <= BulkState.MAX_RETRIES + 1; attempt++) {
+                if (BulkState.isCancelled) break;
 
-            // ── Zero-Missed Tabs & RAM Management ──
-            const finalRes = BulkState.results.find(r => r.tabId === tab.tabId);
-            const isSuccess = finalRes && (finalRes.status === 'ok' || (finalRes.status === 'partial' && finalRes.title));
+                // Small delay so scrapeOneTab can push its result before we check
+                await sleep(100);
 
-            if (isSuccess) {
-              // Succeeded: free RAM immediately if auto-close is enabled
-              if (BulkState.AUTO_CLOSE_TABS && !BulkState.isCancelled) {
-                safeRemoveTab(tab.tabId);
+                let lastResIndex = -1;
+                for (let j = BulkState.results.length - 1; j >= 0; j--) {
+                  if (BulkState.results[j].tabId === tab.tabId) { lastResIndex = j; break; }
+                }
+                if (lastResIndex === -1) break;
+                const res = BulkState.results[lastResIndex];
+                if (res.status !== 'fail' && res.status !== 'partial') break;
+
+                BulkState.results.splice(lastResIndex, 1);
+                setBulkRowMeta(tab.tabId, `Retry ${attempt}/${BulkState.MAX_RETRIES + 1}…`);
+
+                try {
+                  const td = await new Promise(r => chrome.tabs.get(tab.tabId, t => r(chrome.runtime.lastError ? null : t)));
+                  if (td && (td.discarded || td.status !== 'complete')) {
+                    chrome.tabs.reload(tab.tabId, {}, () => { void chrome.runtime.lastError; });
+                    for (let w = 0; w < 24; w++) {
+                      await sleep(500);
+                      const td2 = await new Promise(r => chrome.tabs.get(tab.tabId, t => r(chrome.runtime.lastError ? null : t)));
+                      if (!td2 || td2.status === 'complete') break;
+                    }
+                    await sleep(300);
+                  }
+                } catch (_) {}
+
+                try {
+                  await chrome.scripting.executeScript({ target: { tabId: tab.tabId }, files: ['content.js'] });
+                  await sleep(300);
+                } catch (_) {}
+
+                if (!BulkState.isCancelled) await scrapeOneTab(tab);
               }
-            } else {
-              // Failed / Problem: NEVER close tab! Bring to front so user can see it
-              try {
-                await chrome.tabs.update(tab.tabId, { active: true });
-              } catch (_) {}
-              setBulkRowMeta(tab.tabId, '⚠️ Kept open for review');
+            }
+
+            // ── Auto-close tab after successful scrape ──
+            if (BulkState.AUTO_CLOSE_TABS && !BulkState.isCancelled) {
+              const finalRes = BulkState.results.find(r => r.tabId === tab.tabId);
+              if (finalRes && finalRes.status === 'ok') {
+                try {
+                  chrome.tabs.remove(tab.tabId, () => { void chrome.runtime.lastError; });
+                } catch (_) {}
+              }
             }
           } finally {
             tab._done = true;
@@ -5056,23 +4786,6 @@ async function processSmartQueue(tabs) {
 
 async function scrapeOneTab(tabInfo) {
   setBulkRowStatus(tabInfo.tabId, 'active');
-
-  // ── Live Active Tab Focus: Bring hunted tab to foreground ──
-  if (tabInfo.tabId && Number.isInteger(tabInfo.tabId)) {
-    try {
-      await chrome.tabs.update(tabInfo.tabId, { active: true });
-    } catch (_) {}
-  }
-
-  // Highlight active row & auto-scroll into view
-  try {
-    document.querySelectorAll('.bulk-prog-row.active-hunt').forEach(r => r.classList.remove('active-hunt'));
-    const curRow = document.querySelector(`.bulk-prog-row[data-tab-id="${tabInfo.tabId}"]`);
-    if (curRow) {
-      curRow.classList.add('active-hunt');
-      curRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  } catch (_) {}
 
   let scraped = null;
   let error = null;
@@ -5112,7 +4825,7 @@ async function scrapeOneTab(tabInfo) {
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tabInfo.tabId },
-          files: ['lib/jszip.min.js', 'content.js']
+          files: ['content.js']
         });
         await sleep(100);
       } catch (_) {}
@@ -5446,7 +5159,7 @@ async function scrapeOneTab(tabInfo) {
         const origFinish = finish;
         finish = (v) => { clearTimeout(t); clearInterval(cancelCheck); origFinish(v); };
         try {
-          chrome.tabs.sendMessage(tabInfo.tabId, { action: 'SCRAPE_PAGE', tabIndex: tabInfo.originalIndex, totalTabs: BulkState.huntTotal }, (res) => {
+          chrome.tabs.sendMessage(tabInfo.tabId, { action: 'SCRAPE_PAGE' }, (res) => {
             clearTimeout(t);
             if (chrome.runtime.lastError) { finish(null); return; }
             if (!res?.success || !res?.data) { finish(null); return; }
@@ -5455,32 +5168,33 @@ async function scrapeOneTab(tabInfo) {
         } catch (e) { finish(null); }
       });
 
-      // ── AUTO-REFRESH on no-response (Quick 3s max, no 45s hanging) ──
+      // ── AUTO-REFRESH on no-response ──────────────────────────────────────
+      // If the tab didn't respond (timed out, frozen, or content script wasn't
+      // injected), refresh the tab and try exactly one more time before skipping.
       if (!scraped && !BulkState.isCancelled) {
-        setBulkRowMeta(tabInfo.tabId, 'Not responding — waking…');
+        setBulkRowMeta(tabInfo.tabId, 'Not responding — refreshing…');
 
-        // Bring to front so Chrome allocates 100% CPU priority
-        try { await chrome.tabs.update(tabInfo.tabId, { active: true }); } catch (_) {}
-
-        // Quick reload tab and wait up to 3 seconds max
+        // Refresh the tab and wait for it to finish loading (up to 15 seconds)
         try { await new Promise(r => chrome.tabs.reload(tabInfo.tabId, {}, r)); } catch (_) {}
         let reloadDetails = null;
-        for (let i = 0; i < 12; i++) { // 12 × 250ms = 3s max wait
+        for (let i = 0; i < 15; i++) {               // 15 × 200ms = 3s max
           if (BulkState.isCancelled) break;
           reloadDetails = await new Promise(r => chrome.tabs.get(tabInfo.tabId, t => r(chrome.runtime.lastError ? null : t)));
           if (!reloadDetails || reloadDetails.status === 'complete') break;
-          await sleep(250);
+          await sleep(200);
         }
         if (reloadDetails) await sleep(200);
 
         if (!BulkState.isCancelled) {
-          setBulkRowMeta(tabInfo.tabId, 'Retrying…');
+          setBulkRowMeta(tabInfo.tabId, 'Retrying after refresh…');
 
+          // Re-inject content script after reload
           try {
-            await chrome.scripting.executeScript({ target: { tabId: tabInfo.tabId }, files: ['lib/jszip.min.js', 'content.js'] });
-            await sleep(200);
+            await chrome.scripting.executeScript({ target: { tabId: tabInfo.tabId }, files: ['content.js'] });
+            await sleep(400);
           } catch (_) {}
 
+          // Lazy-wake events (for SPA sites that need scroll to hydrate)
           if (isLazy) {
             try {
               await chrome.scripting.executeScript({
@@ -5491,30 +5205,32 @@ async function scrapeOneTab(tabInfo) {
                   document.dispatchEvent(new Event('visibilitychange'));
                 }
               });
-              await sleep(200);
+              await sleep(500);
             } catch (_) {}
           }
 
+          // Single retry attempt after refresh
           scraped = await new Promise((resolve) => {
             let done = false;
             let finish = (v) => { if (!done) { done = true; resolve(v); } };
             let cancelCheck = setInterval(() => { if (BulkState.isCancelled) finish(null); }, 200);
-            const t = setTimeout(() => finish(null), 3000);
+            const t = setTimeout(() => finish(null), BulkState.TAB_TIMEOUT);
             const origFinish = finish;
             finish = (v) => { clearTimeout(t); clearInterval(cancelCheck); origFinish(v); };
             try {
-              chrome.tabs.sendMessage(tabInfo.tabId, { action: 'SCRAPE_PAGE', tabIndex: tabInfo.originalIndex, totalTabs: BulkState.huntTotal }, (res) => {
+              chrome.tabs.sendMessage(tabInfo.tabId, { action: 'SCRAPE_PAGE' }, (res) => {
                 clearTimeout(t);
-                if (chrome.runtime.lastError || !res?.success || !res?.data) { finish(null); return; }
+                if (chrome.runtime.lastError) { finish(null); return; }
+                if (!res?.success || !res?.data) { finish(null); return; }
                 finish(res.data);
               });
             } catch (e) { finish(null); }
           });
 
           if (!scraped) {
-            // Problem tab — kept open in Chrome so user can see it!
-            setBulkRowMeta(tabInfo.tabId, '⚠️ Problem tab (kept open)');
-            error = 'needs_attention';
+            // Still no response after refresh — skip this tab
+            setBulkRowMeta(tabInfo.tabId, 'Skipped (no response after refresh)');
+            error = 'no_response_after_refresh';
           }
         }
       }
@@ -5572,14 +5288,6 @@ async function scrapeOneTab(tabInfo) {
   let status;
   if (!scraped) {
     status = 'fail';
-  } else if (
-    scraped.botWarning ||
-    /robot check|captcha|blocked|access denied|perimeterx|security check/i.test(scraped.title || '') ||
-    /validateCaptcha/i.test(scraped.url || '')
-  ) {
-    error = scraped.botWarning || 'captcha_blocked';
-    status = 'fail';
-    scraped = null;
   } else if (!scraped.title || (!scraped.price && (!scraped.images || !scraped.images.length))) {
     status = 'partial';
   } else {
@@ -5660,19 +5368,11 @@ async function scrapeOneTab(tabInfo) {
 async function imageDownloadPhase() {
   const pending = BulkState.results.filter(r => r.images?.length > 0 && r.status !== 'fail');
   if (!pending.length) return;
-  // Fast mode check: skip downloading base64 if Fast Mode is active
-  if (isBulkFastMode()) {
-    pending.forEach(r => { r.imagesBase64 = []; r.imgDlSkipped = true; setBulkRowMeta(r.tabId, `${r.images.length} img URLs`); setBulkRowStatus(r.tabId, r.status, { images: r.images.length, error: r.error }); });
-    return;
-  }
 
   updateBulkProgressTitle('Downloading images', `${pending.length} products — saving pictures`);
 
   let cursor = 0;
-  const speedMode = getHuntSpeedMode();
-  let CONCUR = 2;
-  if (speedMode === 'safe') CONCUR = 1; // 1 batch at a time for slow internet!
-  else if (speedMode === 'turbo') CONCUR = 4; // fast internet
+  const CONCUR = 4; // 4 parallel image batches (was 2) — 2x faster image phase
 
   const workers = Array.from({ length: CONCUR }, async () => {
     while (cursor < pending.length && !BulkState.isCancelled) {
@@ -5691,12 +5391,9 @@ async function imageDownloadPhase() {
       }
       const imgCount = r.imagesBase64?.length || 0;
       setBulkRowMeta(r.tabId, `${imgCount} imgs`);
-      // v9.8.1: image DOWNLOAD (base64 for ZIP) fail hone se product "partial" nahi — title/price/image URLs sab mil gaye hain,
-      // Temu ko URLs hi chahiye. Sirf note rakho (imgDlFailed) aur row par likho.
       if (r.status === 'ok' && r.images?.length > 0 && imgCount === 0) {
-        r.imgDlFailed = true;
-        setBulkRowMeta(r.tabId, `${r.images.length} img URLs · download ✗`);
-        setBulkRowStatus(r.tabId, 'ok', { images: r.images.length, error: '' });
+        r.status = 'partial'; r.error = 'img_fetch_failed';
+        setBulkRowStatus(r.tabId, 'partial', { images: 0, error: 'img_fetch_failed' });
       } else {
         setBulkRowStatus(r.tabId, r.status, { images: imgCount, error: r.error });
       }
@@ -5758,12 +5455,8 @@ function openBulkProgressModal(tabs) {
       row.innerHTML = `
         <span class="bulk-prog-status">⌛</span>
         <span class="plat-pill plat-pill-sm" data-plat="${esc(platTag)}">${esc(platName)}</span>
-        <span class="bulk-prog-name" title="${esc(t.title || t.url)}">${esc(trunc(t.title, 46))}</span>
-        <span class="bulk-prog-meta"></span>
-        <div class="bulk-prog-actions">
-          <button type="button" class="btn-prog-act btn-prog-focus" data-tab-id="${t.tabId}" data-url="${esc(t.url)}" title="Open & Focus Tab in Chrome">↗</button>
-          <button type="button" class="btn-prog-act btn-prog-retry" data-tab-id="${t.tabId}" title="Retry this tab">🔄</button>
-        </div>`;
+        <span class="bulk-prog-name">${esc(trunc(t.title, 55))}</span>
+        <span class="bulk-prog-meta"></span>`;
       list.appendChild(row);
     });
   }
@@ -5790,49 +5483,14 @@ function openBulkProgressModal(tabs) {
 
 // ring: 0..100
 function bpSetRing(pct, state) {
-  const r = $('bulkRingFill'), p = $('bulkRingPct'), headWrap = $('bulkRingHeadWrap'), head = $('bulkRingHead');
-  const liveStatus = $('bpLiveStatus');
-  const C = 257.6;
-  const clamped = Math.max(0, Math.min(100, pct || 0));
-  if (r) {
-    r.style.strokeDashoffset = String(C - (C * clamped / 100));
-    r.classList.toggle('done', state === 'done' || clamped >= 100);
-    r.classList.toggle('warn', state === 'warn');
-  }
-  if (headWrap) {
-    const angle = -90 + (clamped * 3.6);
-    headWrap.setAttribute('transform', `rotate(${angle} 48 48)`);
-    if (head) {
-      head.style.opacity = clamped <= 0 ? '0' : '1';
-      head.classList.toggle('done', state === 'done' || clamped >= 100);
-    }
-  }
-  if (p) p.textContent = Math.round(clamped) + '%';
-  if (liveStatus) {
-    if (state === 'done' || clamped >= 100) {
-      liveStatus.textContent = 'HUNT COMPLETE';
-      liveStatus.style.color = '#34D399';
-    } else if (state === 'warn') {
-      liveStatus.textContent = 'ATTENTION REQUIRED';
-      liveStatus.style.color = '#F59E0B';
-    } else {
-      liveStatus.textContent = BulkState.isPaused ? 'PAUSED' : 'ACTIVE HUNTING';
-      liveStatus.style.color = '#00E5FF';
-    }
-  }
+  const r = $('bulkRingFill'), p = $('bulkRingPct');
+  const C = 263.9;
+  if (r) { r.style.strokeDashoffset = String(C - (C * Math.max(0, Math.min(100, pct)) / 100)); r.classList.toggle('done', state === 'done'); r.classList.toggle('warn', state === 'warn'); }
+  if (p) p.textContent = Math.round(pct) + '%';
 }
 
 function closeBulkProgressModal() {
   $('bulkProgressModal')?.classList.add('hidden');
-  // Free memory: release heavy base64 strings when modal is closed
-  if (!BulkState.isHunting && Array.isArray(BulkState.results)) {
-    BulkState.results.forEach(r => {
-      if (r.imagesBase64 && r.imagesBase64.length) {
-        r.imageCount = r.imagesBase64.length;
-        r.imagesBase64 = null;
-      }
-    });
-  }
 }
 
 function updateBulkProgressTitle(text, sub) {
@@ -5963,7 +5621,6 @@ function cancelBulkHunt() {
 // ── Hunt finished ────────────────────────────────────────────
 async function finishBulkHunt() {
   msg({ action: 'STOP_KEEPALIVE' }).catch(() => {});
-  try { setTimeout(() => bulkNextRender(), 300); } catch (_) {} // v9.10.0
 
   const ok      = BulkState.results.filter(r => r.status === 'ok').length;
   const partial = BulkState.results.filter(r => r.status === 'partial').length;
@@ -5980,8 +5637,7 @@ async function finishBulkHunt() {
   $('bulkRsOk').textContent      = ok;
   $('bulkRsPartial').textContent = partial;
   $('bulkRsFail').textContent    = fail;
-  const dlFail = BulkState.results.filter(r => r.imgDlFailed).length;
-  $('bulkResultMeta').textContent = `${totalImgs} images · ${totalVids} videos · ${durStr} total` + (dlFail ? ` · ${dlFail} ki images download nahi hui (URLs theek — Temu ke liye kaafi)` : '');
+  $('bulkResultMeta').textContent = `${totalImgs} images · ${totalVids} videos · ${durStr} total`;
 
   // Mark progress complete
   const fill = $('bulkProgFill');
@@ -5994,36 +5650,18 @@ async function finishBulkHunt() {
   const listEl   = $('bulkFailedList');
   if (detailEl && listEl && failedRows.length > 0) {
     detailEl.classList.remove('hidden');
-    listEl.classList.remove('hidden'); // auto-open so user sees them right away
     const errMap = {
-      'cancelled':'cancelled','no_response':'timeout / slow','timeout':'timeout / slow',
-      'needs_attention':'needs check (kept open in Chrome)','no_response_after_refresh':'slow / captcha (kept open)',
+      'cancelled':'cancelled','no_response':'timeout','timeout':'timeout',
       'no_product':'not a product page','img_fetch_failed':'images failed',
       'url_mismatch':'wrong page','tab_navigated':'tab navigated','product_mismatch':'data mismatch',
-      'scrape_error':'scrape error','tab_closed':'tab closed','no_script':'no script access','network_error':'network error',
-      'captcha_blocked':'bot check / captcha (kept open)'
+      'scrape_error':'scrape error','tab_closed':'tab closed','no_script':'no script access','network_error':'network error'
     };
     listEl.innerHTML = failedRows.map(r => {
       const raw    = r.error || '';
-      const reason = errMap[raw] || (raw ? raw.replace(/_/g,' ') : 'problem tab');
+      const reason = errMap[raw] || (raw ? raw.replace(/_/g,' ') : 'failed');
       const host = (() => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return r.url; } })();
-      const platTag = r.platform ? r.platform.slice(0, 3).toLowerCase() : 'oth';
-      const prodTitle = r.title || host;
-      return `
-        <div class="bulk-failed-item" data-tab-id="${r.tabId}">
-          <div class="bfi-info">
-            <span class="plat-pill plat-pill-sm" data-plat="${esc(platTag)}">${esc(r.platform || 'Other')}</span>
-            <span class="bfi-title" title="${esc(r.title || r.url)}">${esc(trunc(prodTitle, 45))}</span>
-            <span class="bfi-reason" title="${esc(raw)}">⚠️ ${esc(reason)}</span>
-          </div>
-          <div class="bfi-actions">
-            <button type="button" class="btn btn-ghost btn-xs bfi-act-open" data-tab-id="${r.tabId}" data-url="${esc(r.url)}" title="Open & Focus Tab in Chrome">↗ View Tab</button>
-            <button type="button" class="btn btn-ghost btn-xs bfi-act-retry" data-tab-id="${r.tabId}" title="Retry scraping this tab">🔄 Retry</button>
-          </div>
-        </div>`;
+      return `<div class="bulk-failed-item"><span class="bfi-url" title="${esc(r.url)}">✗ ${esc(host)}</span><span class="bfi-reason">→ ${esc(reason)}</span></div>`;
     }).join('');
-    if ($('bulkFailedCount')) $('bulkFailedCount').textContent = failedRows.length;
-    if ($('bulkFailedRetryCount')) $('bulkFailedRetryCount').textContent = failedRows.length;
   } else if (detailEl) {
     detailEl.classList.add('hidden');
   }
@@ -6046,172 +5684,6 @@ async function finishBulkHunt() {
   updateQueueExportButtons();
 
   // v8.3.2: no automatic download — the result modal is where the user picks what to save.
-}
-
-// ── Focus / Open Tab ──
-async function bulkFocusTab(tabId, url) {
-  if (tabId && Number.isInteger(+tabId)) {
-    try {
-      const t = await new Promise(r => chrome.tabs.get(+tabId, x => r(chrome.runtime.lastError ? null : x)));
-      if (t) {
-        await chrome.tabs.update(+tabId, { active: true });
-        if (t.windowId) await chrome.windows.update(t.windowId, { focused: true });
-        toast('Switched to tab', 'ok');
-        return;
-      }
-    } catch (_) {}
-  }
-  if (url) {
-    chrome.tabs.create({ url, active: true });
-    toast('Opened product in new tab', 'ok');
-  }
-}
-
-// ── Manual Single Tab Retry ──
-async function bulkRetrySingleTab(rawTabId) {
-  const isQueueItem = typeof rawTabId === 'string' && (rawTabId.startsWith('q_') || (QueueState.items || []).some(q => q.id === rawTabId));
-
-  if (isQueueItem) {
-    const qItem = (QueueState.items || []).find(q => q.id === rawTabId);
-    if (!qItem) { toast('Queue item not found', 'warn'); return; }
-
-    toast(`Retrying "${trunc(qItem.title || qItem.url, 25)}"…`, 'ok');
-    setBulkRowStatus(rawTabId, 'active');
-    setBulkRowMeta(rawTabId, 'Retrying…');
-
-    // Remove old failed result
-    const prevIdx = (BulkState.results || []).findIndex(r => r.tabId === rawTabId);
-    if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
-
-    let worker = null;
-    try {
-      worker = await ensureQueueWorkerTab();
-      await scrapeQueueItem(qItem, worker.id);
-      const newRes = (BulkState.results || []).find(r => r.tabId === rawTabId);
-      if (newRes && newRes.status !== 'fail') {
-        await appendToMasterSheet([newRes]);
-        toast('✓ Successfully hunted & added to sheet!', 'ok');
-      }
-    } catch (e) {
-      toast('Retry failed: ' + (e?.message || 'unknown'), 'err');
-    } finally {
-      await closeQueueWorkerTab();
-      updateBulkProgressBar();
-      if (!$('bulkResultSummary')?.classList.contains('hidden')) {
-        finishBulkHunt();
-      }
-    }
-    return;
-  }
-
-  // Normal Chrome tab
-  const tabId = +rawTabId;
-  let tabInfo = (BulkState.tabs || []).find(t => t.tabId === tabId);
-  if (!tabInfo) {
-    const res = (BulkState.results || []).find(r => r.tabId === tabId);
-    if (res) {
-      tabInfo = { tabId: res.tabId, url: res.url, title: res.title || res.url, platform: { name: res.platform || 'Other' }, originalIndex: res.originalIndex ?? 0 };
-    }
-  }
-  if (!tabInfo) {
-    toast('Tab not found — could be closed', 'warn');
-    return;
-  }
-
-  toast('Retrying tab in foreground…', 'ok');
-  setBulkRowStatus(tabId, 'active');
-  setBulkRowMeta(tabId, 'Retrying…');
-
-  // Bring to foreground
-  try {
-    await chrome.tabs.update(tabId, { active: true });
-  } catch (_) {}
-
-  // Reload tab and wait for ready
-  try {
-    await new Promise(r => chrome.tabs.reload(tabId, {}, r));
-    for (let i = 0; i < 20; i++) {
-      await sleep(250);
-      const td = await new Promise(r => chrome.tabs.get(tabId, t => r(chrome.runtime.lastError ? null : t)));
-      if (!td || td.status === 'complete') break;
-    }
-    await sleep(400);
-  } catch (_) {}
-
-  // Remove previous result from BulkState.results
-  const prevIdx = (BulkState.results || []).findIndex(r => r.tabId === tabId);
-  if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
-
-  await scrapeOneTab(tabInfo);
-  updateBulkProgressBar();
-  
-  // If result summary is currently visible, refresh it
-  if (!$('bulkResultSummary')?.classList.contains('hidden')) {
-    finishBulkHunt();
-  }
-}
-
-// ── 1-Click Retry All Failed Tabs ──
-async function bulkRetryAllFailed() {
-  const failedRows = (BulkState.results || []).filter(r => r.status === 'fail');
-  if (!failedRows.length) {
-    toast('No failed tabs to retry!', 'ok');
-    return;
-  }
-
-  // Check if these are Queue items
-  const failedQueueItems = failedRows.filter(r => typeof r.tabId === 'string' && (r.tabId.startsWith('q_') || (QueueState.items || []).some(q => q.id === r.tabId)));
-  const failedOpenTabs = failedRows.filter(r => !failedQueueItems.includes(r));
-
-  // Remove failed records so re-scrape updates properly
-  const failedIds = new Set(failedRows.map(r => r.tabId));
-  BulkState.results = BulkState.results.filter(r => !failedIds.has(r.tabId));
-
-  toast(`Retrying ${failedRows.length} failed link${failedRows.length > 1 ? 's' : ''}…`, 'ok');
-
-  BulkState.isHunting = true;
-  BulkState.isPaused = false;
-  BulkState.isCancelled = false;
-
-  try {
-    if (failedQueueItems.length > 0) {
-      const qItemsToRetry = failedQueueItems.map(fr => (QueueState.items || []).find(q => q.id === fr.tabId) || { id: fr.tabId, url: fr.url, title: fr.title }).filter(Boolean);
-      const fakeTabs = qItemsToRetry.map(i => ({ tabId: i.id, url: i.url, title: i.title || i.url, platform: { name: 'Other', tag: 'oth' } }));
-      openBulkProgressModal(fakeTabs);
-      updateBulkProgressTitle('Retrying failed links', `Processing ${qItemsToRetry.length} queued links…`);
-      await processQueueSequential(qItemsToRetry);
-    }
-    if (failedOpenTabs.length > 0) {
-      const tabsToRetry = [];
-      for (const fr of failedOpenTabs) {
-        let existing = (BulkState.tabs || []).find(t => t.tabId === fr.tabId);
-        if (existing) {
-          existing._started = false;
-          existing._done = false;
-          tabsToRetry.push(existing);
-        } else {
-          tabsToRetry.push({
-            tabId: fr.tabId,
-            url: fr.url,
-            title: fr.title || fr.url,
-            platform: { name: fr.platform || 'Other', tag: (fr.platform || 'oth').slice(0, 3).toLowerCase() },
-            originalIndex: fr.originalIndex ?? 0
-          });
-        }
-      }
-      openBulkProgressModal(tabsToRetry);
-      updateBulkProgressTitle('Retrying failed tabs', `Processing ${tabsToRetry.length} tabs in foreground…`);
-      await processSmartQueue(tabsToRetry);
-    }
-    if (!BulkState.isCancelled && !isBulkFastMode()) {
-      await imageDownloadPhase();
-    }
-  } catch (e) {
-    toast('Retry error: ' + (e?.message || 'unknown'), 'err');
-  } finally {
-    BulkState.isHunting = false;
-    finishBulkHunt();
-  }
 }
 
 // ── Master Sheet storage ─────────────────────────────────────
@@ -6346,7 +5818,15 @@ function filterAndRenderMasterRows() {
   const plat = MasterUIState.filterPlatform || 'all';
   const sort = MasterUIState.sortBy || 'newest';
 
-  if (plat === 'starred') {
+  // Update problems count
+  const isProblem = r => (r.status && r.status !== 'ok') || !r.price || r.price === '—' || !r.images?.length || r.duplicate;
+  const problemCount = (MasterUIState.allRows || []).filter(isProblem).length;
+  const probBadge = $('masterProblemCount');
+  if (probBadge) probBadge.textContent = problemCount;
+
+  if (plat === 'problems') {
+    rows = rows.filter(isProblem);
+  } else if (plat === 'starred') {
     rows = rows.filter(r => !!r.starred);
   } else if (plat !== 'all') {
     rows = rows.filter(r => {
@@ -6391,18 +5871,21 @@ function filterAndRenderMasterRows() {
 function renderMasterRows(rows) {
   const list = $('masterRowsList');
   if (!list) return;
-  const libView = localStorage.getItem('zh_lib_view') || 'card';
-  list.classList.toggle('master-dense-view', libView === 'dense' || libView === 'compact');
+  const panel = $('tab-library');
+  const prevPanelScroll = panel ? panel.scrollTop : 0;
+  const prevListScroll = list.scrollTop;
+
   if (!rows || rows.length === 0) {
-    list.innerHTML = '<div class="bulk-empty empty"><div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div><h3>No Products Yet</h3><p>Hunt some tabs to collect products here. They will appear instantly!</p></div>';
+    list.innerHTML = '<div class="bulk-empty"><p>No products yet. Hunt some tabs first!</p></div>';
     updateMasterBulkBar();
+    if (panel) panel.scrollTop = prevPanelScroll;
     return;
   }
 
   list.innerHTML = '';
   // Order already determined by filterAndRenderMasterRows sorting
   const display = [...rows];
-  display.forEach((r, _rowIdx) => {
+  display.forEach(r => {
     const sel = MasterUIState.selectedIds.has(r.id);
     const status = r.status || 'ok';
     const date = r.scrapedAt ? new Date(r.scrapedAt) : null;
@@ -6416,7 +5899,7 @@ function renderMasterRows(rows) {
       ? r.images[0]
       : (r.images?.[0]?.url || '');
     const thumbHtml = thumbUrl
-      ? `<img class="row-thumb-img" src="${esc(thumbUrl)}" alt="${esc(r.title || '')}" loading="lazy" decoding="async" data-onerror="thumb"><span class="row-thumb-fallback" style="display:none;">${esc(platName.slice(0, 2))}</span>`
+      ? `<img class="row-thumb-img" src="${esc(thumbUrl)}" alt="${esc(r.title || '')}" loading="lazy" data-onerror="thumb"><span class="row-thumb-fallback" style="display:none;">${esc(platName.slice(0, 2))}</span>`
       : `<span class="row-thumb-fallback">${esc(platName.slice(0, 2))}</span>`;
 
     const row = document.createElement('div');
@@ -6502,6 +5985,9 @@ function renderMasterRows(rows) {
     // Click row → toggle selection (but ignore quick action, star, or thumbnail clicks)
     row.addEventListener('click', (e) => {
       if (e.target.closest('.row-act-btn') || e.target.closest('.row-thumb-wrap') || e.target.closest('.star-btn')) return;
+      e.preventDefault();
+      const p = $('tab-library');
+      const st = p ? p.scrollTop : 0;
       if (MasterUIState.selectedIds.has(r.id)) {
         MasterUIState.selectedIds.delete(r.id);
         row.classList.remove('selected');
@@ -6510,12 +5996,14 @@ function renderMasterRows(rows) {
         row.classList.add('selected');
       }
       updateMasterBulkBar();
+      if (p) p.scrollTop = st;
     });
 
-    row.style.animationDelay = Math.min(_rowIdx * 30, 300) + 'ms';
     list.appendChild(row);
   });
   updateMasterBulkBar();
+  if (panel) panel.scrollTop = prevPanelScroll;
+  if (list) list.scrollTop = prevListScroll;
 }
 
 function updateMasterBulkBar() {
@@ -6532,23 +6020,37 @@ function updateMasterBulkBar() {
 }
 
 async function masterSelectByStatus(targetStatus) {
+  const panel = $('tab-library');
+  const prevPanelScroll = panel ? panel.scrollTop : 0;
   const rows = await getMasterRows();
   rows.forEach(r => {
     if (r.status === targetStatus) MasterUIState.selectedIds.add(r.id);
   });
   renderMasterRows(rows);
+  if (panel) panel.scrollTop = prevPanelScroll;
 }
 
 async function masterSelectAll() {
+  const panel = $('tab-library');
+  const prevPanelScroll = panel ? panel.scrollTop : 0;
   // v9.7.3: "All" = sirf jo abhi filter/search mein dikh rahe hain (poori Library nahi)
   const rows = Array.isArray(MasterUIState.visibleRows) ? MasterUIState.visibleRows : await getMasterRows();
   rows.forEach(r => MasterUIState.selectedIds.add(r.id));
   renderMasterRows(rows);
+  if (panel) panel.scrollTop = prevPanelScroll;
 }
 
 function masterDeselectAll() {
+  const panel = $('tab-library');
+  const prevPanelScroll = panel ? panel.scrollTop : 0;
   MasterUIState.selectedIds.clear();
-  updateMasterStats(); // re-render
+  const rows = Array.isArray(MasterUIState.visibleRows) ? MasterUIState.visibleRows : null;
+  if (rows) {
+    renderMasterRows(rows);
+  } else {
+    updateMasterStats();
+  }
+  if (panel) panel.scrollTop = prevPanelScroll;
 }
 
 // ── Bulk tab inline columns panel ───────────────────────────
@@ -6683,7 +6185,7 @@ async function reHuntMasterRow(rowId) {
 
     // Inject content script (idempotent)
     try {
-      await chrome.scripting.executeScript({ target: { tabId: newTab.id }, files: ['lib/jszip.min.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: newTab.id }, files: ['content.js'] });
     } catch {}
     await new Promise(r => setTimeout(r, 200));
 
@@ -7321,24 +6823,18 @@ async function parseImportFile(file) {
     const pick = (...keys) => { for (const k of keys) { const v = r[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim(); } return ''; };
     const url = pick('url', 'Link', 'link', 'URL', 'Product Link', 'Soursing link', 'Sourcing link');
     if (!/^https?:\/\//i.test(url)) return null;
-    const basePx = pick('Base Price', 'base', 'temuBase', 'BasePrice', 'price', 'Price');
-    const varVal = pick('Variation', 'variation', 'variant', 'Variant', 'color', 'Color');
-    const rawImgs = pick('Images', 'images', 'image_urls', 'Image URLs');
-    const imgList = Array.isArray(r.images) ? r.images.slice(0, 10) : rawImgs ? rawImgs.split(/[|,\s]+/).map(x => x.trim()).filter(u => /^https?:\/\//i.test(u)).slice(0, 10) : [...Array(10).keys()].map(i => pick(`img${i+1}`, `Image ${i+1}`)).filter(Boolean);
     return {
       id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-      sku: pick('SKU', 'sku', 'Seller SKU', 'seller_sku'),
       title: pick('title', 'Product Title', 'Title', 'name') || url,
       url, platform: pick('platform', 'Platform') || bgPlatformGuess(url),
-      brand: pick('brand', 'Brand'), color: varVal,
+      brand: pick('brand', 'Brand'), color: pick('color', 'Color', 'Variant'),
       weight: pick('weight', 'Weight'), dimL: pick('dimL', 'Length'), dimW: pick('dimW', 'Width'), dimH: pick('dimH', 'Height'),
       bullets: Array.isArray(r.bullets) ? r.bullets : String(pick('bullets', 'Bullet Points')).split(' | ').filter(Boolean),
-      price: pick('price', 'Price', 'Scraped Price') || basePx,
-      temuBase: basePx || pick('price', 'Price', 'Scraped Price'),
+      price: pick('price', 'Price', 'Scraped Price'),
       labelCost: pick('labelCost', 'Sourcing Price', 'Label Cost'), listPrice: pick('listPrice', 'List Price'),
       description: pick('description', 'Description'), tags: pick('tags', 'Tags'), variants: pick('variants', 'Variants'),
-      imageCount: Number(pick('imageCount', 'Images')) || (imgList.length || 0), videoCount: Number(pick('videoCount', 'Videos')) || 0,
-      images: imgList, videos: Array.isArray(r.videos) ? r.videos.slice(0, 4) : [],
+      imageCount: Number(pick('imageCount', 'Images')) || 0, videoCount: Number(pick('videoCount', 'Videos')) || 0,
+      images: Array.isArray(r.images) ? r.images.slice(0, 10) : [...Array(10).keys()].map(i => pick(`img${i+1}`, `Image ${i+1}`)).filter(Boolean), videos: Array.isArray(r.videos) ? r.videos.slice(0, 4) : [],
       status: pick('status', 'Status') || 'ok', scrapedAt: pick('scrapedAt', 'Date') || new Date().toISOString(), lastRehunted: ''
     };
   };
@@ -7719,35 +7215,6 @@ async function downloadBatchZip() {
   if (btn) { btn.disabled = true; btn.querySelector('.bulk-dl-text').textContent = 'Building ZIP…'; }
 
   try {
-    // If any product has image URLs but missing base64 (e.g. hunted with Fast Mode ON), download on-demand!
-    const missingImgRows = rows.filter(r => (!r.imagesBase64 || r.imagesBase64.length === 0) && r.images && r.images.length > 0);
-    if (missingImgRows.length > 0) {
-      if (btn) {
-        const txt = btn.querySelector('.bulk-dl-text');
-        if (txt) txt.textContent = `Downloading images (${missingImgRows.length})…`;
-      }
-      let cur = 0;
-      const CONCUR = 4;
-      const workers = Array.from({ length: CONCUR }, async () => {
-        while (cur < missingImgRows.length) {
-          const r = missingImgRows[cur++];
-          if (!r) break;
-          try {
-            const urls = (r.images || []).slice(0, 7);
-            const batchRes = await msg({ action: 'FETCH_BASE64_BATCH', urls });
-            if (batchRes?.success && Array.isArray(batchRes.results)) {
-              r.imagesBase64 = batchRes.results.filter(x => x?.success && x.base64).map(x => x.base64);
-            }
-          } catch (_) {}
-        }
-      });
-      await Promise.all(workers);
-      if (btn) {
-        const txt = btn.querySelector('.bulk-dl-text');
-        if (txt) txt.textContent = 'Building ZIP…';
-      }
-    }
-
     const zip = new JSZip();
 
     // Styled XLSX — same green header as standalone XLSX download
@@ -7995,11 +7462,15 @@ const results = await chrome.scripting.executeScript({
             return u.replace(/\.{2,}/g, '.');
           };
 
-          // Dedup by Amazon image ID + format to _AC_SL1500_ (auto-crop without white padding)
+          // Dedup by Amazon image ID + reject obvious thumbnails
           const seenIds = new Set();
-          const addImg = (url) => {
+          const addImg = (url, keepBare) => {
             if (!url || !url.startsWith('http')) return;
-            const final = amzUpgrade(url) || url;
+            // Reject thumbnail-sized Amazon URLs (small token = tiny image)
+            // e.g. ._AC_SR38,50_. (38x50px) or ._SX48_. (48px) etc.
+            if (/\._[A-Z]{2,}_S[RXY]\d{1,3}[,_]/i.test(url)) return;
+            if (/\._S[XY]\d{1,3}_\./i.test(url)) return; // _SX48_, _SY60_ etc.
+            const final = keepBare ? amzStrip(url) || url : url;
             const m = final.match(/\/images\/I\/([A-Za-z0-9+/]+=*)/);
             const id = m ? m[1] : final;
             if (seenIds.has(id)) return;
@@ -8008,96 +7479,69 @@ const results = await chrome.scripting.executeScript({
           };
 
           // Upgrade a 'large' URL to ._AC_SL1500_. (reliable 500-1500px CDN version)
+          // NOTE: 'large' image IDs are stored as 500px source files.
+          // Stripping their token gives the same 500px. But ._AC_SL1500_. asks Amazon
+          // for the best it can serve up to 1500px, which is more reliable.
           const amzUpgrade = (url) => {
             if (!url) return url;
             const bare = amzStrip(url);
             return bare.replace(/\.(jpg|jpeg|png|webp|gif|avif)$/i, '._AC_SL1500_.$1');
           };
 
-          // ── Strategy 1: Simple Extension Logic (ImageBlockATF / colorImages) ───────────────
+          // ── Strategy 1: Simple Extension Logic (ImageBlockATF) ───────────────
           let foundInitial = false;
           for (let script of document.querySelectorAll('script:not([src])')) {
             const t = script.textContent || '';
-            if (!t.includes('colorImages') && !t.includes('ImageBlockATF')) continue;
-            // Exclude sponsored ad scripts
-            if (t.includes('ape_Detail') || t.includes('adCreativeMetaData') || t.includes('adProgramId')) continue;
-
-            try {
-              const initMatch = t.match(/"initial"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/);
-              const scope = initMatch ? initMatch[1] : '';
-              if (scope) {
-                const hiResRegex = /"hiRes"\s*:\s*(?:null|"([^"\\]+)")/g;
-                const largeRegex = /"large"\s*:\s*"([^"\\]+)"/g;
-
+            if (t.includes('ImageBlockATF') && t.includes('initial')) {
+              try {
+                const hiResRegex = /"hiRes":"(https:\/\/[^"]+)"/g;
+                const largeRegex = /"large":"(https:\/\/[^"]+)"/g;
+                
                 let match;
                 let hiResCount = 0;
-                while ((match = hiResRegex.exec(scope)) !== null) {
-                  if (match[1]) {
-                    addImg(match[1], true);
-                    hiResCount++;
-                  }
+                while ((match = hiResRegex.exec(t)) !== null) {
+                  addImg(match[1], false); // As requested, use exact hiRes URL
+                  hiResCount++;
                 }
-
+                
                 if (hiResCount > 0) {
                   foundInitial = true;
                   break;
                 }
-
+                
                 // If no hiRes, fallback to large
                 let largeCount = 0;
-                while ((match = largeRegex.exec(scope)) !== null) {
-                  if (match[1]) {
-                    addImg(match[1], true);
-                    largeCount++;
-                  }
+                while ((match = largeRegex.exec(t)) !== null) {
+                  addImg(amzUpgrade(match[1]), false);
+                  largeCount++;
                 }
-
+                
                 if (largeCount > 0) {
                   foundInitial = true;
                   break;
                 }
+              } catch (e) {
+                console.error("Error parsing ImageBlockATF", e);
               }
-            } catch (e) {
-              console.error("Error parsing ImageBlockATF", e);
             }
           }
 
-          // ── Strategy 2: DOM Gallery Fallback (Scoped strictly to product gallery) ──
-          if (!foundInitial || images.length === 0) {
-            const isBadEl = (el) => {
-              return !!el.closest(
-                '[id*="ape_"], [class*="ape-"], [id*="ad-"], [class*="sponsored"], ' +
-                '[id*="sims"], [id*="similarities"], [id*="recommendations"], [id*="reviews"], ' +
-                '#customerReviews, #va-related-videos-widget_feature_div'
-              );
-            };
-            const pickDyn = (el) => {
-              try {
-                const d = el.getAttribute('data-a-dynamic-image');
-                if (!d || !d.startsWith('{')) return '';
-                const p = JSON.parse(d);
-                const k = Object.keys(p);
-                k.sort((a,b) => (p[b][0]*p[b][1]) - (p[a][0]*p[a][1]));
-                return k[0] || '';
-              } catch(_) { return ''; }
-            };
-
+          // ── Strategy 2: Simple Extension DOM Fallback ────────────────────────
+          if (!foundInitial) {
             const landingImage = document.getElementById('landingImage');
-            if (landingImage && !isBadEl(landingImage)) {
-              const u = landingImage.getAttribute('data-old-hires') || pickDyn(landingImage) || landingImage.src;
-              if (u) addImg(u, true);
+            if (landingImage) {
+              const dataOldHires = landingImage.getAttribute('data-old-hires');
+              if (dataOldHires) addImg(dataOldHires, false);
+              else addImg(landingImage.src, false);
             }
-
-            const altImages = document.querySelectorAll(
-              '#altImages li:not(.video-item) img, #imageBlock img:not(.video-item img), ' +
-              '#imgTagWrapperId img, .a-button-thumbnail img, .imageThumbnail img'
-            );
+            
+            // Also look for alternate image thumbnails to extract their hi-res versions
+            const altImages = document.querySelectorAll('.a-button-thumbnail img, .imageThumbnail img');
             altImages.forEach(img => {
-              if (isBadEl(img)) return;
-              const u = img.getAttribute('data-old-hires') || pickDyn(img) || img.getAttribute('data-zoom-image') || img.src || '';
-              if (u && !/play[-_]?button|video[-_]?thumbnail/i.test(u)) {
-                addImg(u, true);
-              }
+              let src = img.src || '';
+              // Simple extension strips size tokens to get original
+              let hiResSrc = src.replace(/\._.*_\./, '.');
+              if (hiResSrc) addImg(hiResSrc, false);
             });
           }
 
@@ -9127,34 +8571,14 @@ document.addEventListener('DOMContentLoaded', () => initVideoTab(), { once: true
 // v8.5.0 — TEMU EXPORT (built-in converter: rows → Temu general template)
 // No Python needed. Template stored once in settings; config editable in modal.
 // ═══════════════════════════════════════════════════════════════
-const DEFAULT_GROQ_KEYS = [
-  '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',
-  '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',
-  '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',
-  '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'
-];
-
-function temuGetAiKeys(raw) {
-  if (!raw || typeof raw !== 'string') return [...DEFAULT_GROQ_KEYS];
-  const keys = raw.split(/[\s,;\n]+/).map(k => k.trim()).filter(Boolean);
-  return keys.length ? keys : [...DEFAULT_GROQ_KEYS];
-}
-
 const TEMU_DEFAULT_CONFIG = {
   sku_prefix: 'CH',
   price_multiplier: 5.0,
   list_price_multiplier: 1.25,
   price_round_to_99: true,
-  min_profit_dollar: 50.0,
-  heavy_shipping_buffer: 2.0,
-  heavy_weight_threshold: 2.0,
   quantity_min: 250,
   quantity_max: 500,
   max_sku_images: 10,
-  gemini_api_key: DEFAULT_GROQ_KEYS.join('\n'),
-  ai_keep_approved_brands: true,
-  ai_strip_claims: true,
-  ai_custom_instructions: '',
   defaults: {
     shipping_template: 'Main Shipping Template',
     handling_time: '2 Days',
@@ -9181,88 +8605,8 @@ const TEMU_DEFAULT_CONFIG = {
       weight_lb: 1.4, length_in: 7.5, width_in: 5.2, height_in: 1.5 },
     towels: { match: ['bath towel', 'hand towel', 'beach towel', 'washcloth', 'towel set'], exclude: ['paper towel', 'kitchen towel roll', 'shop towel'],
       category_keyword: 'Bath Towels',
-      weight_lb: 2.0, length_in: 12, width_in: 10, height_in: 4 },
-    // v9.8.0: household / grocery / baby — Temu category names + REQUIRED attributes Temu ki category template
-    // (TEMU_BABYDIAPERS_..._CLEANINGCL.xlsx, GoodsLevelMode + Valid Values) se. Attribute values Temu ki valid list se hain.
-    // Order matters: pehla match jeet-ta hai (specific pehle, general baad mein).
-    swim_diapers: { match: ['swim diaper', 'swim pants', 'little swimmers', 'splashers'], category_keyword: 'Swim Diapers',
-      attributes: { 'Applicable Age Group': '0 Year+', 'Material': 'Other' }, length_in: 10, width_in: 8, height_in: 4 },
-    diapers: { match: ['diaper', 'diapers', 'pull-ups', 'pull ups', 'training pants', 'easy ups'], exclude: ['dog diaper', 'adult', 'incontinence', 'wipes', 'diaper bag', 'diaper pail', 'diaper cream', 'rash'],
-      category_keyword: 'Baby Diapers', attributes: { 'Applicable Age Group': '0 Year+', 'Major Material': 'Textile' }, length_in: 16, width_in: 12, height_in: 10 },
-    disinfectant_wipes: { match: ['disinfecting wipes', 'disinfectant wipes', 'clorox wipes', 'lysol wipes', 'cleaning wipes', 'antibacterial wipes'],
-      category_keyword: 'Disinfectant Wipes', attributes: { 'Composition': 'See The User Manual' }, length_in: 10, width_in: 6, height_in: 8 },
-    baby_wipes: { match: ['baby wipes', 'wipes refill', 'sensitive wipes', 'flushable wipes', 'water wipes', 'wipes,'], exclude: ['disinfect', 'clorox', 'lysol', 'glasses', 'screen', 'makeup', 'dog', 'pet'],
-      category_keyword: 'Baby Wipes & Refills', attributes: { 'Applicable Age Group': '0 Year+' }, length_in: 12, width_in: 8, height_in: 8 },
-    baby_lotion: { match: ['baby lotion', 'baby cream', 'baby moisturizer', 'baby oil', 'baby wash', 'baby shampoo'],
-      category_keyword: 'Lotions', attributes: { 'Applicable Age Group': '0 Year+' } },
-    trash_bags: { match: ['trash bag', 'trash bags', 'garbage bag', 'garbage bags', 'clean-up bag', 'clean up bag', 'drawstring bags', 'kitchen bags', 'lawn and leaf bag', 'contractor bag', 'trash can liner'], exclude: ['diaper', 'dog waste', 'poop bag'],
-      category_keyword: 'Trash Bags', attributes: { 'Material': 'Plastic' }, length_in: 12, width_in: 8, height_in: 6 },
-    // Bounty napkins bhi "Bounty" match karte hain → napkins/tissues pehle
-    napkins: { match: ['napkin', 'napkins'], category_keyword: 'Disposable Napkins', attributes: { 'Material': 'Paper' }, length_in: 12, width_in: 8, height_in: 6 },
-    box_tissues: { match: ['facial tissue', 'facial tissues', 'kleenex', 'puffs', 'tissue box', 'tissues,'], exclude: ['toilet', 'bath tissue', 'wipes'],
-      category_keyword: 'Box Tissues', attributes: { 'Material': 'Paper' }, length_in: 12, width_in: 10, height_in: 9 },
-    cleansing_wipes: { match: ['facial cleansing', 'cleansing towelettes', 'cleansing wipes', 'facial towels', 'makeup remover wipes', 'body wipes'],
-      category_keyword: 'Personal Cleansing Wipes', attributes: { 'Material': 'Fabric' }, length_in: 10, width_in: 6, height_in: 6 },
-    paper_towels: { match: ['paper towel', 'paper towels', 'bounty', 'select-a-size', 'kitchen roll'],
-      category_keyword: 'Paper Towels', attributes: { 'Material': 'Paper' }, length_in: 16, width_in: 12, height_in: 11 },
-    paper_plates: { match: ['paper plate', 'paper plates', 'dinner plates', 'dixie plates', 'compostable plates'], exclude: ['plastic plate'],
-      category_keyword: 'Plates', attributes: { 'Material': 'Paper' }, length_in: 12, width_in: 12, height_in: 6 },
-    plastic_plates: { match: ['plastic plate', 'plastic plates', 'disposable plates', 'foam plates'],
-      category_keyword: 'Plates', attributes: { 'Material': 'Plastic' }, length_in: 12, width_in: 12, height_in: 6 },
-    bowls: { match: ['paper bowl', 'paper bowls', 'disposable bowl', 'disposable bowls', 'foam bowls', 'plastic bowls'],
-      category_keyword: 'Bowls', attributes: { 'Material': 'Paper' }, length_in: 10, width_in: 10, height_in: 6 },
-    cutlery: { match: ['plastic fork', 'plastic forks', 'plastic spoons', 'plastic knives', 'cutlery', 'utensil set', 'disposable forks', 'disposable spoons', 'plastic utensils'],
-      category_keyword: 'Cutlery Sets', attributes: { 'Material': 'Plastic' }, length_in: 10, width_in: 6, height_in: 4 },
-    cups: { match: ['plastic cups', 'disposable cups', 'party cups', 'solo cups', 'paper cups', 'hot cups', 'cold cups'],
-      category_keyword: 'Cups', attributes: { 'Material': 'Plastic' }, length_in: 10, width_in: 8, height_in: 8 },
-    dish_soap: { match: ['dish soap', 'dishwashing liquid', 'dish liquid', 'dawn'], exclude: ['rinse aid', 'dishwasher'], category_keyword: 'Dish Soap' },
-    rinse_aids: { match: ['rinse aid', 'jet-dry', 'jet dry', 'dishwasher rinse'], category_keyword: 'Rinse Aids', attributes: { 'Composition': 'See The User Manual' } },
-    bleach: { match: ['bleach'], exclude: ['hair'], category_keyword: 'Bleach' },
-    toilet_cleaners: { match: ['toilet bowl cleaner', 'toilet cleaner', 'toilet bowl'], category_keyword: 'Toilet Cleaners' },
-    sponges: { match: ['sponge', 'sponges', 'scrub daddy', 'scrubber'], category_keyword: 'Sponges', attributes: { 'Material': 'Plastic' } },
-    cleaning_cloths: { match: ['microfiber cloth', 'microfiber cloths', 'cleaning cloth', 'cleaning cloths', 'microfiber towels', 'shop towels'],
-      category_keyword: 'Cleaning Cloths', attributes: { 'Material': 'Microfiber' } },
-    hangers: { match: ['kids hangers', "children's hangers", 'baby hangers', 'toddler hangers', 'clothes hangers'], category_keyword: "Children's Clothes Hangers", attributes: { 'Material': 'Plastic' } },
-    // Food — Allergen Information product-specific hai, khud nahi bharte (Fix drafts report karega); Food Ingredient List = "See Product Details"
-    chips: { match: ['chips', 'crisps', 'pringles', 'doritos', 'cheetos', 'tortilla chips', 'potato chips'], exclude: ['chocolate chip', 'wood chip', 'poker chip'],
-      category_keyword: 'Chips & Crisps', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    crackers: { match: ['saltine', 'saltines', 'crackers', 'ritz', 'cheez-it', 'goldfish'], category_keyword: 'Saltines', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    jerky: { match: ['jerky', 'beef sticks', 'meat sticks', 'slim jim'], category_keyword: 'Jerky', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    fruit_snacks: { match: ['fruit snacks', 'fruit snack', 'gummies', 'fruit roll', 'welch'], exclude: ['vitamin', 'supplement'],
-      category_keyword: 'Fruit Snacks', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    ground_coffee: { match: ['ground coffee', 'coffee ground', 'coffee, ground', 'folgers', 'maxwell house'], exclude: ['k-cup', 'k cup', 'pods', 'whole bean', 'instant'],
-      category_keyword: 'Ground Coffee', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    string_cheese: { match: ['string cheese', 'cheese sticks', 'cheese snack', 'snack cheese', 'babybel'], category_keyword: 'String & Snack', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    olive_oil: { match: ['olive oil'], category_keyword: 'Olive', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    // Canned beans / sauces — Temu file: sirf Allergen Information required (product-specific, khud nahi bharte)
-    baked_beans: { match: ['baked beans'], category_keyword: 'Baked Beans' },
-    kidney_beans: { match: ['kidney beans'], category_keyword: 'Kidney Beans' },
-    pinto_beans: { match: ['pinto beans'], category_keyword: 'Pinto Beans' },
-    black_beans: { match: ['black beans'], category_keyword: 'Black Beans' },
-    pasta_sauce: { match: ['pasta sauce', 'marinara', 'alfredo sauce', 'spaghetti sauce'], category_keyword: 'Sauces' },
-    canned_corn: { match: ['canned corn', 'whole kernel corn', 'sweet corn', 'corn, '], exclude: ['popcorn', 'corn chips', 'corn starch', 'tortilla'], category_keyword: 'Corn', attributes: { 'Food Ingredient List': 'See Product Details' } },
-    green_beans: { match: ['green beans', 'cut green beans', 'french style green beans'], category_keyword: 'Green Beans', attributes: { 'Food Ingredient List': 'See Product Details' } }
+      weight_lb: 2.0, length_in: 12, width_in: 10, height_in: 4 }
   },
-  price_alert_high: 150, price_alert_low: 3,
-  price_min: 69.99, // v9.8.1: base price kam se kam itni ($69.99 floor)
-  price_max: 999, // v9.12.3: high price limit ($999 tak normal hai)
-  // v9.11.0 Brand approval guard — Temu "Brands & IP" ke mutabiq: brand → approved category groups (+ remaining sellable units).
-  // Groups: sports, kitchen (Home & Kitchen), grocery, household (cleaning/paper/disposables), baby, pets, beauty.
-  // Default list HQ TWO (Sep 2026) se — har store ke Settings mein apni list likhein.
-  brand_rules: {
-    'GREAT VALUE': { groups: ['kitchen', 'grocery'], units: 1000000 },
-    "MEMBER'S MARK": { groups: ['pets', 'kitchen'], units: 1000000 },
-    'CALLAWAY': { groups: ['sports'], units: 0 },
-    'TAYLORMADE': { groups: ['sports'], units: 0 },
-    'WILSON': { groups: ['sports'], units: 80 },
-    'VICE GOLF': { groups: ['sports'], units: 999964 },
-    'TITLEIST': { groups: ['sports'], units: 49 }
-  },
-  // v9.8.0: Temu template ke packaging columns (blank = nahi bharna). Valid values Temu template se:
-  // SKU_type: Single set | Multi-piece set | Mixed set of different specifications | Mixed set of different products
-  // Individually_packed: Yes | No · Packaging_unit: piece | pair | pack
-  packaging: { sku_type: '', individually_packed: '', total_packaging_quantity: '', packaging_unit: '' },
-  auto_fix_after_upload: true,
   colors: ['White','Red','Black','Yellow','Grey','Gray','Blue','Green','Purple','Orange','Pink','Brown','Navy Blue','Multi Color','Mixed Color','Neon'],
   smart_variations: true,
   upload_in_background: true,
@@ -9270,12 +8614,7 @@ const TEMU_DEFAULT_CONFIG = {
   smart_weight: true,
   max_weight_lb: 8,
   skip_listed: true,
-  title_remove_words: [
-    'Amazon', 'Amazon.com', 'Walmart', 'Walmart.com', "Sam's Club", 'Costco', 'Target',
-    'priced per pound', 'Prime', 'FSA Eligible', 'Best Seller', 'Lifetime Warranty', 'Warranty', 'Guaranteed',
-    'Callaway', 'Vice', 'Titleist', 'TaylorMade', 'Bridgestone', 'Srixon', 'Pinnacle', 'Wilson',
-    'BPA Free', 'Free Shipping', '100% Authentic'
-  ]
+  title_remove_words: ['Amazon', 'Amazon.com', 'Walmart', "Sam's Club", 'priced per pound', 'Prime', 'FSA Eligible', 'Best Seller']
 };
 
 
@@ -9352,28 +8691,7 @@ async function temuMigrateLegacyIfNeeded() {
     await temuSaveStores(stores, 'Store 1');
   }
 }
-function temuRenderStorePills() {
-  const list = $('temuStorePillsList'); if (!list) return;
-  const stores = temuStores();
-  const act = temuActiveStoreName();
-  const names = Object.keys(stores);
-  if (!names.length) {
-    list.innerHTML = '<span style="font-size:10.5px;color:var(--ink-4);padding-left:4px;">No stores</span>';
-    return;
-  }
-  list.innerHTML = names.map(n => {
-    const isActive = n === act;
-    const st = stores[n];
-    const hasTpl = !!st?.templateName;
-    return `<button type="button" class="temu-store-pill${isActive ? ' active' : ''}" data-sname="${esc(n)}" title="${isActive ? 'Active store: ' + esc(n) : 'Click to switch to ' + esc(n)}">
-      <span class="t-pill-dot"></span>
-      <span>${esc(n)}</span>
-      ${hasTpl ? '<span class="t-pill-check" title="Template attached">✓</span>' : ''}
-    </button>`;
-  }).join('');
-}
 function temuRenderStoreBar() {
-  temuRenderStorePills();
   const sel = $('temuStoreSel'); if (!sel) return;
   const stores = temuStores(); const act = temuActiveStoreName();
   sel.innerHTML = '';
@@ -9391,161 +8709,22 @@ function temuGetCfg() {
   const base = JSON.parse(JSON.stringify(TEMU_DEFAULT_CONFIG));
   const saved = temuActiveStore()?.config;
   if (!saved || typeof saved !== 'object' || !saved.defaults) return base;
-  const merged = { ...base, ...saved, defaults: { ...base.defaults, ...saved.defaults }, packaging: { ...(base.packaging || {}), ...(saved.packaging || {}) }, category_profiles: { ...(base.category_profiles || {}), ...(saved.category_profiles || {}) }, brand_rules: (saved.brand_rules && typeof saved.brand_rules === 'object') ? saved.brand_rules : base.brand_rules };
-  const currentKeys = (merged.gemini_api_key || '').split(/[\s,;\n]+/).map(k => k.trim()).filter(Boolean);
-  if (!currentKeys.length || (currentKeys.length === 1 && !DEFAULT_GROQ_KEYS.includes(currentKeys[0]))) {
-    merged.gemini_api_key = DEFAULT_GROQ_KEYS.join('\n');
-  } else if (!DEFAULT_GROQ_KEYS.every(dk => currentKeys.includes(dk))) {
-    merged.gemini_api_key = Array.from(new Set([...DEFAULT_GROQ_KEYS, ...currentKeys])).join('\n');
-  }
-  return merged;
+  // merge: saved wins, but new keys from defaults are never missing
+  return { ...base, ...saved, defaults: { ...base.defaults, ...saved.defaults } };
 }
 
 function temuCleanTitle(t, cfg) {
   t = String(t || '').replace(/\s+/g, ' ').trim();
-  ['Amazon.com :', 'Amazon.com:', 'Walmart.com:', 'SamsClub.com:'].forEach(p => { 
-    if (t.toLowerCase().startsWith(p.toLowerCase())) t = t.slice(p.length).trim(); 
+  ['Amazon.com :', 'Amazon.com:', 'Walmart.com:'].forEach(p => { if (t.toLowerCase().startsWith(p.toLowerCase())) t = t.slice(p.length).trim(); });
+  // v8.9.0: remove banned/violation words (case-insensitive whole phrases)
+  (cfg.title_remove_words || []).forEach(w => {
+    w = String(w || '').trim();
+    if (!w) return;
+    const re = new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+    t = t.replace(re, ' ');
   });
-  
-  // Sort remove words by length descending so longer phrases match first
-  const words = (cfg.title_remove_words || [])
-    .map(w => String(w || '').trim())
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length);
-
-  words.forEach(w => {
-    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp('(^|\\s|[,.;:!|/\\-])' + escaped + '(?=[,.;:!|/\\-\\s]|$)', 'gi');
-    t = t.replace(re, '$1');
-  });
-
-  // Clean orphan domain remnants like .com, .org
-  t = t.replace(/(^|[\s\-_,])\.com\b/gi, '$1');
-
-  // Clean punctuation spacing without breaking hyphenated words like 12-Pack
-  t = t.replace(/\s*([,;:!|])\s*/g, '$1 ')
-       .replace(/\s+-\s+/g, ' - ')
-       .replace(/([,;:|–—])\s*([,;:|–—])/g, '$1')
-       .replace(/,\s*,+/g, ', ')
-       .replace(/-\s*-+/g, '-')
-       .replace(/\s{2,}/g, ' ')
-       .replace(/^[\s,.;:!|/\-–—\\]+|[\s,.;:!|/\-–—\\]+$/g, '')
-       .trim();
+  t = t.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!])/g, '$1').replace(/^[\s,.;:\-–]+|[\s,.;:\-–]+$/g, '');
   return t.slice(0, 500);
-}
-
-// ── Smart Title & Brand Cleaner (Word Remover Chips & Live Preview) ──
-function temuRenderWordChips() {
-  const container = $('tgWordsChips');
-  if (!container) return;
-  const raw = $('tgWords')?.value || '';
-  const words = raw.split(',').map(w => w.trim()).filter(Boolean);
-  
-  container.innerHTML = '';
-  if (!words.length) {
-    container.innerHTML = '<span class="title-cleaner-empty">Koi banned word set nahi hai. Upar word likh kar "+ Add" dabayein ya Preset select karein.</span>';
-    temuUpdateWordPreview();
-    return;
-  }
-
-  words.forEach((w, idx) => {
-    const chip = document.createElement('span');
-    chip.className = 'word-cleaner-chip';
-    chip.innerHTML = `<span class="wc-text">${esc(w)}</span><button type="button" class="wc-del" data-idx="${idx}" title="Remove '${esc(w)}'">✕</button>`;
-    chip.querySelector('.wc-del').addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      temuRemoveWordAt(idx);
-    });
-    container.appendChild(chip);
-  });
-
-  temuUpdateWordPreview();
-}
-
-function temuAddWords(newWordsArr) {
-  const current = ($('tgWords')?.value || '').split(',').map(w => w.trim()).filter(Boolean);
-  let added = false;
-  newWordsArr.forEach(nw => {
-    const clean = String(nw || '').trim();
-    if (clean && !current.some(x => x.toLowerCase() === clean.toLowerCase())) {
-      current.push(clean);
-      added = true;
-    }
-  });
-  if (added) {
-    if ($('tgWords')) $('tgWords').value = current.join(', ');
-    temuRenderWordChips();
-  }
-}
-
-function temuRemoveWordAt(idx) {
-  const current = ($('tgWords')?.value || '').split(',').map(w => w.trim()).filter(Boolean);
-  if (idx >= 0 && idx < current.length) {
-    current.splice(idx, 1);
-    if ($('tgWords')) $('tgWords').value = current.join(', ');
-    temuRenderWordChips();
-  }
-}
-
-function temuUpdateWordPreview() {
-  const raw = $('tgWords')?.value || '';
-  const words = raw.split(',').map(w => w.trim()).filter(Boolean);
-  const sample = 'Callaway Golf Chrome Tour Golf Balls 12-Pack Prime';
-  const cfg = { title_remove_words: words };
-  const cleaned = temuCleanTitle(sample, cfg);
-  if ($('tgPrevBefore')) $('tgPrevBefore').textContent = sample;
-  if ($('tgPrevAfter')) $('tgPrevAfter').textContent = cleaned || '(Empty Title)';
-}
-
-function temuInitWordRemoverEvents() {
-  const wInput = $('tgWordInput');
-  const wAddBtn = $('tgWordAddBtn');
-  if (wInput && !wInput.dataset.bound) {
-    wInput.dataset.bound = '1';
-    const doAdd = () => {
-      const val = wInput.value.trim();
-      if (!val) return;
-      const split = val.split(',').map(x => x.trim()).filter(Boolean);
-      temuAddWords(split);
-      wInput.value = '';
-      wInput.focus();
-    };
-    wAddBtn?.addEventListener('click', doAdd);
-    wInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        doAdd();
-      }
-    });
-  }
-
-  const qwInp = $('tckQuickWordInput');
-  if (qwInp && !qwInp.dataset.bound) {
-    qwInp.dataset.bound = '1';
-    qwInp.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        $('tckQuickWordBtn')?.click();
-      }
-    });
-  }
-
-  document.querySelectorAll('.preset-chip-btn').forEach(btn => {
-    if (!btn.dataset.bound) {
-      btn.dataset.bound = '1';
-      btn.addEventListener('click', () => {
-        const type = btn.dataset.preset;
-        if (type === 'stores') {
-          temuAddWords(['Amazon', 'Amazon.com', 'Walmart', 'Walmart.com', "Sam's Club", 'Costco', 'Target']);
-        } else if (type === 'golf') {
-          temuAddWords(['Callaway', 'Vice', 'Titleist', 'TaylorMade', 'Bridgestone', 'Srixon', 'Pinnacle']);
-        } else if (type === 'claims') {
-          temuAddWords(['Prime', 'Best Seller', 'Lifetime Warranty', 'Guaranteed', 'BPA Free', 'FSA Eligible', 'Priced per pound', 'Free Shipping']);
-        }
-      });
-    }
-  });
 }
 
 function temuSourceId(url) {
@@ -9667,36 +8846,12 @@ function temuWeightFromTitle(title) {
   return Math.max(0.2, Math.ceil(lb * 10) / 10);
 }
 
-function temuPrice(src, cfg, itemWeight) {
+function temuPrice(src, cfg) {
   const p = parseFloat(String(src ?? '').replace(/[$,]/g, ''));
   if (!isFinite(p) || p <= 0) return [null, null];
-  let base = p * (cfg.price_multiplier || 1.25);
-  // v11: Min profit floor ($) — default $50 over sourcing cost. Ensures we always make at least $50 per item.
-  const minProfit = isFinite(parseFloat(cfg.min_profit_dollar)) ? parseFloat(cfg.min_profit_dollar) : 50;
-  if (minProfit > 0 && (base - p) < minProfit) {
-    base = p + minProfit;
-  }
-  // v10.5.0: Heavy item shipping buffer ($) for items >= 2 lb
-  const heavyBuf = parseFloat(cfg.heavy_shipping_buffer);
-  const wtThresh = parseFloat(cfg.heavy_weight_threshold) || 2.0;
-  const wt = parseFloat(itemWeight);
-  if (isFinite(heavyBuf) && heavyBuf > 0 && isFinite(wt) && wt >= wtThresh) {
-    base += heavyBuf;
-  }
-  // Minimum base price floor: if sourcing <= $2.5, floor is 69.99; otherwise min is 99 (or cfg.price_min)
-  let minP = parseFloat(cfg.price_min) || 69.99;
-  if (p <= 2.5) {
-    minP = Math.min(minP, 69.99);
-  } else if (minP < 99 && (!cfg.price_min || cfg.price_min === 60)) {
-    minP = 99.0;
-  }
-  if (base < minP) base = minP;
+  let base = p * cfg.price_multiplier;
   let list = base * (cfg.list_price_multiplier || 1.25);
-  // v10.5.0: Smart .99 Rounding
-  if (cfg.price_round_to_99 !== false) {
-    base = Math.floor(base) + 0.99;
-    list = Math.floor(list) + 0.99;
-  }
+  if (cfg.price_round_to_99) { base = Math.floor(base) + 0.99; list = Math.floor(list) + 0.99; }
   return [Math.round(base * 100) / 100, Math.round(list * 100) / 100];
 }
 
@@ -9704,31 +8859,20 @@ function temuPrice(src, cfg, itemWeight) {
 function temuEnrich(rows, cfg) {
   const items = [], usedSku = new Set(), seenSrc = new Set(), skipped = [];
   const d = cfg.defaults;
-  rows.forEach((r, rowIdx) => {
-    const title = temuCleanTitle(r.title, cfg) || String(r.title || '').trim() || ('Product ' + (rowIdx + 1));
+  rows.forEach(r => {
+    const title = temuCleanTitle(r.title, cfg);
     const url = r.url || '';
     if (!title || !url) { skipped.push((!url ? 'no url: ' : 'no title: ') + String(r.title || r.url || '?').slice(0, 40)); return; } // v9.7.2: chup-chaap drop nahi
     let uhost = ''; try { uhost = new URL(url).hostname; } catch (_) {}
     if (/temu\.com$/i.test(uhost) && !isTemuProductUrl(url)) { skipped.push('not a product (Temu page): ' + title.slice(0, 40)); return; }
     if (/^Temu\s*\|/i.test(title)) { skipped.push('not a product (Temu page): ' + title.slice(0, 40)); return; }
     if (/\/s\?k=|amazon\.[a-z.]+\/s\b|walmart\.com\/search|samsclub\.com\/s(\/|\?)/i.test(url)) { skipped.push('search page: ' + title.slice(0, 40)); return; }
-    let sid = temuSourceId(url);
-    if (!sid || !/^[A-Za-z0-9]{5,20}$/.test(sid)) {
-      sid = String(url).replace(/\W+/g, '').slice(-10) || ('PRD' + String(rowIdx + 1).padStart(6, '0'));
-    }
-    const cleanVar = String(r.copyColor || r.color || r.variation || '').trim();
-    const cleanTitle = String(r.title || '').trim();
-    const srcKey = sid ? `${sid}|${cleanVar || cleanTitle.slice(0, 35)}` : (url || String(rowIdx));
-    const isDup = seenSrc.has(srcKey);
-    seenSrc.add(srcKey);
-    if (isDup && !cfg._forReview && !cfg.allow_duplicates) {
-      skipped.push('duplicate: ' + title.slice(0, 40));
-      return;
-    }
-    const rec = temuListedMap()[(temuActiveStoreName() || 'default') + '|' + sid];
-    const isAlreadyListed = !!rec;
-    const skipListedSetting = $('tgSkipListedExport') ? $('tgSkipListedExport').checked : (cfg.skip_listed !== false);
-    if (skipListedSetting && !cfg.allow_relist && !cfg._forReview) {
+    const sid = temuSourceId(url);
+    if (!/^[A-Z0-9]{10}$/.test(sid) && !/^\d{6,}$/.test(sid)) { skipped.push('invalid product url: ' + title.slice(0, 40)); return; }
+    if (seenSrc.has(sid)) { skipped.push('duplicate: ' + title.slice(0, 40)); return; }
+    seenSrc.add(sid);
+    if (cfg.skip_listed !== false) {
+      const rec = temuListedMap()[(temuActiveStoreName() || 'default') + '|' + sid];
       if (rec) { skipped.push(`already listed (${rec.d}): ` + title.slice(0, 40)); return; }
     }
 
@@ -9754,11 +8898,11 @@ function temuEnrich(rows, cfg) {
 
     // variation: smart (Color / Quantity / Weight / Capacity / Size / fallback) — see temuSmartVariation
     const variation = temuSmartVariation(title, r.color, cfg, prof, sid);
-    let vtype = variation.type, color = variation.value;
-    if (r.copyColor) { color = String(r.copyColor).trim(); vtype = 'Color'; } // v10.2.0 Store Copy
+    const vtype = variation.type, color = variation.value;
 
+    const [base, list] = temuPrice(r.price, cfg);
     const goods = `${cfg.sku_prefix}-${sid}`;
-    const vsfx = (color.replace(/[^A-Za-z0-9]+/g, '') || (isDup ? 'Dup' : 'Std')).slice(0, 10);
+    const vsfx = color.replace(/[^A-Za-z0-9]+/g, '') || 'Std';
     let sku = `${goods}-${vsfx}`;
     let n = 2; while (usedSku.has(sku)) sku = `${goods}-${vsfx}-${n++}`;
     usedSku.add(sku);
@@ -9767,9 +8911,10 @@ function temuEnrich(rows, cfg) {
     const images = (Array.isArray(r.images) ? r.images : []).filter(u => /^https?:\/\//.test(u) && /\.(jpe?g|png)(\?|$)/i.test(u)).slice(0, cfg.max_sku_images);
 
     const warn = [];
-    if (isDup) warn.push('DUPLICATE_SOURCE');
     if (!images.length) warn.push('NO_IMAGES');
     if (!brand) warn.push('NO_BRAND_MATCH');
+    if (base === null) warn.push('NO_PRICE');
+    if (!profName) warn.push('NO_CATEGORY_PROFILE');
 
     // weight: profile → title (smart) → scraped (0.1–8 lb) → global default; > max → skip
     let weight = (prof.weight_lb != null) ? prof.weight_lb : null, wsrc = weight != null ? 'profile' : '';
@@ -9779,41 +8924,18 @@ function temuEnrich(rows, cfg) {
       else { const sw = parseFloat(r.weight); if (isFinite(sw) && sw >= 0.1 && sw <= (cfg.max_weight_lb || 8)) { weight = Math.round(sw * 10) / 10; wsrc = 'scraped'; } }
     }
     if (weight == null) { weight = d.weight_lb; wsrc = 'default'; }
-    const maxWt = parseFloat(cfg.max_weight_lb) || 0;
-    if (maxWt > 0 && weight > maxWt) {
-      warn.push('OVERWEIGHT');
-    }
+    if (cfg.max_weight_lb && weight > cfg.max_weight_lb) { skipped.push(`too heavy (${weight} lb from ${wsrc}): ` + title.slice(0, 40)); return; }
     if (wsrc === 'default') warn.push('DEFAULT_WEIGHT');
-
-    let [base, list] = temuPrice(r.price, cfg, weight);
-    if (r.temuBase) { // v10.2.0: Temu sheet ki base price as-is
-      const tb = parseFloat(String(r.temuBase).replace(/[$,]/g, ''));
-      if (isFinite(tb) && tb > 0) {
-        base = Math.round(tb * 100) / 100;
-        list = Math.round(base * (cfg.list_price_multiplier || 1.25) * 100) / 100;
-        if (cfg.price_round_to_99 !== false) list = Math.floor(list) + 0.99;
-      }
-    }
-
-    if (base === null) warn.push('NO_PRICE');
-    if (!r.temuBase) { const pm = parseFloat(cfg.price_max) || 999; const sp = parseFloat(String(r.price ?? '').replace(/[$,]/g, '')); if (isFinite(pm) && pm > 0 && isFinite(sp) && sp > pm && sp > 999) warn.push('PRICE_ABSURD'); }
-    if (r.copyCat && !profName) { const hit = Object.entries(cfg.category_profiles).find(([, p]) => String(p.category_keyword || '').toLowerCase() === String(r.copyCat).toLowerCase()); if (hit) { profName = hit[0]; prof = hit[1]; } else prof = { category_keyword: r.copyCat }; }
-    if (!profName && !r.copyCat) warn.push('NO_CATEGORY_PROFILE');
 
     items.push({
       title, url, goods, sku, brand, trademark: tm, color, vtype, images, wsrc,
       category_keyword: prof.category_keyword || '',
       keyword_attributes: prof.keyword_attributes || '',
-      group: temuProfileGroup(profName, prof), // v9.11.0
       base, list,
-      source_price: r.price,
       qty: Math.floor(Math.random() * (cfg.quantity_max - cfg.quantity_min + 1)) + cfg.quantity_min,
       weight, dimL: prof.length_in ?? d.length_in,
       dimW: prof.width_in ?? d.width_in, dimH: prof.height_in ?? d.height_in,
-      warn,
-      isAlreadyListed,
-      listedRecord: rec,
-      isHistoryImport: !!r.isHistoryImport
+      warn
     });
   });
   return { items, skipped };
@@ -9842,23 +8964,9 @@ function temuFillTemplate(wb, items, cfg) {
   items.forEach(it => {
     put(r, 'listing_id', it.goods); put(r, 'seller_sku', it.sku);
     put(r, 'item_name', it.title); put(r, 'category', it.category_keyword);
-    // v9.7.6: reference_link khali — Temu sourcing link dekh kar kam price suggest karta tha
-    put(r, 'brand', it.brand); put(r, 'trademark', it.trademark);
-    let kwAttrs = it.keyword_attributes || '';
-    if (it.attributes && typeof it.attributes === 'object') {
-      const parts = [];
-      if (it.attributes.material) parts.push(`Material: ${it.attributes.material}`);
-      if (it.attributes.size) parts.push(`Size: ${it.attributes.size}`);
-      if (it.attributes.color) parts.push(`Color: ${it.attributes.color}`);
-      if (it.attributes.model) parts.push(`Model: ${it.attributes.model}`);
-      if (it.attributes.pack_count && it.attributes.pack_count > 1) parts.push(`Quantity: ${it.attributes.pack_count}`);
-      if (parts.length) {
-        kwAttrs = kwAttrs ? `${kwAttrs}; ${parts.join('; ')}` : parts.join('; ');
-      }
-    }
-    put(r, 'Keyword_attributes', kwAttrs);
-    put(r, 'Variation_type_1', it.vtype || d.variation_theme);
-    put(r, 'Variation_Variants_1', (it.attributes?.color || it.color || 'One Color'));
+    put(r, 'reference_link', it.url); put(r, 'brand', it.brand); put(r, 'trademark', it.trademark);
+    put(r, 'Keyword_attributes', it.keyword_attributes);
+    put(r, 'Variation_type_1', it.vtype || d.variation_theme); put(r, 'Variation_Variants_1', it.color);
     if (it.images.length) {
       put(r, 'main_image_url', it.images[0]);
       it.images.slice(1, 10).forEach((u, i) => put(r, 'other_image_url', u, i));
@@ -9868,10 +8976,6 @@ function temuFillTemplate(wb, items, cfg) {
     put(r, 'item_length', it.dimL); put(r, 'item_volume_unit', 'in');
     put(r, 'item_width', it.dimW); put(r, 'item_height', it.dimH);
     put(r, 'item_weight', it.weight); put(r, 'item_weight_unit', 'lb');
-    { const pk = cfg.packaging || {}; // v9.8.0
-      put(r, 'SKU_type', pk.sku_type); put(r, 'Individually_packed', pk.individually_packed);
-      { const q = parseInt(pk.total_packaging_quantity, 10); if (q > 0) put(r, 'Total_packaging_quantity', q); }
-      put(r, 'Packaging_unit', pk.packaging_unit); }
     put(r, 'shipping_template', d.shipping_template); put(r, 'handling_time', d.handling_time);
     put(r, 'fulfillment_channel', d.fulfillment_channel); put(r, 'origin_country', d.origin_country);
     r++;
@@ -9890,7 +8994,6 @@ async function temuRunExport(opts = {}) {
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) {} } };
   // v9.7.1: imported Temu file as-is — koi conversion nahi
   if (($('temuSource')?.value || '') === 'sheet' && TemuLast?.asIs) {
-    if (opts.dryRun) return null;
     if (!opts.forUpload) { zhSaveBlob(new Blob([TemuLast.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'temu_upload.xlsx'); toast('Temu file download', 'ok'); }
     return;
   }
@@ -9908,17 +9011,11 @@ async function temuRunExport(opts = {}) {
     { const sv = $('tgSmartVar'); if (sv) cfg.smart_variations = !!sv.checked; }
     { const bgc = $('tgBgUpload'); if (bgc) cfg.upload_in_background = !!bgc.checked; }
     { const swc = $('tgSmartWeight'); if (swc) cfg.smart_weight = !!swc.checked; }
-    if ($('tgSkuType')) cfg.packaging = { sku_type: $('tgSkuType')?.value || '', individually_packed: $('tgIndPacked')?.value || '', total_packaging_quantity: ($('tgPackQty')?.value || '').trim(), packaging_unit: $('tgPackUnit')?.value || '' };
     { const lp = parseFloat($('tgListPx')?.value); if (isFinite(lp) && lp > 0) cfg.list_price_multiplier = lp; }
-    { const mp = parseFloat($('tgMinPx')?.value); if (isFinite(mp) && mp >= 0) cfg.price_min = mp; }
-    { const mx = parseFloat($('tgMaxPx')?.value); if (isFinite(mx) && mx >= 0) cfg.price_max = mx; }
     { const a = parseInt($('tgQtyMin')?.value, 10), b = parseInt($('tgQtyMax')?.value, 10); if (a > 0 && b >= a) { cfg.quantity_min = a; cfg.quantity_max = b; } }
     { const mw = parseFloat($('tgMaxW')?.value); if (isFinite(mw) && mw > 0) cfg.max_weight_lb = mw; }
     { const vv = $('tgVarValues')?.value; if (vv !== undefined && vv !== null && vv.trim()) cfg.simple_variation_values = vv.split(',').map(x => x.trim()).filter(Boolean); }
     { const px = parseFloat($('tgPx')?.value); if (isFinite(px) && px > 0) cfg.price_multiplier = px; }
-    { const r99 = $('tgRound99'); if (r99) cfg.price_round_to_99 = !!r99.checked; }
-    { const mpf = parseFloat($('tgMinProfit')?.value); if (isFinite(mpf) && mpf >= 0) cfg.min_profit_dollar = mpf; }
-    { const hbf = parseFloat($('tgHeavyBuffer')?.value); if (isFinite(hbf) && hbf >= 0) cfg.heavy_shipping_buffer = hbf; }
     { const num = v => { const x = parseFloat(v); return isFinite(x) && x > 0 ? x : null; };
       const w = num($('tgW')?.value), l = num($('tgL')?.value), wd = num($('tgWd')?.value), ht = num($('tgH')?.value);
       if (w) cfg.defaults.weight_lb = w; if (l) cfg.defaults.length_in = l;
@@ -9926,9 +9023,8 @@ async function temuRunExport(opts = {}) {
     const source = $('temuSource')?.value || 'bulk';
     let rows = [];
     if (source === 'bulk') {
-      // v10.3.2: Library ka chupke-se fallback khatam — "Last bulk hunt" = sirf bulk hunt ke products
       rows = (BulkState?.results || []).filter(x => x.status !== 'fail');
-      if (!rows.length) { if (!opts.dryRun) { say('✗ Last bulk hunt mein 0 products hain.\n→ Bulk → "Hunt all open tabs" chalayen, ya "Products to export" mein Library select karein.'); toast('Bulk hunt khali — Library select karein', 'warn'); } return opts.dryRun ? null : undefined; }
+      if (!rows.length) rows = await getMasterRows();
     } else if (source === 'library_sel' && TemuLibPick?.ids) {
       rows = (await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id));
     } else if (source === 'sheet' && TemuSheetRows) {
@@ -9938,11 +9034,7 @@ async function temuRunExport(opts = {}) {
     }
     if (!rows.length) { say('✗ Export ke liye koi product nahi mila.\n→ Bulk tab → "Hunt all open tabs" chalayen (ya data source "Library" karein), phir dobara try karein.'); toast('No products — pehle hunt karein', 'warn'); return; }
     say('Converting ' + rows.length + ' products…');
-    if (opts.dryRun || opts.forReview || opts.forUpload || $('tgPrecheck')?.checked) cfg._forReview = true;
-    let { items, skipped } = opts.items ? { items: opts.items, skipped: opts.skipped || [] } : temuEnrich(rows, cfg);
-    if (opts.dryRun) return { items, skipped, cfg, rows };
-    // v9.12.3: check panel ke bina upload → ghalat (absurd) price wale products bahar (Temu "abnormal price" violation)
-    if (opts.dropAbsurd) { const bad = items.filter(it => (it.warn || []).includes('PRICE_ABSURD') && it.base > (parseFloat(cfg.price_max) || 999)); if (bad.length) { items = items.filter(it => !bad.includes(it)); bad.forEach(it => skipped.push(`price ghalat ($${it.base}): ` + String(it.title || '').slice(0, 40))); } }
+    const { items, skipped } = temuEnrich(rows, cfg);
     if (!items.length) {
       say('Koi naya product nahi:\n' + (skipped.length ? skipped.map(x => '• ' + x).join('\n') : '(list khali hai)') +
         '\n\nAgar dobara list karna hai to "Pehle se listed" checkbox off karein.');
@@ -9953,7 +9045,7 @@ async function temuRunExport(opts = {}) {
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
     TemuLast = { bytes: out, items, skipped, n, marked: false };
     // v9.3.1: listed-history ab sirf CONFIRMED upload ke baad mark hoti hai (export-only par nahi).
-    { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Listed mark karo (${n})`; } }
+    { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Mark ${n} as listed`; } }
     zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'temu_upload.xlsx');
     if (!opts.forUpload) { try { await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); } catch (_) {} }
     const lines = items.map(it => `${it.sku}  ${it.brand || '—'}  ${it.vtype || 'Color'}: ${it.color}  ${it.weight}lb(${it.wsrc || '?'})  img=${it.images.length}  $${it.base ?? '—'}${it.warn.length ? '  ⚠ ' + it.warn.join(',') : ''}`);
@@ -9967,84 +9059,23 @@ async function temuRunExport(opts = {}) {
 }
 
 
-// ── v9.10.0 Pipeline stepper (Export → Upload → Confirm → Errors → Fix drafts) ──
-function temuStep(name, state, note) {
-  const box = $('temuSteps'); if (!box) return;
-  box.hidden = false;
-  const el = box.querySelector(`.tstep[data-step="${name}"]`); if (!el) return;
-  el.className = 'tstep ' + (state || 'idle');
-  const n = el.querySelector('.tstep-note'); if (n) n.textContent = note || '';
-  const r = el.querySelector('.tstep-retry'); if (r) r.hidden = !(state === 'bad' || state === 'warn');
-}
-function temuStepsReset(show) {
-  const box = $('temuSteps'); if (!box) return;
-  box.querySelectorAll('.tstep').forEach(el => {
-    el.className = 'tstep idle';
-    const n = el.querySelector('.tstep-note'); if (n) n.textContent = '—';
-    const r = el.querySelector('.tstep-retry'); if (r) r.hidden = true;
-  });
-  box.hidden = !show;
-}
-async function temuStepRetry(name) {
-  if (name === 'prep') return temuUpdateSrcInfo();
-  if (name === 'export') return temuAutoUpload({});
-  if (name === 'upload') { if (!TemuLast) return temuAutoUpload({}); TemuLast.fromCheck = true; return temuAutoUpload({ skipCheck: true }); }
-  if (name === 'fix') {
-    temuStep('fix', 'run', 'Drafts fix…');
-    await temuFixDrafts();
-    await temuFillAttributes();
-    temuStep('fix', 'ok', 'Live');
-    return;
-  }
-}
-
-let TemuUploading = false;
-let TemuUploadCancelled = false;
-
-async function temuAutoUpload(opts = {}) {
+async function temuAutoUpload() {
   const rep = $('temuReport');
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
-  
-  TemuUploading = true;
-  TemuUploadCancelled = false;
-  temuStopShow(true);
-
+  // Build fresh if nothing exported yet in this session
+  if (!TemuLast) { await temuRunExport({ forUpload: true }); }
+  if (!TemuLast) return;
+  { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
+  const bg = temuGetCfg().upload_in_background !== false;
+  say((rep?.textContent || '') + (bg ? '\n\nTemu tab khul raha hai — processing poori hote hi focus wapas aap ke tab par aa jayega…' : '\n\nTemu page khul raha hai…'));
   try {
-    // v9.8.0: upload se pehle check panel (flags + price/category edit) — jab tak user "Upload" na dabaye, kuch nahi jata
-    let drItems = null;
-    if (!opts.skipCheck && !TemuLast?.fromCheck && ($('tgPrecheck')?.checked !== false)) {
-      const dr = await temuRunExport({ dryRun: true, forUpload: true });
-      if (dr && dr.items) {
-        drItems = dr.items;
-        if (!dr.items.length) { say('Koi naya product nahi:\n' + (dr.skipped.length ? dr.skipped.map(x => '• ' + x).join('\n') : '(list khali hai)') + '\n\nAgar dobara list karna hai to "Skip already listed" off karein.'); toast('Koi product nahi — sab skipped', 'warn'); return; }
-        const anyFlag = dr.items.some(it => temuCheckFlags(it, dr.cfg).some(f => f.k === 'bad' || f.k === 'warn'));
-        if (!anyFlag) { say(`✓ Check: ${dr.items.length} products saaf (koi flag nahi) — seedha upload…`); toast(`${dr.items.length} products saaf — upload ho raha hai`, 'ok'); }
-        else { temuCheckRender(dr.items, dr.skipped, dr.cfg, dr.rows); return; }
-      }
-      if (!dr && !TemuLast?.asIs) return; // template/store error ya bulk khali — message already shown; asIs (sheet) mode mein null expected hai
-    }
-    if (TemuUploadCancelled) { say('\n🛑 Upload cancelled by user.'); temuStep('upload', 'bad', 'Cancelled'); return; }
-    if (TemuLast?.fromCheck) TemuLast.fromCheck = false;
-    temuStepsReset(true);
-    const totalCount = (opts.items || drItems || TemuLast?.items || []).length || (BulkState?.results || []).length || 1;
-    temuStep('prep', 'ok', `${totalCount} products`);
-    temuStep('export', 'run', 'Building .xlsx…');
-    // v9.10.0: store auto-detect
-    try { const det = await temuDetectStore({ apply: true }); if (det?.switched) say(`✓ Store auto: Temu tab par "${det.mall}" khula hai — active store switch kar diya`); else if (det?.unknown) { say(`✗ Temu tab par store "${det.mall}" khula hai jo extension mein add nahi — pehle "+ Add" se add karein`); temuStep('export', 'bad', 'store?'); return; } } catch (_) {}
-    // Build fresh if nothing exported yet in this session
-    if (!TemuLast) { await temuRunExport({ forUpload: true, dropAbsurd: true }); }
-    if (TemuUploadCancelled) { say('\n🛑 Upload cancelled by user.'); temuStep('upload', 'bad', 'Cancelled'); return; }
-    if (!TemuLast) { temuStep('export', 'bad', 'fail'); return; }
-    temuStep('export', 'ok', `${TemuLast.n || TemuLast.items?.length || 0} ready`);
-    temuStep('upload', 'run', 'Temu tab…');
-    { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
-    const bg = temuGetCfg().upload_in_background !== false;
-    say((rep?.textContent || '') + (bg ? '\n\nTemu tab khul raha hai — processing poori hote hi focus wapas aap ke tab par aa jayega…' : '\n\nTemu page khul raha hai…'));
-
     const u8 = new Uint8Array(TemuLast.bytes);
     let bin = '';
     for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
     const b64 = btoa(bin);
+    // v9.1.0: poora kaam background service worker karta hai (TEMU_AUTO_UPLOAD) — side panel
+    // sirf result dikhata hai. Tab inactive khulta hai; zaroorat par 1-2 sec ke liye saamne aata hai.
+    // v9.4.3 — live progress line (⏳ …) from the Temu tab while the background worker waits
     const base = rep?.textContent || '';
     const fmtProg = (p) => {
       const t = p.secs != null ? ` · ${p.secs}s` : '';
@@ -10055,46 +9086,23 @@ async function temuAutoUpload(opts = {}) {
       if (p.phase === 'finishing')  return `⏳ Processing khatam — result parh raha hoon${id}${t}…`;
       return `⏳ ${p.phase}${t}…`;
     };
-    const onProg = (m) => {
-      if (m?.action === 'TEMU_UPLOAD_PROGRESS' && rep) {
-        rep.textContent = base + '\n' + fmtProg(m);
-        try {
-          const p = m;
-          if (p.phase === 'uploading') temuStep('upload', 'run', `${p.secs || 0}s`);
-          else if (p.phase === 'accepted') temuStep('upload', 'run', 'Processing…');
-          else if (p.phase === 'processing' || p.phase === 'finishing') temuStep('upload', 'run', p.pct != null ? `${p.pct}%` : 'Processing…');
-        } catch (_) {}
-      }
-    };
+    const onProg = (m) => { if (m?.action === 'TEMU_UPLOAD_PROGRESS' && rep) rep.textContent = base + '\n' + fmtProg(m); };
     try { chrome.runtime.onMessage.addListener(onProg); } catch (_) {}
     let result;
-    try {
-      if (TemuUploadCancelled) { say('\n🛑 Upload cancelled by user.'); temuStep('upload', 'bad', 'Cancelled'); return; }
-      result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: 'temu_upload.xlsx', expectStore: temuActiveStoreName(), background: bg });
-    }
+    try { result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: 'temu_upload.xlsx', expectStore: temuActiveStoreName(), background: bg }); }
     finally { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} }
-    if (TemuUploadCancelled) { say('\n🛑 Upload cancelled by user.'); temuStep('upload', 'bad', 'Cancelled'); return; }
-    if (rep) rep.textContent = base;
-    if (!result?.success) {
-      const isStoreErr = (result?.report || []).some(r => /ghalat store/i.test(r));
-      temuStep('upload', 'bad', isStoreErr ? 'Store mismatch' : 'Upload fail');
-      if (isStoreErr) toast('Store mismatch: Temu tab par aur store khula hai', 'warn');
-    }
-    if (result?.success && !result?.confirmed) {
-      temuStep('upload', 'run', 'Confirming…');
-      const late = await temuLateConfirm(result, rep);
-      if (late) { result.confirmed = true; result.report = [...(result.report || []), `✓ Late confirm — ${late.status}: ${late.processed ?? '?'} records processed, ${late.added ?? '?'} added, ${late.errors ?? '?'} errors` + (late.uploadId ? ` (ID ${late.uploadId})` : '')]; }
-    }
+    if (rep) rep.textContent = base; // drop the live ⏳ line
+    // v9.4.3 — result numbers from the report ("Completed: 28 records processed, 28 added, 0 errors")
     const rl = (result?.report || []).join('\n');
     const rm = rl.match(/(\d+) records processed, (\d+) added, (\d+) errors/);
-    try { const im = rl.match(/ID (\d{13,20})/); if (im && TemuLast) TemuLast.uploadId = im[1]; } catch (_) {}
     const summary = result?.success
       ? (result?.confirmed
           ? (rm ? `→ Upload ho gaya: ${rm[2]} products add huay${+rm[3] > 0 ? `, ${rm[3]} mein error (Temu tab → "View processing results")` : ', 0 errors'}.`
                 : '→ Upload ho gaya. Temu tab peeche khula hai — Upload history mein result wahan dekhein.')
-          : '→ File attach ho gayi lekin confirm nahi hua — Temu tab check karein.')
+          : '→ File attach ho gayi lekin confirm nahi hua — Temu tab check karein; complete ho jaye to "Mark as listed" daba dein.')
       : '→ Manually upload kar lein (file Download folder mein hai).';
     say((rep?.textContent || '') + '\n' + (result?.report || []).join('\n') + '\n' + summary);
+    // v9.7.0: history record
     try {
       const idm = rl.match(/ID (\d{13,20})/);
       await temuHistAdd({ kind: 'upload', store: temuActiveStoreName() || '—', n: TemuLast.items.length, skipped: (TemuLast.skipped || []).length,
@@ -10102,2340 +9110,23 @@ async function temuAutoUpload(opts = {}) {
         added: rm ? +rm[2] : null, errors: rm ? +rm[3] : null, items: temuHistItems(TemuLast.items), skippedList: (TemuLast.skipped || []).slice(0, 300) });
     } catch (_) {}
     if (result?.success && result?.confirmed) {
-      temuStep('upload', 'ok', rm ? `${rm[2]} added` : 'Confirmed');
       if (!TemuLast.marked) { await temuMarkListed(TemuLast.items); TemuLast.marked = true; }
-      say((rep?.textContent || '') + `\n✓ ${TemuLast.items.length} products listed-history mein save`);
+      say((rep?.textContent || '') + `\n✓ ${TemuLast.items.length} products listed-history mein save (agli baar skip honge)`);
       temuUpdateSrcInfo();
-      // One-click pipeline: Fix drafts + missing attributes
-      const hasErrors = rm ? +rm[3] > 0 : false;
-      const isClean = rm ? +rm[3] === 0 : false;
-      if (isClean) {
-        say((rep?.textContent || '') + '\n✓ Sab products kamyabi se upload ho gaye (0 errors) — drafts fill karne ki zaroorat nahi!');
-        temuStep('fix', 'ok', 'Clean (0 errors)');
-      } else if (($('tgAutoFix')?.checked ?? (temuGetCfg().auto_fix_after_upload !== false)) && hasErrors) {
+      // v9.6.0: errors hon to Temu ka "View failed details" khud parh kar wajah dikhao
+      if (rm && +rm[3] > 0) {
         const idm = rl.match(/ID (\d{13,20})/);
-        const upId = idm ? idm[1] : (result.uploadId || TemuLast?.uploadId || null);
-        say((rep?.textContent || '') + `\n⏳ ${rm[3]} products mein error/drafts hain — Temu processing results check kar raha hoon…`);
-        temuStep('fix', 'run', 'Checking drafts…');
-
-        // Step 1: Read the actual failure reasons from Temu Processing results first
-        const failedRes = await temuReadFailed({ tabId: result.tabId ?? null, uploadId: upId, silent: true });
-        const failedList = failedRes?.failed || [];
-
-        const dupOnly = failedList.length > 0 && failedList.every(f => f.duplicate);
-        const hasMissingAttrs = failedList.some(f => f.missingAttributes || (!f.duplicate && !f.priceIssue));
-
-        if (dupOnly) {
-          // All drafts are duplicate SKUs (already listed on store)!
-          // They DO NOT have missing attributes, so opening product-action.html would show 0 products and fail.
-          say((rep?.textContent || '') + `\n✓ Tamam error products pehle se store par list hain (Duplicate SKU) — inhen listed-history mein save kar diya.`);
-          temuStep('fix', 'ok', 'Duplicates Skipped');
-          toast(`${failedList.length} duplicate product(s) — store par pehle se listed`, 'ok');
-        } else {
-          // There are genuine missing attributes or uninspected errors — run Fix Drafts
-          say((rep?.textContent || '') + `\n⏳ Products ke missing attributes complete karne ja raha hoon…`);
-          const fx = await temuOpenCompleteAndFix({ tabId: result.tabId ?? null, uploadId: upId });
-          let attrOk = true;
-          if (hasMissingAttrs || !failedList.length) {
-            attrOk = await temuFillAttributes();
-          }
-          const allDone = !!(fx && attrOk);
-          temuStep('fix', allDone ? 'ok' : 'warn', allDone ? 'Live' : 'Action Needed');
-        }
-      } else {
-        temuStep('fix', 'skip', 'Ready');
+        say((rep?.textContent || '') + '\n⏳ Failed details parh raha hoon…');
+        await temuReadFailed({ tabId: result.tabId ?? null, uploadId: idm ? idm[1] : null, silent: true });
       }
-      bulkNextRender('uploaded'); hdrStoreRender();
     } else {
-      say((rep?.textContent || '') + '\n(Upload unconfirmed — products listed mark nahi kiye)');
-      if (result?.success) temuStep('upload', 'bad', 'Unconfirmed');
-      const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Listed mark karo (${TemuLast.items.length})`; }
+      say((rep?.textContent || '') + '\n(Products listed mark NAHI kiye — upload confirm nahi hua; agli export mein dobara aa jayenge)');
+      const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${TemuLast.items.length} as listed`; }
     }
-    toast(result?.success ? 'File Temu par upload ho gayi' : 'Auto-upload fail', result?.success ? 'ok' : 'warn');
+    toast(result?.success ? 'File Temu par upload ho gayi' : 'Auto-upload fail — file download ho chuki hai', result?.success ? 'ok' : 'warn');
   } catch (e) {
     say((rep?.textContent || '') + '\n✗ ' + (e?.message || e));
-    temuStep('upload', 'bad', 'Error');
-  } finally {
-    TemuUploading = false;
-    temuStopShow(false);
   }
-}
-
-// ── v9.8.0 Pre-upload check: har product ke flags, price/category edit, unselect → phir upload ──
-let TemuCheck = null; // { items, skipped, cfg }
-// v9.11.0 — profile name → Temu top-level category group (brand approval ke liye)
-const TEMU_PROFILE_GROUPS = {
-  golf_balls: 'sports', towels: 'kitchen', hangers: 'kitchen', bowls: 'kitchen', cups: 'kitchen', cutlery: 'kitchen',
-  swim_diapers: 'baby', diapers: 'baby', baby_wipes: 'baby', baby_lotion: 'baby',
-  disinfectant_wipes: 'household', trash_bags: 'household', napkins: 'household', box_tissues: 'household', cleansing_wipes: 'beauty',
-  paper_towels: 'household', paper_plates: 'household', plastic_plates: 'household', dish_soap: 'household', rinse_aids: 'household',
-  bleach: 'household', toilet_cleaners: 'household', sponges: 'household', cleaning_cloths: 'household',
-  chips: 'grocery', crackers: 'grocery', jerky: 'grocery', fruit_snacks: 'grocery', ground_coffee: 'grocery', string_cheese: 'grocery',
-  olive_oil: 'grocery', baked_beans: 'grocery', kidney_beans: 'grocery', pinto_beans: 'grocery', black_beans: 'grocery', pasta_sauce: 'grocery',
-  canned_corn: 'grocery', green_beans: 'grocery'
-};
-function temuProfileGroup(name, prof) { return (prof && prof.group) || TEMU_PROFILE_GROUPS[name] || ''; }
-// v9.12.0 Temu top-level category name → group token
-const TEMU_CAT_GROUPS = [
-  [/sports/i, 'sports'], [/home\s*&\s*kitchen/i, 'kitchen'], [/grocery/i, 'grocery'], [/health\s*&\s*household|household/i, 'household'],
-  [/pet/i, 'pets'], [/baby/i, 'baby'], [/beauty|personal care/i, 'beauty'], [/toys/i, 'toys'], [/electronics/i, 'electronics'],
-  [/tools|home improvement/i, 'tools'], [/automotive/i, 'automotive'], [/office/i, 'office'], [/clothing|apparel|shoes/i, 'clothing'],
-  [/patio|lawn|garden/i, 'garden'], [/arts|crafts|sewing/i, 'crafts'], [/industrial|scientific/i, 'industrial'], [/musical/i, 'music'], [/appliances/i, 'appliances'], [/cell phones/i, 'phones'], [/video games/i, 'games'], [/books|movies|music/i, 'media']
-];
-function temuCatGroup(name) { for (const [re, g] of TEMU_CAT_GROUPS) if (re.test(name)) return g; return String(name || '').toLowerCase().replace(/\(.*$/, '').replace(/[^a-z]+/g, ' ').trim().split(' ')[0] || 'other'; }
-// rule → units for a group (per-group `cats` pehle, phir purana single `units`)
-function temuRuleUnits(rule, group) { if (!rule) return null; if (rule.cats && group && rule.cats[group] != null) return rule.cats[group]; return rule.units ?? null; }
-// brand rule lookup (case-insensitive) → { groups, units } | null
-function temuBrandRule(cfg, brand) {
-  if (!brand) return null;
-  const rules = cfg.brand_rules || {}; const b = String(brand).toLowerCase();
-  for (const [k, v] of Object.entries(rules)) if (k.toLowerCase() === b) return v || null;
-  return null;
-}
-// "BRAND: group1, group2 | units N" lines ⇄ object
-// "BRAND: kitchen(59), grocery(58)" — group ke baad (units) optional; purana "| units N" bhi chalta hai
-function temuBrandRulesToText(rules) {
-  return Object.entries(rules || {}).map(([b, r]) => {
-    const parts = (r.groups || []).map(g => { const u = temuRuleUnits(r, g); return u != null && r.cats ? `${g}(${u})` : g; });
-    return `${b}: ${parts.join(', ')}${(!r.cats && r.units != null) ? ` | units ${r.units}` : ''}`;
-  }).join('\n');
-}
-function temuBrandRulesFromText(txt) {
-  const out = {};
-  String(txt || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
-    const m = l.match(/^([^:]+):\s*([^|]*)(?:\|\s*units?\s*(\d+))?\s*$/i); if (!m) return;
-    const b = m[1].trim().toUpperCase(); if (!b) return;
-    const groups = [], cats = {}; let anyCats = false;
-    m[2].split(',').map(x => x.trim()).filter(Boolean).forEach(tok => { const gm = tok.match(/^([a-z][a-z_ -]*?)\s*(?:\((\d+)\))?$/i); if (!gm) return; const g = gm[1].trim().toLowerCase(); groups.push(g); if (gm[2] != null) { cats[g] = +gm[2]; anyCats = true; } });
-    out[b] = { groups, units: m[3] != null ? +m[3] : null, ...(anyCats ? { cats } : {}) };
-  });
-  return out;
-}
-function temuCheckFlags(it, cfg) {
-  const f = [];
-  // v9.11.0 brand approval guard
-  { const rule = temuBrandRule(cfg, it.brand);
-    if (it.brand && rule) {
-      // v9.12.2: units ka flag hata diya — units orders se kam hote hain, snapshot purana ho sakta hai; user Temu par khud dekhe. Sirf category approval check.
-      if (it.group && rule.groups?.length && !rule.groups.includes(it.group)) f.push({ k: 'bad', t: `${it.brand} ✗ ${it.group}`, tip: `Is store par ${it.brand} sirf ${rule.groups.join(', ')} ke liye approved hai — ${it.group} product violation se removed hoga` });
-      else if (!it.group && rule.groups?.length) f.push({ k: 'warn', t: `${it.brand}: category?`, tip: `Brand approval sirf ${rule.groups.join(', ')} — is product ki category pata nahi, khud check karein` });
-    } else if (it.brand) f.push({ k: 'warn', t: `${it.brand}: approval?`, tip: 'Ye brand Settings → Brand approvals list mein nahi — Temu par trademark approval hai? Warna removed hoga' });
-  }
-  const w = it.warn || [];
-  if (w.includes('NO_IMAGES') || !(it.images || []).length) f.push({ k: 'bad', t: 'no images', tip: 'Koi image nahi — Temu reject karega' });
-  else if ((it.images || []).length < 3) f.push({ k: 'warn', t: `${it.images.length} imgs`, tip: '3 se kam images — Temu min 3 recommend karta hai' });
-
-  if (w.includes('NO_PRICE') || it.base == null || it.base <= 0) {
-    f.push({ k: 'bad', t: 'no price', tip: 'Selling price nahi mili ya zero hai' });
-  } else if (it.base > (parseFloat(cfg.price_max) || 999)) {
-    f.push({ k: 'warn', t: `$${it.base}`, tip: `High price: $${it.base}` });
-  } else {
-    const lo = Math.max(cfg.price_alert_low || 3, parseFloat(cfg.price_min) || 0);
-    if (it.base < lo) f.push({ k: 'warn', t: `$${it.base} low`, tip: 'Price minimum se kam hai' });
-  }
-  if (w.includes('DUPLICATE_SOURCE')) {
-    f.push({ k: 'info', t: 'dupe link', tip: 'Same source link se aik aur product maujood hai (unique variation SKU assigned)' });
-  }
-
-  // Weight check (Temu requires valid shipping weight)
-  const wt = parseFloat(it.weight);
-  const maxWt = parseFloat(cfg?.max_weight_lb) || 0;
-  if (!wt || wt <= 0) f.push({ k: 'bad', t: 'no weight', tip: 'Weight missing hai — Temu file reject kar dega' });
-  else if (w.includes('OVERWEIGHT') || (maxWt > 0 && wt > maxWt)) f.push({ k: 'warn', t: `⚖️ ${wt} lb (heavy)`, tip: `Configured limit (${maxWt} lb) se zyada hai — edit weight or proceed` });
-  else if (w.includes('DEFAULT_WEIGHT') || it.wsrc === 'default') f.push({ k: 'info', t: `${it.weight} lb default`, tip: 'Weight default lag raha hai' });
-
-  // Title check (Temu title max limit)
-  const tlen = (it.title || '').trim().length;
-  if (!tlen) f.push({ k: 'bad', t: 'no title', tip: 'Title missing hai' });
-  else if (tlen > 140) f.push({ k: 'bad', t: `${tlen} chars`, tip: 'Title 140 chars se bara hai — Temu reject karega' });
-  else if (tlen > 120) f.push({ k: 'warn', t: `${tlen} chars`, tip: 'Title 120 chars se bara hai — Temu standard 120 chars hai' });
-
-  // Banned words & IP risk check in title
-  const removeWords = (cfg.title_remove_words || []).filter(Boolean);
-  const tLower = ' ' + (it.title || '').toLowerCase() + ' ';
-  const matchedBanned = removeWords.find(w => {
-    const escW = w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp('(^|[\\s,.;:!|/\\-])' + escW + '(?=[\\s,.;:!|/\\-]|$)', 'i').test(tLower);
-  });
-  if (matchedBanned) {
-    f.push({ k: 'ip', t: `🛡️ ${matchedBanned}`, tip: `Title mein banned/IP lafz "${matchedBanned}" mila — "Clean Titles" se remove karein` });
-  }
-
-  if (w.includes('NO_CATEGORY_PROFILE') || !it.category_keyword) f.push({ k: 'warn', t: 'no category', tip: 'Category profile match nahi — Temu khud category lagayega' });
-  if (w.includes('NO_BRAND_MATCH')) f.push({ k: 'info', t: 'no brand', tip: 'Brand blank jayega' });
-
-  // pehle se listed?
-  const sid = it.sid || temuSourceId(it.url), me = temuActiveStoreName() || 'default';
-  const rec = it.listedRecord || temuListedMap()[me + '|' + sid];
-  if (it.isAlreadyListed || rec) {
-    const dStr = rec?.d ? ` (${rec.d})` : '';
-    if (it._relist || it._aiOptimized) {
-      f.push({ k: 'ok', t: '✨ Ready to Re-list', tip: `AI Rewritten title & naya SKU tayyar hai${dStr}.` });
-    } else {
-      f.push({ k: 'warn', t: 'Already Listed', tip: `Is store par pehle list ho chuka hai${dStr}. AI Title rewrite karke naye SKU ke sath re-list karein.` });
-    }
-  } else {
-    // doosre store mein pehle se listed?
-    const others = Object.keys(temuListedMap()).filter(k => k.endsWith('|' + sid) && k.split('|')[0] !== me).map(k => k.split('|')[0]);
-    if (others.length) f.push({ k: 'info', t: 'listed: ' + others.slice(0, 2).join(', '), tip: 'Doosre store mein pehle se listed hai' });
-  }
-  return f;
-}
-
-function renderTckImgSlots(it, itemIdx) {
-  let imgs = Array.isArray(it.images) && it.images.length > 0 ? it.images : (it.image ? [it.image] : []);
-  if (!imgs.length) imgs = [''];
-  return imgs.map((imgUrl, sIdx) => {
-    const isMain = sIdx === 0;
-    const badgeTxt = isMain ? '⭐ Slot 1 (Main Hero)' : `Slot ${sIdx + 1}`;
-    return `<div class="tck-img-slot" data-i="${itemIdx}" data-slot="${sIdx}">
-      <div class="tck-slot-badge ${isMain ? 'main' : ''}">
-        <span>${badgeTxt}</span>
-        ${!isMain ? `<button type="button" class="temu-link-btn tck-slot-act-main" data-i="${itemIdx}" data-slot="${sIdx}" title="Make this the Main Image">⭐ Make Main</button>` : ''}
-      </div>
-      <div class="tck-slot-thumb-wrap">
-        <img class="tck-slot-thumb" src="${esc(imgUrl || '')}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>🖼️</text></svg>'">
-      </div>
-      <div class="tck-slot-acts">
-        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn tck-flow-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Open Flow AI and link this slot">🎨 Edit in Flow</button>
-        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn tck-paste-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Paste image URL from clipboard">📋 Paste</button>
-        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn btn-danger tck-del-img-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Delete image">✕</button>
-      </div>
-    </div>`;
-  }).join('') + `<div class="tck-img-add-card" data-i="${itemIdx}"><span>➕</span><b>Add Image</b></div>`;
-}
-
-async function handleFlowImageCaptured(url) {
-  if (!url) return;
-  let target = null;
-  try {
-    const res = await chrome.storage.local.get('flowActiveTarget');
-    target = res?.flowActiveTarget;
-  } catch (_) {}
-  if (!target || target.itemIdx == null || target.slotIdx == null) {
-    toast('Image captured from Flow, but no active product slot selected in ZHunter', 'warn');
-    return;
-  }
-  const i = target.itemIdx, slot = target.slotIdx;
-  if (!TemuCheck?.items || !TemuCheck.items[i]) {
-    toast('Active product not found in current review session', 'warn');
-    return;
-  }
-  const it = TemuCheck.items[i];
-  it.images = Array.isArray(it.images) && it.images.length > 0 ? it.images : [it.image || ''];
-  it.images[slot] = url;
-  if (slot === 0) it.image = url;
-  const list = $('temuCheckList');
-  if (list) {
-    const slotsEl = list.querySelector(`.tck-img-slots[data-i="${i}"]`);
-    if (slotsEl) slotsEl.innerHTML = renderTckImgSlots(it, i);
-    const row = list.querySelector(`.tck-row[data-i="${i}"]`);
-    if (row) {
-      const imgBtn = row.querySelector('.tck-img-btn');
-      if (imgBtn) imgBtn.textContent = `🖼️ ${(it.images || []).length || 1} imgs ▾`;
-      const mainThumb = row.querySelector('.tck-thumb');
-      const firstImg = it.images?.[0] || it.image;
-      if (mainThumb && firstImg) mainThumb.src = firstImg;
-    }
-  }
-  saveTemuCheckSession();
-  toast(`✓ Slot ${slot + 1} updated with Flow AI image!`, 'ok');
-}
-
-function temuCheckRender(items, skipped, cfg, rows) {
-  TemuCheck = { items, skipped, cfg, showAll: true, rows: rows || TemuCheck?.rows || null, view: { filter: 'all', q: '', hideClean: null, minimized: false } };
-  const card = $('temuCheckCard'), list = $('temuCheckList'); if (!card || !list) return;
-  const acts = document.querySelector('.temu-actions'); if (acts) acts.style.display = 'none';
-  temuReviewMode(true);
-  const skipBox = $('temuSkippedBox');
-  if (skipBox) {
-    if (skipped && skipped.length > 0) {
-      skipBox.hidden = false;
-      skipBox.innerHTML = `<div class="tck-skipped-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-weight:600;font-size:11px;color:var(--tck-ink-2,#aab4c0);">${skipped.length} skipped before review</span><button type="button" class="btn btn-ghost btn-xs" id="tckToggleSkippedBtn" style="font-size:10px;padding:2px 6px;">Show Details ▼</button></div><div class="tck-skipped-list" id="tckSkippedDetails" style="display:none;max-height:120px;overflow-y:auto;font-size:11px;color:#94a3b8;border-top:1px solid rgba(255,255,255,0.06);padding-top:6px;">${skipped.map(s => `<div style="margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">• ${esc(typeof s === 'object' ? s.text || s.reason || JSON.stringify(s) : String(s))}</div>`).join('')}</div>`;
-      const btn = $('tckToggleSkippedBtn');
-      if (btn) {
-        btn.addEventListener('click', () => {
-          const det = $('tckSkippedDetails');
-          if (det) {
-            const isHidden = det.style.display === 'none';
-            det.style.display = isHidden ? 'block' : 'none';
-            btn.textContent = isHidden ? 'Hide Details ▲' : 'Show Details ▼';
-          }
-        });
-      }
-    } else {
-      skipBox.hidden = true;
-      skipBox.innerHTML = '';
-    }
-  }
-  const cats = Object.values(cfg.category_profiles || {}).map(p => p.category_keyword).filter(Boolean);
-  const catSet = [...new Set(cats)];
-  list.innerHTML = items.map((it, i) => {
-    const flags = temuCheckFlags(it, cfg);
-    const bad = flags.some(f => f.k === 'bad');
-    const opts = ['<option value="">— category —</option>'].concat(catSet.map(c => `<option value="${esc(c)}"${c === it.category_keyword ? ' selected' : ''}>${esc(c)}</option>`));
-    if (it.category_keyword && !catSet.includes(it.category_keyword)) opts.push(`<option value="${esc(it.category_keyword)}" selected>${esc(it.category_keyword)}</option>`);
-    const clean = !flags.some(f => f.k === 'bad' || f.k === 'warn');
-    const thumb = it.images?.[0] || it.image || '';
-    const titleLen = (it.title || '').length;
-    const lenCls = titleLen > 140 ? 'bad' : titleLen > 120 ? 'warn' : '';
-    const isH = it.warn?.includes('OVERWEIGHT') || (parseFloat(cfg?.max_weight_lb) > 0 && parseFloat(it.weight) > parseFloat(cfg.max_weight_lb));
-    const collapsed = it._uiCollapsed != null ? it._uiCollapsed : clean; // v11.1.0: clean products auto-collapse by default, click row to expand
-    return `<div class="tck-row${bad ? ' tck-bad' : ''}${clean ? ' tck-clean' : ''}${collapsed ? ' tck-collapsed' : ''}" data-i="${i}" data-bad="${bad}" data-warn="${flags.some(f => f.k === 'warn')}" data-clean="${clean}" data-heavy="${isH}" data-ai="${!!it._aiOptimized}">
-      <label class="tck-chk"><input type="checkbox" class="tck-on" data-i="${i}" ${bad ? '' : 'checked'}></label>
-      <img class="tck-thumb" src="${esc(thumb)}" alt="" loading="lazy" decoding="async" onerror="this.style.opacity='0.2';this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>📦</text></svg>'">
-      <div class="tck-main">
-        <div class="tck-title-row">
-          <input class="inp tck-title-inp" data-i="${i}" value="${esc(it.title || '')}" title="Click to edit title">
-          <span class="tck-chars ${lenCls}" title="Title length (Temu standard ≤ 120)">${titleLen}/120</span>
-          <button type="button" class="btn btn-ghost btn-xs tck-ai-row-btn" data-i="${i}" title="AI se ye title optimize karein">AI</button>
-          <span class="tck-mini tck-mini-price">$${esc(String(it.base ?? ''))}</span>
-          <span class="tck-mini tck-mini-cat">${esc(it.category_keyword || '\u2014')}</span>
-          <button type="button" class="tck-row-toggle" data-i="${i}" title="${collapsed ? 'Expand' : 'Collapse'} product details" aria-label="Toggle product details"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-        </div>
-        <div class="tck-details">
-        <div class="tck-meta">
-          ${flags.filter(f => f.k !== 'info').map(f => `<span class="tck-flag tck-${f.k}" title="${esc(f.tip)}">${esc(f.t)}</span>`).join('')}
-          <span class="tck-sku">${esc(it.sku || '')}</span>
-          <span class="tck-badge tck-cost" title="Original Cost">Cost: ${(it.source_price ?? it.cost) ? (String(it.source_price ?? it.cost).trim().startsWith('$') ? esc(String(it.source_price ?? it.cost).trim()) : '$' + esc(String(it.source_price ?? it.cost).trim())) : '—'}</span>
-          <span class="tck-badge tck-badge-weight" title="Shipping weight">${it.weight || 1.4} lb</span>
-          <button type="button" class="tck-img-btn" data-i="${i}" title="View and edit product images in Flow AI">🖼️ ${(it.images || []).length || 1} imgs ▾</button>
-          <span class="tck-dim">${esc(it.color || '')}${it.brand ? ' · ' + esc(it.brand) : ''}</span>
-          ${it.attributes ? `<div class="tck-attr-badges">
-            ${it.attributes.material ? `<span class="tck-attr-chip">🧶 <b>${esc(it.attributes.material)}</b></span>` : ''}
-            ${it.attributes.size ? `<span class="tck-attr-chip">📐 <b>${esc(it.attributes.size)}</b></span>` : ''}
-            ${it.attributes.color ? `<span class="tck-attr-chip">🎨 <b>${esc(it.attributes.color)}</b></span>` : ''}
-            ${it.attributes.pack_count && it.attributes.pack_count > 1 ? `<span class="tck-attr-chip">📦 <b>${it.attributes.pack_count}-Pack</b></span>` : ''}
-          </div>` : ''}
-        </div>
-        <div class="tck-edit">
-          <span class="tck-lbl" title="Temu Selling Price">$</span>
-          <input class="inp tck-price" data-i="${i}" value="${it.base ?? ''}" inputmode="decimal" title="Temu Selling Base Price">
-          <span class="tck-lbl" title="Shipping weight (lb)">⚖</span>
-          <input class="inp tck-weight" data-i="${i}" type="number" step="0.1" min="0.1" value="${it.weight ?? 1.4}" title="Item Shipping Weight in lb (Click to edit)">
-          <span class="tck-wt-unit">lb</span>
-          <select class="sel tck-cat" data-i="${i}" title="Temu category keyword">${opts.join('')}</select>
-          <span class="tck-lbl" title="Pack size">📦</span>
-          <select class="sel tck-pack-sel" data-i="${i}" title="Product pack size">
-            <option value="1"${(!it.attributes?.pack_count || it.attributes.pack_count <= 1) ? ' selected' : ''}>1-Pack</option>
-            <option value="2"${it.attributes?.pack_count == 2 ? ' selected' : ''}>2-Pack</option>
-            <option value="3"${it.attributes?.pack_count == 3 ? ' selected' : ''}>3-Pack</option>
-            <option value="4"${it.attributes?.pack_count == 4 ? ' selected' : ''}>4-Pack</option>
-            <option value="5"${it.attributes?.pack_count == 5 ? ' selected' : ''}>5-Pack</option>
-            <option value="6"${it.attributes?.pack_count == 6 ? ' selected' : ''}>6-Pack</option>
-          </select>
-        </div>
-        <div class="tck-img-drawer" id="tckImgDrawer_${i}" hidden>
-          <div class="tck-img-drawer-head">
-            <div class="tck-img-drawer-title">
-              <span>🖼️ Product Images (Flow AI &amp; URLs)</span>
-            </div>
-            <button type="button" class="btn btn-ghost btn-xs tck-add-img-btn" data-i="${i}">+ Add Image URL</button>
-          </div>
-          <div class="tck-img-slots" data-i="${i}">
-            ${renderTckImgSlots(it, i)}
-          </div>
-        </div>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-
-  list.querySelectorAll('.tck-title-inp').forEach(inp => {
-    inp.addEventListener('input', () => {
-      const i = +inp.dataset.i;
-      if (items[i]) items[i].title = inp.value.trim();
-      const cnt = inp.parentElement?.querySelector('.tck-chars');
-      if (cnt) {
-        const len = inp.value.length;
-        cnt.textContent = `${len}/120`;
-        cnt.className = `tck-chars ${len > 140 ? 'bad' : len > 120 ? 'warn' : ''}`;
-      }
-      temuCheckSummary();
-      saveTemuCheckSession();
-    });
-  });
-
-  list.querySelectorAll('.tck-price').forEach(inp => {
-    inp.addEventListener('change', () => {
-      const i = +inp.dataset.i;
-      const px = parseFloat(inp.value);
-      if (items[i] && isFinite(px) && px > 0) {
-        items[i].base = Math.round(px * 100) / 100;
-        let l = items[i].base * (cfg.list_price_multiplier || 1.25);
-        if (cfg.price_round_to_99) l = Math.floor(l) + 0.99;
-        items[i].list = Math.round(l * 100) / 100;
-      }
-      temuCheckSummary();
-      saveTemuCheckSession();
-    });
-  });
-
-  list.querySelectorAll('.tck-weight').forEach(inp => {
-    inp.addEventListener('change', () => {
-      const i = +inp.dataset.i;
-      const wt = parseFloat(inp.value);
-      if (items[i] && isFinite(wt) && wt > 0) {
-        items[i].weight = Math.round(wt * 10) / 10;
-        const maxWt = parseFloat(cfg?.max_weight_lb) || 0;
-        if (maxWt > 0 && items[i].weight > maxWt) {
-          if (!items[i].warn.includes('OVERWEIGHT')) items[i].warn.push('OVERWEIGHT');
-        } else {
-          items[i].warn = (items[i].warn || []).filter(w => w !== 'OVERWEIGHT');
-        }
-        const row = inp.closest('.tck-row');
-        if (row) {
-          const wb = row.querySelector('.tck-badge-weight');
-          if (wb) wb.textContent = `⚖️ ${items[i].weight} lb`;
-        }
-      }
-      temuCheckSummary();
-      saveTemuCheckSession();
-    });
-  });
-
-  list.querySelectorAll('.tck-cat').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const i = +sel.dataset.i;
-      if (items[i]) items[i].category_keyword = sel.value;
-      saveTemuCheckSession();
-    });
-  });
-
-  list.querySelectorAll('.tck-on').forEach(chk => {
-    chk.addEventListener('change', () => {
-      saveTemuCheckSession();
-    });
-  });
-
-  // Image drawer toggle
-  list.querySelectorAll('.tck-img-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const i = +btn.dataset.i;
-      const drawer = $(`tckImgDrawer_${i}`);
-      if (!drawer) return;
-      const isHidden = drawer.hidden;
-      drawer.hidden = !isHidden;
-      btn.classList.toggle('active', !isHidden);
-      const row = btn.closest('.tck-row');
-      if (row && row.classList.contains('tck-collapsed') && !isHidden) {
-        row.classList.remove('tck-collapsed');
-      }
-    });
-  });
-
-  // Pack selector change
-  list.querySelectorAll('.tck-pack-sel').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const i = +sel.dataset.i;
-      if (!items[i]) return;
-      const pack = parseInt(sel.value, 10) || 1;
-      items[i].attributes = items[i].attributes || {};
-      items[i].attributes.pack_count = pack;
-      let t = items[i].title || '';
-      if (pack > 1) {
-        if (!/(pack of|\b\d+-pack\b)/i.test(t)) {
-          items[i].title = `${t.trim()} (${pack}-Pack)`;
-        } else {
-          items[i].title = t.replace(/(pack of\s*\d+|\b\d+-pack\b|\(\d+-pack\))/gi, `(${pack}-Pack)`);
-        }
-      } else {
-        items[i].title = t.replace(/\s*\([1-9]\d*-Pack\)/gi, '').replace(/\s*\b[1-9]\d*-Pack\b/gi, '').trim();
-      }
-      const titleInp = sel.closest('.tck-row')?.querySelector('.tck-title-inp');
-      if (titleInp) titleInp.value = items[i].title;
-      saveTemuCheckSession();
-      toast(`✓ Updated to ${pack}-Pack`, 'ok');
-    });
-  });
-
-  // Image slots interaction handler (delegated on list)
-  const refreshRowDrawer = (itemIdx) => {
-    const slotsEl = list.querySelector(`.tck-img-slots[data-i="${itemIdx}"]`);
-    if (slotsEl && items[itemIdx]) {
-      slotsEl.innerHTML = renderTckImgSlots(items[itemIdx], itemIdx);
-    }
-    const row = list.querySelector(`.tck-row[data-i="${itemIdx}"]`);
-    if (row && items[itemIdx]) {
-      const imgBtn = row.querySelector('.tck-img-btn');
-      if (imgBtn) imgBtn.textContent = `🖼️ ${(items[itemIdx].images || []).length || 1} imgs ▾`;
-      const mainThumb = row.querySelector('.tck-thumb');
-      const firstImg = items[itemIdx].images?.[0] || items[itemIdx].image;
-      if (mainThumb && firstImg) mainThumb.src = firstImg;
-    }
-  };
-
-  list.addEventListener('click', async (e) => {
-    const flowBtn = e.target.closest('.tck-flow-btn');
-    if (flowBtn) {
-      e.stopPropagation();
-      const i = +flowBtn.dataset.i, slot = +flowBtn.dataset.slot;
-      const it = items[i]; if (!it) return;
-      list.querySelectorAll('.tck-img-slot').forEach(s => s.classList.remove('active-flow'));
-      flowBtn.closest('.tck-img-slot')?.classList.add('active-flow');
-      await chrome.storage.local.set({
-        flowActiveTarget: { itemIdx: i, slotIdx: slot, sku: it.sku || '', time: Date.now() }
-      });
-      const curImg = (it.images || [])[slot] || it.image || '';
-      if (curImg) {
-        try { await navigator.clipboard.writeText(curImg); } catch (_) {}
-      }
-      chrome.tabs.create({ url: 'https://flow.google.com/project/a1e6e7b6-b581-4e66-8f69-bee201d83517' });
-      toast('🎨 Flow AI tab khola gaya! Image URL clipboard par copy ho chuka hai. Edit ke baad right-click karein ya Paste dabayein.', 'ok');
-      return;
-    }
-
-    const pasteBtn = e.target.closest('.tck-paste-btn');
-    if (pasteBtn) {
-      e.stopPropagation();
-      const i = +pasteBtn.dataset.i, slot = +pasteBtn.dataset.slot;
-      const it = items[i]; if (!it) return;
-      let clip = '';
-      try { clip = await navigator.clipboard.readText(); } catch(_) {}
-      if (!clip || !clip.startsWith('http')) {
-        clip = prompt('Paste new image URL:', (it.images || [])[slot] || it.image || '');
-      }
-      if (clip && clip.trim().startsWith('http')) {
-        it.images = Array.isArray(it.images) && it.images.length > 0 ? it.images : [it.image || ''];
-        it.images[slot] = clip.trim();
-        if (slot === 0) it.image = clip.trim();
-        refreshRowDrawer(i);
-        saveTemuCheckSession();
-        toast('✓ Image slot updated!', 'ok');
-      }
-      return;
-    }
-
-    const mainBtn = e.target.closest('.tck-slot-act-main');
-    if (mainBtn) {
-      e.stopPropagation();
-      const i = +mainBtn.dataset.i, slot = +mainBtn.dataset.slot;
-      const it = items[i]; if (!it || !it.images || !it.images[slot]) return;
-      const picked = it.images.splice(slot, 1)[0];
-      it.images.unshift(picked);
-      it.image = it.images[0];
-      refreshRowDrawer(i);
-      saveTemuCheckSession();
-      toast('✓ Moved to Slot 1 (Main Hero Image)!', 'ok');
-      return;
-    }
-
-    const delBtn = e.target.closest('.tck-del-img-btn');
-    if (delBtn) {
-      e.stopPropagation();
-      const i = +delBtn.dataset.i, slot = +delBtn.dataset.slot;
-      const it = items[i]; if (!it || !it.images) return;
-      it.images.splice(slot, 1);
-      if (it.images.length === 0) it.images.push('');
-      it.image = it.images[0] || '';
-      refreshRowDrawer(i);
-      saveTemuCheckSession();
-      toast('✓ Image removed', 'ok');
-      return;
-    }
-
-    const addBtn = e.target.closest('.tck-add-img-btn') || e.target.closest('.tck-img-add-card');
-    if (addBtn) {
-      e.stopPropagation();
-      const i = +addBtn.dataset.i;
-      const it = items[i]; if (!it) return;
-      let url = prompt('Enter new Image URL:');
-      if (url && url.trim().startsWith('http')) {
-        it.images = Array.isArray(it.images) ? it.images : (it.image ? [it.image] : []);
-        it.images.push(url.trim());
-        refreshRowDrawer(i);
-        saveTemuCheckSession();
-        toast('✓ New image added!', 'ok');
-      }
-      return;
-    }
-  });
-
-  // v10.3.3: ek hi visibility engine — default: masle hon to saaf products chhupe
-  { const v = TemuCheck.view; if (v.hideClean == null) { const nClean = items.filter(it => !temuCheckFlags(it, cfg).some(f => f.k === 'bad' || f.k === 'warn')).length; v.hideClean = nClean > 0 && nClean < items.length; } const hc = $('tckHideClean'); if (hc) hc.checked = !!v.hideClean; const si = $('tckSearchInp'); if (si) si.value = ''; }
-  temuCheckSync();
-  try { chrome.storage.local.get('tckPanelOpen', r => { if (r?.tckPanelOpen && $(r.tckPanelOpen)) temuCheckPanel(r.tckPanelOpen, true); }); } catch (_) {}
-
-  // Hook up inline AI prompt bar apply button
-  const promptBtn = $('tckApplyPromptBtn');
-  if (promptBtn) {
-    promptBtn.onclick = async () => {
-      const pVal = ($('tckCustomPromptInp')?.value || '').trim();
-      if (!pVal) {
-        toast('Pehle apna AI prompt likhein (e.g. Add 2024 Edition, remove brand...)', 'warn');
-        $('tckCustomPromptInp')?.focus();
-        return;
-      }
-      promptBtn.disabled = true;
-      promptBtn.textContent = '⏳ Optimizing...';
-      try {
-        await temuAIOptimizeTitles(null, { customPrompt: pVal });
-        toast('✓ AI Prompt applied to selected products!', 'ok');
-      } catch (err) {
-        toast('AI Error: ' + (err?.message || err), 'err');
-      } finally {
-        promptBtn.disabled = false;
-        promptBtn.textContent = '⚡ Apply AI';
-      }
-    };
-  }
-
-  temuCheckSummary();
-  saveTemuCheckSession();
-  card.hidden = false;
-  card.style.display = '';
-  try { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) {}
-  const rep = $('temuReport'); if (rep) rep.textContent = `Review Table: ${items.length} products tayyar — title/price/weight edit ya flags dekh kar "Upload" dabayen.` + (skipped.length ? `\nSkipped ${skipped.length}: ${skipped.slice(0, 5).join('; ')}${skipped.length > 5 ? '…' : ''}` : '');
-
-  // Restore view mode
-  const savedView = localStorage.getItem('zh_tck_view') || 'card';
-  setTemuReviewViewMode(savedView);
-}
-
-// v10.3.3 — SINGLE source of truth: har change ke baad ye chalta hai aur sab kuch (rows, counts, chips,
-// status line, dock, Upload(N)) ek hi hisab se update karta hai. Row dikhana/chhupana sirf row.hidden se.
-function temuCheckSync() {
-  if (!TemuCheck) return;
-  const allItems = TemuCheck.items || [], cfg = TemuCheck.cfg || {};
-  const v = TemuCheck.view || (TemuCheck.view = { filter: 'all', q: '', hideClean: false, minimized: false });
-  const maxWt = parseFloat(cfg?.max_weight_lb) || 0, me = temuActiveStoreName() || 'default', lm = temuListedMap();
-  const q = (v.q || '').trim().toLowerCase();
-  let ready = 0, warn = 0, bad = 0, heavy = 0, ai = 0, listed = 0, visible = 0, hiddenClean = 0, hiddenFilter = 0, checked = 0;
-  const list = $('temuCheckList');
-  const rows = document.querySelectorAll('#temuCheckList .tck-row');
-  rows.forEach(r => {
-    const idx = +r.dataset.i, it = allItems[idx]; if (!it) { r.hidden = true; return; }
-    const flags = temuCheckFlags(it, cfg);
-    const isBad = flags.some(f => f.k === 'bad'), isWarn = !isBad && flags.some(f => f.k === 'warn'), clean = !isBad && !isWarn;
-    const isH = !!(it.warn?.includes('OVERWEIGHT') || (maxWt > 0 && parseFloat(it.weight) > maxWt));
-    const isAi = !!it._aiOptimized;
-    const isL = !!(it.isAlreadyListed || it.listedRecord || lm[me + '|' + (it.sid || temuSourceId(it.url))]);
-    if (isBad) bad++; else if (isWarn) warn++; else ready++;
-    if (isH) heavy++; if (isAi) ai++; if (isL) listed++;
-    r.dataset.bad = isBad; r.dataset.warn = isWarn; r.dataset.clean = clean; r.dataset.heavy = isH; r.dataset.ai = isAi; r.dataset.listed = isL;
-    const collapsed = it._uiCollapsed != null ? it._uiCollapsed : clean; // v11.1.0
-    r.classList.toggle('tck-bad', isBad); r.classList.toggle('tck-clean', clean); r.classList.toggle('tck-collapsed', collapsed);
-    let show = true;
-    const f = v.filter || 'all';
-    if (f === 'ready') show = clean; else if (f === 'warn') show = isWarn; else if (f === 'bad') show = isBad;
-    else if (f === 'ai') show = isAi; else if (f === 'heavy') show = isH; else if (f === 'listed') show = isL;
-    if (show && q) {
-      const hay = [r.querySelector('.tck-title-inp')?.value, it.sku, it.brand, it.color, it.source_price, it.base, it.url].map(x => String(x ?? '').toLowerCase()).join(' ');
-      show = hay.includes(q);
-    }
-    if (!show) hiddenFilter++;
-    else if (v.hideClean && clean && f === 'all' && !q) { show = false; hiddenClean++; }
-    r.hidden = !show; // v11.1.0: minimize ab per-row collapse hai, poori row hide nahi hoti
-    if (show) visible++;
-    if (r.querySelector('.tck-on')?.checked) checked++;
-  });
-  const all = allItems.length;
-  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
-  set('temuCntAll', all); set('temuCntReady', ready); set('temuCntWarn', warn); set('temuCntBad', bad); set('temuCntHeavy', heavy); set('temuCntAi', ai); set('temuCntListed', listed);
-  document.querySelectorAll('.tck-filter-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || 'all') === (v.filter || 'all')));
-  { const el = $('temuCheckSum'); if (el) { el.textContent = `${checked}/${all} · ${ready} ok · ${warn} warn · ${bad} bad` + (heavy ? ` · ${heavy} heavy` : ''); el.title = `${checked} of ${all} selected · ${ready} ready · ${warn} warnings · ${bad} blocked · ${heavy} heavy` + (TemuCheck.skipped?.length ? ` · ${TemuCheck.skipped.length} skipped before review` : ''); } }
-  // Filters badge: active filter / search / hide-clean
-  { const b = $('tckFiltersBadge'); const parts = []; if ((v.filter || 'all') !== 'all') parts.push(v.filter); if (v.hideClean && hiddenClean) parts.push('clean hidden'); if (b) { b.hidden = !parts.length; b.textContent = parts.length ? String(parts.length) : ''; b.title = parts.join(' · '); }
-    const fb = $('tckFiltersBtn'); if (fb) fb.classList.toggle('is-active', !!parts.length || !!q); }
-  // Search count
-  { const sc = $('tckSearchCount'); if (sc) { sc.hidden = !q; sc.textContent = `${visible}`; } const cl = $('tckSearchClearBtn'); if (cl) cl.hidden = !q; }
-  // Status line
-  { const st = $('tckStatusLine'), tx = $('tckStatusTxt'), sa = $('tckStatusShowAll');
-    if (st && tx) {
-      if (v.minimized) { st.hidden = true; }
-      else if (visible === all) { st.hidden = true; }
-      else {
-        st.hidden = false;
-        const why = []; if (hiddenClean) why.push(`${hiddenClean} clean hidden`); if (hiddenFilter) why.push(`${hiddenFilter} filtered out`);
-        tx.textContent = `Showing ${visible} of ${all}` + (why.length ? ' · ' + why.join(' · ') : '');
-        if (sa) sa.hidden = false;
-      }
-    } }
-  // v11.1.2: yeh poore Review panel ko minimize karta hai (jagah bachane ke liye) — alag hai per-row collapse se
-  { if (list) list.hidden = !!v.minimized; const n = $('tckMinimizedNotice'); if (n) n.style.display = v.minimized ? 'block' : 'none'; set('tckMinimizedCount', `${all} products`); const mb = $('tckMinimizeBtn'); if (mb) mb.classList.toggle('is-min', !!v.minimized); const hc = $('tckHideClean'); if (hc) hc.checked = !!v.hideClean; }
-  // Dock
-  const b = $('temuCheckGo'); if (b) b.disabled = !checked;
-  set('tckStickyCount', `${checked}`); set('tckTotalCount', `${all}`); set('tckBtnUploadCount', `${checked}`);
-}
-function temuCheckSummary() { temuCheckSync(); }
-function temuCheckPanel(id, force) {
-  const p = $(id); if (!p) return;
-  const open = force != null ? !!force : p.hidden;
-  ['tckFiltersPanel', 'tckToolsPanel'].forEach(x => { const el = $(x); if (el && x !== id) el.hidden = true; });
-  p.hidden = !open;
-  document.querySelectorAll('.tck-drop-btn').forEach(btn => btn.classList.toggle('open', btn.dataset.panel === id && open));
-  try { chrome.storage.local.set({ tckPanelOpen: open ? id : '' }); } catch (_) {}
-}
-
-// ── Quick Filter Tabs logic ──
-function temuFilterRows(filterType) {
-  if (!TemuCheck) return;
-  TemuCheck.view.filter = filterType || 'all';
-  temuCheckSync();
-}
-
-// ── Dual-View Switcher: Review Table & Library ──
-function setTemuReviewViewMode(view) {
-  const list = $('temuCheckList');
-  const switcher = $('tckViewSwitcher');
-  const isDense = (view === 'dense' || view === 'compact');
-  if (list) {
-    list.classList.toggle('tck-compact-view', isDense);
-    list.classList.toggle('tck-dense-view', isDense);
-  }
-  if (switcher) {
-    switcher.querySelectorAll('.zh-view-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === (isDense ? 'dense' : 'card'));
-    });
-  }
-  const vBtn = $('temuViewToggle');
-  if (vBtn) vBtn.textContent = isDense ? '↔️ View: Dense' : '↔️ View: Card';
-  localStorage.setItem('zh_tck_view', isDense ? 'dense' : 'card');
-}
-
-function setMasterLibraryViewMode(view) {
-  const list = $('masterRowsList');
-  const switcher = $('masterViewSwitcher');
-  const isDense = (view === 'dense' || view === 'compact');
-  if (list) {
-    list.classList.toggle('master-dense-view', isDense);
-  }
-  if (switcher) {
-    switcher.querySelectorAll('.zh-view-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === (isDense ? 'dense' : 'card'));
-    });
-  }
-  localStorage.setItem('zh_lib_view', isDense ? 'dense' : 'card');
-}
-
-function temuToggleViewMode() {
-  const current = localStorage.getItem('zh_tck_view') || 'card';
-  const next = (current === 'dense' || current === 'compact') ? 'card' : 'dense';
-  setTemuReviewViewMode(next);
-  toast(next === 'dense' ? 'Dense Spreadsheet View active' : 'Card View active', 'ok');
-}
-
-function toggleTemuProductsMinimized() {
-  // v11.1.2: poori Review list minimize/maximize (list.hidden true/false) — jagah bachane ke liye.
-  // Har product ka apna row-level collapse (chevron/click) ek alag, independent feature hai.
-  if (!TemuCheck) return;
-  TemuCheck.view.minimized = !TemuCheck.view.minimized;
-  temuCheckSync();
-}
-
-// ── Find & Replace in Titles Modal ──
-function openFindReplaceModal() {
-  const m = $('tckFindReplaceModal');
-  if (!m) return;
-  m.classList.remove('hidden');
-  m.setAttribute('aria-hidden', 'false');
-  const fInp = $('tckFrFind');
-  if (fInp) { fInp.value = ''; fInp.focus(); }
-  const rInp = $('tckFrReplace');
-  if (rInp) rInp.value = '';
-  updateFindReplacePreview();
-}
-
-function closeFindReplaceModal() {
-  const m = $('tckFindReplaceModal');
-  if (m) {
-    m.classList.add('hidden');
-    m.setAttribute('aria-hidden', 'true');
-  }
-}
-
-function updateFindReplacePreview() {
-  const findVal = $('tckFrFind')?.value || '';
-  const caseSens = $('tckFrCase')?.checked || false;
-  const selOnly = $('tckFrSelectedOnly')?.checked || false;
-  const previewEl = $('tckFrPreview');
-  const applyBtn = $('tckFrApplyBtn');
-
-  if (!findVal) {
-    if (previewEl) previewEl.textContent = 'Enter text to search...';
-    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Replace All'; }
-    return;
-  }
-
-  const items = TemuCheck?.items || [];
-  let matchCount = 0;
-  let titleCount = 0;
-
-  items.forEach((it, idx) => {
-    if (selOnly) {
-      const chk = document.querySelector(`#temuCheckList .tck-on[data-i="${idx}"]`);
-      if (!chk || !chk.checked) return;
-    }
-    const title = it.title || '';
-    let matches = 0;
-    if (caseSens) {
-      matches = (title.split(findVal).length - 1);
-    } else {
-      const re = new RegExp(findVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-      matches = (title.match(re) || []).length;
-    }
-    if (matches > 0) {
-      matchCount += matches;
-      titleCount++;
-    }
-  });
-
-  if (previewEl) {
-    previewEl.textContent = matchCount > 0
-      ? `Found ${matchCount} match${matchCount > 1 ? 'es' : ''} in ${titleCount} title${titleCount > 1 ? 's' : ''}`
-      : 'No matches found in titles';
-  }
-  if (applyBtn) {
-    applyBtn.disabled = matchCount === 0;
-    applyBtn.textContent = matchCount > 0 ? `Replace All (${matchCount})` : 'Replace All';
-  }
-}
-
-function applyFindReplace() {
-  const findVal = $('tckFrFind')?.value || '';
-  const repVal = $('tckFrReplace')?.value ?? '';
-  const caseSens = $('tckFrCase')?.checked || false;
-  const selOnly = $('tckFrSelectedOnly')?.checked || false;
-
-  if (!findVal || !TemuCheck?.items) return;
-
-  const items = TemuCheck.items;
-  let updatedCount = 0;
-  let occurrences = 0;
-
-  items.forEach((it, idx) => {
-    if (selOnly) {
-      const chk = document.querySelector(`#temuCheckList .tck-on[data-i="${idx}"]`);
-      if (!chk || !chk.checked) return;
-    }
-    const title = it.title || '';
-    let newTitle = title;
-    let occ = 0;
-    if (caseSens) {
-      occ = (title.split(findVal).length - 1);
-      newTitle = title.split(findVal).join(repVal);
-    } else {
-      const re = new RegExp(findVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-      occ = (title.match(re) || []).length;
-      newTitle = title.replace(re, repVal);
-    }
-
-    if (occ > 0 && newTitle !== title) {
-      it.title = newTitle;
-      updatedCount++;
-      occurrences += occ;
-
-      const row = document.querySelector(`#temuCheckList .tck-row[data-i="${idx}"]`);
-      if (row) {
-        const inp = row.querySelector('.tck-title-inp');
-        if (inp) inp.value = newTitle;
-        const cnt = row.querySelector('.tck-chars');
-        if (cnt) {
-          const len = newTitle.length;
-          cnt.textContent = `${len}/120`;
-          cnt.className = `tck-chars ${len > 140 ? 'bad' : len > 120 ? 'warn' : ''}`;
-        }
-      }
-    }
-  });
-
-  closeFindReplaceModal();
-  temuCheckSummary();
-  toast(`Replaced ${occurrences} occurrences in ${updatedCount} titles!`, 'ok');
-}
-function temuCleanTitlesInReview(customWord = null) {
-  if (!TemuCheck || !TemuCheck.items) return 0;
-  const { items, cfg } = TemuCheck;
-  let count = 0;
-  const wordsToStrip = customWord ? [customWord] : (cfg.title_remove_words || []);
-  const tempCfg = { ...cfg, title_remove_words: wordsToStrip };
-
-  items.forEach((it, i) => {
-    const oldT = it.title || '';
-    const newT = temuCleanTitle(oldT, tempCfg);
-    if (newT !== oldT) {
-      it.title = newT;
-      count++;
-      const row = document.querySelector(`#temuCheckList .tck-row[data-i="${i}"]`);
-      if (row) {
-        const inp = row.querySelector('.tck-title-inp');
-        if (inp) inp.value = newT;
-        const cnt = row.querySelector('.tck-chars');
-        if (cnt) {
-          const len = newT.length;
-          cnt.textContent = `${len}/120`;
-          cnt.className = `tck-chars ${len > 140 ? 'bad' : len > 120 ? 'warn' : ''}`;
-        }
-      }
-    }
-  });
-
-  temuCheckSummary();
-  return count;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 1-CLICK AI TITLE STUDIO (Prompt Box + Side-by-Side Live Edit)
-// ═══════════════════════════════════════════════════════════════
-const _aiEsc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-function openAiTitleStudio() {
-  if (!TemuCheck || !TemuCheck.items || !TemuCheck.items.length) {
-    toast('Pehle products hunt karein ya Review table kholein', 'warn');
-    return;
-  }
-  const modal = $('tckAiStudioModal');
-  if (!modal) return;
-
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-
-  chrome.storage.local.get('zhLastAiTitlePrompt', res => {
-    const pInp = $('tckAiStudioPromptInp');
-    if (pInp && !pInp.value.trim() && res?.zhLastAiTitlePrompt) {
-      pInp.value = res.zhLastAiTitlePrompt;
-    }
-  });
-
-  const selChks = document.querySelectorAll('#temuCheckList .tck-on:checked');
-  const selCount = selChks.length;
-  const selCountEl = $('tckAiStudioSelCount');
-  if (selCountEl) selCountEl.textContent = selCount;
-
-  const selOnlyToggle = $('tckAiStudioSelectedOnly');
-  if (selOnlyToggle) {
-    selOnlyToggle.checked = selCount > 0 && selCount < TemuCheck.items.length;
-  }
-
-  renderAiStudioList();
-}
-
-function closeAiTitleStudio() {
-  const modal = $('tckAiStudioModal');
-  if (modal) {
-    modal.classList.add('hidden');
-    modal.setAttribute('aria-hidden', 'true');
-  }
-}
-
-function renderAiStudioList() {
-  const listEl = $('tckAiStudioList');
-  if (!listEl || !TemuCheck || !TemuCheck.items) return;
-
-  const items = TemuCheck.items;
-  const selOnly = $('tckAiStudioSelectedOnly')?.checked || false;
-
-  let activeIndices = [];
-  items.forEach((it, idx) => {
-    if (selOnly) {
-      const chk = document.querySelector(`#temuCheckList .tck-on[data-i="${idx}"]`);
-      if (!chk || !chk.checked) return;
-    }
-    activeIndices.push(idx);
-  });
-
-  if (!activeIndices.length) {
-    activeIndices = items.map((_, i) => i);
-  }
-
-  const itemCountEl = $('tckAiStudioItemCount');
-  if (itemCountEl) itemCountEl.textContent = activeIndices.length;
-
-  const statusEl = $('tckAiStudioStatus');
-  if (statusEl) statusEl.textContent = `Ready to optimize ${activeIndices.length} product titles`;
-
-  const existingValues = {};
-  listEl.querySelectorAll('.tck-ai-item').forEach(row => {
-    const idx = +row.dataset.i;
-    const val = row.querySelector('.tck-ai-item-inp')?.value;
-    const isChecked = row.querySelector('.tck-ai-item-chk')?.checked;
-    if (!isNaN(idx) && val !== undefined) {
-      existingValues[idx] = { val, isChecked };
-    }
-  });
-
-  listEl.innerHTML = activeIndices.map(idx => {
-    const it = items[idx];
-    const origTitle = it.title || '';
-    const currVal = existingValues[idx]?.val !== undefined ? existingValues[idx].val : origTitle;
-    const isChecked = existingValues[idx]?.isChecked !== undefined ? existingValues[idx].isChecked : true;
-    const len = currVal.length;
-    const badgeCls = len > 120 ? 'bad' : len > 100 ? 'warn' : 'ok';
-    const isMod = currVal !== origTitle;
-    const imgUrl = it.image || it.img || (Array.isArray(it.images) ? it.images[0] : '') || 'icon48.png';
-
-    return `<div class="tck-ai-item ${isMod ? 'tck-ai-modified' : ''}" data-i="${idx}">
-      <div class="tck-ai-item-left">
-        <label class="chk" style="margin:0;"><input type="checkbox" class="tck-ai-item-chk" ${isChecked ? 'checked' : ''}></label>
-        <img src="${imgUrl}" class="tck-ai-thumb" onerror="this.src='icon48.png'" />
-        <span class="tck-ai-num">#${idx + 1}</span>
-      </div>
-      <div class="tck-ai-item-body">
-        <div class="tck-ai-orig">
-          <span class="tck-ai-tag-orig">Original</span>
-          <span class="tck-ai-orig-text">${_aiEsc(origTitle)}</span>
-        </div>
-        <div class="tck-ai-opt-wrap">
-          <div class="tck-ai-opt-head">
-            <span class="tck-ai-tag-ai">✨ AI Title (Direct Edit)</span>
-            <span class="tck-ai-char-badge ${badgeCls}">${len}/120</span>
-          </div>
-          <textarea class="inp tck-ai-item-inp" rows="2" placeholder="AI title yahan show hoga aur aap edit kar sakte hain...">${_aiEsc(currVal)}</textarea>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-
-  updateAiStudioCounts();
-}
-
-function updateAiStudioCounts() {
-  const listEl = $('tckAiStudioList');
-  if (!listEl) return;
-
-  const chks = listEl.querySelectorAll('.tck-ai-item-chk:checked');
-  const applyBtn = $('tckAiStudioApplyBtn');
-  const countEl = $('tckAiApprovedCount');
-
-  if (countEl) countEl.textContent = chks.length;
-  if (applyBtn) {
-    applyBtn.disabled = chks.length === 0;
-  }
-}
-
-async function runAiTitleStudio() {
-  if (!TemuCheck || !TemuCheck.items || !TemuCheck.items.length) return;
-
-  const cfg = temuGetCfg();
-  const rawKeyStr = (cfg.gemini_api_key || $('tgGeminiKey')?.value || '').trim();
-  const keyList = temuGetAiKeys(rawKeyStr);
-  if (!keyList.length) {
-    toast('Pehle Settings → AI Optimizer mein API Key enter karein', 'warn');
-    return;
-  }
-
-  const promptInp = $('tckAiStudioPromptInp');
-  const userCustomPrompt = (promptInp?.value || '').trim();
-  if (userCustomPrompt) {
-    chrome.storage.local.set({ zhLastAiTitlePrompt: userCustomPrompt });
-  }
-
-  const runBtn = $('tckAiStudioRunBtn');
-  const statusEl = $('tckAiStudioStatus');
-  if (runBtn) {
-    runBtn.classList.add('busy');
-    runBtn.innerHTML = '⏳ Processing with AI...';
-  }
-
-  const listEl = $('tckAiStudioList');
-  const rows = listEl ? Array.from(listEl.querySelectorAll('.tck-ai-item')) : [];
-  const allItems = TemuCheck.items;
-
-  const targetIndices = rows.map(r => +r.dataset.i).filter(i => !isNaN(i) && allItems[i]);
-  if (!targetIndices.length) {
-    toast('Optimize karne ke liye koi product nahi hai', 'warn');
-    if (runBtn) {
-      runBtn.classList.remove('busy');
-      runBtn.innerHTML = '<svg class="i i-xs" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ✨ Run AI Title Check';
-    }
-    return;
-  }
-
-  const keepBrands = cfg.ai_keep_approved_brands !== false;
-  let approvedBrands = [];
-  if (keepBrands) {
-    const brandMap = {};
-    if (cfg.brand_rules && typeof cfg.brand_rules === 'object') {
-      Object.keys(cfg.brand_rules).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    if (cfg.trademarks && typeof cfg.trademarks === 'object') {
-      Object.keys(cfg.trademarks).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    if (cfg.brands && typeof cfg.brands === 'object') {
-      Object.values(cfg.brands).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    approvedBrands = Object.keys(brandMap);
-  }
-
-  const stripClaims = cfg.ai_strip_claims !== false;
-  const CHUNK_SIZE = 25;
-  let optimizedCount = 0;
-
-  try {
-    let activeKeyIndex = 0;
-
-    for (let c = 0; c < targetIndices.length; c += CHUNK_SIZE) {
-      const chunkIndices = targetIndices.slice(c, c + CHUNK_SIZE);
-      if (statusEl) {
-        statusEl.textContent = `⏳ Processing ${c + 1}–${Math.min(c + CHUNK_SIZE, targetIndices.length)} of ${targetIndices.length}...`;
-      }
-
-      const inputList = chunkIndices.map(idx => ({
-        id: idx,
-        title: allItems[idx].title || ''
-      }));
-
-      const systemPrompt = `You are an expert e-commerce copywriter optimizing product titles specifically for the Temu marketplace.
-Your job is to rewrite each product title so it is clean, accurate, attractive, and strictly compliant with marketplace guidelines.
-
-TEMU TITLE REQUIREMENTS:
-1. Target length: strictly between 60 and 115 characters. Never exceed 118 characters.
-2. Format: Clear and readable. Structure as: [Core Product / Keywords] + [Key Features / Material / Model] + [Pack Size / Quantity / Color].
-3. Quality: Capitalize the first letter of major words (Title Case). Do NOT use ALL-CAPS words, do NOT use emojis, exclamation marks, or symbols like '***' or '>>>'.
-${approvedBrands.length ? `4. CRITICAL BRAND RULE: The seller is authorized and APPROVED to sell these brands: [${approvedBrands.join(', ')}].
-   - If a product title mentions any of these approved brands, YOU MUST PRESERVE the brand name in the title!
-   - For any OTHER third-party brands NOT in this approved list, remove the brand name to avoid copyright/IP violations.` : `4. Remove third-party trademarked brand names to avoid copyright/IP violations.`}
-${stripClaims ? `5. PROHIBITED CLAIMS & WORDS (MUST REMOVE):
-   - Health/Medical claims: "FDA approved", "cure", "relief", "pain relief", "medical grade", "therapeutic", "clinical", "heals".
-   - Environmental/Eco claims: "eco-friendly", "biodegradable", "green", "100% natural", "organic", "zero waste".
-   - Baby/Safety claims: "BPA free", "non-toxic", "pediatrician approved", "infant safe", "choking safe".
-   - Warranty/Hype words: "lifetime warranty", "guaranteed", "best seller", "top seller", "100% satisfaction", "free shipping", "prime".
-   - Platform/Store names: "Amazon", "Walmart", "Sam's Club", "Costco", "eBay", "Prime".` : ''}
-${userCustomPrompt ? `6. USER CRITICAL CUSTOM INSTRUCTIONS (FOLLOW STRICTLY):
-   ${userCustomPrompt}` : ''}
-
-You will receive a JSON list of objects with "id" and "title".
-Return ONLY a valid JSON array of objects with "id" and "optimized" (the new title string).
-Do NOT include explanations or markdown fences. Just the raw JSON array.`;
-
-      let outText = '';
-      let chunkSuccess = false;
-      let lastError = null;
-
-      while (activeKeyIndex < keyList.length && !chunkSuccess) {
-        const apiKey = keyList[activeKeyIndex];
-        const isGroq = apiKey.startsWith('gsk_');
-
-        try {
-          if (isGroq) {
-            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: JSON.stringify(inputList) }
-                ],
-                temperature: 0.2
-              })
-            });
-            const resData = await res.json();
-            if (res.status === 429 || resData.error?.code === 'rate_limit_exceeded' || (resData.error?.message && /rate limit|tokens per/i.test(resData.error.message))) {
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) {
-                toast(`⚡ Groq Key #${activeKeyIndex} limit ➔ Switching to Key #${activeKeyIndex + 1}`, 'info');
-                continue;
-              } else {
-                throw new Error('All Groq keys rate-limited. Please wait 1 minute.');
-              }
-            }
-            if (resData.error) throw new Error(resData.error.message || 'Groq API call failed');
-            outText = resData?.choices?.[0]?.message?.content || '';
-            chunkSuccess = true;
-          } else {
-            let { model, apiVer } = await temuGetGeminiModelInfo(apiKey);
-            let geminiUrl = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const payload = {
-              contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\nINPUT TITLES:\n' + JSON.stringify(inputList) }] }],
-              generationConfig: { temperature: 0.3, maxOutputTokens: 2048, responseMimeType: 'application/json' }
-            };
-
-            let res = await fetch(geminiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            let resData = await res.json();
-            if (res.status === 429 || resData.error?.code === 429) {
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) {
-                toast(`⚡ Gemini Key #${activeKeyIndex} quota ➔ Key #${activeKeyIndex + 1}`, 'info');
-                continue;
-              } else {
-                throw new Error('All API keys quota exceeded.');
-              }
-            }
-            if (resData.error) throw new Error(resData.error.message || 'Gemini API call failed');
-            outText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-            chunkSuccess = true;
-          }
-        } catch (err) {
-          lastError = err;
-          if (activeKeyIndex + 1 < keyList.length) {
-            activeKeyIndex++;
-            toast(`⚡ Key #${activeKeyIndex} error ➔ Key #${activeKeyIndex + 1}`, 'info');
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (!outText) throw (lastError || new Error('No content returned by AI'));
-
-      let parsed = [];
-      try {
-        let clean = outText.trim();
-        if (clean.startsWith('```json')) clean = clean.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-        else if (clean.startsWith('```')) clean = clean.replace(/^```\s*/i, '').replace(/\s*```$/, '');
-        parsed = JSON.parse(clean);
-      } catch (err) {
-        console.error('AI JSON parse failed on:', outText);
-        throw new Error('AI response format invalid');
-      }
-
-      if (Array.isArray(parsed)) {
-        parsed.forEach(p => {
-          const idx = p.id;
-          const newTitle = (p.optimized || '').trim();
-          if (newTitle) {
-            const row = listEl?.querySelector(`.tck-ai-item[data-i="${idx}"]`);
-            if (row) {
-              row.classList.add('tck-ai-modified');
-              const inp = row.querySelector('.tck-ai-item-inp');
-              if (inp) {
-                inp.value = newTitle;
-                inp.style.background = 'rgba(168, 85, 247, 0.25)';
-                setTimeout(() => { if (inp) inp.style.background = ''; }, 1200);
-              }
-              const cnt = row.querySelector('.tck-ai-char-badge');
-              if (cnt) {
-                const len = newTitle.length;
-                cnt.textContent = `${len}/120`;
-                cnt.className = `tck-ai-char-badge ${len > 120 ? 'bad' : len > 100 ? 'warn' : 'ok'}`;
-              }
-              const chk = row.querySelector('.tck-ai-item-chk');
-              if (chk) chk.checked = true;
-            }
-            optimizedCount++;
-          }
-        });
-      }
-    }
-
-    if (statusEl) statusEl.textContent = `✓ ${optimizedCount} titles check ho gaye. Aap kisi ko bhi edit kar sakte hain!`;
-    toast(`✨ ${optimizedCount} titles AI se generate ho gaye!`, 'ok');
-    updateAiStudioCounts();
-  } catch (err) {
-    console.error('AI Title Studio Error:', err);
-    if (statusEl) statusEl.textContent = `⚠️ Error: ${err.message}`;
-    toast(`AI Error: ${err.message}`, 'bad');
-  } finally {
-    if (runBtn) {
-      runBtn.classList.remove('busy');
-      runBtn.innerHTML = '<svg class="i i-xs" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ✨ Run AI Title Check';
-    }
-  }
-}
-
-function applyAiStudioTitles() {
-  const listEl = $('tckAiStudioList');
-  if (!listEl || !TemuCheck || !TemuCheck.items) return;
-
-  const items = TemuCheck.items;
-  let appliedCount = 0;
-
-  listEl.querySelectorAll('.tck-ai-item').forEach(row => {
-    const chk = row.querySelector('.tck-ai-item-chk');
-    if (!chk || !chk.checked) return;
-
-    const idx = +row.dataset.i;
-    const inp = row.querySelector('.tck-ai-item-inp');
-    const newTitle = (inp?.value || '').trim();
-
-    if (!isNaN(idx) && items[idx] && newTitle) {
-      items[idx].title = newTitle;
-      items[idx]._aiOptimized = true;
-      appliedCount++;
-
-      const mainRow = document.querySelector(`#temuCheckList .tck-row[data-i="${idx}"]`);
-      if (mainRow) {
-        mainRow.dataset.ai = 'true';
-        const tInp = mainRow.querySelector('.tck-title-inp');
-        if (tInp) {
-          tInp.value = newTitle;
-          tInp.style.background = 'rgba(16, 185, 129, 0.25)';
-          setTimeout(() => { if (tInp) tInp.style.background = ''; }, 1200);
-        }
-        const cnt = mainRow.querySelector('.tck-chars');
-        if (cnt) {
-          const len = newTitle.length;
-          cnt.textContent = `${len}/120`;
-          cnt.className = `tck-chars ${len > 140 ? 'bad' : len > 120 ? 'warn' : ''}`;
-        }
-      }
-    }
-  });
-
-  temuCheckSummary();
-  closeAiTitleStudio();
-  toast(`✅ ${appliedCount} titles pre-upload list mein apply ho gaye!`, 'ok');
-  if (appliedCount > 0) {
-    showAiDoneModal(
-      'AI Studio Applied',
-      `🎉 ${appliedCount} titles successfully update ho gaye!`,
-      'Pre-upload review list mein updated titles ready hain.'
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INSTANT LIVE SEARCH (PRE-UPLOAD REVIEW TABLE)
-// ═══════════════════════════════════════════════════════════════
-function tckFilterBySearch(q) {
-  if (!TemuCheck) return;
-  TemuCheck.view.q = q || '';
-  temuCheckSync();
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 1-CLICK SMART PRICING PRESETS
-// ═══════════════════════════════════════════════════════════════
-function applyPricingPreset(presetKey) {
-  const presets = {
-    standard: { mult: 1.35, minProfit: 2.0, heavyBuf: 4.0, round99: true, name: 'Standard (1.35x)' },
-    high_margin: { mult: 2.50, minProfit: 4.0, heavyBuf: 6.0, round99: true, name: 'High Margin (2.5x)' },
-    heavy_bulky: { mult: 1.25, minProfit: 3.0, heavyBuf: 10.0, round99: true, name: 'Heavy Bulky (+$10)' },
-    aggressive: { mult: 1.18, minProfit: 0.0, heavyBuf: 2.0, round99: false, name: 'Aggressive (1.18x)' }
-  };
-
-  const p = presets[presetKey];
-  if (!p) return;
-
-  const pxInp = $('tgPx'); if (pxInp) pxInp.value = String(p.mult);
-  const px2Inp = $('tgPx2'); if (px2Inp) px2Inp.value = String(p.mult);
-  const minPInp = $('tgMinProfit'); if (minPInp) minPInp.value = String(p.minProfit);
-  const heavyInp = $('tgHeavyBuffer'); if (heavyInp) heavyInp.value = String(p.heavyBuf);
-  const r99 = $('tgRound99'); if (r99) r99.checked = p.round99;
-  const r99_2 = $('tgRound992'); if (r99_2) r99_2.checked = p.round99;
-
-  document.querySelectorAll('.zh-pricing-preset-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.preset === presetKey);
-  });
-
-  const cfg = temuGetCfg();
-  cfg.list_price_multiplier = p.mult;
-  cfg.min_profit = p.minProfit;
-  cfg.heavy_buffer = p.heavyBuf;
-  cfg.price_round_to_99 = p.round99;
-  temuSaveCfg(cfg);
-
-  if (TemuCheck?.items?.length) {
-    TemuCheck.items.forEach((it, idx) => {
-      const baseCost = it.source_price ?? it.cost ?? it.base ?? 10;
-      let calculated = baseCost * p.mult;
-      if (p.minProfit && (calculated - baseCost) < p.minProfit) calculated = baseCost + p.minProfit;
-      if (parseFloat(it.weight) >= 2 && p.heavyBuf) calculated += p.heavyBuf;
-      if (p.round99) calculated = Math.floor(calculated) + 0.99;
-      else calculated = Math.round(calculated * 100) / 100;
-
-      it.base = calculated;
-      it.list = Math.round((calculated * 1.2) * 100) / 100;
-
-      const row = document.querySelector(`#temuCheckList .tck-row[data-i="${idx}"]`);
-      if (row) {
-        const inp = row.querySelector('.tck-price');
-        if (inp) inp.value = calculated.toFixed(2);
-      }
-    });
-    temuCheckSummary();
-    saveTemuCheckSession();
-  }
-
-  temuUpdatePricePreview();
-  toast(`Pricing applied: ${p.name}`, 'ok');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CRASH-PROOF REVIEW SESSION PERSISTENCE
-// ═══════════════════════════════════════════════════════════════
-let _sessionSaveTimer = null;
-function saveTemuCheckSession() {
-  clearTimeout(_sessionSaveTimer);
-  _sessionSaveTimer = setTimeout(() => {
-    try {
-      if (TemuCheck && Array.isArray(TemuCheck.items) && TemuCheck.items.length) {
-        chrome.storage.local.set({
-          zh_saved_temu_session: {
-            items: TemuCheck.items,
-            skipped: TemuCheck.skipped || [],
-            savedAt: Date.now()
-          }
-        });
-      } else {
-        chrome.storage.local.remove('zh_saved_temu_session');
-      }
-    } catch (_) {}
-  }, 400);
-}
-
-function restoreTemuCheckSession() {
-  chrome.storage.local.get('zh_saved_temu_session', res => {
-    const s = res?.zh_saved_temu_session;
-    if (!s || !Array.isArray(s.items) || !s.items.length) return;
-    const ageMs = Date.now() - (s.savedAt || 0);
-    if (ageMs < 24 * 60 * 60 * 1000) {
-      if (!TemuCheck || !TemuCheck.items || !TemuCheck.items.length) {
-        const cfg = temuGetCfg();
-        temuCheckRender(s.items, s.skipped || [], cfg);
-        toast(`✨ Restored ${s.items.length} products from previous session!`, 'ok');
-      }
-    }
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════
-// AI ATTRIBUTES & SPECIFICATIONS AUTO-EXTRACTOR
-// ═══════════════════════════════════════════════════════════════
-async function temuAiExtractAttributes() {
-  if (!TemuCheck || !TemuCheck.items || !TemuCheck.items.length) {
-    toast('Pehle products hunt karein ya Review table kholein', 'warn');
-    return;
-  }
-  const cfg = temuGetCfg();
-  const rawKeyStr = (cfg.gemini_api_key || $('tgGeminiKey')?.value || '').trim();
-  const keyList = temuGetAiKeys(rawKeyStr);
-  if (!keyList.length) {
-    toast('Pehle Settings → AI Optimizer mein API Key enter karein', 'warn');
-    return;
-  }
-
-  const allItems = TemuCheck.items;
-  const rows = document.querySelectorAll('#temuCheckList .tck-row');
-  let targetIndices = [];
-  rows.forEach(r => {
-    const chk = r.querySelector('.tck-on');
-    const idx = +r.dataset.i;
-    if (chk && chk.checked && allItems[idx]) targetIndices.push(idx);
-  });
-  if (!targetIndices.length) {
-    targetIndices = allItems.map((_, idx) => idx);
-  }
-
-  const btn = $('temuAiAttributesBtn');
-  if (btn) {
-    btn.classList.add('busy');
-    btn.textContent = '⏳ Specs...';
-  }
-
-  const CHUNK_SIZE = 20;
-  let extractedCount = 0;
-  try {
-    let activeKeyIndex = 0;
-
-    for (let c = 0; c < targetIndices.length; c += CHUNK_SIZE) {
-      const chunkIndices = targetIndices.slice(c, c + CHUNK_SIZE);
-      const inputList = chunkIndices.map(idx => {
-        const it = allItems[idx];
-        return {
-          id: idx,
-          title: it.title || '',
-          description: (it.description || '').slice(0, 300),
-          bullets: Array.isArray(it.bullets) ? it.bullets.slice(0, 5).join('; ') : ''
-        };
-      });
-
-      const systemPrompt = `You are an expert e-commerce catalog specialist extracting product specifications for Temu marketplace listings.
-Analyze each product and accurately extract these 5 key attributes:
-1. material: Primary material (e.g., Stainless Steel, Cotton, Plastic, Ceramic, PU Leather, Solid Wood, Aluminum). If unknown, leave empty string "".
-2. size: Size specification (e.g., 12 oz, Large, 10x8 inch, 500ml, Standard). If unknown, leave empty string "".
-3. color: Primary color or color combination (e.g., Black, White, Navy Blue, Multicolor). If unknown, leave empty string "".
-4. model: Model number or sub-series name. If unknown, leave empty string "".
-5. pack_count: Item quantity / pack count (e.g., 1, 2, 4, 12). If unknown, default to 1.
-
-Return ONLY a valid JSON array of objects with keys: "id", "material", "size", "color", "model", "pack_count". No explanations or markdown.`;
-
-      let outText = '';
-      let chunkSuccess = false;
-      let lastError = null;
-
-      while (activeKeyIndex < keyList.length && !chunkSuccess) {
-        const apiKey = keyList[activeKeyIndex];
-        const isGroq = apiKey.startsWith('gsk_');
-
-        try {
-          if (isGroq) {
-            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: JSON.stringify(inputList) }
-                ],
-                temperature: 0.1
-              })
-            });
-            const resData = await res.json();
-            if (res.status === 429 || resData.error?.code === 'rate_limit_exceeded') {
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) continue;
-              else throw new Error('All Groq keys rate-limited');
-            }
-            if (resData.error) throw new Error(resData.error.message || 'Groq API error');
-            outText = resData?.choices?.[0]?.message?.content || '';
-            chunkSuccess = true;
-          } else {
-            let { model, apiVer } = await temuGetGeminiModelInfo(apiKey);
-            let geminiUrl = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const payload = {
-              contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\nINPUT DATA:\n' + JSON.stringify(inputList) }] }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 2048, responseMimeType: 'application/json' }
-            };
-            let res = await fetch(geminiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            let resData = await res.json();
-            if (res.status === 429) {
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) continue;
-              else throw new Error('All Gemini keys quota exceeded');
-            }
-            if (resData.error) throw new Error(resData.error.message || 'Gemini API error');
-            outText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-            chunkSuccess = true;
-          }
-        } catch (err) {
-          lastError = err;
-          if (activeKeyIndex + 1 < keyList.length) {
-            activeKeyIndex++;
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (!outText) throw (lastError || new Error('No content returned by AI'));
-
-      let parsed = [];
-      try {
-        let clean = outText.trim();
-        if (clean.startsWith('```json')) clean = clean.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-        else if (clean.startsWith('```')) clean = clean.replace(/^```\s*/i, '').replace(/\s*```$/, '');
-        parsed = JSON.parse(clean);
-      } catch (err) {
-        console.error('AI JSON parse failed:', outText);
-      }
-
-      if (Array.isArray(parsed)) {
-        parsed.forEach(p => {
-          const idx = p.id;
-          if (allItems[idx]) {
-            allItems[idx].attributes = {
-              material: p.material || '',
-              size: p.size || '',
-              color: p.color || allItems[idx].color || '',
-              model: p.model || '',
-              pack_count: p.pack_count || 1
-            };
-            if (p.color && !allItems[idx].color) allItems[idx].color = p.color;
-
-            const row = document.querySelector(`#temuCheckList .tck-row[data-i="${idx}"]`);
-            if (row) {
-              let badgeWrap = row.querySelector('.tck-attr-badges');
-              if (!badgeWrap) {
-                badgeWrap = document.createElement('div');
-                badgeWrap.className = 'tck-attr-badges';
-                const meta = row.querySelector('.tck-meta');
-                if (meta) meta.appendChild(badgeWrap);
-              }
-              const chips = [];
-              if (p.material) chips.push(`<span class="tck-attr-chip">🧶 <b>${esc(p.material)}</b></span>`);
-              if (p.size) chips.push(`<span class="tck-attr-chip">📐 <b>${esc(p.size)}</b></span>`);
-              if (p.color) chips.push(`<span class="tck-attr-chip">🎨 <b>${esc(p.color)}</b></span>`);
-              if (p.pack_count && p.pack_count > 1) chips.push(`<span class="tck-attr-chip">📦 <b>${p.pack_count}-Pack</b></span>`);
-              badgeWrap.innerHTML = chips.join('');
-            }
-            extractedCount++;
-          }
-        });
-      }
-    }
-
-    saveTemuCheckSession();
-    toast(`🧩 ${extractedCount} products ke attributes extract ho gaye!`, 'ok');
-  } catch (err) {
-    console.error('AI Specs Error:', err);
-    toast(`AI Specs Error: ${err.message}`, 'bad');
-  } finally {
-    if (btn) {
-      btn.classList.remove('busy');
-      btn.textContent = '🧩 AI Specs';
-    }
-  }
-}
-
-let detectedGeminiModel = 'gemini-3.6-flash';
-let detectedGeminiApiVersion = 'v1beta';
-
-async function temuGetGeminiModelInfo(apiKey, forceRefresh = false) {
-  if (detectedGeminiModel && !forceRefresh) {
-    return { model: detectedGeminiModel, apiVer: detectedGeminiApiVersion };
-  }
-
-  const versions = ['v1beta', 'v1'];
-  for (const ver of versions) {
-    try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?key=${encodeURIComponent(apiKey)}`);
-      const listData = await listRes.json();
-      if (listData && Array.isArray(listData.models) && listData.models.length > 0) {
-        const candidates = listData.models.filter(m => 
-          Array.isArray(m.supportedGenerationMethods) && 
-          m.supportedGenerationMethods.includes('generateContent')
-        );
-
-        // Sort descending: highest version + flash first (e.g. 3.6-flash > 2.5-flash > 2.0-flash)
-        candidates.sort((a, b) => {
-          const score = mName => {
-            const verMatch = mName.match(/gemini-(\d+)(?:\.(\d+))?/i);
-            const v = verMatch ? (parseInt(verMatch[1] || '0', 10) * 100 + parseInt(verMatch[2] || '0', 10)) : 0;
-            const isFlash = /flash/i.test(mName) ? 1000 : 0;
-            return v + isFlash;
-          };
-          return score(b.name) - score(a.name);
-        });
-
-        if (candidates.length > 0) {
-          detectedGeminiModel = candidates[0].name.replace(/^models\//, '');
-          detectedGeminiApiVersion = ver;
-          return { model: detectedGeminiModel, apiVer: detectedGeminiApiVersion };
-        }
-      }
-    } catch (e) {
-      console.warn(`ListModels for ${ver} failed:`, e);
-    }
-  }
-
-  detectedGeminiModel = 'gemini-3.6-flash';
-  detectedGeminiApiVersion = 'v1beta';
-  return { model: detectedGeminiModel, apiVer: detectedGeminiApiVersion };
-}
-
-// Google Gemini AI Title Optimizer
-async function temuAIOptimizeTitles(singleIndex = null, opts = {}) {
-  if (!TemuCheck || !TemuCheck.items || !TemuCheck.items.length) {
-    toast('Review table mein koi product nahi mila', 'warn');
-    return;
-  }
-  const cfg = temuGetCfg();
-  const rawKeyStr = (cfg.gemini_api_key || $('tgGeminiKey')?.value || '').trim();
-  const keyList = temuGetAiKeys(rawKeyStr);
-  if (!keyList.length) {
-    toast('Pehle Settings → AI Optimizer mein API Key enter karein', 'warn');
-    const pill = document.querySelector('a[href="#tgSecGeminiAi"]');
-    if (pill) pill.click();
-    return;
-  }
-
-  const allItems = TemuCheck.items;
-  let targetIndices = [];
-
-  if (opts?.targetIndices && Array.isArray(opts.targetIndices)) {
-    targetIndices = opts.targetIndices;
-  } else if (singleIndex !== null && typeof singleIndex === 'number') {
-    targetIndices = [singleIndex];
-  } else {
-    const rows = document.querySelectorAll('#temuCheckList .tck-row');
-    rows.forEach(r => {
-      const chk = r.querySelector('.tck-on');
-      const idx = +r.dataset.i;
-      if (chk && chk.checked && allItems[idx]) targetIndices.push(idx);
-    });
-    if (!targetIndices.length) {
-      targetIndices = allItems.map((_, idx) => idx);
-    }
-  }
-
-  if (!targetIndices.length) {
-    toast('Optimize karne ke liye koi product select nahi hai', 'warn');
-    return;
-  }
-
-  const mainBtn = $('temuAiOptimizeBtn');
-  if (mainBtn && singleIndex === null) {
-    mainBtn.classList.add('busy');
-    mainBtn.textContent = '⏳ AI Optimizing...';
-  }
-  if (singleIndex !== null) {
-    const rowBtn = document.querySelector(`.tck-ai-row-btn[data-i="${singleIndex}"]`);
-    if (rowBtn) {
-      rowBtn.classList.add('busy');
-      rowBtn.textContent = '⏳...';
-    }
-  }
-
-  // Approved Brands Whitelist
-  const keepBrands = cfg.ai_keep_approved_brands !== false;
-  let approvedBrands = [];
-  if (keepBrands) {
-    const brandMap = {};
-    if (cfg.brand_rules && typeof cfg.brand_rules === 'object') {
-      Object.keys(cfg.brand_rules).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    if (cfg.trademarks && typeof cfg.trademarks === 'object') {
-      Object.keys(cfg.trademarks).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    if (cfg.brands && typeof cfg.brands === 'object') {
-      Object.values(cfg.brands).forEach(b => { if (b.trim()) brandMap[b.trim()] = true; });
-    }
-    approvedBrands = Object.keys(brandMap);
-  }
-
-  const stripClaims = cfg.ai_strip_claims !== false;
-  const userInstructions = (opts?.customPrompt || cfg.ai_custom_instructions || $('tgAiInstructions')?.value || '').trim();
-  const rawBanned = (cfg.ai_banned_words ?? $('tgBannedWords')?.value ?? '').trim();
-  const defaultBanned = 'cure, treat, healing, disease, remedy, therapeutic, detox, relief, pain relief, immunity, clinical, medicine, sterile, eco-friendly, biodegradable, sustainable, zero waste, 100% organic, non-toxic, chemical-free, baby, infant, newborn, toddler, crib, nursery, pediatric, lifetime warranty, guaranteed, prime';
-  const bannedWordsList = (rawBanned || defaultBanned).split(',').map(s => s.trim()).filter(Boolean);
-  const isReListMode = Boolean(opts?.isReList);
-
-  let optimizedCount = 0;
-  const CHUNK_SIZE = 25;
-
-  try {
-    let activeKeyIndex = 0;
-
-    for (let c = 0; c < targetIndices.length; c += CHUNK_SIZE) {
-      const chunkIndices = targetIndices.slice(c, c + CHUNK_SIZE);
-      const inputList = chunkIndices.map(idx => ({
-        id: idx,
-        title: allItems[idx].title || ''
-      }));
-
-      const systemPrompt = `You are an expert e-commerce copywriter optimizing product titles specifically for the Temu marketplace.
-Your job is to rewrite each product title so it is descriptive, clean, accurate, attractive, and strictly compliant with official Temu marketplace guidelines.
-
-TEMU OFFICIAL TITLE STRUCTURE & REQUIREMENTS:
-1. Target length: strictly between 80 and 135 characters. Titles shorter than 75 characters are blocked by Temu's algorithm for "Product title too short". Never exceed 140 characters.
-2. Official recommended structure (separated by commas where appropriate):
-   [Quantifier/Pack] + [Core Feature] + [Short Product Keywords], [Additional Feature], [Alternative Keyword], [Target Market / Audience], [Size / Color (if applicable)], [Product Category]
-   Example pattern: "2-Pack Heavy Duty Wireless Earbuds, Deep Bass Waterproof, Bluetooth 5.3 Headphones for Running Workout, In-Ear Black, Consumer Electronics"
-3. Quality: Capitalize the first letter of major words (Title Case). Do NOT use ALL-CAPS words, emojis, or symbols like '***' or '>>>'.
-${approvedBrands.length ? `4. CRITICAL BRAND RULE: The seller is authorized and APPROVED to sell these brands: [${approvedBrands.join(', ')}].
-   - If a product title mentions any of these approved brands, YOU MUST PRESERVE the brand name in the title!
-   - For any OTHER third-party brands NOT in this approved list, remove the brand name to avoid copyright/IP violations.` : `4. Remove third-party trademarked brand names to avoid copyright/IP violations.`}
-${stripClaims && bannedWordsList.length ? `5. STRICT BANNED WORDS & CLAIMS (NEVER USE ANY OF THESE):
-   [${bannedWordsList.join(', ')}]
-   - Health/Medical claims: Never claim health benefits, medical treatment, pain relief, or healing.
-   - Environmental claims: Never make unverified eco/green claims (like eco-friendly, biodegradable, sustainable). Note: genuine colors (e.g. "Green Shirt", "Green Tea") are permitted if part of the product name/color.
-   - Baby/Infant words: Strictly avoid baby, infant, toddler, newborn terms (which trigger Temu CPC/CPSC certification blocks).
-   - Warranty/Hype/Platforms: Remove warranty, guaranteed, Amazon, Walmart, Prime.` : ''}
-${userInstructions ? `6. USER CUSTOM RULES: ${userInstructions}` : ''}
-${isReListMode ? `7. SPECIAL RE-LISTING DIRECTIVE:
-   - These products were previously listed on Temu.
-   - YOU MUST REWRITE AND RESTRUCTURE the title with fresh, alternative SEO keywords and angles so it is NOT identical to the old listing, strictly avoiding Temu duplicate product / title penalties.
-   - Keep approved brand and core specifications accurate, but vary phrasing and keyword order significantly.` : ''}
-
-You will receive a JSON list of objects with "id" and "title".
-Return ONLY a valid JSON array of objects with "id" and "optimized" (the new title string).
-Do NOT include explanations or markdown fences. Just the raw JSON array.`;
-
-      let outText = '';
-      let chunkSuccess = false;
-      let lastError = null;
-
-      while (activeKeyIndex < keyList.length && !chunkSuccess) {
-        const apiKey = keyList[activeKeyIndex];
-        const isGroq = apiKey.startsWith('gsk_');
-
-        try {
-          if (isGroq) {
-            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: JSON.stringify(inputList) }
-                ],
-                temperature: 0.2
-              })
-            });
-            const resData = await res.json();
-            if (res.status === 429 || resData.error?.code === 'rate_limit_exceeded' || (resData.error?.message && /rate limit|tokens per/i.test(resData.error.message))) {
-              console.log(`Groq Key #${activeKeyIndex + 1} rate-limited, switching to next key...`);
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) {
-                toast(`⚡ Groq Key #${activeKeyIndex} limit ➔ Switching to Key #${activeKeyIndex + 1}`, 'info');
-                continue;
-              } else {
-                throw new Error('All Groq keys rate-limited. Please wait 1 minute.');
-              }
-            }
-            if (resData.error) throw new Error(resData.error.message || 'Groq API call failed');
-            outText = resData?.choices?.[0]?.message?.content || '';
-            chunkSuccess = true;
-          } else {
-            let { model, apiVer } = await temuGetGeminiModelInfo(apiKey);
-            let geminiUrl = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const payload = {
-              contents: [
-                {
-                  role: 'user',
-                  parts: [
-                    { text: systemPrompt + '\n\nINPUT TITLES:\n' + JSON.stringify(inputList) }
-                  ]
-                }
-              ],
-              generationConfig: {
-                temperature: 0.3,
-                maxOutputTokens: 2048,
-                responseMimeType: 'application/json'
-              }
-            };
-
-            let res = await fetch(geminiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
-              body: JSON.stringify(payload)
-            });
-
-            let resData = await res.json();
-            if (resData.error) {
-              const m = (resData.error.message || '').match(/use\s+models\/([a-zA-Z0-9\.\-_]+)/i);
-              if (m && m[1]) {
-                model = m[1];
-                detectedGeminiModel = model;
-                geminiUrl = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-                res = await fetch(geminiUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
-                  body: JSON.stringify(payload)
-                });
-                resData = await res.json();
-              }
-            }
-
-            if (res.status === 429 || resData.error?.code === 429) {
-              activeKeyIndex++;
-              if (activeKeyIndex < keyList.length) {
-                toast(`⚡ Gemini limit ➔ Switching to Key #${activeKeyIndex + 1}`, 'info');
-                continue;
-              } else {
-                throw new Error('All API keys rate-limited. Please wait a moment.');
-              }
-            }
-
-            if (resData.error) throw new Error(resData.error.message || 'Gemini API call failed');
-            outText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-            chunkSuccess = true;
-          }
-        } catch (err) {
-          lastError = err;
-          if (activeKeyIndex + 1 < keyList.length) {
-            activeKeyIndex++;
-            toast(`⚡ Key #${activeKeyIndex} error ➔ Trying Key #${activeKeyIndex + 1}`, 'info');
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (!outText) throw (lastError || new Error('No content returned by AI'));
-
-      let parsed = [];
-      try {
-        let clean = outText.trim();
-        if (clean.startsWith('```json')) clean = clean.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-        else if (clean.startsWith('```')) clean = clean.replace(/^```\s*/i, '').replace(/\s*```$/, '');
-        // Try strict parse first
-        try {
-          parsed = JSON.parse(clean);
-        } catch (_) {
-          // Response may be truncated — salvage complete objects already present
-          const items = [];
-          const objRegex = /\{[^{}]*"id"\s*:\s*(\d+)[^{}]*"optimized"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
-          let m;
-          while ((m = objRegex.exec(clean)) !== null) {
-            items.push({ id: +m[1], optimized: m[2].replace(/\\"/g, '"') });
-          }
-          if (items.length > 0) {
-            parsed = items;
-            console.warn(`AI JSON truncated — salvaged ${items.length} item(s) from partial response`);
-            toast(`⚠️ AI response truncated — ${items.length} titles saved`, 'info');
-          } else {
-            console.error('AI JSON parse failed on:', outText);
-            throw new Error('AI response format invalid');
-          }
-        }
-      } catch (err) {
-        if (err.message === 'AI response format invalid') throw err;
-        console.error('AI JSON parse failed on:', outText);
-        throw new Error('AI response format invalid');
-      }
-
-      if (Array.isArray(parsed)) {
-        parsed.forEach(p => {
-          const idx = p.id;
-          const newTitle = (p.optimized || '').trim();
-          if (allItems[idx] && newTitle) {
-            allItems[idx].title = newTitle;
-            allItems[idx]._aiOptimized = true;
-            optimizedCount++;
-            const row = document.querySelector(`#temuCheckList .tck-row[data-i="${idx}"]`);
-            if (row) {
-              row.dataset.ai = 'true';
-              const inp = row.querySelector('.tck-title-inp');
-              if (inp) {
-                inp.value = newTitle;
-                inp.style.transition = 'background 0.4s';
-                inp.style.background = 'rgba(168, 85, 247, 0.25)';
-                setTimeout(() => { if (inp) inp.style.background = ''; }, 1200);
-              }
-              const cnt = row.querySelector('.tck-chars');
-              if (cnt) {
-                const len = newTitle.length;
-                cnt.textContent = `${len}/120`;
-                cnt.className = `tck-chars ${len > 140 ? 'bad' : len > 120 ? 'warn' : ''}`;
-              }
-            }
-          }
-        });
-      }
-    }
-
-    temuCheckSummary();
-    toast(`✨ ${optimizedCount} titles AI se optimize ho gaye!`, 'ok');
-    if (optimizedCount > 0) {
-      showAiDoneModal(
-        'AI Optimization Done',
-        `🎉 ${optimizedCount} products ke titles AI se optimize ho gaye!`,
-        'Sabhi selected products ke titles successfully update ho gaye hain.'
-      );
-    }
-  } catch (err) {
-    console.error('AI Title Optimization Error:', err);
-    toast(`AI Error: ${err.message}`, 'bad');
-  } finally {
-    if (mainBtn && singleIndex === null) {
-      mainBtn.classList.remove('busy');
-      mainBtn.textContent = '🤖 AI Optimize';
-    }
-    if (singleIndex !== null) {
-      const rowBtn = document.querySelector(`.tck-ai-row-btn[data-i="${singleIndex}"]`);
-      if (rowBtn) {
-        rowBtn.classList.remove('busy');
-        rowBtn.textContent = '✨ AI';
-      }
-    }
-  }
-}
-
-async function temuTestGeminiConnection() {
-  const rawKeyStr = ($('tgGeminiKey')?.value || temuGetCfg()?.gemini_api_key || '').trim();
-  const keys = temuGetAiKeys(rawKeyStr);
-  const st = $('tgGeminiStatus');
-  const btn = $('tgGeminiTestBtn');
-  if (!keys.length) {
-    if (st) { st.textContent = '✗ Pehle API key paste karein'; st.className = 'temu-inline-msg bad'; }
-    toast('API key enter karein', 'warn');
-    return;
-  }
-  if (btn) btn.disabled = true;
-
-  const key = keys[0];
-  const isGroq = key.startsWith('gsk_');
-  if (st) { st.textContent = isGroq ? `⏳ Testing Groq AI (${keys.length} keys loaded)...` : '⏳ Testing Gemini connection...'; st.className = 'temu-inline-msg'; }
-
-  try {
-    if (isGroq) {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-oss-120b',
-          messages: [{ role: 'user', content: 'Reply with the word OK' }],
-          max_tokens: 10,
-          temperature: 0
-        })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message || 'Groq API error');
-      if (st) {
-        st.textContent = `✓ Connected successfully! ${keys.length} Groq Keys Active (Auto-Failover ON).`;
-        st.className = 'temu-inline-msg ok';
-      }
-      toast(`✓ Groq AI Connected! (${keys.length} keys active)`, 'ok');
-    } else {
-      let { model, apiVer } = await temuGetGeminiModelInfo(key, true);
-      let url = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-      let res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Reply with the single word: OK' }] }],
-          generationConfig: { maxOutputTokens: 10, temperature: 0 }
-        })
-      });
-      let data = await res.json();
-      if (data.error) {
-        const m = (data.error.message || '').match(/use\s+models\/([a-zA-Z0-9\.\-_]+)/i);
-        if (m && m[1]) {
-          model = m[1];
-          detectedGeminiModel = model;
-          url = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-          res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: 'Reply with the single word: OK' }] }],
-              generationConfig: { maxOutputTokens: 10, temperature: 0 }
-            })
-          });
-          data = await res.json();
-        }
-      }
-
-      if (data.error) throw new Error(data.error.message || 'API rejected request');
-      if (st) {
-        st.textContent = `✓ Connected successfully! Active Model: ${model}`;
-        st.className = 'temu-inline-msg ok';
-      }
-      toast(`✓ Gemini Connected! (${model})`, 'ok');
-    }
-  } catch (err) {
-    if (st) {
-      st.textContent = '✗ Connection failed: ' + err.message;
-      st.className = 'temu-inline-msg bad';
-    }
-    toast('API error: ' + err.message, 'bad');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-function temuAutoFixAll() {
-  if (!TemuCheck || !TemuCheck.items) return;
-  const { items, cfg } = TemuCheck;
-  const defaultWeight = parseFloat(cfg.default_weight) || 1.4;
-  const defaultProf = Object.values(cfg.category_profiles || {})[0] || {};
-  const defaultCat = defaultProf.category_keyword || '';
-  const defaultAttrs = defaultProf.keyword_attributes || defaultProf.attributes || '';
-  let fixedCount = 0;
-
-  items.forEach(it => {
-    let touched = false;
-    // 1. Strip banned words & IP terms
-    const cleanT = temuCleanTitle(it.title, cfg);
-    if (cleanT !== it.title) {
-      it.title = cleanT;
-      touched = true;
-    }
-
-    // 2. Trim title if > 120 chars
-    if (it.title && it.title.length > 120) {
-      let t = it.title.slice(0, 120);
-      const sp = t.lastIndexOf(' ');
-      if (sp > 95) t = t.slice(0, sp);
-      it.title = t.trim();
-      touched = true;
-    }
-
-    // 3. Fix missing weight
-    const wt = parseFloat(it.weight);
-    if (!wt || wt <= 0) {
-      it.weight = defaultWeight;
-      it.wsrc = 'default';
-      touched = true;
-    }
-
-    // 4. Fallback category & attributes if none
-    if (!it.category_keyword && defaultCat) {
-      it.category_keyword = defaultCat;
-      if (defaultAttrs && !it.keyword_attributes) {
-        it.keyword_attributes = typeof defaultAttrs === 'string' ? defaultAttrs : JSON.stringify(defaultAttrs);
-      }
-      touched = true;
-    }
-
-    if (touched) fixedCount++;
-  });
-
-  temuCheckRender(items, TemuCheck.skipped, cfg);
-
-  // Auto-uncheck unfixable items (e.g. no images or no price)
-  let unch = 0;
-  items.forEach((it, i) => {
-    const flags = temuCheckFlags(it, cfg);
-    if (flags.some(f => f.k === 'bad')) {
-      const chk = document.querySelector(`#temuCheckList .tck-row[data-i="${i}"] .tck-on`);
-      if (chk && chk.checked) { chk.checked = false; unch++; }
-    }
-  });
-  if (unch) temuCheckSummary();
-
-  toast(`⚡ Auto-fixed ${fixedCount} product${fixedCount === 1 ? '' : 's'}!${unch ? ` (${unch} unfixable unselected)` : ''}`, 'ok');
-}
-function temuCheckClose() { const c = $('temuCheckCard'); if (c) { c.hidden = true; c.style.display = 'none'; } const acts = document.querySelector('.temu-actions'); if (acts) acts.style.display = ''; TemuCheck = null; temuReviewMode(false); try { chrome.storage.local.remove('zh_saved_temu_session'); } catch (_) {} }
-
-// Returns array of checked items with live title/price/weight values read from UI
-function temuCheckSelected() {
-  if (!TemuCheck) return [];
-  const { items } = TemuCheck;
-  const sel = [];
-  document.querySelectorAll('#temuCheckList .tck-row').forEach(row => {
-    const i = +row.dataset.i, it = items[i]; if (!it) return;
-    const on = row.querySelector('.tck-on')?.checked;
-    if (!on) return;
-    const titleVal = row.querySelector('.tck-title-inp')?.value?.trim();
-    if (titleVal) it.title = titleVal;
-    const px = parseFloat(row.querySelector('.tck-price')?.value);
-    if (isFinite(px) && px > 0) it.base = Math.round(px * 100) / 100;
-    const wtVal = parseFloat(row.querySelector('.tck-weight')?.value);
-    if (isFinite(wtVal) && wtVal > 0) it.weight = Math.round(wtVal * 10) / 10;
-    const cat = row.querySelector('.tck-cat')?.value;
-    if (cat) it.category_keyword = cat;
-    sel.push(it);
-  });
-  return sel;
-}
-
-// v10.3.2 — review mode: upar ke store/template/pricing cards ek line mein simat jate hain, products upar aa jate hain
-function temuReviewMode(on) {
-  const m = $('temuModal'); if (!m) return;
-  m.classList.toggle('temu-review-mode', !!on);
-  if (!on) m.classList.remove('temu-review-expanded');
-  const bar = $('temuReviewCompact'); if (bar) bar.hidden = !on;
-  if (on) temuReviewCompactText();
-}
-function temuReviewCompactText() {
-  const t = $('temuReviewCompactTxt'); if (!t) return;
-  const st = temuActiveStoreName() || 'store?';
-  const tpl = temuActiveStore()?.templateB64 ? 'template ✓' : 'template ✗';
-  const px = $('tgPx')?.value || temuGetCfg().price_multiplier || '';
-  const srcTxt = $('temuSource')?.selectedOptions?.[0]?.textContent || '';
-  t.textContent = `● ${st} · ${tpl} · Price ×${px} · ${srcTxt}`;
-}
-// Review table se selected products + user ki edits (title / price / weight / category) uthao
-function temuCheckCollect() {
-  if (!TemuCheck) return null;
-  const { items, cfg } = TemuCheck;
-  const skipped = TemuCheck.skipped.slice();
-  const sel = [];
-  document.querySelectorAll('#temuCheckList .tck-row').forEach(row => {
-    const i = +row.dataset.i, it = items[i]; if (!it) return;
-    const on = row.querySelector('.tck-on')?.checked;
-    const titleVal = row.querySelector('.tck-title-inp')?.value?.trim();
-    if (titleVal) it.title = titleVal;
-    const px = parseFloat(row.querySelector('.tck-price')?.value);
-    if (isFinite(px) && px > 0 && px !== it.base) {
-      it.base = Math.round(px * 100) / 100;
-      let l = it.base * (cfg.list_price_multiplier || 1.25);
-      if (cfg.price_round_to_99) l = Math.floor(l) + 0.99;
-      it.list = Math.round(l * 100) / 100;
-    }
-    const wtVal = parseFloat(row.querySelector('.tck-weight')?.value);
-    if (isFinite(wtVal) && wtVal > 0 && wtVal !== it.weight) {
-      it.weight = Math.round(wtVal * 10) / 10;
-    }
-    const cat = row.querySelector('.tck-cat')?.value ?? it.category_keyword;
-    if (cat !== it.category_keyword) { it.category_keyword = cat; if (cat) it.warn = (it.warn || []).filter(w => w !== 'NO_CATEGORY_PROFILE'); }
-    if (on) sel.push(it); else skipped.push('unchecked in review table: ' + (it.title || '').slice(0, 40));
-  });
-  return { sel, skipped, items, cfg };
-}
-// Review se sirf file (upload nahi): 'temu' = Temu template .xlsx, 'simple' = ZHunter title/link/price sheet
-async function temuReviewExport(kind) {
-  const c = temuCheckCollect(); if (!c) return;
-  const { sel, skipped } = c;
-  if (!sel.length) { toast('Koi product select nahi', 'warn'); return; }
-  if (kind === 'simple') {
-    const rows = TemuCheck.rows || [];
-    const urls = new Set(sel.map(it => String(it.url || '').split('#')[0].toLowerCase()));
-    let picked = rows.filter(r => urls.has(String(r.url || '').split('#')[0].toLowerCase()));
-    if (!picked.length) picked = sel.map(it => ({ title: it.title, url: it.url, price: it.source_price ?? it.base, brand: it.brand, images: it.images || [], platform: it.platform || '' }));
-    // review mein edit kiya hua title sheet mein bhi jaye
-    const byUrl = new Map(sel.map(it => [String(it.url || '').split('#')[0].toLowerCase(), it]));
-    picked = picked.map(r => { const it = byUrl.get(String(r.url || '').split('#')[0].toLowerCase()); return it && it.title ? { ...r, title: it.title } : r; });
-    downloadXlsxRich(buildRichSheetData(picked), buildFilename('xlsx', '_temu_review'));
-    toast(`ZHunter sheet — ${picked.length} products`, 'ok');
-    return;
-  }
-  await temuRunExport({ forUpload: false, items: sel, skipped });
-}
-async function temuCheckGo() {
-  const c = temuCheckCollect(); if (!c) return;
-  const { sel, skipped, items, cfg } = c;
-  if (!sel.length) { toast('Koi product select nahi', 'warn'); return; }
-
-  // Confirmation if any items are skipped or overweight
-  const unselCount = items.length - sel.length;
-  const maxWt = parseFloat(cfg?.max_weight_lb) || 0;
-  const heavyCount = sel.filter(it => it.warn?.includes('OVERWEIGHT') || (maxWt > 0 && it.weight > maxWt)).length;
-
-  if (unselCount > 0 || heavyCount > 0) {
-    const msg = [];
-    if (unselCount > 0) msg.push(`⚠️ ${unselCount} products unselect hain (skip ho jayenge).`);
-    if (heavyCount > 0) msg.push(`⚖️ ${heavyCount} selected products limit (${maxWt} lb) se zyada heavy hain.`);
-    msg.push(`\nKya aap baaqi ${sel.length} products Temu par upload karna chahte hain?`);
-    if (!confirm(msg.join('\n'))) return;
-  }
-
-  temuCheckClose();
-  // v10.3.2: Excel banne ke doran bhi Stop dikhe
-  TemuUploadCancelled = false; TemuUploading = true; temuStopShow(true);
-  temuStepsReset(true); temuStep('prep', 'ok', `${sel.length} products`); temuStep('export', 'run', 'Building .xlsx…');
-  try { await temuRunExport({ forUpload: true, items: sel, skipped }); } finally { if (!TemuLast || TemuUploadCancelled) temuStopShow(false); }
-  if (TemuUploadCancelled) { temuStep('export', 'bad', 'Cancelled'); TemuUploading = false; return; }
-  if (!TemuLast) { temuStep('export', 'bad', 'fail'); TemuUploading = false; return; }
-  TemuLast.fromCheck = true;
-  await temuAutoUpload({ skipCheck: true });
-}
-// v10.3.2 — Stop button (pipeline header) + purana Stop Upload button ek saath
-function temuStopShow(on) {
-  const sb = $('temuStopBtn'); if (sb) sb.hidden = !on;
-  const cb = $('temuCancelUploadBtn'); if (cb) cb.style.display = on ? 'inline-flex' : 'none';
-  const ab = $('temuAutoBtn'); if (ab) ab.style.display = on ? 'none' : 'inline-flex';
-}
-async function temuStopNow() {
-  TemuUploadCancelled = true;
-  TemuUploading = false;
-  temuStopShow(false);
-  temuStep('upload', 'bad', 'Cancelled');
-  const rep = $('temuReport'); if (rep) rep.textContent += '\n🛑 Stop dabaya — upload rok raha hoon…';
-  try {
-    const r = await msg({ action: 'TEMU_ABORT_UPLOAD' });
-    if (rep && r?.note) rep.textContent += '\n' + r.note;
-  } catch (_) {}
-  toast('Upload cancelled', 'warn');
-}
-
-// v9.8.1: Upload history mein row na mile to tab reload kar ke ek baar dobara try (Refresh button kabhi table update nahi karta)
-// v9.8.3 — upload confirm time-out ke baad Upload history row ko poll karo (max 10 min, har 15s)
-async function temuLateConfirm(result, rep) {
-  const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
-  const expectStore = temuActiveStoreName() || '';
-  let tabId = result?.tabId ?? null;
-  if (tabId == null) { const all = await chrome.tabs.query({ url: ['https://seller.temu.com/upload-goods-multiple.html*'] }); if (all[0]) tabId = all[0].id; }
-  if (tabId == null) { add('• Temu upload tab nahi mila — late confirm mumkin nahi'); return null; }
-  add('⏳ Upload history se confirm kar raha hoon (10 min tak, har 15s)…');
-  const t0 = Date.now(); let lastLine = '', misses = 0, lastReload = 0;
-  while (Date.now() - t0 < 600000) {
-    const r = await new Promise(res => chrome.tabs.sendMessage(tabId, { action: 'TEMU_CHECK_UPLOAD', uploadId: result?.uploadId || null, notSig: result?.beforeSig || null, expectStore }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
-    if (r?.wrongStore) { (r.report || []).forEach(add); return null; }
-    if (r?.success && r.done) { (r.report || []).forEach(add); return r; }
-    // v9.10.2: table kabhi stale reh jati hai (Refresh register na ho) — 3 baar row na mile to tab reload (2 min mein ek baar)
-    if (r?.noRow || !r?.success) { misses++; if (misses >= 3 && Date.now() - lastReload > 120000) { misses = 0; lastReload = Date.now(); add('• Row nahi mil rahi — Temu tab reload kar raha hoon…'); await new Promise(rs => chrome.tabs.reload(tabId, {}, () => { void chrome.runtime.lastError; rs(); })); await new Promise(rs => setTimeout(rs, 4000)); await new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(tabId, { action: 'PING' }, x => { if (!chrome.runtime.lastError && x?.ready) return res(true); if (++n > 30) return res(false); setTimeout(ping, 500); }); ping(); }); continue; } } else misses = 0;
-    const line = (r?.report || []).join(' ') + ` · ${Math.round((Date.now() - t0) / 1000)}s`;
-    if (rep && line !== lastLine) { if (lastLine) rep.textContent = rep.textContent.replace('\n' + lastLine, ''); add(line); lastLine = line; }
-    await new Promise(r => setTimeout(r, 15000));
-  }
-  add('• 10 min mein bhi confirm nahi hua — Temu tab check karein; complete ho jaye to "Listed mark karo" daba dein');
-  return null;
-}
-// v9.14.1 — Temu tab se rabta: ping; na mile to (extension reload ke baad content script nahi hota) tab reload → 30s tak ping
-async function temuEnsureTabReady(tabId, add) {
-  const ping = (ms, delay) => new Promise(res => { let n = 0, max = Math.ceil(ms / 500); const p = () => chrome.tabs.sendMessage(tabId, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > max) return res(false); setTimeout(p, 500); }); setTimeout(p, delay); });
-  if (await ping(3000, 50)) return true;
-  add && add(`• Tab ${tabId}: page se rabta nahi — reload kar raha hoon…`);
-  await new Promise(r => chrome.tabs.reload(tabId, {}, () => { void chrome.runtime.lastError; r(); }));
-  const ok = await ping(30000, 3000);
-  if (ok) await new Promise(r => setTimeout(r, 2000));
-  return ok;
-}
-async function temuRetryAfterReload(tabId, message, add) {
-  try {
-    add && add('• Row nahi mili — Temu tab reload kar ke dobara dekh raha hoon…');
-    await new Promise(r => chrome.tabs.reload(tabId, {}, () => { void chrome.runtime.lastError; r(); }));
-    await new Promise(r => setTimeout(r, 2500));
-    const ok = await new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(tabId, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > 40) return res(false); setTimeout(ping, 500); }); ping(); });
-    if (!ok) return null;
-    await new Promise(r => setTimeout(r, 1500));
-    return await new Promise(res => chrome.tabs.sendMessage(tabId, message, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
-  } catch (_) { return null; }
-}
-const temuRowMissing = r => (r?.report || []).some(t => /upload nahi mila/i.test(t));
-
-// ── v9.8.0 Pipeline step: upload-history row → "Complete product infomation" → wait for edit page → Fix drafts ──
-// ── v9.14.0 "Missing required attributes" page (upload ke errors) — open + fill + submit ──
-const TEMU_ATTR_URL = 'https://seller.temu.com/product-action.html?reform_type=excel_publish_complete_attributes';
-async function temuFillAttributes() {
-  const rep = $('temuReport');
-  const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
-  try {
-    const cfg = temuGetCfg(); const rules = temuDraftRules(cfg);
-    const defaults = (cfg.draft_default_attributes && typeof cfg.draft_default_attributes === 'object') ? cfg.draft_default_attributes : {};
-    let tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/product-action.html*', 'https://seller.temu.com/*products-excel-multiple-edit*'] });
-    let tab = tabs.find(t => t.active) || tabs[0] || null, created = false;
-    if (!tab) { tab = await chrome.tabs.create({ url: TEMU_ATTR_URL, active: true }); created = true; add('⏳ "Product action required" page khol raha hoon…'); }
-    else { try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {} }
-    const pingFor = (ms, delay) => new Promise(res => { let n = 0, max = Math.ceil(ms / 500); const ping = () => chrome.tabs.sendMessage(tab.id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > max) return res(false); setTimeout(ping, 500); }); setTimeout(ping, delay); });
-    let okP = await pingFor(created ? 30000 : 3000, created ? 2500 : 100);
-    if (!okP && !created) { add('⏳ Tab se rabta nahi — reload…'); await new Promise(r => chrome.tabs.reload(tab.id, {}, () => { void chrome.runtime.lastError; r(); })); okP = await pingFor(30000, 3000); created = true; }
-    if (!okP) { add('✗ Temu page se rabta nahi hua'); return false; }
-    if (created) await new Promise(r => setTimeout(r, 2500));
-    const isEditPage = (tab.url || '').includes('products-excel-multiple-edit');
-    add(isEditPage ? '⏳ Complete product details drafts check & submit kar raha hoon…' : '⏳ Missing attributes bhar raha hoon…');
-    const act = isEditPage ? 'TEMU_FIX_DRAFTS' : 'TEMU_FILL_ATTRS';
-    const r = await new Promise(res => chrome.tabs.sendMessage(tab.id, { action: act, rules, defaults, autoSubmit: cfg.draft_auto_submit !== false, expectStore: temuActiveStoreName() }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
-    (r?.report || []).forEach(add);
-    toast(r?.success ? `Attributes: ${r.changed || 0} set, ${r.submitted || 0} submitted${r.stillEmpty ? `, ${r.stillEmpty} baqi` : ''}` : 'Attributes fill fail — report dekhein', r?.success && !r.stillEmpty ? 'ok' : 'warn');
-    return !!(r?.success && !r.stillEmpty);
-  } catch (e) { add('✗ ' + (e?.message || e)); return false; }
-}
-async function temuOpenCompleteAndFix({ tabId = null, uploadId = null } = {}) {
-  const rep = $('temuReport');
-  const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
-  try {
-    const expectStore = temuActiveStoreName() || '';
-    const before = new Set((await chrome.tabs.query({ url: ['https://seller.temu.com/*products-excel-multiple-edit*'] })).map(t => t.id));
-    let cands = [];
-    if (tabId != null) { const t = await new Promise(r => chrome.tabs.get(tabId, x => r(chrome.runtime.lastError ? null : x))); if (t) cands.push(t); }
-    const all = await chrome.tabs.query({ url: ['https://seller.temu.com/upload-goods-multiple.html*'] });
-    all.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
-    for (const t of all) if (!cands.some(c => c.id === t.id)) cands.push(t);
-    if (!cands.length) { add('✗ Temu upload page ka tab nahi mila — "Fix drafts on Temu" khud dabayen'); return false; }
-    const pingOk = id => new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > 10) return res(false); setTimeout(ping, 400); }); ping(); });
-    let result = null, tab = null;
-    for (const t of cands) {
-      if (!(await pingOk(t.id)) && !(await temuEnsureTabReady(t.id, add))) continue; // v9.14.1 auto reload
-      // v9.10.1: tab saamne lao — background tab se Temu ka naya page (window.open) Chrome block kar deta hai
-      try { await chrome.tabs.update(t.id, { active: true }); await new Promise(r => setTimeout(r, 400)); } catch (_) {}
-      let r = await new Promise(res => chrome.tabs.sendMessage(t.id, { action: 'TEMU_OPEN_COMPLETE', uploadId, expectStore }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
-      if (r?.wrongStore) continue;
-      if (!r?.success && temuRowMissing(r)) { (r.report || []).forEach(add); const r2 = await temuRetryAfterReload(t.id, { action: 'TEMU_OPEN_COMPLETE', uploadId, expectStore }, add); if (r2) r = r2; }
-      result = r; tab = t; break;
-    }
-    (result?.report || []).forEach(add);
-    if (result?.noDraftsNeeded) {
-      add('✓ Sab products already complete hain (0 errors) — draft fix ki zaroorat nahi.');
-      temuStep('fix', 'ok', 'Clean (0 errors)');
-      return true;
-    }
-    if (!result?.success) { add('• Drafts khud complete nahi ho sake — Temu par "Complete product infomation" dabakar phir "Fix drafts on Temu" dabayen'); return false; }
-    // edit page: nayi tab ya same tab — dono handle
-    let retried = false;
-    const editTab = await new Promise(res => {
-      const t0 = Date.now();
-      const poll = async () => {
-        const list = await chrome.tabs.query({ url: ['https://seller.temu.com/*products-excel-multiple-edit*'] });
-        const fresh = list.find(t => !before.has(t.id)) || list.find(t => t.id === tab.id) || null;
-        if (fresh && fresh.status === 'complete') return res(fresh);
-        // v10.1.1: 8s baad bhi kuch nahi khula — popup block? dobara dabao; href ho to extension khud tab khole
-        if (!fresh && !retried && Date.now() - t0 > 8000) {
-          retried = true;
-          if (result?.href) { add('• Page khud nahi khula — link se tab khol raha hoon'); try { await chrome.tabs.create({ url: result.href, active: true }); } catch (_) {} }
-          else { add('• Page khud nahi khula — button dobara daba raha hoon'); try { await new Promise(r2 => chrome.tabs.sendMessage(tab.id, { action: 'TEMU_OPEN_COMPLETE', uploadId, expectStore }, () => { void chrome.runtime.lastError; r2(); })); } catch (_) {} }
-        }
-        if (Date.now() - t0 > 30000) return res(fresh);
-        setTimeout(poll, 700);
-      };
-      poll();
-    });
-    if (!editTab) { add('✗ "Complete product details" page 30s mein nahi khula — Temu par "Complete product infomation" khud dabayen, phir "Temu par complete karo" dabayen'); if (result?.btnHtml) { try { chrome.storage.local.set({ temuDebugCompleteBtn: result.btnHtml }); } catch (_) {} } return false; }
-    try { await chrome.tabs.update(editTab.id, { active: true }); } catch (_) {}
-    await new Promise(r => setTimeout(r, 1500)); // page render
-    add('⏳ Fix drafts chal raha hai…');
-    await temuFixDrafts({ noChain: true });
-    return true;
-  } catch (e) { add('✗ ' + (e?.message || e)); return false; }
 }
 
 // ── v9.0.0 Fix drafts: drive Temu's "Complete product details" page ──
@@ -12456,10 +9147,7 @@ function temuDraftRules(cfg) {
   }
   return rules;
 }
-async function temuFixDrafts(opts = {}) {
-  { // v9.14.0: agar "Product action required" (missing attributes) page saamne khula hai to wahi bharo
-    try { const [act] = await chrome.tabs.query({ active: true, currentWindow: true }); if (act && /seller\.temu\.com\/product-action\.html/.test(act.url || '')) return temuFillAttributes(); } catch (_) {}
-  }
+async function temuFixDrafts() {
   const rep = $('temuReport');
   const say = t => { if (rep) rep.textContent = t; };
   const cfg = temuGetCfg();
@@ -12471,19 +9159,9 @@ async function temuFixDrafts(opts = {}) {
     const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/products-excel-multiple-edit.html*', 'https://seller.temu.com/*products-excel-multiple-edit*'] });
     let tab = tabs.find(t => t.active) || tabs[0];
     if (!tab) {
-      // v9.8.3: edit page khula nahi → khud Upload history se "Complete product infomation" dabao (pehle sirf upload page khol kar ruk jata tha)
-      if (opts.noChain) { say('✗ "Complete product details" page nahi khula — Temu Upload history mein "Complete product infomation" dabayen, phir "Fix drafts on Temu".'); return; }
-      say('"Complete product details" page khula nahi — Upload history se khud "Complete product infomation" daba raha hoon…');
-      const ups = await chrome.tabs.query({ url: ['https://seller.temu.com/upload-goods-multiple.html*'] });
-      let up = ups.find(t => t.active) || ups[0] || null;
-      if (!up) {
-        up = await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
-        const okPing = await new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(up.id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > 60) return res(false); setTimeout(ping, 500); }); setTimeout(ping, 1500); });
-        if (!okPing) { say('✗ Temu upload page 30s mein load nahi hua — page khulne par dobara "Fix drafts on Temu" dabayen'); return; }
-        await new Promise(r => setTimeout(r, 2000));
-      }
-      const done = await temuOpenCompleteAndFix({ tabId: up.id, uploadId: TemuLast?.uploadId || null });
-      if (!done) toast('Drafts complete nahi ho sake — report dekhein', 'warn');
+      say('"Complete product details" page khula nahi hai.\n\n1) Temu → Add products via upload → Upload history\n2) "Complete product information" button dabayen\n3) Phir yahan dobara "Fix drafts" dabayen.');
+      await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
+      toast('Temu upload page khol diya — "Complete product information" dabayen', 'warn');
       return;
     }
     await chrome.tabs.update(tab.id, { active: true });
@@ -12497,7 +9175,7 @@ async function temuFixDrafts(opts = {}) {
       });
       ping();
     });
-    if (!ready && !(await temuEnsureTabReady(tab.id, t => say((rep?.textContent || '') + '\n' + t)))) { say('✗ Temu page se rabta nahi hua — page reload kar ke dobara try karein'); return; }
+    if (!ready) { say('✗ Temu page se rabta nahi hua — page reload kar ke dobara try karein'); return; }
     const result = await new Promise(res => chrome.tabs.sendMessage(tab.id,
       { action: 'TEMU_FIX_DRAFTS', rules, defaults, autoSubmit: cfg.draft_auto_submit !== false, expectStore: temuActiveStoreName() },
       r => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : r)));
@@ -12530,10 +9208,9 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false } 
     const pingOk = id => new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > 10) return res(false); setTimeout(ping, 400); }); ping(); });
     let result = null, tab = null;
     for (const t of cands) {
-      if (!(await pingOk(t.id)) && !(await temuEnsureTabReady(t.id, add))) { add(`• Tab ${t.id}: page se rabta nahi`); continue; } // v9.14.1 auto reload
-      let r = await new Promise(res => chrome.tabs.sendMessage(t.id, { action: 'TEMU_READ_FAILED', uploadId, expectStore }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
+      if (!(await pingOk(t.id))) { add(`• Tab ${t.id}: page se rabta nahi (reload karein)`); continue; }
+      const r = await new Promise(res => chrome.tabs.sendMessage(t.id, { action: 'TEMU_READ_FAILED', uploadId, expectStore }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
       if (r?.wrongStore) { add(`• Tab "${r.mall}" skip (active store: ${expectStore})`); continue; }
-      if (uploadId && temuRowMissing(r)) { (r.report || []).forEach(add); const r2 = await temuRetryAfterReload(t.id, { action: 'TEMU_READ_FAILED', uploadId, expectStore }, add); if (r2) r = r2; }
       result = r; tab = t; break;
     }
     if (!result) { add(`✗ Store "${expectStore}" ka "Add products via upload" tab nahi mila — us store ka Temu upload page kholein`); return null; }
@@ -12546,26 +9223,14 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false } 
     const byTitle = new Map(items.map(it => [temuNormTitle(it.title), it]));
     const dupItems = [];
     for (const f of failed) {
-      const lineIdx = f.line ? (parseInt(f.line, 10) - 5) : -1;
-      const itByLine = (lineIdx >= 0 && lineIdx < items.length) ? items[lineIdx] : null;
-      const it = (f.name ? byTitle.get(temuNormTitle(f.name)) : null) || itByLine || (f.name ? items.find(it => temuNormTitle(it.title).startsWith(temuNormTitle(f.name).slice(0, 40))) : null);
-      const prodName = (it?.title || f.name || `Line ${f.line || '?'}` || f.goodsId || 'Product');
-      let explainTag = '';
-      if (f.duplicate) {
-        explainTag = `⚠️ DUPLICATE SKU — Store par pehle se mojood hai` + (f.dupGoodsId ? ` (Goods ID: ${f.dupGoodsId})` : '') + `\n  → Is product mein attributes ki koi kami nahi hai. Pehle se listed hone ki wajah se draft bana.`;
-        if (it) dupItems.push(it);
-      } else if (f.missingAttributes) {
-        explainTag = `⚠️ MISSING ATTRIBUTES — ${f.reason || 'Attributes required'}\n  → Temu par "Complete product details" se fill karein ya profile mein attributes likhein.`;
-      } else if (f.priceIssue) {
-        explainTag = `⚠️ PRICE ISSUE — ${f.reason}\n  → Price Temu limits se bahar hai.`;
-      } else {
-        explainTag = `⚠️ ${f.status || 'Draft'}: ${f.reason || 'Unknown error'}`;
-      }
-      add(`• ${prodName.slice(0, 60)}:\n  ${explainTag}`);
+      const it = byTitle.get(temuNormTitle(f.name)) || items.find(it => temuNormTitle(it.title).startsWith(temuNormTitle(f.name).slice(0, 40)));
+      const tag = f.duplicate ? 'DUPLICATE — store mein pehle se hai' + (f.dupGoodsId ? ` (Goods ${f.dupGoodsId})` : '') : f.reason;
+      add(`✗ ${f.name.slice(0, 55)} → ${tag}${it ? '' : '  (is export ke items mein match nahi)'}`);
+      if (f.duplicate && it) dupItems.push(it);
     }
     if (dupItems.length) {
       await temuMarkListed(dupItems);
-      add(`✓ ${dupItems.length} duplicate product(s) listed-history mein mark ho gaye — agli export mein khud skip honge.`);
+      add(`✓ ${dupItems.length} duplicate product(s) listed-history mein mark — agli export mein skip honge`);
       temuUpdateSrcInfo();
     }
     const other = failed.filter(f => !f.duplicate).length;
@@ -12582,173 +9247,27 @@ async function temuHistAdd(entry) {
   await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list.slice(0, 100) }, r));
   temuRenderHistory();
 }
-// ── v9.9.0 Daily dashboard: aaj kitne listed (sab stores), uploads, errors, target progress, 7-din strip ──
-// Listed = temuListed entries (key "store|sid", d = ISO date jis din mark hua); uploads/errors = temuUploadHistory (aaj ke 'upload' records).
-const temuDayKey = (d) => new Date(d).toISOString().slice(0, 10);
-async function temuDashTarget() { return await new Promise(r => chrome.storage.local.get('temuDailyTarget', x => { const v = parseInt(x?.temuDailyTarget, 10); r(v > 0 ? v : 50); })); }
-async function temuDashRender(list) {
-  const root = $('temuDash'); if (!root) return;
-  try {
-    if (!list) list = await temuHistGet();
-    const target = await temuDashTarget();
-    const today = temuDayKey(Date.now());
-    const perDay = {}, perStore = {};
-    for (const [k, v] of Object.entries(temuListedMap())) {
-      const d = v?.d; if (!d) continue;
-      perDay[d] = (perDay[d] || 0) + 1;
-      if (d === today) { const st = k.split('|')[0] || '—'; perStore[st] = (perStore[st] || 0) + 1; }
-    }
-    const listed = perDay[today] || 0;
-    let uploads = 0, errors = 0;
-    for (const hh of list) { if (hh.kind !== 'upload' || temuDayKey(hh.t) !== today) continue; uploads++; errors += +hh.errors || 0; }
-    const left = Math.max(0, target - listed);
-    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
-    set('temuDashListed', listed); set('temuDashUploads', uploads); set('temuDashErrors', errors); set('temuDashLeft', left);
-    try { hdrStoreRender(); } catch (_) {} // v9.10.0
-    { const el = $('temuDashDate'); if (el) el.textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }); }
-    { const ti = $('temuDashTarget'); if (ti && document.activeElement !== ti) ti.value = String(target); }
-    { const f = $('temuDashFill'); if (f) { const pct = Math.min(100, Math.round(listed / target * 100)); f.style.width = pct + '%'; f.classList.toggle('done', listed >= target); f.title = `${listed} / ${target} (${pct}%)`; } }
-    { const el = $('temuDashStores'); if (el) { const ents = Object.entries(perStore).sort((a, b) => b[1] - a[1]); el.innerHTML = ents.length ? ents.map(([st, n]) => `<span class="temu-dash-store"><b>${n}</b> ${esc(st)}</span>`).join('') : '<span class="temu-dash-none">Aaj abhi kuch listed nahi</span>'; } }
-    { const el = $('temuDashWeek'); if (el) {
-        const days = []; for (let i = 6; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); days.push({ k: temuDayKey(d), lbl: d.toLocaleDateString(undefined, { weekday: 'narrow' }), n: perDay[temuDayKey(d)] || 0 }); }
-        const mx = Math.max(target, ...days.map(x => x.n), 1);
-        el.innerHTML = days.map(x => `<div class="temu-dash-day${x.k === today ? ' today' : ''}${x.n >= target ? ' hit' : ''}" title="${x.k}: ${x.n} listed"><div class="temu-dash-col"><div class="temu-dash-colfill" style="height:${Math.max(x.n ? 6 : 0, Math.round(x.n / mx * 100))}%"></div></div><span class="temu-dash-n">${x.n || ''}</span><span class="temu-dash-d">${x.lbl}</span></div>`).join('');
-    } }
-  } catch (e) { try { console.warn('temuDashRender', e); } catch (_) {} }
-}
-let TemuHistStoreFilter = 'all';
-let TemuHistStatusFilter = 'all';
-let TemuHistSearchQuery = '';
-
 async function temuRenderHistory() {
   const box = $('temuHistList'); if (!box) return;
   const list = await temuHistGet();
-  temuDashRender(list); // v9.9.0
   { const c = $('temuHistCount'); if (c) c.textContent = list.length ? String(list.length) : ''; }
-
-  // Bind live search input once
-  const hSearchInp = $('temuHistSearch');
-  if (hSearchInp && !hSearchInp.dataset.bound) {
-    hSearchInp.dataset.bound = '1';
-    hSearchInp.addEventListener('input', () => {
-      TemuHistSearchQuery = hSearchInp.value.trim();
-      const clr = $('temuHistSearchClear');
-      if (clr) clr.hidden = !TemuHistSearchQuery;
-      temuRenderHistory();
-    });
-  }
-
-  // Populate dynamic store filter pills
-  const storePillsWrap = $('temuHistStoreFilters');
-  if (storePillsWrap) {
-    const uniqueStores = [...new Set(list.map(x => x.store).filter(Boolean))];
-    let storeBtns = `<button type="button" class="thist-store-pill${TemuHistStoreFilter === 'all' ? ' active' : ''}" data-sfilter="all">All Stores</button>`;
-    uniqueStores.forEach(s => {
-      storeBtns += `<button type="button" class="thist-store-pill${TemuHistStoreFilter === s ? ' active' : ''}" data-sfilter="${esc(s)}">${esc(s)}</button>`;
-    });
-    storePillsWrap.innerHTML = storeBtns;
-  }
-
-  // Filter list
-  const filtered = list.filter(h => {
-    if (TemuHistStoreFilter !== 'all' && (h.store || '') !== TemuHistStoreFilter) return false;
-    if (TemuHistStatusFilter === 'ok') {
-      if (h.kind !== 'upload' || !h.confirmed || (h.errors && h.errors > 0)) return false;
-    } else if (TemuHistStatusFilter === 'err') {
-      const isErr = (h.kind === 'upload' && !h.confirmed) || (h.errors && h.errors > 0);
-      if (!isErr) return false;
-    } else if (TemuHistStatusFilter === 'export') {
-      if (h.kind !== 'export' && h.kind !== 'manual') return false;
-    }
-    if (TemuHistSearchQuery) {
-      const q = TemuHistSearchQuery.toLowerCase();
-      const inStore = String(h.store || '').toLowerCase().includes(q);
-      const inUploadId = String(h.uploadId || '').toLowerCase().includes(q);
-      const inSource = String(h.source || '').toLowerCase().includes(q);
-      const inItems = (h.items || []).some(it => 
-        String(it.sku || '').toLowerCase().includes(q) ||
-        String(it.title || '').toLowerCase().includes(q) ||
-        String(it.url || '').toLowerCase().includes(q)
-      );
-      if (!inStore && !inUploadId && !inSource && !inItems) return false;
-    }
-    return true;
-  });
-
   box.innerHTML = '';
-  for (const h of filtered) {
+  for (const h of list) {
     const d = new Date(h.t);
     const when = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    let typeClass = 'thist-type-ok';
-    if (h.kind === 'export' || h.kind === 'manual') {
-      typeClass = 'thist-type-export';
-    } else if (!h.confirmed || (h.errors && h.errors > 0)) {
-      typeClass = 'thist-type-bad';
-    }
-
+    const res = h.kind === 'export' ? 'Export file only (Temu par upload nahi hua)'
+      : h.kind === 'manual' ? 'Manually listed mark'
+      : h.confirmed ? `Upload confirmed${h.uploadId ? ' · ID ' + h.uploadId : ''}${h.added != null ? ` · ${h.added} added` : ''}${h.errors ? ` · ${h.errors} errors` : ''}`
+      : `Upload confirm NAHI hua${h.uploadId ? ' · ID ' + h.uploadId : ''}`;
     const el = document.createElement('div');
-    el.className = `temu-hist ${typeClass}`;
-    el.innerHTML = `
-      <div class="temu-hist-top">
-        <div class="thist-meta-left">
-          <span class="thist-store-badge"><span class="thist-sdot"></span>${esc(h.store || 'Store')}</span>
-          <span class="thist-time">${esc(when)}</span>
-          <span class="thist-count-badge">${h.n || (h.items || []).length} items</span>
-        </div>
-        <div class="temu-hist-acts">
-          <button class="btn btn-ghost btn-xs" type="button" data-act="list">List</button>
-          <button class="btn btn-ghost btn-xs" type="button" data-act="csv">CSV</button>
-        </div>
-      </div>
-      <div class="thist-badges-row">
-        ${h.added != null ? `<span class="thist-badge ok">✓ ${h.added} added</span>` : ''}
-        ${h.errors ? `<span class="thist-badge bad">⚠ ${h.errors} errors</span>` : ''}
-        ${h.skipped ? `<span class="thist-badge warn">${h.skipped} skipped</span>` : ''}
-        ${h.uploadId ? `<button type="button" class="thist-badge id thist-copy-id" data-copy="${esc(h.uploadId)}" title="Click to copy Upload ID">ID: ${esc(h.uploadId)} <svg class="i i-xs" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>` : ''}
-        ${h.kind === 'export' ? `<span class="thist-badge file">📁 Export File Only</span>` : ''}
-        ${h.kind === 'manual' ? `<span class="thist-badge file">Marked as listed</span>` : ''}
-        ${h.source ? `<span class="thist-meta-src">via ${esc(h.source)}</span>` : ''}
-      </div>
-      <div class="temu-hist-list">
-        <div class="thist-prod-rows">
-          ${(h.items || []).map((it, i) => `
-            <div class="thist-prod-row">
-              <span class="thist-pnum">#${i + 1}</span>
-              <span class="thist-psku">${esc(it.sku || '—')}</span>
-              <span class="thist-ptitle" title="${esc(it.title || '')}">${esc(it.title || 'Untitled')}</span>
-              ${it.base ? `<span class="thist-pprice">$${esc(it.base)}</span>` : ''}
-            </div>
-          `).join('')}
-          ${(h.skippedList || []).length ? `
-            <div class="thist-skipped-box">
-              <b>Skipped (${h.skippedList.length}):</b>
-              ${h.skippedList.map(x => `<div>• ${esc(x)}</div>`).join('')}
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `;
-
-    const copyBtn = el.querySelector('.thist-copy-id');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const idVal = copyBtn.dataset.copy;
-        if (idVal) {
-          navigator.clipboard.writeText(idVal).then(() => {
-            toast(`Upload ID copied: ${idVal}`, 'ok');
-          }).catch(() => {
-            toast('Failed to copy ID', 'warn');
-          });
-        }
-      });
-    }
-
+    el.className = 'temu-hist';
+    el.innerHTML = `<div class="temu-hist-top"><div><div class="temu-hist-title">${esc(when)} · ${esc(h.store || '—')} · ${h.n} products</div><div class="temu-hist-meta ${h.kind === 'upload' ? (h.confirmed && !h.errors ? 'ok' : (h.confirmed ? '' : 'bad')) : ''}">${esc(res)}${h.source ? ' · source: ' + esc(h.source) : ''}${h.skipped ? ' · ' + h.skipped + ' skipped' : ''}</div></div>
+      <div class="temu-hist-acts"><button class="btn btn-ghost btn-xs" type="button" data-act="list">List</button><button class="btn btn-ghost btn-xs" type="button" data-act="csv">CSV</button></div></div>
+      <div class="temu-hist-list">${(h.items || []).map((it, i) => esc(`${i + 1}. ${it.sku || ''}  ${it.title || ''}`)).join('\n')}${(h.skippedList || []).length ? '\n\nSKIPPED (' + h.skippedList.length + '):\n' + h.skippedList.map(x => esc('• ' + x)).join('\n') : ''}</div>`;
     el.querySelector('[data-act="list"]').addEventListener('click', () => el.classList.toggle('open'));
     el.querySelector('[data-act="csv"]').addEventListener('click', () => {
       const lines = [['SKU', 'Title', 'URL', 'Base Price', 'Variation'].join(',')].concat((h.items || []).map(it => [it.sku, it.title, it.url, it.base, it.variation].map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')));
-      zhSaveBlob(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' }), `temu_upload_${h.store || 'store'}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`);
+      zhSaveBlob(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }), `temu_upload_${h.store || 'store'}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`);
     });
     box.appendChild(el);
   }
@@ -12773,52 +9292,26 @@ function temuParseTemuFile(buf) {
   }
   return items.length ? items : null;
 }
-// v9.7.6: as-is Temu file mein bhi reference_link column khali karo (purani exports mein sourcing link tha)
-function temuStripRefLinks(buf) {
-  try {
-    const wb = XLSX.read(buf, { type: 'array', cellStyles: true });
-    const ws = wb.Sheets['Template'] || wb.Sheets[wb.SheetNames[0]]; if (!ws || !ws['!ref']) return { buf, n: 0 };
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    const cols = [];
-    for (let c = range.s.c; c <= range.e.c; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 2, c })]; if (cell && String(cell.v).trim() === 'reference_link') cols.push(c); }
-    if (!cols.length) return { buf, n: 0 };
-    let n = 0;
-    for (let r = 4; r <= range.e.r; r++) cols.forEach(c => { const a = XLSX.utils.encode_cell({ r, c }); if (ws[a] && ws[a].v !== '' && ws[a].v !== null && ws[a].v !== undefined) { delete ws[a]; n++; } });
-    if (!n) return { buf, n: 0 };
-    return { buf: XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true }), n };
-  } catch (e) { console.warn('temuStripRefLinks', e); return { buf, n: 0 }; }
-}
 async function temuImportSheet(file) {
   const rep = $('temuReport');
   const name = (file.name || '').toLowerCase();
   if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-    let buf = await file.arrayBuffer();
+    const buf = await file.arrayBuffer();
     const items = temuParseTemuFile(buf);
     if (items) {
-      // Temu file as-is: koi conversion nahi, wahi file upload hogi (sirf reference_link khali — v9.7.6)
-      const strip = temuStripRefLinks(buf); buf = strip.buf;
+      // Temu file as-is: koi conversion nahi, wahi file upload hogi
       TemuSheetRows = null;
       TemuLast = { bytes: buf, items, skipped: [], n: items.length, marked: false, asIs: true, name: file.name };
       const sel = $('temuSource');
       if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = `Temu file — ${file.name} (${items.length}) · as-is`; } sel.value = 'sheet'; }
-      { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Listed mark karo (${items.length})`; } }
+      { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${items.length} as listed`; } }
       temuUpdateSrcInfo();
-      if (rep) rep.textContent = `✓ Temu file: ${file.name} — ${items.length} products (as-is, koi conversion nahi; already-listed skip bhi nahi).${strip.n ? `\n${strip.n} reference_link (sourcing link) khali kar diye.` : ''}
+      if (rep) rep.textContent = `✓ Temu file: ${file.name} — ${items.length} products (as-is, koi conversion nahi; already-listed skip bhi nahi).
 Store check karein, phir "Export + Upload to Temu".
 ` + items.slice(0, 60).map(it => `${it.sku}  ${it.vtype}: ${it.color}  $${it.base}`).join('\n');
       toast(`Temu file ready — ${items.length} products, as-is upload`, 'ok');
       return;
     }
-  }
-  if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv')) { // v10.2.0 Store Copy (Temu Manage products → Download)
-    try {
-      const buf2 = await file.arrayBuffer(); const wb2 = XLSX.read(buf2, { type: 'array' }); const ws2 = wb2.Sheets[wb2.SheetNames[0]];
-      const rows2 = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: '' }).map(r => (r || []).map(c => String(c ?? '').trim()));
-      const sc = (typeof parseTemuStoreExport === 'function') ? parseTemuStoreExport(rows2) : null;
-      if (sc) { if (!sc.length) { if (rep) rep.textContent = '✗ Temu export mein koi product nahi'; return; }
-        await importStoreCopy(sc, file.name, (t) => { if (rep) rep.textContent = t + '\n\nAgla qadam: Bulk tab → tabs kholo / hunt karo → wapas Temu Export → "Export + Upload to Temu".'; });
-        return; }
-    } catch (_) {}
   }
   const parsed = await parseImportFile(file);
   if (!parsed) return;
@@ -12833,7 +9326,6 @@ Store check karein, phir "Export + Upload to Temu".
 }
 
 function temuUpdateTplStatus() {
-  try { temuSetupRender(); hdrStoreRender(); } catch (_) {} // v9.10.0
   const el = $('temuTplStatus'); if (!el) return;
   const store = temuActiveStore(); const n = temuActiveStoreName();
   const name = store?.templateName;
@@ -12850,284 +9342,35 @@ async function temuSaveCfg(cfg) {
   return temuSaveStores(stores);
 }
 
-// ── Temu Official Category Catalog & Smart Auto-Fill ────────
-const TEMU_OFFICIAL_CATALOG = [
-  // Home & Kitchen
-  { name: 'Bath Towels', cat: 'Bath Towels', match: ['bath towel', 'hand towel', 'washcloth', 'towel set', 'shower towel'], wt: 2, l: 12, w: 10, h: 4 },
-  { name: 'Bed Sheets', cat: 'Bed Sheets', match: ['bed sheet', 'fitted sheet', 'flat sheet', 'sheet set', 'bedsheet'], wt: 3, l: 14, w: 11, h: 3 },
-  { name: 'Pillows', cat: 'Pillows', match: ['pillow', 'pillowcase', 'memory foam pillow', 'bed pillow', 'cushion'], wt: 2.5, l: 16, w: 12, h: 5 },
-  { name: 'Blankets', cat: 'Blankets', match: ['blanket', 'throw blanket', 'fleece blanket', 'plush blanket', 'quilt'], wt: 3.5, l: 15, w: 12, h: 4 },
-  { name: 'Kitchen Utensils', cat: 'Kitchen Utensils', match: ['spatula', 'tongs', 'whisk', 'ladle', 'utensil set', 'cooking spoons'], wt: 1.5, l: 12, w: 5, h: 3 },
-  { name: 'Coffee Mugs', cat: 'Coffee Mugs', match: ['coffee mug', 'ceramic mug', 'tea cup', 'tumbler', 'insulated mug'], wt: 1.2, l: 6, w: 5, h: 5 },
-  { name: 'Water Bottles', cat: 'Water Bottles', match: ['water bottle', 'stainless steel bottle', 'sports bottle', 'flask', 'hydration'], wt: 1.1, l: 10, w: 4, h: 4 },
-  { name: 'Storage Bins', cat: 'Storage Bins', match: ['storage bin', 'organizer box', 'storage basket', 'closet organizer', 'storage container'], wt: 2, l: 14, w: 10, h: 8 },
-  { name: 'Cookware', cat: 'Cookware', match: ['frying pan', 'skillet', 'saucepan', 'pot', 'nonstick pan'], wt: 4, l: 14, w: 11, h: 4 },
-  { name: 'Curtains', cat: 'Curtains', match: ['curtains', 'drapes', 'window panel', 'blackout curtain', 'sheer curtains'], wt: 2.5, l: 12, w: 9, h: 3 },
-  { name: 'Candles', cat: 'Candles', match: ['scented candle', 'soy candle', 'aromatherapy candle', 'wax candle', 'jar candle'], wt: 1.2, l: 5, w: 5, h: 5 },
-
-  // Pets
-  { name: 'Dog Food', cat: 'Dog Food', match: ['dog food', 'puppy food', 'dry dog food', 'kibble', 'wet dog food'], wt: 5, l: 14, w: 10, h: 5 },
-  { name: 'Cat Food', cat: 'Cat Food', match: ['cat food', 'kitten food', 'dry cat food', 'wet cat food', 'cat pouches'], wt: 4, l: 12, w: 9, h: 4 },
-  { name: 'Dog Toys', cat: 'Dog Toys', match: ['dog toy', 'chew toy', 'puppy toy', 'squeaky toy', 'rope toy', 'dog ball'], wt: 0.8, l: 7, w: 4, h: 3 },
-  { name: 'Cat Toys', cat: 'Cat Toys', match: ['cat toy', 'catnip', 'feather wand', 'cat scratcher', 'laser toy'], wt: 0.6, l: 8, w: 4, h: 3 },
-  { name: 'Pet Beds', cat: 'Pet Beds', match: ['dog bed', 'cat bed', 'pet mat', 'calming bed', 'orthopedic dog bed'], wt: 3.5, l: 18, w: 14, h: 6 },
-  { name: 'Dog Collars & Leashes', cat: 'Collars & Leashes', match: ['dog collar', 'dog leash', 'dog harness', 'puppy collar', 'pet leash'], wt: 0.7, l: 8, w: 5, h: 2 },
-  { name: 'Pet Grooming', cat: 'Pet Grooming', match: ['dog shampoo', 'pet brush', 'nail clippers', 'grooming comb', 'deshedding tool'], wt: 1.2, l: 9, w: 4, h: 3 },
-
-  // Sports & Outdoors
-  { name: 'Golf Balls', cat: 'Standard Balls', match: ['golf ball', 'golf balls', 'dozen balls', 'chrome tour', 'tp5', 'pro v1'], wt: 1.4, l: 7.5, w: 5.2, h: 1.5, attrs: 'Rubber, 14 Years+' },
-  { name: 'Yoga Mats', cat: 'Yoga Mats', match: ['yoga mat', 'exercise mat', 'fitness mat', 'pilates mat', 'workout mat'], wt: 2.8, l: 24, w: 6, h: 6 },
-  { name: 'Resistance Bands', cat: 'Resistance Bands', match: ['resistance bands', 'exercise bands', 'workout bands', 'loop bands', 'pull up bands'], wt: 1, l: 8, w: 6, h: 2 },
-  { name: 'Fishing Lures', cat: 'Fishing Lures', match: ['fishing lure', 'crankbait', 'soft plastic bait', 'spinnerbait', 'tackle kit'], wt: 0.8, l: 7, w: 4, h: 2 },
-  { name: 'Camping Gear', cat: 'Camping', match: ['sleeping bag', 'camping tent', 'camp chair', 'headlamp', 'camping lantern'], wt: 4, l: 16, w: 8, h: 8 },
-
-  // Electronics & Accessories
-  { name: 'Phone Cases', cat: 'Phone Cases', match: ['phone case', 'iphone case', 'clear case', 'protective cover', 'silicone case'], wt: 0.3, l: 6.5, w: 3.5, h: 0.8 },
-  { name: 'Screen Protectors', cat: 'Screen Protectors', match: ['screen protector', 'tempered glass', 'privacy screen', 'camera lens protector'], wt: 0.2, l: 7, w: 4, h: 0.5 },
-  { name: 'Charging Cables', cat: 'Charging Cables', match: ['charging cable', 'usb-c cable', 'lightning cable', 'fast charger cord', 'type c cable'], wt: 0.3, l: 5, w: 4, h: 1 },
-  { name: 'Earbuds & Headphones', cat: 'Earbuds', match: ['wireless earbuds', 'bluetooth earbuds', 'headphones', 'earphones', 'airbuds'], wt: 0.5, l: 5, w: 4, h: 2 },
-  { name: 'Smartwatch Bands', cat: 'Watch Bands', match: ['watch band', 'smartwatch strap', 'apple watch band', 'silicone band'], wt: 0.2, l: 6, w: 2, h: 1 },
-
-  // Apparel & Footwear
-  { name: 'T-Shirts', cat: 'T-Shirts', match: ['t-shirt', 'tee shirt', 'graphic tee', 'crewneck tee', 'cotton shirt'], wt: 0.6, l: 11, w: 8, h: 1 },
-  { name: 'Hoodies & Sweatshirts', cat: 'Hoodies', match: ['hoodie', 'sweatshirt', 'pullover', 'fleece hoodie'], wt: 1.5, l: 13, w: 10, h: 3 },
-  { name: 'Socks', cat: 'Socks', match: ['socks', 'ankle socks', 'crew socks', 'athletic socks', 'compression socks'], wt: 0.5, l: 9, w: 4, h: 2 },
-  { name: 'Underwear', cat: 'Underwear', match: ['boxer briefs', 'boxers', 'panties', 'briefs', 'cotton underwear'], wt: 0.6, l: 8, w: 6, h: 2 },
-  { name: 'Baseball Caps', cat: 'Hats & Caps', match: ['baseball cap', 'snapback', 'trucker hat', 'sun hat', 'beanie'], wt: 0.4, l: 8, w: 7, h: 4 },
-  { name: 'Sunglasses', cat: 'Sunglasses', match: ['sunglasses', 'polarized sunglasses', 'shades', 'uv protection glasses'], wt: 0.3, l: 7, w: 3, h: 2 },
-  { name: 'Sneakers', cat: 'Sneakers', match: ['sneakers', 'running shoes', 'athletic shoes', 'walking shoes', 'tennis shoes'], wt: 2.2, l: 13, w: 8, h: 5 },
-  { name: 'Backpacks', cat: 'Backpacks', match: ['backpack', 'school bag', 'travel backpack', 'laptop bag', 'daypack'], wt: 1.8, l: 16, w: 12, h: 5 },
-
-  // Baby & Toys
-  { name: 'Baby Diapers', cat: 'Diapers', match: ['baby diapers', 'diaper pants', 'swaddlers', 'pull-ups', 'training pants'], wt: 4.5, l: 14, w: 10, h: 8 },
-  { name: 'Baby Wipes', cat: 'Baby Wipes', match: ['baby wipes', 'wet wipes', 'water wipes', 'sensitive wipes'], wt: 3, l: 9, w: 6, h: 5 },
-  { name: 'Action Figures', cat: 'Action Figures', match: ['action figure', 'collectible figure', 'toy model', 'superhero figure'], wt: 0.8, l: 9, w: 6, h: 3 },
-  { name: 'Stuffed Animals', cat: 'Plush Toys', match: ['stuffed animal', 'plush toy', 'teddy bear', 'plushie', 'squishy plush'], wt: 1, l: 10, w: 8, h: 6 },
-  { name: 'Puzzles & Games', cat: 'Puzzles', match: ['jigsaw puzzle', 'board game', 'puzzle 1000 pieces', 'card game'], wt: 1.6, l: 11, w: 9, h: 2 },
-
-  // Beauty & Personal Care
-  { name: 'Makeup Brushes', cat: 'Makeup Brushes', match: ['makeup brushes', 'brush set', 'cosmetic brush', 'foundation brush', 'blending brush'], wt: 0.5, l: 8, w: 4, h: 2 },
-  { name: 'Skin Care', cat: 'Skin Care', match: ['face cream', 'moisturizer', 'facial cleanser', 'serum', 'face lotion'], wt: 0.8, l: 6, w: 3, h: 3 },
-  { name: 'Hair Accessories', cat: 'Hair Accessories', match: ['hair clips', 'hair ties', 'scrunchies', 'headband', 'claw clips'], wt: 0.3, l: 6, w: 4, h: 2 },
-
-  // Automotive & Tools
-  { name: 'Car Seat Covers', cat: 'Seat Covers', match: ['car seat cover', 'seat protector', 'leather seat cover', 'front seat cover'], wt: 3.5, l: 14, w: 11, h: 5 },
-  { name: 'Car Phone Mount', cat: 'Car Mounts', match: ['car phone mount', 'dashboard mount', 'air vent holder', 'magnetic car mount'], wt: 0.4, l: 5, w: 4, h: 3 },
-  { name: 'Hand Tools', cat: 'Hand Tools', match: ['screwdriver set', 'pliers', 'wrench set', 'hammer', 'tape measure'], wt: 3, l: 12, w: 8, h: 3 },
-  { name: 'Cleaning Cloths', cat: 'Cleaning Cloths', match: ['microfiber cloth', 'cleaning towels', 'car drying towel', 'dusting cloth'], wt: 1, l: 10, w: 7, h: 3 }
-];
-
-function temuPopulateCatalogDropdown() {
-  const sel = $('tcCatalogSel');
-  if (!sel || sel.dataset.populated) return;
-  sel.dataset.populated = '1';
-  TEMU_OFFICIAL_CATALOG.forEach((c, idx) => {
-    const opt = document.createElement('option');
-    opt.value = idx;
-    opt.textContent = `🏷️ ${c.name} (${c.cat})`;
-    sel.appendChild(opt);
-  });
-  sel.addEventListener('change', () => {
-    const val = sel.value;
-    if (val === '') return;
-    const item = TEMU_OFFICIAL_CATALOG[+val];
-    if (item) temuLoadFromCatalogItem(item);
-    sel.value = '';
-  });
-}
-
-function temuLoadFromCatalogItem(item) {
-  const keyName = item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  if ($('tcName')) $('tcName').value = keyName;
-  if ($('tcCat')) $('tcCat').value = item.cat || item.name;
-  if ($('tcMatch')) $('tcMatch').value = (item.match || []).join(', ');
-  if ($('tcAttrs')) $('tcAttrs').value = item.attrs || '';
-  if ($('tcW')) $('tcW').value = item.wt || '';
-  if ($('tcL')) $('tcL').value = item.l || '';
-  if ($('tcWd')) $('tcWd').value = item.w || '';
-  if ($('tcH')) $('tcH').value = item.h || '';
-  const ft = $('tcFormTitle'); if (ft) ft.textContent = `Add category: ${item.name}`;
-  temuCatMsg(`✓ "${item.name}" catalog se load ho gaya! Ab "Save category" dabayein.`, 'ok');
-  toast(`✓ Temu category "${item.name}" loaded!`, 'ok');
-  try { $('temuCatForm').scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) {}
-}
-
-function temuAutoFillCategory(rawName) {
-  rawName = String(rawName || '').trim();
-  if (!rawName) rawName = $('tcName')?.value?.trim();
-  if (!rawName) {
-    temuCatMsg('Pehle category ka aam naam likhein (e.g. Dog Food ya Bedsheets)', 'bad');
-    $('tcName')?.focus();
-    return;
-  }
-  const q = rawName.toLowerCase();
-  const hit = TEMU_OFFICIAL_CATALOG.find(c => c.name.toLowerCase() === q || c.cat.toLowerCase() === q || c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
-  if (hit) {
-    temuLoadFromCatalogItem(hit);
-    return;
-  }
-
-  const cleanKey = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  const titleCase = rawName.split(/[\s_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-  const words = rawName.toLowerCase().split(/[\s_]+/).filter(w => w.length > 2);
-  const matchArr = [rawName.toLowerCase()];
-  if (words.length > 1) {
-    matchArr.push(words.join(' '));
-    words.forEach(w => { if (!matchArr.includes(w)) matchArr.push(w); });
-  }
-  if (rawName.toLowerCase().endsWith('s')) matchArr.push(rawName.toLowerCase().slice(0, -1));
-  else matchArr.push(rawName.toLowerCase() + 's');
-
-  if ($('tcName')) $('tcName').value = cleanKey;
-  if ($('tcCat')) $('tcCat').value = titleCase;
-  if ($('tcMatch')) $('tcMatch').value = [...new Set(matchArr)].slice(0, 6).join(', ');
-  if ($('tcW')) $('tcW').value = '1.4';
-  if ($('tcL')) $('tcL').value = '8';
-  if ($('tcWd')) $('tcWd').value = '6';
-  if ($('tcH')) $('tcH').value = '3';
-
-  temuCatMsg(`✨ Smart Auto-Fill complete for "${titleCase}"! Ab "Save category" dabayein.`, 'ok');
-  toast(`✨ Category "${titleCase}" auto-filled!`, 'ok');
-}
-
-async function temuFetchCategoryFromTab() {
-  const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/*'] });
-  if (!tabs.length) {
-    toast('Koi Temu Seller Central tab khula nahi hai', 'warn');
-    return;
-  }
-  const tab = tabs.find(t => t.active) || tabs[0];
-  toast('Temu tab se category read ho rahi hai…', 'ok');
-  
-  chrome.tabs.sendMessage(tab.id, { action: 'TEMU_GET_ACTIVE_CATEGORY' }, res => {
-    let catFound = res?.category || '';
-    if (!catFound) {
-      const title = tab.title || '';
-      const m = title.match(/([A-Za-z\s&]+)\s*-\s*Temu/i) || title.match(/Upload\s+([A-Za-z\s&]+)/i);
-      if (m && m[1]) catFound = m[1].trim();
-    }
-    if (catFound) {
-      const lastSeg = catFound.split(/[\/>-]/).pop().trim();
-      temuAutoFillCategory(lastSeg);
-      toast(`📥 Temu se category mil gayi: "${lastSeg}"!`, 'ok');
-    } else {
-      toast('Temu page par koi category select nahi mili — catalog se pick karein', 'info');
-    }
-  });
-}
-
-async function temuImportCategoryFromTemplate(file) {
-  if (!file) return;
-  const name = file.name.replace(/\.[^/.]+$/, '');
-  try {
-    const buf = await file.arrayBuffer();
-    let catName = '';
-    if (typeof XLSX !== 'undefined') {
-      const wb = XLSX.read(buf, { type: 'array' });
-      const ws = wb.Sheets['Template'] || wb.Sheets[wb.SheetNames[0]];
-      if (ws) {
-        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        const text = JSON.stringify(aoa.slice(0, 5));
-        const m = text.match(/Category[:\s"]+([A-Za-z\s&]{3,40})/i);
-        if (m) catName = m[1].trim();
-      }
-    }
-    if (!catName) {
-      catName = name.replace(/_template|template|temu/gi, '').replace(/[_-]+/g, ' ').trim();
-    }
-    temuAutoFillCategory(catName || name);
-    toast(`📄 Template se category auto-fill: "${catName || name}"!`, 'ok');
-  } catch (err) {
-    toast('Template read error: ' + err.message, 'warn');
-  }
-}
-
-let TemuCatSearchQuery = '';
-
 function temuRenderProfiles() {
   const box = $('temuProfileList'); if (!box) return;
-  temuPopulateCatalogDropdown();
   const cfg = temuGetCfg();
-  
-  // Bind category search once
-  const cSearchInp = $('temuCatSearch');
-  if (cSearchInp && !cSearchInp.dataset.bound) {
-    cSearchInp.dataset.bound = '1';
-    cSearchInp.addEventListener('input', () => {
-      TemuCatSearchQuery = cSearchInp.value.trim();
-      const clr = $('temuCatSearchClear');
-      if (clr) clr.hidden = !TemuCatSearchQuery;
-      temuRenderProfiles();
-    });
-  }
-
   box.innerHTML = '';
   const entries = Object.entries(cfg.category_profiles || {});
   const cnt = $('temuCatCount'); if (cnt) cnt.textContent = entries.length ? String(entries.length) : '';
-  
-  const filtered = entries.filter(([name, p]) => {
-    if (!TemuCatSearchQuery) return true;
-    const q = TemuCatSearchQuery.toLowerCase();
-    if (name.toLowerCase().includes(q)) return true;
-    if ((p.category_keyword || '').toLowerCase().includes(q)) return true;
-    if ((p.match || []).some(m => String(m).toLowerCase().includes(q))) return true;
-    if ((p.keyword_attributes || '').toLowerCase().includes(q)) return true;
-    return false;
-  });
-
-  if (!filtered.length) {
-    box.innerHTML = '<div style="padding:16px;text-align:center;font-size:11.5px;color:var(--ink-4);">Koi matching category profile nahi mila.</div>';
-    return;
-  }
-
-  filtered.forEach(([name, p]) => {
+  entries.forEach(([name, p]) => {
     const row = document.createElement('div');
     row.className = 'temu-prof';
     const dims = [p.length_in, p.width_in, p.height_in].every(v => v != null) ? `${p.length_in}×${p.width_in}×${p.height_in} in` : 'default size';
-    const wt = p.weight_lb != null ? `${p.weight_lb} lb` : 'title/default';
-    const displayName = String(name || '').replace(/_/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase());
-    
-    row.innerHTML = `
-      <div class="temu-prof-head" data-collapse-toggle>
-        <div class="temu-prof-name">
-          <span class="temu-prof-collapse-icon">▶</span>
-          <span>${esc(displayName)}</span>
-          ${p.category_keyword ? `<span class="tcat-keyword-badge">🏷️ ${esc(p.category_keyword)}</span>` : ''}
-        </div>
-        <div class="temu-prof-actions">
-          <button class="btn btn-ghost btn-xs" data-edit="${esc(name)}" type="button">Edit</button>
-          <button class="btn btn-ghost btn-xs btn-danger" data-del="${esc(name)}" type="button">Delete</button>
-        </div>
+    const wt = p.weight_lb != null ? `${p.weight_lb} lb` : 'weight: title/default';
+    row.innerHTML = `<div class="temu-prof-name">${esc(name)}</div>
+      <div class="temu-prof-actions">
+        <button class="btn btn-ghost btn-xs" data-edit="${esc(name)}" type="button">Edit</button>
+        <button class="btn btn-ghost btn-xs btn-danger" data-del="${esc(name)}" type="button">Delete</button>
       </div>
-      <div class="tcat-pills-row tcat-collapsed">
-        ${(p.match || []).map(m => `<span class="tcat-pill">🔑 ${esc(m)}</span>`).join('')}
-        ${(p.exclude || []).length ? `<span class="tcat-pill" style="color:#FF2E54;border-color:rgba(255,46,84,0.25);">✕ ${esc(p.exclude.join(', '))}</span>` : ''}
-        ${p.keyword_attributes ? `<span class="tcat-pill" style="color:#A78BFA;border-color:rgba(167,139,250,0.25);">⚙️ ${esc(p.keyword_attributes)}</span>` : ''}
-        <span class="tcat-spec-pill">⚖️ ${esc(wt)}</span>
-        <span class="tcat-spec-pill">📐 ${esc(dims)}</span>
-      </div>
-    `;
-
-    row.querySelector('[data-collapse-toggle]').addEventListener('click', (e) => {
-      if (e.target.closest('button')) return;
-      const pills = row.querySelector('.tcat-pills-row');
-      const icon = row.querySelector('.temu-prof-collapse-icon');
-      const isCollapsed = pills.classList.toggle('tcat-collapsed');
-      icon.textContent = isCollapsed ? '▶' : '▼';
-    });
-
+      <div class="temu-prof-meta"><b>Keywords:</b> ${esc((p.match||[]).join(', ')) || '—'}${(p.exclude||[]).length ? ` · <b>Exclude:</b> ${esc(p.exclude.join(', '))}` : ''}<br>
+      <b>Temu category:</b> ${esc(p.category_keyword || 'auto')} · ${esc(wt)} · ${esc(dims)}${p.keyword_attributes ? `<br><b>Attributes:</b> ${esc(p.keyword_attributes)}` : ''}</div>`;
     row.querySelector('[data-edit]').addEventListener('click', () => {
-      $('tcName').value = displayName; $('tcCat').value = p.category_keyword || '';
+      $('tcName').value = name; $('tcCat').value = p.category_keyword || '';
       $('tcMatch').value = (p.match||[]).join(', '); $('tcExclude').value = (p.exclude||[]).join(', ');
       $('tcAttrs').value = p.keyword_attributes || '';
       $('tcW').value = p.weight_lb ?? ''; $('tcL').value = p.length_in ?? '';
       $('tcWd').value = p.width_in ?? ''; $('tcH').value = p.height_in ?? '';
-      const ft = $('tcFormTitle'); if (ft) ft.textContent = `Edit category: ${displayName}`;
+      const ft = $('tcFormTitle'); if (ft) ft.textContent = `Edit category: ${name}`;
       $('temuCatForm')?.classList.add('editing');
       temuCatMsg('');
-      try { $('temuCatForm').scrollIntoView({ block: 'start', behavior: 'smooth' }); $('tcName')?.focus(); } catch (_) {}
+      try { $('temuCatForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
     });
-
     row.querySelector('[data-del]').addEventListener('click', async () => {
       if (!confirm(`Category "${name}" delete karein?`)) return;
       const cfg2 = temuGetCfg(); delete cfg2.category_profiles[name];
@@ -13189,64 +9432,20 @@ function temuFillForm() {
   const chk = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
   set('tgW', d.weight_lb); set('tgL', d.length_in); set('tgWd', d.width_in); set('tgH', d.height_in);
   set('tgPx', cfg.price_multiplier); set('tgPx2', cfg.price_multiplier);
-  set('tgListPx', cfg.list_price_multiplier ?? 1.25); set('tgMinPx', cfg.price_min ?? 69.99); set('tgMaxPx', cfg.price_max ?? 999);
-  set('tgMinProfit', cfg.min_profit_dollar ?? 50); set('tgMinProfit2', cfg.min_profit_dollar ?? 50);
-  set('tgHeavyBuffer', cfg.heavy_shipping_buffer ?? 2); set('tgHeavyBuffer2', cfg.heavy_shipping_buffer ?? 2);
-  chk('tgRound99', cfg.price_round_to_99 !== false); chk('tgRound992', cfg.price_round_to_99 !== false);
+  set('tgListPx', cfg.list_price_multiplier ?? 1.25);
   set('tgQtyMin', cfg.quantity_min ?? 250); set('tgQtyMax', cfg.quantity_max ?? 500);
   set('tgMaxW', cfg.max_weight_lb ?? 8);
   set('tgWords', (cfg.title_remove_words || []).join(', '));
   set('tgVarValues', (cfg.simple_variation_values || []).join(', '));
-  temuInitWordRemoverEvents();
-  temuRenderWordChips();
   chk('tgSkipListed', cfg.skip_listed !== false);
-  chk('tgSkipListedExport', cfg.skip_listed !== false);
   chk('tgSmartVar', cfg.smart_variations !== false);
   chk('tgBgUpload', cfg.upload_in_background !== false);
   chk('tgSmartWeight', cfg.smart_weight !== false);
-  { const pk = cfg.packaging || {}; set('tgSkuType', pk.sku_type); set('tgIndPacked', pk.individually_packed); set('tgPackQty', pk.total_packaging_quantity); set('tgPackUnit', pk.packaging_unit); }
-  chk('tgAutoFix', cfg.auto_fix_after_upload !== false);
-  set('tgBrandRules', temuBrandRulesToText(cfg.brand_rules)); // v9.11.0
-  const activeKeysStr = cfg.gemini_api_key || DEFAULT_GROQ_KEYS.join('\n');
-  set('tgGeminiKey', activeKeysStr);
-  const aiSt = $('tgGeminiStatus');
-  const aiKeys = temuGetAiKeys(activeKeysStr);
-  if (aiSt && aiKeys.length) {
-    aiSt.textContent = `🟢 ${aiKeys.length} Groq Keys Active (Auto-Failover ON)`;
-    aiSt.className = 'temu-inline-msg ok';
-  }
-  chk('tgKeepApprovedBrands', cfg.ai_keep_approved_brands !== false);
-  chk('tgStripClaims', cfg.ai_strip_claims !== false);
-  set('tgBannedWords', cfg.ai_banned_words ?? 'cure, treat, healing, disease, remedy, therapeutic, detox, relief, pain relief, immunity, clinical, medicine, sterile, eco-friendly, biodegradable, sustainable, zero waste, 100% organic, non-toxic, chemical-free, baby, infant, newborn, toddler, crib, nursery, pediatric, lifetime warranty, guaranteed, prime');
-  set('tgAiInstructions', cfg.ai_custom_instructions || '');
   temuUpdateSrcInfo();
-  temuUpdatePricePreview();
 }
-
-function temuUpdatePricePreview() {
-  const resEl = $('tppResult'), profEl = $('tppProfit');
-  if (!resEl || !profEl) return;
-  const px = parseFloat($('tgPx')?.value) || 5.0;
-  const minProfit = parseFloat($('tgMinProfit')?.value) || 0;
-  const round99 = $('tgRound99') ? !!$('tgRound99').checked : true;
-  const sampleCost = 10.0;
-  let base = sampleCost * px;
-  if (minProfit > 0 && (base - sampleCost) < minProfit) {
-    base = sampleCost + minProfit;
-  }
-  if (round99) {
-    base = Math.floor(base) + 0.99;
-  }
-  base = Math.round(base * 100) / 100;
-  const estProfit = Math.round((base - sampleCost) * 100) / 100;
-  resEl.textContent = `$${base.toFixed(2)}`;
-  profEl.textContent = `+$${estProfit.toFixed(2)}`;
-}
-
 // "N products ready" line under the source selector
 async function temuUpdateSrcInfo() {
   const el = $('temuSrcInfo'); if (!el) return;
-  try { if ($('temuModal')?.classList.contains('temu-review-mode')) temuReviewCompactText(); } catch (_) {}
   try {
     const source = $('temuSource')?.value || 'bulk';
     if (source === 'sheet' && TemuLast?.asIs) { el.textContent = `${TemuLast.n} products — Temu file as-is (${TemuLast.name}) · store: ${temuActiveStoreName() || '—'}`; return; }
@@ -13256,32 +9455,12 @@ async function temuUpdateSrcInfo() {
     else if (source === 'sheet' && TemuSheetRows) rows = TemuSheetRows;
     else rows = await getMasterRows();
     const n = rows.length;
-    if (!n) {
-      if (source === 'bulk') {
-        const masterRows = await getMasterRows();
-        if (masterRows.length > 0) {
-          el.innerHTML = `<span>0 in current bulk hunt · <b style="color:#38BDF8">${masterRows.length} in Library</b></span> <button id="temuSwitchLibBtn" class="temu-link-btn" type="button" style="color:#FFB800;font-weight:700;margin-left:8px;text-decoration:underline;">[ 📦 Switch to Library ]</button>`;
-          $('temuSwitchLibBtn')?.addEventListener('click', () => {
-            if ($('temuSource')) { $('temuSource').value = 'master'; temuUpdateSrcInfo(); }
-          });
-          return;
-        }
-        el.textContent = '0 products — pehle Bulk → Hunt all open tabs chalayen';
-        return;
-      }
-      el.textContent = '0 products in Library';
-      return;
-    }
+    if (!n) { el.textContent = source === 'bulk' ? '0 products — pehle Bulk → Hunt all open tabs chalayen' : '0 products in Library'; return; }
     const cfg = temuGetCfg();
     const store = temuActiveStoreName() || 'default';
-    const skipOn = $('tgSkipListedExport') ? !!$('tgSkipListedExport').checked : ($('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false);
+    const skipOn = $('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false; // v9.7.4: export ki tarah live checkbox
     const listed = rows.filter(r => temuListedMap()[store + '|' + temuSourceId(r.url || '')]).length;
     el.textContent = `${n} products ready` + (listed ? ` · ${listed} already listed (${skipOn ? 'skip' : 'skip OFF — dobara jayenge!'})` : '') + ` · store: ${temuActiveStoreName() || '—'}`;
-    if ($('tgPrecheck')?.checked && rows.length > 0 && !TemuCheck) {
-      temuRunExport({ dryRun: true, forUpload: true }).then(dr => {
-        if (dr?.items?.length) temuCheckRender(dr.items, dr.skipped || [], dr.cfg, dr.rows);
-      }).catch(() => {});
-    }
   } catch (_) { el.textContent = '—'; }
 }
 function temuSwitchTab(name) {
@@ -13292,6 +9471,182 @@ function temuSaveMsg(text, kind) {
   const el = $('tgSaveMsg'); if (!el) return;
   el.textContent = text || ''; el.className = 'temu-inline-msg' + (kind ? ' ' + kind : '');
   if (text && kind === 'ok') setTimeout(() => { if (el.textContent === text) { el.textContent = ''; el.className = 'temu-inline-msg'; } }, 4000);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// ═══ Temu AI Title Studio ═══
+// ═════════════════════════════════════════════════════════════════
+let TemuAiLastUndo = null;
+
+async function temuGetQueuedRows() {
+  const source = $('temuSource')?.value || 'bulk';
+  if (source === 'bulk') return (BulkState?.results || []).filter(x => x.status !== 'fail');
+  if (source === 'library_sel' && TemuLibPick?.ids) return (await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id));
+  if (source === 'sheet' && TemuSheetRows) return TemuSheetRows;
+  return await getMasterRows();
+}
+
+async function temuRenderAiTitles() {
+  const list = $('temuAiTitleList');
+  const countEl = $('temuAiTitleCount');
+  const rows = await temuGetQueuedRows();
+  if (countEl) countEl.textContent = rows.length;
+  if (!list || list.classList.contains('hidden')) return;
+
+  if (!rows.length) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:8px;text-align:center;">Koi products nahi mile</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  rows.forEach((r, idx) => {
+    const thumbUrl = (Array.isArray(r.images) && r.images.length && typeof r.images[0] === 'string')
+      ? r.images[0]
+      : (r.images?.[0]?.url || '');
+    const title = r.title || '';
+    const len = title.length;
+    const badgeClass = len <= 60 ? 'ok' : (len <= 80 ? 'warn' : 'over');
+
+    const row = document.createElement('div');
+    row.className = 'temu-ai-row';
+    row.dataset.idx = idx;
+    row.dataset.id = r.id || '';
+
+    row.innerHTML = `
+      ${thumbUrl ? `<img class="temu-ai-row-thumb" src="${esc(thumbUrl)}" alt="" loading="lazy">` : `<span class="temu-ai-row-thumb" style="display:grid;place-items:center;font-size:10px;">📦</span>`}
+      <input type="text" class="temu-ai-row-inp" value="${esc(title)}" placeholder="Product title for Temu..." />
+      <span class="temu-ai-char-badge ${badgeClass}">${len}/60</span>
+    `;
+
+    const inp = row.querySelector('.temu-ai-row-inp');
+    const badge = row.querySelector('.temu-ai-char-badge');
+
+    inp?.addEventListener('input', e => {
+      const val = e.target.value;
+      r.title = val;
+      const l = val.length;
+      badge.textContent = `${l}/60`;
+      badge.className = 'temu-ai-char-badge ' + (l <= 60 ? 'ok' : (l <= 80 ? 'warn' : 'over'));
+    });
+
+    inp?.addEventListener('change', async e => {
+      r.title = e.target.value;
+      if (MasterUIState?.allRows) {
+        const m = MasterUIState.allRows.find(x => x.id === r.id);
+        if (m) m.title = r.title;
+        await setMasterRows(MasterUIState.allRows);
+      }
+    });
+
+    list.appendChild(row);
+  });
+}
+
+async function temuRunAiTitleOptimization(actionOrPrompt) {
+  const rows = await temuGetQueuedRows();
+  if (!rows || !rows.length) {
+    toast('No products to optimize. Pehle hunt karein!', 'warn');
+    return;
+  }
+
+  let instruction = actionOrPrompt;
+  if (actionOrPrompt === 'temu-polish') {
+    instruction = 'Optimize for Temu seller catalog: remove all brand names, trademark signs, manufacturer models, and promotional buzzwords (HOT, NEW, SALE). Make the title concise, descriptive, high-converting, and strictly under 60 characters.';
+  } else if (actionOrPrompt === 'clean-brand') {
+    instruction = 'Remove all brand names, seller codes, store names, and promotional filler words. Keep only clean descriptive product keywords.';
+  } else if (actionOrPrompt === 'title-case') {
+    instruction = 'Capitalize the first letter of each significant word (Title Case) and clean up punctuation.';
+  }
+
+  TemuAiLastUndo = rows.map(r => ({ id: r.id, title: r.title }));
+  $('temuAiUndoBtn')?.classList.remove('hidden');
+
+  const progressStrip = $('temuAiProgress');
+  const progressFill = $('temuAiProgressBarFill');
+  const progressText = $('temuAiProgressText');
+  if (progressStrip) progressStrip.classList.remove('hidden');
+
+  const total = rows.length;
+  let processed = 0;
+  const batchSize = 4;
+
+  toast(`⚡ Temu AI: ${total} titles rewrite ho rahe hain...`, 'run');
+
+  for (let i = 0; i < total; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const batchInput = batch.map((b, bIdx) => ({ id: b.id || String(i + bIdx), title: b.title || '(untitled)' }));
+
+    const prompt = `Instruction: ${instruction}
+
+Input JSON list of products:
+${JSON.stringify(batchInput, null, 2)}
+
+Respond with ONLY a valid JSON array of objects with the exact structure:
+[
+  {"id": "...", "new_title": "..."}
+]
+Do not wrap in markdown quotes if possible, return raw JSON array only.`;
+
+    try {
+      const rawRes = await callGroqAPI({
+        prompt,
+        systemPrompt: 'You are an automated Temu e-commerce title optimization engine. You ONLY output valid JSON arrays. Never include explanations or pleasantries.'
+      });
+
+      const cleaned = rawRes.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const results = JSON.parse(cleaned);
+
+      if (Array.isArray(results)) {
+        results.forEach(item => {
+          if (item?.id && item?.new_title) {
+            const target = rows.find(r => (r.id && r.id === item.id) || (!r.id && item.id));
+            if (target) target.title = item.new_title.trim();
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Temu AI batch error:', err);
+      toast(`AI error: ${err.message}`, 'warn');
+    }
+
+    processed += batch.length;
+    const pct = Math.min(100, Math.round((processed / total) * 100));
+    if (progressFill) progressFill.style.width = `${pct}%`;
+    if (progressText) progressText.textContent = `Rewriting ${processed}/${total} (${pct}%)`;
+  }
+
+  // Lock scroll position of modal body so buttons never jump
+  const modalBody = $('temuModal')?.querySelector('.temu-modal-body');
+  const savedScroll = modalBody ? modalBody.scrollTop : null;
+
+  if (MasterUIState?.allRows) {
+    rows.forEach(r => {
+      const m = MasterUIState.allRows.find(x => x.id === r.id);
+      if (m) m.title = r.title;
+    });
+    await setMasterRows(MasterUIState.allRows);
+    filterAndRenderMasterRows();
+  }
+
+  // Only re-render titles if the list is currently visible
+  const titleList = $('temuAiTitleList');
+  if (titleList && !titleList.classList.contains('hidden')) {
+    await temuRenderAiTitles();
+  } else {
+    // Just update the count
+    const countEl = $('temuAiTitleCount');
+    if (countEl) countEl.textContent = rows.length;
+  }
+
+  if (modalBody && savedScroll !== null) {
+    modalBody.scrollTop = savedScroll;
+  }
+
+  if (progressText) progressText.textContent = `✓ Done! ${total} titles optimized for Temu.`;
+  setTimeout(() => {
+    if (progressStrip) progressStrip.classList.add('hidden');
+  }, 2500);
+  toast(`✓ Temu titles AI optimized!`, 'ok');
 }
 
 async function openTemuModal() {
@@ -13305,7 +9660,7 @@ async function openTemuModal() {
   temuCatFormReset();
   temuSwitchTab('upload');
   temuRenderHistory();
-  TemuStoreCardOpen = false; temuSetupRender(); hdrStoreRender(); temuDetectStore({ apply: false }).catch(() => {}); // v9.10.0 / v9.16.0
+  temuRenderAiTitles();
   // v9.7.2: purana Activity log wapas
   try { const rep = $('temuReport'); if (rep && !(rep.textContent || '').trim()) chrome.storage.local.get('temuReportText', x => { if (x?.temuReportText && rep && !(rep.textContent || '').trim()) rep.textContent = x.temuReportText; }); } catch (_) {}
   { const wp = $('temuActivityWrap'); if (wp) wp.open = false; }
@@ -13337,494 +9692,71 @@ function temuInitActivitySummary() {
   sync();
 }
 
-// ── v9.10.0 Store auto-detect (khule Temu tabs ka mall name) ──
-async function temuDetectStore({ apply = false } = {}) {
-  let tabs = [];
-  try { tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/*'] }); } catch (_) { return null; }
-  if (!tabs.length) return { none: true };
-  const malls = new Set();
-  await Promise.all(tabs.map(t => new Promise(res => {
-    try {
-      chrome.tabs.sendMessage(t.id, { action: 'TEMU_GET_MALL' }, async r => {
-        if (!chrome.runtime.lastError && r?.mall) { malls.add(r.mall); return res(); }
-        try {
-          if (chrome.scripting) {
-            const inj = await chrome.scripting.executeScript({
-              target: { tabId: t.id },
-              func: () => (document.querySelector('[class*="mall_name"]')?.textContent || '').trim()
-            });
-            const m = inj?.[0]?.result;
-            if (m) malls.add(m);
-          }
-        } catch (_) {}
-        res();
-      });
-    } catch (_) { res(); }
-  })));
-  if (!malls.size) return { none: true };
-  const act = temuActiveStoreName();
-  const stores = temuStores();
-  const list = [...malls];
-  const line = $('temuStoreDetect'), setupLine = $('temuSetupDetect');
-  const show = (txt, kind) => { [line, setupLine].forEach(el => { if (!el) return; el.hidden = !txt; el.textContent = txt || ''; el.className = (el === line ? 'temu-detect' : 'setup-hint') + (kind ? ' ' + kind : ''); });
-    const md = $('temuStoreMiniDet'); if (md) { md.textContent = kind === 'ok' ? '· Temu tab ✓' : kind ? '· Temu tab ⚠' : ''; md.className = 'tsm-det' + (kind ? ' ' + kind : ''); } // v9.16.0
-  };
-  if (list.length > 1) { show(`Temu tabs: ${list.join(', ')} — ${list.includes(act) ? act + ' active' : 'active store "' + act + '" khula nahi!'}`, list.includes(act) ? '' : 'bad'); return { multi: true, malls: list }; }
-  const mall = list[0];
-  if (mall === act) { show(`✓ Temu tab par "${mall}" khula hai — match`, 'ok'); return { match: true, mall }; }
-  const known = Object.keys(stores).find(n => n.toLowerCase() === mall.toLowerCase());
-  if (known) {
-    if (apply) { if ((await temuSaveStores(stores, known)) === true) { if (!TemuLast?.asIs) TemuLast = null; temuRenderStoreBar(); temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm(); hdrStoreRender(); show(`✓ Store auto-switch: "${known}" (Temu tab se)`, 'ok'); return { switched: true, mall: known }; } }
-    show(`Temu tab par "${mall}" khula hai, extension mein "${act || '—'}" — dropdown se switch karein`, 'warn'); return { mismatch: true, mall };
-  }
-  show(`Temu tab par "${mall}" khula hai — ye store extension mein nahi. "+ Add" dabayen (naam khud bhar jayega)`, 'warn');
-  TemuDetectedMall = mall;
-  return { unknown: true, mall };
-}
-let TemuDetectedMall = '';
-
-// ── v9.12.0 Brand approvals import from Temu "Brands & intellectual property" ──
-async function temuImportBrands() {
-  const msgEl = $('tgBrandMsg'); const say = (t, k) => { if (msgEl) { msgEl.textContent = t; msgEl.className = 'temu-inline-msg' + (k ? ' ' + k : ''); } };
-  const store = temuActiveStoreName(); if (!store) { say('Pehle store chunein', 'bad'); return; }
-  say('⏳ Temu Brands & IP page dhoondh raha hoon…');
-  let tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/brands-property.html*'] });
-  let tab = tabs.find(t => t.active) || tabs[0] || null, created = false;
-  if (!tab) { tab = await chrome.tabs.create({ url: 'https://seller.temu.com/brands-property.html', active: true }); created = true; }
-  const pingFor = (ms, delay) => new Promise(res => { let n = 0, max = Math.ceil(ms / 500); const ping = () => chrome.tabs.sendMessage(tab.id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > max) return res(false); setTimeout(ping, 500); }); setTimeout(ping, delay); });
-  let okPing = await pingFor(created ? 30000 : 3000, created ? 2500 : 100);
-  if (!okPing && !created) {
-    // v9.12.1: extension reload ke baad purane tab mein content script nahi hota — tab reload kar ke dobara
-    say('⏳ Temu tab se rabta nahi (extension reload hua tha) — tab reload kar raha hoon…');
-    await new Promise(r => chrome.tabs.reload(tab.id, {}, () => { void chrome.runtime.lastError; r(); }));
-    okPing = await pingFor(30000, 3000); created = true;
-  }
-  if (!okPing) { say('✗ Temu page se rabta nahi — page load hone par dobara dabayen', 'bad'); return; }
-  if (created) await new Promise(r => setTimeout(r, 2500));
-  try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
-  say('⏳ Trademark table parh raha hoon (sab pages)…');
-  const r = await new Promise(res => chrome.tabs.sendMessage(tab.id, { action: 'TEMU_READ_BRANDS' }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
-  if (!r?.success) { say((r?.report || ['✗ parh nahi saka']).join(' '), 'bad'); return; }
-  if (r.mall && r.mall.toLowerCase() !== store.toLowerCase()) { say(`✗ Temu tab store "${r.mall}" ka hai, extension mein "${store}" — pehle store match karein`, 'bad'); return; }
-  const rules = {}; let skipped = 0;
-  for (const b of r.brands || []) {
-    if (!/in effect/i.test(b.status || '')) { skipped++; continue; }
-    const name = String(b.name || '').trim().toUpperCase(); if (!name) continue;
-    const rule = rules[name] || { groups: [], cats: {} };
-    for (const ct of b.cats || []) { const g = temuCatGroup(ct.name); if (!rule.groups.includes(g)) rule.groups.push(g); if (ct.units != null) rule.cats[g] = Math.max(rule.cats[g] ?? 0, ct.units); }
-    rules[name] = rule;
-  }
-  const ta = $('tgBrandRules'); if (ta) ta.value = temuBrandRulesToText(rules);
-  const cfg = temuGetCfg(); cfg.brand_rules = rules;
-  const sv = await temuSaveCfg(cfg);
-  say(sv === true ? `✓ ${Object.keys(rules).length} brands import + save (${store})${skipped ? ` · ${skipped} non-active skip` : ''}` : '✗ Save fail: ' + sv, sv === true ? 'ok' : 'bad');
-  toast(`${Object.keys(rules).length} brand approvals import — ${store}`, 'ok');
-}
-
-// ── v9.10.0 Header store badge ──
-async function hdrStoreRender() {
-  const b = $('hdrStore'); if (!b) return;
-  const n = temuActiveStoreName();
-  if (!n) { b.hidden = true; return; }
-  b.hidden = false; $('hdrStoreName').textContent = n;
-  try {
-    const target = await temuDashTarget(); const today = temuDayKey(Date.now());
-    let listed = 0; for (const v of Object.values(temuListedMap())) if (v?.d === today) listed++;
-    const t = $('hdrStoreToday'); if (t) { t.textContent = `${listed}/${target}`; t.classList.toggle('done', listed >= target); }
-  } catch (_) {}
-}
-
-// ── v9.10.0 Bulk tab "Agla step" card ──
-function bulkNextRender(mode) {
-  const card = $('bulkNext'); if (!card) return;
-  const rows = (BulkState?.results || []).filter(x => x.status !== 'fail');
-  const t = $('bulkNextTitle'), sub = $('bulkNextSub'), btn = $('bulkNextBtn');
-
-  if (mode === 'uploaded') {
-    card.hidden = false;
-    card.dataset.mode = 'uploaded';
-    if (t) t.textContent = 'Upload Completed ✓';
-    if (sub) sub.textContent = 'Products successfully pushed to Temu';
-    if (btn) btn.innerHTML = `<svg class="i i-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg><span class="btn-lbl">Temu History</span><span class="btn-arr">→</span>`;
-    return;
-  }
-  if (!rows.length) {
-    card.hidden = false;
-    card.dataset.mode = 'idle';
-    if (t) t.textContent = 'Temu Seller Integration';
-    if (sub) sub.textContent = 'Direct Export, Draft Creation & Auto-Upload';
-    if (btn) btn.innerHTML = `<svg class="i i-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="btn-lbl">Upload to Temu</span><span class="btn-arr">→</span>`;
-    return;
-  }
-  card.hidden = false;
-  card.dataset.mode = 'ready';
-  if (t) t.textContent = `${rows.length} Product${rows.length === 1 ? '' : 's'} Ready for Temu`;
-  if (sub) sub.textContent = '1-Click Export and automated Drafts upload';
-  if (btn) btn.innerHTML = `<svg class="i i-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="btn-lbl">Upload to Temu</span><span class="btn-arr">→</span>`;
-}
-
-// ── v9.10.0 Setup card ──
-let TemuStoreCardOpen = false; // v9.16.0
-function temuStoreMiniRender(hasStore, hasTpl) {
-  const full = $('temuStoreCard'); if (!full) return;
-  full.hidden = !hasStore;
-}
-function temuSetupRender() {
-  const card = $('temuSetup'); if (!card) return;
-  const n = temuActiveStoreName(); const st = temuActiveStore();
-  const s1 = $('setupStep1'), s2 = $('setupStep2');
-  const hasStore = !!n, hasTpl = !!(st && st.templateName);
-  temuStoreMiniRender(hasStore, hasTpl); // v9.16.0
-  if (hasStore && hasTpl) { card.hidden = true; return; }
-  card.hidden = false;
-  s1.classList.toggle('done', hasStore); s2.classList.toggle('done', hasTpl); s2.classList.toggle('locked', !hasStore);
-  s1.querySelector('.setup-txt small').textContent = hasStore ? `✓ ${n}` : 'Naam bilkul wahi jo Temu Seller Center mein upar-right dikhta hai';
-}
-
-// ── v9.10.0 Hints → (?) toggle ──
-function temuHintsInit() {
-  document.querySelectorAll('#temuModal .temu-hint:not(.temu-hint-top):not([data-q])').forEach(hint => {
-    hint.dataset.q = '1';
-    const field = hint.closest('.temu-field') || hint.parentElement;
-    const lbl = field && field.querySelector('.temu-lbl');
-    const q = document.createElement('button'); q.type = 'button'; q.className = 'hint-q'; q.textContent = '?'; q.title = 'Madad';
-    q.addEventListener('click', (e) => { e.preventDefault(); hint.classList.toggle('open'); q.classList.toggle('on', hint.classList.contains('open')); });
-    if (lbl) lbl.appendChild(q); else hint.before(q);
-  });
-}
-
 function initTemuExport() {
   temuInitActivitySummary();
-  temuHintsInit();
-  restoreTemuCheckSession();
-  // v9.10.0: stepper retry / next card / setup / fast toggle
-  document.addEventListener('click', e => {
-    const rb = e.target.closest('#temuSteps .tstep-retry'); if (rb) { temuStepRetry(rb.dataset.retry); return; }
-    if (e.target.closest('#bulkNextBtn')) { const card = $('bulkNext'); openTemuModal().then(() => { if (card?.dataset.mode === 'uploaded') temuSwitchTab('history'); }); return; }
-    if (e.target.closest('#hdrStore')) { openTemuModal(); return; }
-    if (e.target.closest('#temuStoreMini')) { TemuStoreCardOpen = true; temuSetupRender(); return; } // v9.16.0
-    if (e.target.closest('#tgBrandImport')) { temuImportBrands(); return; }
-    if (e.target.closest('#temuAttrBtn')) { temuStepsReset(false); temuFillAttributes(); return; }
-    const sb = e.target.closest('#temuSetup [data-setup]'); if (sb) { if (sb.dataset.setup === 'store') $('temuStoreAddBtn')?.click(); else $('temuTplFile')?.click(); return; }
-  });
-  { const ft = $('bulkFastToggle'); if (ft) {
-      const sync = () => { try { ft.checked = !!State.data?.settings?.bulkSkipImageDownload; } catch (_) {} };
-      setTimeout(sync, 400); setTimeout(sync, 2000);
-      ft.addEventListener('change', async () => { const v = ft.checked; const r = await msg({ action: 'UPDATE_SETTINGS', settings: { bulkSkipImageDownload: v } }).catch(() => null); if (r?.success !== false) { if (State.data?.settings) State.data.settings.bulkSkipImageDownload = v; const q = document.querySelector('#tab-settings [data-setting="bulkSkipImageDownload"]'); if (q) q.checked = v; toast(v ? 'Fast mode ON — sirf image URLs' : 'Fast mode OFF — images download hongi', 'ok'); } else toast('Save nahi hua', 'warn'); });
-      document.addEventListener('change', e => { if (e.target?.dataset?.setting === 'bulkSkipImageDownload') ft.checked = !!e.target.checked; });
-  } }
-  { // Find & Replace Modal Inputs
-    $('tckFrFind')?.addEventListener('input', updateFindReplacePreview);
-    $('tckFrReplace')?.addEventListener('input', updateFindReplacePreview);
-    $('tckFrCase')?.addEventListener('change', updateFindReplacePreview);
-    $('tckFrSelectedOnly')?.addEventListener('change', updateFindReplacePreview);
-    $('tckFrFind')?.addEventListener('keydown', e => { if (e.key === 'Enter') applyFindReplace(); });
-    $('tckFrReplace')?.addEventListener('keydown', e => { if (e.key === 'Enter') applyFindReplace(); });
-  }
-  { // 1-Click AI Title Studio Listeners
-    $('tckAiStudioSelectedOnly')?.addEventListener('change', renderAiStudioList);
-    $('tckAiStudioList')?.addEventListener('input', e => {
-      const inp = e.target.closest('.tck-ai-item-inp');
-      if (inp) {
-        const row = inp.closest('.tck-ai-item');
-        if (row) {
-          row.classList.add('tck-ai-modified');
-          const chk = row.querySelector('.tck-ai-item-chk');
-          if (chk) chk.checked = true;
-          const cnt = row.querySelector('.tck-ai-char-badge');
-          if (cnt) {
-            const len = inp.value.length;
-            cnt.textContent = `${len}/120`;
-            cnt.className = `tck-ai-char-badge ${len > 120 ? 'bad' : len > 100 ? 'warn' : 'ok'}`;
-          }
-          updateAiStudioCounts();
-        }
-      }
-    });
-    $('tckAiStudioList')?.addEventListener('change', e => {
-      if (e.target.classList.contains('tck-ai-item-chk')) {
-        updateAiStudioCounts();
-      }
-    });
-    window.addEventListener('keydown', e => {
-      if (e.key === 'Escape') {
-        closeAiTitleStudio();
-        closeFindReplaceModal();
-      }
-    });
-  }
-  { // Initialize Hunt Speed & Network Mode
-    setTimeout(() => {
-      setHuntSpeedMode(getHuntSpeedMode());
-    }, 100);
-  }
-  setTimeout(() => { hdrStoreRender(); bulkNextRender(); }, 600);
-  { // v10.2.3 — tabs hide/show (zhHiddenTabs: ['images','library'])
-    const apply = (hidden) => {
-      ['images', 'library'].forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.style.display = hidden.includes(t) ? 'none' : ''; });
-      const act = document.querySelector('.tab-btn.active'); if (act && hidden.includes(act.dataset.tab)) document.querySelector('[data-tab="bulk"]')?.click();
-      window.zhHiddenTabs = hidden;
-    };
-    chrome.storage.local.get('zhHiddenTabs', x => { const h = Array.isArray(x?.zhHiddenTabs) ? x.zhHiddenTabs : []; apply(h);
-      const ch = $('zhTabShowHunt'), cl = $('zhTabShowLibrary'); if (ch) ch.checked = !h.includes('images'); if (cl) cl.checked = !h.includes('library'); });
-    const save = () => { const h = []; if ($('zhTabShowHunt') && !$('zhTabShowHunt').checked) h.push('images'); if ($('zhTabShowLibrary') && !$('zhTabShowLibrary').checked) h.push('library'); chrome.storage.local.set({ zhHiddenTabs: h }); apply(h); toast('Tabs update ho gaye', 'ok'); };
-    $('zhTabShowHunt')?.addEventListener('change', save); $('zhTabShowLibrary')?.addEventListener('change', save);
-  }
-  { const ef = $('zhExportFolderToggle'); if (ef) { chrome.storage.local.get('zhExportFolder', x => { ef.checked = x?.zhExportFolder !== false; }); ef.addEventListener('change', () => { chrome.storage.local.set({ zhExportFolder: ef.checked }); toast(ef.checked ? 'Downloads → ZHunter Export/<date>/' : 'Downloads → default folder', 'ok'); }); } } // v10.1.0
-  {
-    const sendToActiveTab = (payload) => {
-      try {
-        chrome.tabs.query({ active: true }, tabs => {
-          (tabs || []).forEach(tab => {
-            if (tab && tab.id) {
-              chrome.tabs.sendMessage(tab.id, { action: 'zhUpdateFrame', ...payload }).catch(() => {});
-            }
-          });
-        });
-      } catch (_) {}
-    };
-
-    // v10.3.4 Performance mode (default ON): html[data-fx="off"] → animations/blur band
-    { const fx = $('zhReduceFxToggle');
-      const apply = on => { document.documentElement.dataset.fx = on ? 'off' : 'full'; };
-      chrome.storage.local.get('zhReduceFx', x => { const on = x?.zhReduceFx === true; if (fx) fx.checked = on; apply(on); }); // v11: default OFF (Premium glass)
-      fx?.addEventListener('change', () => { chrome.storage.local.set({ zhReduceFx: fx.checked }); apply(fx.checked); toast(fx.checked ? 'Performance mode ON' : 'Performance mode OFF', 'ok'); }); }
-    const pf = $('zhPageFrameToggle');
-    if (pf) {
-      chrome.storage.local.get('zhPageFrame', x => { pf.checked = x?.zhPageFrame !== false; });
-      pf.addEventListener('change', () => {
-        chrome.storage.local.set({ zhPageFrame: pf.checked });
-        sendToActiveTab({ enabled: pf.checked });
-        toast(pf.checked ? 'Page frame ON' : 'Page frame OFF', 'ok');
-      });
-    }
-
-    const updateFrameColor = (color) => {
-      chrome.storage.local.set({ zhFrameColor: color });
-      if ($('zhFrameColorPicker') && color !== 'rainbow') $('zhFrameColorPicker').value = color;
-      if ($('zhFrameColorPicker2') && color !== 'rainbow') $('zhFrameColorPicker2').value = color;
-      document.querySelectorAll('.zh-fcol-preset').forEach(btn => {
-        const isSel = (btn.dataset.color || '').toLowerCase() === color.toLowerCase();
-        btn.classList.toggle('zh-fcol-active', isSel);
-        btn.style.outline = isSel ? '2.5px solid #FFB800' : 'none';
-        btn.style.boxShadow = isSel ? '0 0 0 4px rgba(255,184,0,.25), 0 0 8px rgba(255,184,0,.4)' : 'none';
-      });
-      sendToActiveTab({ color });
-      toast(color === 'rainbow' ? '🌈 Colorful Rainbow Border' : `Border color: ${color}`, 'ok');
-    };
-
-    const updateFrameMoving = (moving) => {
-      chrome.storage.local.set({ zhFrameMoving: !!moving });
-      const mt = $('zhFrameMovingToggle');
-      if (mt) mt.checked = !!moving;
-      sendToActiveTab({ moving: !!moving });
-      toast(moving ? '⚡ Moving Animated Border ON' : 'Moving Border OFF', 'ok');
-    };
-
-    const updateFrameStyle = (style) => {
-      chrome.storage.local.set({ zhFrameStyle: style });
-      document.querySelectorAll('.zh-style-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.style === style);
-      });
-      sendToActiveTab({ style });
-      const names = { laser: '⚡ Laser Comet', dual: '💫 Dual Beams', wave: '🌊 Fluid Rainbow Wave' };
-      toast(`Style: ${names[style] || style}`, 'ok');
-    };
-
-    const updateFrameSpeed = (speed) => {
-      const num = parseFloat(speed) || 3.5;
-      chrome.storage.local.set({ zhFrameSpeed: num });
-      if ($('zhFrameSpeedVal')) $('zhFrameSpeedVal').textContent = `${num}s`;
-      if ($('zhFrameSpeedSlider')) $('zhFrameSpeedSlider').value = num;
-      sendToActiveTab({ speed: num });
-    };
-
-    const updateFrameCorners = (corner) => {
-      chrome.storage.local.set({ zhFrameCorners: corner });
-      document.querySelectorAll('.zh-corner-btn').forEach(btn => {
-        const isSel = btn.dataset.corner === corner;
-        btn.classList.toggle('active', isSel);
-      });
-      sendToActiveTab({ corners: corner });
-      toast(`Border corners: ${corner}`, 'ok');
-    };
-
-    const updateFrameWidth = (w) => {
-      const num = parseFloat(w) || 5.5;
-      chrome.storage.local.set({ zhFrameWidth: num });
-      if ($('zhFrameWidthVal')) $('zhFrameWidthVal').textContent = `${num}px`;
-      if ($('zhFrameWidthSlider')) $('zhFrameWidthSlider').value = num;
-      sendToActiveTab({ width: num });
-    };
-
-    const updateFrameBright = (b) => {
-      const num = parseInt(b, 10) || 100;
-      chrome.storage.local.set({ zhFrameBrightness: num });
-      if ($('zhFrameBrightVal')) $('zhFrameBrightVal').textContent = `${num}%`;
-      if ($('zhFrameBrightSlider')) $('zhFrameBrightSlider').value = num;
-      sendToActiveTab({ brightness: num });
-    };
-
-    chrome.storage.local.get(['zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
-      const col = x?.zhFrameColor || '#FF1E56';
-      if ($('zhFrameColorPicker') && col !== 'rainbow') $('zhFrameColorPicker').value = col;
-      if ($('zhFrameColorPicker2') && col !== 'rainbow') $('zhFrameColorPicker2').value = col;
-      document.querySelectorAll('.zh-fcol-preset').forEach(btn => {
-        const isSel = (btn.dataset.color || '').toLowerCase() === col.toLowerCase();
-        btn.classList.toggle('zh-fcol-active', isSel);
-        btn.style.outline = isSel ? '2.5px solid #FFB800' : 'none';
-        btn.style.boxShadow = isSel ? '0 0 0 4px rgba(255,184,0,.25), 0 0 8px rgba(255,184,0,.4)' : 'none';
-      });
-
-      const w = x?.zhFrameWidth != null ? x.zhFrameWidth : 5.5;
-      if ($('zhFrameWidthSlider')) $('zhFrameWidthSlider').value = w;
-      if ($('zhFrameWidthVal')) $('zhFrameWidthVal').textContent = `${w}px`;
-
-      const br = x?.zhFrameBrightness != null ? x.zhFrameBrightness : 100;
-      if ($('zhFrameBrightSlider')) $('zhFrameBrightSlider').value = br;
-      if ($('zhFrameBrightVal')) $('zhFrameBrightVal').textContent = `${br}%`;
-
-      const c = x?.zhFrameCorners || 'square';
-      document.querySelectorAll('.zh-corner-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.corner === c);
-      });
-
-      const moving = !!x?.zhFrameMoving;
-      if ($('zhFrameMovingToggle')) $('zhFrameMovingToggle').checked = moving;
-
-      const style = x?.zhFrameStyle || 'laser';
-      document.querySelectorAll('.zh-style-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.style === style);
-      });
-
-      const speed = x?.zhFrameSpeed != null ? x.zhFrameSpeed : 3.5;
-      if ($('zhFrameSpeedSlider')) $('zhFrameSpeedSlider').value = speed;
-      if ($('zhFrameSpeedVal')) $('zhFrameSpeedVal').textContent = `${speed}s`;
-    });
-
-    $('zhFrameColorPicker')?.addEventListener('input', e => updateFrameColor(e.target.value));
-    $('zhFrameColorPicker2')?.addEventListener('input', e => updateFrameColor(e.target.value));
-    $('zhFrameMovingToggle')?.addEventListener('change', e => updateFrameMoving(e.target.checked));
-    $('zhFrameSpeedSlider')?.addEventListener('input', e => updateFrameSpeed(e.target.value));
-
-    $('zhFrameWidthSlider')?.addEventListener('input', e => updateFrameWidth(e.target.value));
-    $('zhFrameBrightSlider')?.addEventListener('input', e => updateFrameBright(e.target.value));
-
-    document.addEventListener('click', e => {
-      const preset = e.target.closest('.zh-fcol-preset');
-      if (preset && preset.dataset.color) {
-        updateFrameColor(preset.dataset.color);
-      }
-      const cornerBtn = e.target.closest('.zh-corner-btn');
-      if (cornerBtn && cornerBtn.dataset.corner) {
-        updateFrameCorners(cornerBtn.dataset.corner);
-      }
-      const styleBtn = e.target.closest('.zh-style-btn');
-      if (styleBtn && styleBtn.dataset.style) {
-        updateFrameStyle(styleBtn.dataset.style);
-      }
-    });
-  }
   document.addEventListener('change', e => {
-    if (e.target && (e.target.id === 'tgSkipListed' || e.target.id === 'tgSkipListedExport')) {
-      const isChk = e.target.checked;
-      if ($('tgSkipListed')) $('tgSkipListed').checked = isChk;
-      if ($('tgSkipListedExport')) $('tgSkipListedExport').checked = isChk;
-      TemuCheck = null;
-      temuUpdateSrcInfo();
+    if (e.target && e.target.id === 'tgSkipListed') temuUpdateSrcInfo();
+    if (e.target && e.target.id === 'temuSource') { 
+      if (TemuLast?.asIs && e.target.value !== 'sheet') { TemuLast = null; const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; } 
+      temuUpdateSrcInfo(); 
+      temuRenderAiTitles(); 
     }
-    if (e.target && e.target.id === 'temuDashTarget') { const v = parseInt(e.target.value, 10); if (v > 0) chrome.storage.local.set({ temuDailyTarget: v }, () => temuDashRender()); else e.target.value = '50'; } // v9.9.0
-    if (e.target && e.target.classList?.contains('tck-on')) temuCheckSummary();
-    if (e.target && e.target.id === 'temuSource') temuCheckClose();
-    if (e.target && e.target.id === 'temuSource') { if (TemuLast?.asIs && e.target.value !== 'sheet') { TemuLast = null; const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; } temuUpdateSrcInfo(); }
     if (e.target && e.target.id === 'temuSheetFile') { const f = e.target.files?.[0]; if (f) temuImportSheet(f); e.target.value = ''; }
-    if (e.target && e.target.id === 'tgPx') { const o = $('tgPx2'); if (o) o.value = e.target.value; TemuCheck = null; temuUpdateSrcInfo(); temuUpdatePricePreview(); }
-    if (e.target && e.target.id === 'tgPx2') { const o = $('tgPx'); if (o) o.value = e.target.value; TemuCheck = null; temuUpdateSrcInfo(); temuUpdatePricePreview(); }
-    if (e.target && (e.target.id === 'tgRound99' || e.target.id === 'tgRound992')) {
-      const v = e.target.checked;
-      if ($('tgRound99')) $('tgRound99').checked = v;
-      if ($('tgRound992')) $('tgRound992').checked = v;
-      const cfg = temuGetCfg(); cfg.price_round_to_99 = v;
-      temuSaveCfg(cfg); TemuCheck = null; temuUpdateSrcInfo(); temuUpdatePricePreview();
-    }
-    if (e.target && (e.target.id === 'tgMinProfit' || e.target.id === 'tgMinProfit2')) {
-      const v = e.target.value;
-      if ($('tgMinProfit')) $('tgMinProfit').value = v;
-      if ($('tgMinProfit2')) $('tgMinProfit2').value = v;
-      const cfg = temuGetCfg(); cfg.min_profit_dollar = parseFloat(v) || 0;
-      temuSaveCfg(cfg); TemuCheck = null; temuUpdateSrcInfo(); temuUpdatePricePreview();
-    }
-    if (e.target && (e.target.id === 'tgHeavyBuffer' || e.target.id === 'tgHeavyBuffer2')) {
-      const v = e.target.value;
-      if ($('tgHeavyBuffer')) $('tgHeavyBuffer').value = v;
-      if ($('tgHeavyBuffer2')) $('tgHeavyBuffer2').value = v;
-      const cfg = temuGetCfg(); cfg.heavy_shipping_buffer = parseFloat(v) || 0;
-      temuSaveCfg(cfg); TemuCheck = null; temuUpdateSrcInfo(); temuUpdatePricePreview();
-    }
+    if (e.target && e.target.id === 'tgPx') { const o = $('tgPx2'); if (o) o.value = e.target.value; }
+    if (e.target && e.target.id === 'tgPx2') { const o = $('tgPx'); if (o) o.value = e.target.value; }
     if (e.target && e.target.id === 'temuStoreSel') (async () => {
       if ((await temuSaveStores(temuStores(), e.target.value)) === true) {
-        if (!TemuLast?.asIs) TemuLast = null;
+        TemuLast = null;
         temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm();
         toast(`Active store: ${e.target.value}`, 'ok');
       }
     })();
   });
-  document.addEventListener('input', e => {
-    if (e.target && (e.target.id === 'tgPx' || e.target.id === 'tgPx2' || e.target.id === 'tgMinProfit' || e.target.id === 'tgMinProfit2' || e.target.id === 'tgHeavyBuffer' || e.target.id === 'tgHeavyBuffer2')) {
-      temuUpdatePricePreview();
-    }
-    if (e.target && e.target.id === 'tckSearchInp') {
-      tckFilterBySearch(e.target.value);
-    }
-    if (e.target && e.target.id === 'tckHideClean') { if (TemuCheck) { TemuCheck.view.hideClean = !!e.target.checked; temuCheckSync(); } }
-  });
   // Delegated clicks — survive any re-render and any modal stacking
   document.addEventListener('click', e => {
-    const sp = e.target.closest('.temu-store-pill');
-    if (sp && sp.dataset.sname) {
-      const targetName = sp.dataset.sname;
-      if (targetName !== temuActiveStoreName()) {
-        (async () => {
-          const ok = await temuSaveStores(temuStores(), targetName);
-          if (ok === true) {
-            if (!TemuLast?.asIs) TemuLast = null;
-            temuRenderStoreBar();
-            temuUpdateTplStatus();
-            temuRenderProfiles();
-            temuFillForm();
-            temuUpdateSrcInfo();
-            toast(`Switched to ${targetName} (Active)`, 'ok');
-          }
-        })();
-      }
-      return;
-    }
-    if (e.target.closest('#temuStorePillAdd')) {
-      $('temuStoreAddBtn')?.click();
-      return;
-    }
     const tb = e.target.closest('#temuModal .temu-tab'); if (tb) { temuSwitchTab(tb.dataset.ttab); return; }
     if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) {} }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
     if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
+    if (e.target.closest('#temuAiToggleListBtn')) {
+      const list = $('temuAiTitleList');
+      if (list) {
+        const isClosed = list.classList.toggle('hidden');
+        $('temuAiToggleListBtn').textContent = isClosed 
+          ? `Preview & Edit Titles (${$('temuAiTitleCount')?.textContent || '0'}) ▾`
+          : `Hide Titles List ▴`;
+        if (!isClosed) temuRenderAiTitles();
+      }
+    }
+    if (e.target.closest('#temuAiRunBtn')) {
+      const p = $('temuAiPromptInput')?.value?.trim();
+      if (!p) { toast('Prompt box mein instruction likhein', 'warn'); $('temuAiPromptInput')?.focus(); return; }
+      temuRunAiTitleOptimization(p);
+    }
+    {
+      const ab = e.target.closest('.temu-ai-quick-btns button[data-temu-ai]');
+      if (ab) temuRunAiTitleOptimization(ab.dataset.temuAi);
+    }
+    if (e.target.closest('#temuAiUndoBtn')) {
+      (async () => {
+        if (!TemuAiLastUndo || !TemuAiLastUndo.length) return;
+        const rows = await temuGetQueuedRows();
+        TemuAiLastUndo.forEach(snap => {
+          const target = rows.find(r => r.id === snap.id);
+          if (target) target.title = snap.title;
+          if (MasterUIState?.allRows) {
+            const m = MasterUIState.allRows.find(x => x.id === snap.id);
+            if (m) m.title = snap.title;
+          }
+        });
+        if (MasterUIState?.allRows) await setMasterRows(MasterUIState.allRows);
+        await temuRenderAiTitles();
+        $('temuAiUndoBtn')?.classList.add('hidden');
+        toast('Reverted Temu titles', 'ok');
+      })();
+    }
     if (e.target.closest('#temuModalClose')) $('temuModal')?.classList.add('hidden');
-    if (e.target.closest('#temuExportBtn')) {
-      temuRunExport({ forUpload: false });
-      toast('Excel file download ho rahi hai...', 'ok');
-    }
-    if (e.target.closest('#temuCancelUploadBtn') || e.target.closest('#temuStopBtn')) { temuStopNow(); }
-    if (e.target.closest('#temuReviewExpandBtn')) { $('temuModal')?.classList.toggle('temu-review-expanded'); }
-    { const t2 = e.target.closest('.tck-dock-t2[data-mirror]'); if (t2) { $(t2.dataset.mirror)?.click(); } }
-    if (e.target.closest('#tckExpTemu')) { const mn = $('tckExportMenu'); if (mn) mn.hidden = true; temuReviewExport('temu'); }
-    if (e.target.closest('#tckExpSimple')) { const mn = $('tckExportMenu'); if (mn) mn.hidden = true; temuReviewExport('simple'); }
-    if (!e.target.closest('.tck-export-wrap')) { const mn = $('tckExportMenu'); if (mn && !mn.hidden) mn.hidden = true; }
-    if (e.target.closest('#temuOpenTemuPageBtn')) {
-      chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
-    }
-    if (e.target.closest('#temuStepsResetBtn')) {
-      const st = $('temuSteps');
-      if (st) st.hidden = true;
-    }
+    if (e.target.closest('#temuExportBtn')) temuRunExport({ forUpload: false });
     if (e.target.closest('#temuMarkListedBtn')) (async () => {
       if (!TemuLast?.items?.length) return;
       if (!confirm(`${TemuLast.items.length} products ko "listed" mark karein? (Sirf tab jab aap ne ye file Temu par khud upload kar di ho)`)) return;
@@ -13835,375 +9767,11 @@ function initTemuExport() {
       temuUpdateSrcInfo();
     })();
     if (e.target.closest('#temuAutoBtn')) temuAutoUpload();
-    if (e.target.closest('#temuFixDraftsBtn')) (async () => { // v9.15.2: ek button = drafts complete + missing attributes
-      temuStepsReset(false);
-      const rep = $('temuReport'); if (rep) rep.textContent = '⏳ 1/2 Drafts complete (Complete product details)…';
-      await temuFixDrafts();
-      if (rep) rep.textContent = (rep.textContent || '') + '\n⏳ 2/2 Missing attributes (Product action required)…';
-      await temuFillAttributes();
-      if (rep) rep.textContent = (rep.textContent || '') + '\n✓ Temu par complete — Manage products mein status dekh lein';
-    })();
+    if (e.target.closest('#temuFixDraftsBtn')) temuFixDrafts();
     if (e.target.closest('#temuFailedBtn')) temuReadFailed({});
-    if (e.target.closest('#temuCheckGo')) temuCheckGo();
-    if (e.target.closest('#temuCheckCancel')) { temuCheckClose(); const rep = $('temuReport'); if (rep) rep.textContent = 'Check cancel — kuch upload nahi hua.'; }
-    if (e.target.closest('#temuAutoFixBtn')) temuAutoFixAll();
-    if (e.target.closest('#tckStatusShowAll') || e.target.closest('#temuCheckShowAll')) { if (TemuCheck) { TemuCheck.view.filter = 'all'; TemuCheck.view.q = ''; TemuCheck.view.hideClean = false; const si = $('tckSearchInp'); if (si) si.value = ''; temuCheckSync(); } }
-    { const db = e.target.closest('.tck-drop-btn[data-panel]'); if (db) temuCheckPanel(db.dataset.panel); }
-    if (e.target.closest('#tckSearchClearBtn')) { const si = $('tckSearchInp'); if (si) si.value = ''; tckFilterBySearch(''); }
-    if (e.target.closest('#temuCheckAll')) { document.querySelectorAll('#temuCheckList .tck-row:not([hidden]) .tck-on').forEach(c => { c.checked = true; }); temuCheckSummary(); }
-    if (e.target.closest('#temuCheckNone')) { document.querySelectorAll('#temuCheckList .tck-row:not([hidden]) .tck-on').forEach(c => { c.checked = false; }); temuCheckSummary(); }
-    if (e.target.closest('#temuCheckClean')) { document.querySelectorAll('#temuCheckList .tck-row').forEach(r => { const c = r.querySelector('.tck-on'); if (c) c.checked = r.dataset.clean === 'true'; }); temuCheckSummary(); }
-    if (e.target.closest('#temuCheckHeavy')) {
-      const maxWt = parseFloat(TemuCheck?.cfg?.max_weight_lb) || 0;
-      let cnt = 0;
-      document.querySelectorAll('#temuCheckList .tck-row').forEach(r => {
-        const i = +r.dataset.i, it = TemuCheck?.items?.[i];
-        const isH = it?.warn?.includes('OVERWEIGHT') || (maxWt > 0 && parseFloat(it?.weight) > maxWt);
-        if (isH) {
-          const chk = r.querySelector('.tck-on');
-          if (chk && !chk.checked) { chk.checked = true; cnt++; }
-        }
-      });
-      temuCheckSummary();
-      toast(`⚖️ ${cnt} heavy products include/select kar diye!`, 'ok');
-    }
-    if (e.target.closest('#temuCheckCleanTitles')) {
-      const cnt = temuCleanTitlesInReview();
-      toast(cnt ? `🛡️ ${cnt} titles se banned words strip kar diye!` : 'Sab titles pehle se clean hain!', 'ok');
-    }
-    // Quick Filter Chips
-    const fltChip = e.target.closest('.tck-filter-chip');
-    if (fltChip) {
-      const fType = fltChip.dataset.filter || 'all';
-      temuFilterRows(fType);
-    }
-    // Compact / Dual-View Switchers
-    if (e.target.closest('#temuViewToggle')) {
-      temuToggleViewMode();
-    }
-    const tckViewBtn = e.target.closest('#tckViewSwitcher .zh-view-btn');
-    if (tckViewBtn) {
-      setTemuReviewViewMode(tckViewBtn.dataset.view);
-      toast(tckViewBtn.dataset.view === 'dense' ? 'Dense Spreadsheet View active' : 'Card View active', 'ok');
-    }
-    if (e.target.closest('#tckMinimizeBtn') || e.target.closest('#tckMinimizedNotice')) {
-      toggleTemuProductsMinimized();
-    }
-    if (e.target.closest('#aiDoneClose') || e.target.closest('#aiDoneOk') || (e.target.classList.contains('modal-back') && e.target.id === 'aiDoneModal')) {
-      hideAiDoneModal();
-    }
-    const masterViewBtn = e.target.closest('#masterViewSwitcher .zh-view-btn');
-    if (masterViewBtn) {
-      setMasterLibraryViewMode(masterViewBtn.dataset.view);
-      toast(masterViewBtn.dataset.view === 'dense' ? 'Dense Spreadsheet View active' : 'Card View active', 'ok');
-    }
-    // Find & Replace Modal
-    if (e.target.closest('#temuFindReplaceBtn') || e.target.closest('#tckStickyReplaceBtn')) {
-      openFindReplaceModal();
-    }
-    // 1-Click AI Title Studio Modal
-    if (e.target.closest('#temuAiStudioBtn') || e.target.closest('#tckStickyAiBtn')) {
-      openAiTitleStudio();
-    }
-    if (e.target.closest('#tckAiStudioCloseBtn') || e.target.closest('#tckAiStudioCancelBtn') || e.target.closest('#tckAiStudioBackdrop')) {
-      closeAiTitleStudio();
-    }
-    if (e.target.closest('#tckAiStudioRunBtn')) {
-      runAiTitleStudio();
-    }
-    if (e.target.closest('#tckAiStudioApplyBtn')) {
-      applyAiStudioTitles();
-    }
-    if (e.target.closest('#tckAiMatrixSelectAll')) {
-      const listEl = $('tckAiStudioList');
-      if (listEl) listEl.querySelectorAll('.tck-ai-item-chk').forEach(c => c.checked = true);
-      updateAiStudioCounts();
-    }
-    if (e.target.closest('#tckAiMatrixDeselectAll')) {
-      const listEl = $('tckAiStudioList');
-      if (listEl) listEl.querySelectorAll('.tck-ai-item-chk').forEach(c => c.checked = false);
-      updateAiStudioCounts();
-    }
-    const presetChip = e.target.closest('.tck-ai-preset-chip');
-    if (presetChip && presetChip.dataset.instruction) {
-      const pInp = $('tckAiStudioPromptInp');
-      if (pInp) {
-        const text = presetChip.dataset.instruction;
-        const curr = pInp.value.trim();
-        if (!curr) pInp.value = text;
-        else if (!curr.includes(text)) pInp.value = curr + ', ' + text;
-        presetChip.classList.add('active');
-        setTimeout(() => presetChip.classList.remove('active'), 800);
-        pInp.focus();
-      }
-    }
-    const speedPill = e.target.closest('.zh-speed-pill');
-    if (speedPill && speedPill.dataset.speed) {
-      setHuntSpeedMode(speedPill.dataset.speed);
-      const modeLabel = speedPill.dataset.speed === 'safe' ? 'Safe Mode (1 Tab) — Slow net safe' : speedPill.dataset.speed === 'balanced' ? 'Balanced Mode (2 Tabs)' : 'Turbo Mode (3 Tabs)';
-      toast(`Hunt speed: ${modeLabel}`, 'ok');
-    }
-    if (e.target.closest('#tckStickyExportBtn')) {
-      const mn = $('tckExportMenu'); if (mn) mn.hidden = !mn.hidden;
-    }
-    if (e.target.closest('#tckStickyUploadBtn')) {
-      $('temuCheckGo')?.click();
-    }
-    if (e.target.closest('#tckFrCloseBtn') || e.target.closest('#tckFrCancelBtn') || e.target.closest('#tckFrBackdrop')) {
-      closeFindReplaceModal();
-    }
-    if (e.target.closest('#tckFrApplyBtn')) {
-      applyFindReplace();
-    }
-
-    if (e.target.closest('#temuAiOptimizeBtn')) {
-      temuAIOptimizeTitles();
-    }
-    if (e.target.closest('#temuAiRewriteListedBtn') || e.target.closest('#tckStickyAiRewriteBtn')) {
-      const allItems = TemuCheck?.items || [];
-      const listedIndices = [];
-      allItems.forEach((it, idx) => {
-        if (it.isAlreadyListed || it.listedRecord) listedIndices.push(idx);
-      });
-      if (!listedIndices.length) {
-        toast('Review table mein koi already-listed product nahi mila', 'info');
-        return;
-      }
-      temuAIOptimizeTitles(null, { isReList: true, targetIndices: listedIndices });
-    }
-    if (e.target.closest('#tckQuickAll')) {
-      document.querySelectorAll('#temuCheckList .tck-on').forEach(chk => { chk.checked = true; });
-      temuCheckSummary();
-    }
-    if (e.target.closest('#tckQuickNone')) {
-      document.querySelectorAll('#temuCheckList .tck-on').forEach(chk => { chk.checked = false; });
-      temuCheckSummary();
-    }
-    if (e.target.closest('#tckStickyAiBtn')) {
-      $('temuAiStudioBtn')?.click();
-    }
-    // v10.3.2: Export ▾ menu (tckExpTemu / tckExpSimple) handles review export
-    const aiRelistBtn = e.target.closest('.tck-ai-relist-btn');
-    if (aiRelistBtn) {
-      const idx = +aiRelistBtn.dataset.i;
-      if (!isNaN(idx)) {
-        aiRelistBtn.classList.add('busy');
-        aiRelistBtn.textContent = '⏳...';
-        temuAIOptimizeTitles(idx, { isReList: true });
-      }
-    }
-    if (e.target.closest('#temuAiAttributesBtn')) {
-      temuAiExtractAttributes();
-    }
-    const presetBtn = e.target.closest('.zh-pricing-preset-btn');
-    if (presetBtn && presetBtn.dataset.preset) {
-      applyPricingPreset(presetBtn.dataset.preset);
-    }
-    if (e.target.closest('#tckSearchClearBtn')) {
-      const sInp = $('tckSearchInp');
-      if (sInp) {
-        sInp.value = '';
-        tckFilterBySearch('');
-        sInp.focus();
-      }
-    }
-    const aiRowBtn = e.target.closest('.tck-ai-row-btn');
-    if (aiRowBtn) {
-      const idx = +aiRowBtn.dataset.i;
-      if (!isNaN(idx)) temuAIOptimizeTitles(idx);
-    }
-    // v11.1.0: per-row expand/collapse (chevron button, ya collapsed row kahin bhi click karein)
-    const rowToggleBtn = e.target.closest('.tck-row-toggle');
-    if (rowToggleBtn) {
-      const idx = +rowToggleBtn.dataset.i;
-      const it = TemuCheck?.items?.[idx];
-      const isCollapsedNow = rowToggleBtn.closest('.tck-row')?.classList.contains('tck-collapsed');
-      if (it) { it._uiCollapsed = !isCollapsedNow; temuCheckSync(); }
-    } else {
-      const collapsedRow = e.target.closest('.tck-row.tck-collapsed');
-      if (collapsedRow && !e.target.closest('input, select, button, label, .tck-chk')) {
-        const idx = +collapsedRow.dataset.i;
-        const it = TemuCheck?.items?.[idx];
-        if (it) { it._uiCollapsed = false; temuCheckSync(); }
-      }
-    }
-    if (e.target.closest('#tgGeminiTestBtn')) {
-      temuTestGeminiConnection();
-    }
-    if (e.target.closest('#tgResetDefaultKeysBtn')) {
-      const inp = $('tgGeminiKey');
-      if (inp) {
-        inp.value = DEFAULT_GROQ_KEYS.join('\n');
-        const aiSt = $('tgGeminiStatus');
-        if (aiSt) {
-          aiSt.textContent = `🟢 ${DEFAULT_GROQ_KEYS.length} Groq Keys Active (Auto-Failover ON)`;
-          aiSt.className = 'temu-inline-msg ok';
-        }
-        toast(`Loaded ${DEFAULT_GROQ_KEYS.length} Groq keys! "Save settings" click karein.`, 'ok');
-      }
-    }
-    if (e.target.closest('#tgToggleKeyVis')) {
-      const inp = $('tgGeminiKey');
-      if (inp) {
-        if (inp.tagName === 'TEXTAREA') {
-          inp.style.webkitTextSecurity = (inp.style.webkitTextSecurity === 'none' || !inp.style.webkitTextSecurity) ? 'disc' : 'none';
-        } else {
-          inp.type = inp.type === 'password' ? 'text' : 'password';
-        }
-      }
-    }
-    if (e.target.closest('#temuToggleQuickStrip')) {
-      const bar = $('tckQuickStripBar');
-      if (bar) {
-        bar.hidden = !bar.hidden;
-        if (!bar.hidden) $('tckQuickWordInput')?.focus();
-      }
-    }
-    if (e.target.closest('#tckQuickStripClose')) {
-      const bar = $('tckQuickStripBar');
-      if (bar) bar.hidden = true;
-    }
-    if (e.target.closest('#tckQuickWordBtn')) {
-      const inp = $('tckQuickWordInput');
-      const word = inp?.value?.trim();
-      if (!word) { toast('Lafz likhein jo remove karna hai', 'warn'); return; }
-      const cnt = temuCleanTitlesInReview(word);
-      temuAddWords([word]);
-      const curCfg = temuGetCfg();
-      if (curCfg && Array.isArray(curCfg.title_remove_words) && !curCfg.title_remove_words.some(w => w.toLowerCase() === word.toLowerCase())) {
-        curCfg.title_remove_words.push(word);
-        temuSaveCfg(curCfg);
-      }
-      toast(`✂️ "${word}" ${cnt} titles se strip kar diya aur saved list mein shamil hua!`, 'ok');
-    }
     if (e.target.closest('#temuSheetBtn')) $('temuSheetFile')?.click();
-    if (e.target.closest('#temuDashTarget')) { /* v9.9.0: input click — koi action nahi */ }
     if (e.target.closest('#temuHistClear')) (async () => { if (!confirm('Temu upload history clear karein?')) return; await new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r)); temuRenderHistory(); })();
-    const stFilterBtn = e.target.closest('#temuHistStoreFilters .thist-store-pill');
-    if (stFilterBtn) {
-      TemuHistStoreFilter = stFilterBtn.dataset.sfilter;
-      temuRenderHistory();
-      return;
-    }
-    const statFilterBtn = e.target.closest('#temuHistStatusFilters .thist-status-pill');
-    if (statFilterBtn) {
-      TemuHistStatusFilter = statFilterBtn.dataset.status;
-      document.querySelectorAll('#temuHistStatusFilters .thist-status-pill').forEach(b => b.classList.toggle('active', b === statFilterBtn));
-      temuRenderHistory();
-      return;
-    }
-    if (e.target.closest('#temuHistSearchClear')) {
-      const inp = $('temuHistSearch');
-      if (inp) inp.value = '';
-      const clr = $('temuHistSearchClear');
-      if (clr) clr.hidden = true;
-      TemuHistSearchQuery = '';
-      temuRenderHistory();
-      return;
-    }
-    if (e.target.closest('#temuHistExportAll')) (async () => {
-      const list = await temuHistGet();
-      if (!list.length) { toast('Export karne ke liye koi history nahi', 'warn'); return; }
-      const rows = [['Date', 'Store', 'Kind', 'Confirmed', 'Upload ID', 'Added', 'Errors', 'Source', 'SKU', 'Title', 'Price', 'URL']];
-      list.forEach(h => {
-        const d = new Date(h.t).toISOString().slice(0, 19).replace('T', ' ');
-        if (!h.items || !h.items.length) {
-          rows.push([d, h.store || '', h.kind || '', h.confirmed ? 'Yes' : 'No', h.uploadId || '', h.added ?? '', h.errors ?? '', h.source || '', '', '', '', '']);
-        } else {
-          h.items.forEach(it => {
-            rows.push([d, h.store || '', h.kind || '', h.confirmed ? 'Yes' : 'No', h.uploadId || '', h.added ?? '', h.errors ?? '', h.source || '', it.sku || '', it.title || '', it.base || '', it.url || '']);
-          });
-        }
-      });
-      const csvContent = '\uFEFF' + rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
-      zhSaveBlob(new Blob([csvContent], { type: 'text/csv' }), `temu_all_uploads_history_${new Date().toISOString().slice(0, 10)}.csv`);
-      toast('Full upload history downloaded as CSV', 'ok');
-      return;
-    })();
-    // Categories Search Clear & Quick Add
-    if (e.target.closest('#temuCatSearchClear')) {
-      const inp = $('temuCatSearch');
-      if (inp) inp.value = '';
-      const clr = $('temuCatSearchClear');
-      if (clr) clr.hidden = true;
-      TemuCatSearchQuery = '';
-      temuRenderProfiles();
-      return;
-    }
-    if (e.target.closest('#temuCatAddToggle')) {
-      temuCatFormReset();
-      const form = $('temuCatForm');
-      if (form) {
-        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        $('tcName')?.focus();
-      }
-      return;
-    }
-    // Settings Sub-Nav Jump
-    const snavPill = e.target.closest('.temu-snav-pill');
-    if (snavPill) {
-      e.preventDefault();
-      const targetId = snavPill.getAttribute('href');
-      const targetEl = targetId ? document.querySelector(targetId) : null;
-      if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        document.querySelectorAll('.temu-snav-pill').forEach(p => p.classList.toggle('active', p === snavPill));
-      }
-      return;
-    }
-    // Settings Safe Defaults Reset
-    if (e.target.closest('#tgResetDefaults')) {
-      if (!confirm('Default safe settings restore karein?\n\n• Price ×: 5\n• List price ×: 1.25\n• Min price: $60\n• Min Profit: $3\n• ≥2lb Buffer: $2\n• Auto .99 Rounding: ON\n• Weight: 1.4 lb (7.5×5.2×1.5 in)')) return;
-      if ($('tgPx2')) $('tgPx2').value = '5';
-      if ($('tgPx')) $('tgPx').value = '5';
-      if ($('tgListPx')) $('tgListPx').value = '1.25';
-      if ($('tgMinPx')) $('tgMinPx').value = '60';
-      if ($('tgMaxPx')) $('tgMaxPx').value = '400';
-      if ($('tgQtyMin')) $('tgQtyMin').value = '250';
-      if ($('tgQtyMax')) $('tgQtyMax').value = '500';
-      if ($('tgMinProfit2')) $('tgMinProfit2').value = '3';
-      if ($('tgMinProfit')) $('tgMinProfit').value = '3';
-      if ($('tgHeavyBuffer2')) $('tgHeavyBuffer2').value = '2';
-      if ($('tgHeavyBuffer')) $('tgHeavyBuffer').value = '2';
-      if ($('tgRound992')) $('tgRound992').checked = true;
-      if ($('tgRound99')) $('tgRound99').checked = true;
-      if ($('tgW')) $('tgW').value = '1.4';
-      if ($('tgL')) $('tgL').value = '7.5';
-      if ($('tgWd')) $('tgWd').value = '5.2';
-      if ($('tgH')) $('tgH').value = '1.5';
-      if ($('tgMaxW')) $('tgMaxW').value = '8';
-      if ($('tgSkipListed')) $('tgSkipListed').checked = true;
-      if ($('tgSmartVar')) $('tgSmartVar').checked = true;
-      if ($('tgSmartWeight')) $('tgSmartWeight').checked = true;
-      if ($('tgAutoFix')) $('tgAutoFix').checked = true;
-      if ($('tgBgUpload')) $('tgBgUpload').checked = true;
-      if ($('tgWords')) $('tgWords').value = "Amazon, Amazon.com, Walmart, Sam's Club, priced per pound, Prime, FSA Eligible, Best Seller";
-      temuRenderWordChips();
-      $('tgSaveBtn')?.click();
-      toast('Safe defaults restored & saved!', 'ok');
-      return;
-    }
     if (e.target.closest('#tcSaveBtn')) temuSaveProfileFromForm();
-    if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
-    if (e.target.closest('#tcSmartAutoBtn')) {
-      const name = $('tcName')?.value?.trim();
-      temuAutoFillCategory(name);
-    }
-    if (e.target.closest('#tcFetchTemuTabBtn')) {
-      temuFetchCategoryFromTab();
-    }
-    if (e.target.closest('#tcImportTplBtn')) {
-      const fi = $('tcImportTplFile');
-      if (fi && !fi.dataset.bound) {
-        fi.dataset.bound = '1';
-        fi.addEventListener('change', evt => {
-          const file = evt.target.files?.[0];
-          if (file) temuImportCategoryFromTemplate(file);
-          evt.target.value = '';
-        });
-      }
-      fi?.click();
-    }
     if (e.target.closest('#tgUnmarkLast')) (async () => {
       const lm = await new Promise(r => chrome.storage.local.get('temuLastMarked', x => r(x?.temuLastMarked || null)));
       if (!lm || !lm.sids?.length) { temuSaveMsg('Koi aakhri upload record nahi', 'warn'); return; }
@@ -14221,7 +9789,7 @@ function initTemuExport() {
       if (ok2?.success) { State.data.settings.temuListed = {}; toast('Listed history cleared', 'ok'); }
     })();
     if (e.target.closest('#temuStoreAddBtn')) (async () => {
-      const name = prompt('Store ka naam (bilkul wahi jo Temu Seller Center mein upar dikhta hai, e.g. HQ TWO):', TemuDetectedMall || '');
+      const name = prompt('Store ka naam (bilkul wahi jo Temu Seller Center mein upar dikhta hai, e.g. HQ TWO):');
       if (!name || !name.trim()) return;
       const stores = temuStores();
       if (!stores[name.trim()]) stores[name.trim()] = { templateB64: '', templateName: '', config: null };
@@ -14242,28 +9810,15 @@ function initTemuExport() {
       const cfg = temuGetCfg();
       cfg.price_multiplier = px;
       { const lp = num($('tgListPx')?.value); if (lp) cfg.list_price_multiplier = lp; }
-      { const mp = parseFloat($('tgMinPx')?.value); cfg.price_min = isFinite(mp) && mp >= 0 ? mp : 0; }
-      { const mx = parseFloat($('tgMaxPx')?.value); cfg.price_max = isFinite(mx) && mx > 0 ? mx : 0; } // v9.12.3
       { const a = parseInt($('tgQtyMin')?.value, 10), b = parseInt($('tgQtyMax')?.value, 10);
         if (a > 0 && b >= a) { cfg.quantity_min = a; cfg.quantity_max = b; } }
       { const mw = num($('tgMaxW')?.value); if (mw) cfg.max_weight_lb = mw; }
-      { const minProf = parseFloat($('tgMinProfit2')?.value ?? $('tgMinProfit')?.value); if (isFinite(minProf) && minProf >= 0) cfg.min_profit_dollar = minProf; }
-      { const heavyB = parseFloat($('tgHeavyBuffer2')?.value ?? $('tgHeavyBuffer')?.value); if (isFinite(heavyB) && heavyB >= 0) cfg.heavy_shipping_buffer = heavyB; }
-      { const r99 = $('tgRound992') ? $('tgRound992').checked : ($('tgRound99') ? $('tgRound99').checked : true); cfg.price_round_to_99 = !!r99; }
       cfg.title_remove_words = ($('tgWords')?.value || '').split(',').map(x => x.trim()).filter(Boolean);
       cfg.skip_listed = !!$('tgSkipListed')?.checked;
       cfg.smart_variations = !!$('tgSmartVar')?.checked;
       cfg.upload_in_background = !!$('tgBgUpload')?.checked;
       cfg.smart_weight = !!$('tgSmartWeight')?.checked;
-      cfg.packaging = { sku_type: $('tgSkuType')?.value || '', individually_packed: $('tgIndPacked')?.value || '', total_packaging_quantity: ($('tgPackQty')?.value || '').trim(), packaging_unit: $('tgPackUnit')?.value || '' };
-      cfg.auto_fix_after_upload = !!$('tgAutoFix')?.checked;
-      { const br = $('tgBrandRules'); if (br) cfg.brand_rules = temuBrandRulesFromText(br.value); } // v9.11.0
       { const vv = ($('tgVarValues')?.value || '').split(',').map(x => x.trim()).filter(Boolean); if (vv.length) cfg.simple_variation_values = vv; }
-      cfg.gemini_api_key = ($('tgGeminiKey')?.value || '').trim();
-      cfg.ai_keep_approved_brands = !!$('tgKeepApprovedBrands')?.checked;
-      cfg.ai_strip_claims = !!$('tgStripClaims')?.checked;
-      cfg.ai_banned_words = ($('tgBannedWords')?.value || '').trim();
-      cfg.ai_custom_instructions = ($('tgAiInstructions')?.value || '').trim();
       cfg.defaults.weight_lb = w; cfg.defaults.length_in = l; cfg.defaults.width_in = wd; cfg.defaults.height_in = ht;
       TemuLast = null;
       temuSaveMsg('Saving…');
@@ -14286,80 +9841,5 @@ function initTemuExport() {
     else { const st = $('temuTplStatus'); if (st) { st.textContent = '✗ Template save fail: ' + r; st.style.color = 'var(--bad)'; } }
     e.target.value = '';
   });
-  $('tgGeminiKey')?.addEventListener('input', () => {
-    const raw = ($('tgGeminiKey')?.value || '').trim();
-    const keys = temuGetAiKeys(raw);
-    const aiSt = $('tgGeminiStatus');
-    if (aiSt) {
-      if (keys.length) {
-        aiSt.textContent = `🟢 ${keys.length} Groq Keys Active (Auto-Failover ON)`;
-        aiSt.className = 'temu-inline-msg ok';
-      } else {
-        aiSt.textContent = '✗ No keys entered';
-        aiSt.className = 'temu-inline-msg bad';
-      }
-    }
-  });
-
-  // Restore Dual-View switchers
-  setTemuReviewViewMode(localStorage.getItem('zh_tck_view') || 'card');
-  setMasterLibraryViewMode(localStorage.getItem('zh_lib_view') || 'card');
-  initThumbnailHoverZoom();
 }
-
-// ── Floating Thumbnail Hover Image Zoom ──
-function initThumbnailHoverZoom() {
-  const popup = $('zhImgZoomPopup');
-  const zoomImg = $('zhImgZoomImg');
-  const zoomTitle = $('zhImgZoomTitle');
-  if (!popup || !zoomImg) return;
-
-  function positionZoomPopup(e) {
-    const pad = 14;
-    const w = 224;
-    const h = 240;
-    let left = e.clientX + pad;
-    let top = e.clientY - 60;
-    if (left + w > window.innerWidth) left = e.clientX - w - pad;
-    if (left < 6) left = 6;
-    if (top + h > window.innerHeight) top = window.innerHeight - h - pad;
-    if (top < 6) top = 6;
-    popup.style.left = `${left}px`;
-    popup.style.top = `${top}px`;
-  }
-
-  document.addEventListener('mouseover', (e) => {
-    const thumb = e.target.closest('.tck-thumb, .row-thumb-img, .bulk-tab-thumb, .bulk-thumb-img');
-    if (!thumb) return;
-    const src = thumb.src || thumb.getAttribute('src');
-    if (!src || src.startsWith('data:image/svg')) return;
-    zoomImg.src = src;
-    const row = thumb.closest('.tck-row, .master-row, .bulk-tab-row');
-    const title = thumb.getAttribute('alt') ||
-      row?.querySelector('.tck-title-inp')?.value ||
-      row?.querySelector('.master-row-title, .bulk-tab-title')?.textContent ||
-      '';
-    if (zoomTitle) {
-      zoomTitle.textContent = title.trim();
-      zoomTitle.style.display = title.trim() ? '-webkit-box' : 'none';
-    }
-    popup.hidden = false;
-    positionZoomPopup(e);
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!popup.hidden) {
-      positionZoomPopup(e);
-    }
-  });
-
-  document.addEventListener('mouseout', (e) => {
-    const thumb = e.target.closest('.tck-thumb, .row-thumb-img, .bulk-tab-thumb, .bulk-thumb-img');
-    if (thumb) {
-      popup.hidden = true;
-    }
-  });
-}
-
 try { document.addEventListener('DOMContentLoaded', initTemuExport); if (document.readyState !== 'loading') initTemuExport(); } catch (_) {}
-

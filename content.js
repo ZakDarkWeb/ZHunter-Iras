@@ -1,5 +1,5 @@
 // ============================================================
-// ZHunter PRO v10.3.1 — Content Script
+// ZHunter PRO v9.7.5 — Content Script
 // ============================================================
 // Fixes vs 7.6.0:
 //   • Issue 1: Correct price extraction — reads full price string
@@ -46,12 +46,11 @@ function cleanPriceText(raw) {
     .replace(/save\s+\$?\d[\d.,]*/gi, '')
     .replace(/save\s+\d{1,3}\s*%/gi, '')
     .replace(/\bdiscount\b/gi, '')
-    .replace(/\blist\s*price\s*:?\s*[$£€¥₹₩]?\s*\d[\d.,]*/gi, '')
-    .replace(/\bwas\s*:?\s*[$£€¥₹₩]?\s*\d[\d.,]*/gi, '')
-    .replace(/\btypical\s*price\s*:?\s*[$£€¥₹₩]?\s*\d[\d.,]*/gi, '')
-    .replace(/\boriginal\s*price\s*:?\s*[$£€¥₹₩]?\s*\d[\d.,]*/gi, '')
-    .replace(/\b\d+(?:\.\d+)?\s*(?:¢|cents?)\s*\/\s*(?:oz|fl\.?\s*oz|count|ea|lb)\b/gi, '')
+    .replace(/list\s*price\s*:?/gi, '')
+    .replace(/\bwas\s*:?\s*/gi, '')
     .replace(/\bfrom\s*:?\s*/gi, '')
+    .replace(/typical\s*price\s*:?/gi, '')
+    .replace(/original\s*price\s*:?/gi, '')
     .trim();
 
   const patterns = [
@@ -107,9 +106,12 @@ function normalizeImg(rawUrl) {
      'fmt', 'wid', 'hei', 'fit'].forEach(p => u.searchParams.delete(p));
 
     if (/(media-amazon\.com|ssl-images-amazon\.com|images-na\.|amazon\.[a-z.]+)/i.test(h)) {
-      // Amazon Auto-Crop: _AC_SL1500_ automatically trims excess white margins and provides 1500px HD resolution.
-      let clean = u.pathname.replace(/(?:\._[A-Za-z0-9_.,-]+_\.?)+/g, '.');
-      u.pathname = clean.replace(/(\.[a-zA-Z0-9]+)$/i, '._AC_SL1500_$1');
+      // FIX: Replace ALL size tokens with SL1500 (highest standard CDN quality).
+      // Previously this stripped the token entirely, which can result in Amazon
+      // serving a low-res default. SL1500 guarantees 1500px longest side.
+      // Global flag handles chained tokens like ._AC_US40_._SX300_.
+      let path = u.pathname.replace(/\._[A-Z0-9_,]{2,}_\./gi, '._AC_SL1500_.');
+      u.pathname = path;
       return u.href;
     }
     if (/walmartimages\.com|walmart\.com/i.test(h)) {
@@ -240,25 +242,9 @@ function isBadImageElement(imgEl) {
     '[class*="payment-method"], [class*="PaymentMethod"], ' +
     '[class*="seller-info"], [class*="SellerInfo"], ' +
     '[class*="store-logo"], [class*="StoreLogo"], ' +
-    '[class*="brand-logo"], [class*="BrandLogo"], ' +
-    // Ads, sponsored placements, carousels, recommendations, and reviews
-    '[id*="ape_"], [class*="ape-"], [id*="ad-"], [class*="ad-"], [id*="ilm"], ' +
-    '[class*="sponsored"], [data-cel-widget*="ad"], [id*="sims"], [id*="similarities"], ' +
-    '[id*="recommendations"], [id*="rhf"], [id*="review"], [class*="review"], ' +
-    '#customerReviews, #va-related-videos-widget_feature_div, #dp-ads-middle'
+    '[class*="brand-logo"], [class*="BrandLogo"]'
   );
-  if (badParent) return true;
-
-  // Amazon safeguard: reject images outside product image container
-  if (location.hostname.includes('amazon.')) {
-    const inAmzGallery = imgEl.closest(
-      '#imageBlock, #imageBlock_feature_div, #main-image-container, ' +
-      '#altImages, #imgTagWrapperId, #leftCol, #dp-container #left-col, #landingImage'
-    );
-    if (!inAmzGallery) return true;
-  }
-
-  return false;
+  return !!badParent;
 }
 
 // ── ISSUE 4 FIX: Find the main product gallery container ────
@@ -453,71 +439,6 @@ function collectImagesBySelector(selector, scope) {
     if (s && !isBadImage(s)) out.push(s);
   });
   return out;
-}
-
-// ── Bot Challenge Detection (Walmart / Amazon / Sam's Club) ──
-function checkBotChallenge() {
-  try {
-    const docText = (document.body ? document.body.innerText : '') || '';
-    const title = (document.title || '').toLowerCase();
-
-    // Walmart / PerimeterX
-    if (document.getElementById('px-captcha') || /press\s*&\s*hold/i.test(docText) || /robot or human\?/i.test(title) || (title.includes('blocked') && host().includes('walmart'))) {
-      return 'Walmart / PerimeterX Bot Check';
-    }
-    // Amazon Robot Check
-    if (title.includes('robot check') || /api-services-support@amazon\.com/i.test(docText) || document.querySelector('form[action*="validateCaptcha"]')) {
-      return 'Amazon Robot Check / Captcha';
-    }
-    // Sam's Club / Akamai
-    if (title.includes('access denied') || /reference\s*#[0-9a-f.]+/i.test(docText)) {
-      return "Sam's Club / Akamai Access Denied";
-    }
-  } catch (_) {}
-  return null;
-}
-
-// ── Human-Like Telemetry & Carousel Hydration ────────────────
-// Generates natural pointer movements and a progressive micro-scroll.
-// 1) Satisfies PerimeterX, Akamai (_abck), and Cloudflare sensor scripts that expect user activity.
-// 2) Triggers IntersectionObserver on Walmart, Sam's Club, and Amazon to unlock lazy-loaded carousel images.
-async function simulateHumanInteraction() {
-  try {
-    if (typeof window === 'undefined' || !document.body) return;
-
-    // Jitter mousemove / pointermove across viewport coordinates
-    const points = [
-      { x: Math.floor(window.innerWidth * 0.2) + Math.floor(Math.random() * 50), y: 150 + Math.floor(Math.random() * 40) },
-      { x: Math.floor(window.innerWidth * 0.4) + Math.floor(Math.random() * 60), y: 280 + Math.floor(Math.random() * 50) },
-      { x: Math.floor(window.innerWidth * 0.3) + Math.floor(Math.random() * 40), y: 360 + Math.floor(Math.random() * 60) }
-    ];
-
-    for (const pt of points) {
-      const target = document.elementFromPoint(pt.x, pt.y) || document.body;
-      const mouseEvtInit = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: pt.x,
-        clientY: pt.y,
-        screenX: pt.x + (window.screenX || 0),
-        screenY: pt.y + (window.screenY || 0),
-        buttons: 0
-      };
-      try { target.dispatchEvent(new PointerEvent('pointermove', mouseEvtInit)); } catch (_) {}
-      try { target.dispatchEvent(new MouseEvent('mousemove', mouseEvtInit)); } catch (_) {}
-    }
-
-    // Stepped micro-scroll to activate image observers and lazy-carousels
-    const originalY = window.scrollY;
-    const scrollTarget = Math.min(380, (document.body.scrollHeight || 1000) - window.innerHeight);
-    if (scrollTarget > 50) {
-      window.scrollBy({ top: scrollTarget, behavior: 'smooth' });
-      await new Promise(r => setTimeout(r, 200));
-      window.scrollTo({ top: originalY, behavior: 'smooth' });
-      await new Promise(r => setTimeout(r, 100));
-    }
-  } catch (_) {}
 }
 
 function pickAmazonDynamic(img) {
@@ -1043,52 +964,26 @@ function readSamsClubPrice() {
 
 // ── ISSUE 1 FIX: Walmart precise price reader ────────────────
 function readWalmartPrice() {
-  // Strategy 0: __NEXT_DATA__ JSON (authoritative product pricing)
-  try {
-    const nextEl = document.getElementById('__NEXT_DATA__');
-    if (nextEl) {
-      const nd = JSON.parse(nextEl.textContent || '{}');
-      const root = nd?.props?.pageProps?.initialData?.data?.product
-                || nd?.pageProps?.initialData?.data?.product
-                || nd?.initialData?.data?.product;
-      const jsonPrice = root?.priceInfo?.currentPrice?.priceString
-                     || root?.priceInfo?.currentPrice?.price
-                     || root?.primaryOffer?.offerPrice;
-      if (jsonPrice) {
-        const pStr = String(jsonPrice).trim();
-        return pStr.startsWith('$') ? pStr : `$${pStr}`;
-      }
-    }
-  } catch (_) {}
-
-  // Prefer aria-label on the primary price wrapper (has the full formatted price)
+  // Prefer aria-label on the price wrapper (has the full formatted price)
   const ariaSelectors = [
-    '[data-testid="price-wrap"] [itemprop="price"]',
+    '[itemprop="price"]',
     '[data-automation-id="product-price"] [itemprop="price"]',
-    '[data-testid="price-wrap"] span[aria-label*="$"]',
-    '[data-automation-id="product-price"] span[aria-label*="$"]',
     '[data-automation-id="product-price"]',
-    '[data-testid="price-wrap"]',
-    '[itemprop="price"]'
+    'span[aria-label*="$"]',
+    'span[aria-label*="£"]',
+    'span[aria-label*="€"]'
   ];
   for (const sel of ariaSelectors) {
     for (const el of document.querySelectorAll(sel)) {
-      const attr = el.getAttribute('aria-label') || el.getAttribute('content') || '';
-      const raw = attr || el.innerText || '';
-      // Skip warranty, protection plan, delivery threshold, and unit pricing
-      if (/per\s+(oz|ounce|fl|count|ea|lb)|warranty|protection|shipping|minimum|pickup/i.test(raw)) continue;
-      let c = cleanPriceText(raw);
-      if (!c || !/\d/.test(c)) continue;
-      // Walmart price "$51" + "99" alag spans mein hota hai → innerText "$5199" (dot gayab) → 100x price
-      if (!attr && /^[$£€]?\d{4,}$/.test(c) && el.children.length >= 2) c = c.replace(/(\d{2})$/, '.$1');
-      return c;
+      const raw = el.getAttribute('aria-label') || el.getAttribute('content') || el.innerText || '';
+      const c = cleanPriceText(raw);
+      if (c && /\d/.test(c)) return c;
     }
   }
 
   // Reconstruct from characteristic + mantissa
-  const priceRoot = document.querySelector('[data-testid="price-wrap"], [data-automation-id="product-price"]') || document;
-  const charEl = priceRoot.querySelector('.price-characteristic, [itemprop="price"]');
-  const mantEl = priceRoot.querySelector('.price-mantissa');
+  const charEl = document.querySelector('.price-characteristic, [itemprop="price"]');
+  const mantEl = document.querySelector('.price-mantissa');
   if (charEl) {
     const whole = charEl.getAttribute('content') || charEl.innerText.replace(/[^0-9,]/g, '');
     const frac  = mantEl ? mantEl.innerText.replace(/[^0-9]/g, '') : '00';
@@ -1198,29 +1093,34 @@ function scrapeAmazon() {
   // This way: products where ALL images have hiRes → original quality for all.
   //           Products where SOME images have hiRes=null → 1500px for those.
 
-  // Amazon product images: use _AC_SL1500_ (Auto-Crop 1500px).
-  // Amazon's _AC_ automatically detects and crops out excess white margins around the product,
-  // framing the item tightly and sharply at 1500px HD resolution (identical to right-click saving).
-  function toAmazonAutoCrop(url) {
+  // For hiRes source: strip modifier entirely → original upload quality
+  function cleanHiRes(url) {
     if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
-    let clean = url.split('?')[0];
-    clean = clean.replace(/(?:\._[A-Za-z0-9_.,-]+_\.?)+/g, '.');
-    return clean.replace(/(\.[a-zA-Z0-9]+)$/i, '._AC_SL1500_$1');
+    return url.replace(/\._[A-Za-z0-9_,]+_\./g, '.');
+  }
+
+  // For large/thumb/fallback: replace modifier with _SL1500_ → guaranteed 1500px
+  // NOT stripping, because Amazon may not CDN-cache the original for these paths.
+  function upscaleTo1500(url) {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
+    return url.replace(/\._[A-Za-z0-9_,]+_\./g, '._SL1500_.');
   }
 
   const seenKeys = new Set();
 
+  // Add image from hiRes source → original quality
   function addHiResImg(url) {
-    const sized = toAmazonAutoCrop(url);
-    if (!sized) return;
-    const key = canonImageKey(sized);
+    const clean = cleanHiRes(url);
+    if (!clean) return;
+    const key = canonImageKey(clean);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
-    r.images.push(sized);
+    r.images.push(clean);
   }
 
+  // Add image from fallback source → 1500px quality
   function addFallbackImg(url) {
-    const sized = toAmazonAutoCrop(url);
+    const sized = upscaleTo1500(url);
     if (!sized) return;
     const key = canonImageKey(sized);
     if (seenKeys.has(key)) return;
@@ -1242,23 +1142,8 @@ function scrapeAmazon() {
       '[\\s\\S]{0,600}?' + q + 'large' + q + '\\s*:\\s*' + q + '(https?:\\/\\/[^"\\\\]+)' + q +
       '(?:[\\s\\S]{0,40}?' + q + 'main' + q + '\\s*:\\s*\\{([\\s\\S]{0,4000}?)\\})?', 'g');
     for (const script of document.querySelectorAll('script')) {
-      let t = script.textContent || '';
+      const t = script.textContent || '';
       if (!t.includes('colorImages') && !t.includes('ImageBlockATF')) continue;
-      // v10.3.1 BUG FIX: variation wale products (Color: White / Yellow / …) ke script mein SAB variants ki images hoti hain —
-      // sirf 'initial' (is page ka selected variant) wala array parho, warna har variant ko ek jaisi images milti hain.
-      try {
-        const ci = t.indexOf('colorImages');
-        if (ci >= 0) {
-          const ii = t.indexOf('initial', ci);
-          const ab = ii >= 0 ? t.indexOf('[', ii) : -1;
-          if (ab >= 0 && ab - ii < 20) {
-            let depth = 0, end = -1;
-            for (let i = ab; i < t.length && i < ab + 400000; i++) { const ch = t[i]; if (ch === '[') depth++; else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } } }
-            if (end > ab) t = t.slice(ab, end + 1);
-          }
-        }
-      } catch (_) {}
-      re.lastIndex = 0;
       let m;
       while ((m = re.exec(t)) !== null) {
         const hiRes = m[1] === 'null' ? null : m[1].replace(/^\\?"|\\?"$/g, '');
@@ -1276,64 +1161,54 @@ function scrapeAmazon() {
     }
     return out;
   }
-  let entries = amazonEntriesFromScripts();
-  // v10.3.1 sanity: page ki main image (landingImage data-old-hires) entries mein na ho to script galat variant ka hai → DOM gallery use karo
-  try {
-    const li = document.getElementById('landingImage');
-    const liKey = li ? canonImageKey(li.getAttribute('data-old-hires') || li.src || '') : '';
-    if (liKey && entries.length && !entries.some(e => canonImageKey(e.hiRes || e.best || '') === liKey)) entries = [];
-  } catch (_) {}
-  entries.forEach(e => {
-    if (e.hiRes) addHiResImg(e.hiRes);
-    else if (e.best) addHiResImg(e.best);
-  });
+  const entries = amazonEntriesFromScripts();
+  entries.forEach(e => { if (e.hiRes) addHiResImg(e.hiRes); else addFallbackImg(e.best); });
 
-  // ── DOM gallery fallback: used if script extraction found nothing or wrong variant ──
-  // Handles new Amazon "inline-twister" variant pages where colorImages is absent from scripts.
+  // ── DOM gallery fallback: one url per <img>, best candidate only ───────
   if (r.images.length === 0) {
-    const galleryImgs = document.querySelectorAll(
-      '#landingImage, #imgTagWrapperId img, ' +
-      '#altImages li:not(.video-item) img, ' +
-      '#imageBlock img:not(.video-item img), .imageThumbnail img, ' +
-      // Also capture any lazily-rendered thumbnails that haven't swapped src yet
-      '#altImages [data-old-hires], #imageBlock_feature_div [data-old-hires]'
-    );
-    galleryImgs.forEach(img => {
-      if (isBadImageElement(img)) return;
-      // 1. data-old-hires: convert to _AC_SL1500_ for auto-crop without white padding
-      const oldHires = img.getAttribute('data-old-hires') || '';
-      if (oldHires) { const c = toAmazonAutoCrop(oldHires); if (c) { addHiResImg(c); return; } }
-      // 2. data-a-dynamic-image: pick largest entry, convert to _AC_SL1500_
-      const dyn = pickAmazonDynamic(img);
-      if (dyn) { const c = toAmazonAutoCrop(dyn); if (c) { addHiResImg(c); return; } }
-      // 3. data-zoom-image / data-large-image
-      const zoom = img.getAttribute('data-zoom-image') || img.getAttribute('data-large-image') || '';
-      if (zoom) { const c = toAmazonAutoCrop(zoom); if (c) { addHiResImg(c); return; } }
-      // 4. Lazy src attributes (not yet rendered)
-      const lazySrc = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-lazy') || '';
-      if (lazySrc) { const c = toAmazonAutoCrop(lazySrc); if (c) { addHiResImg(c); return; } }
-      // 5. Rendered src — thumbnail upscale to _AC_SL1500_
-      const src = img.currentSrc || img.src || '';
-      if (!src || /play[-_]?button|video[-_]?thumbnail|pkplay/i.test(src)) return;
-      const c = toAmazonAutoCrop(src);
-      if (c) addHiResImg(c);
+    document.querySelectorAll('#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img').forEach(img => {
+      const hires = img.getAttribute('data-old-hires') || '';
+      const cand = hires || pickAmazonDynamic(img) || img.getAttribute('data-zoom-image') || img.getAttribute('data-large-image') || img.src || img.getAttribute('data-src') || '';
+      if (!cand || /play[-_]?button|video[-_]?thumbnail|pkplay/i.test(cand)) return;
+      if (hires) addHiResImg(cand); else addFallbackImg(cand);
     });
   }
 
-  // Pass 2: Targeted script scan ONLY if DOM and Pass 0 yielded nothing (strictly scoped to image block scripts)
+  // Pass 2: Raw Amazon CDN URL scan — only if targeted script extraction found nothing.
+  if (r.images.length === 0) for (const script of scripts) {
+    const t = script.textContent || '';
+    const rawScan = /https:\/\/(?:m\.media-amazon\.com|images-amazon\.com)\/images\/I\/[A-Za-z0-9%+\-_.]+\.(?:jpg|jpeg|png|webp)/g;
+    let match;
+    while ((match = rawScan.exec(t)) !== null) addFallbackImg(match[0]);
+  }
+
+  // Pass 3 (DOM fallback): used when script scans yield nothing (rare).
   if (r.images.length === 0) {
-    for (const script of document.querySelectorAll('script:not([src])')) {
-      const t = script.textContent || '';
-      if (!t.includes('colorImages') && !t.includes('ImageBlockATF') && !t.includes('imageBlock')) continue;
-      // Exclude any sponsored ad scripts
-      if (t.includes('ape_Detail') || t.includes('adCreativeMetaData') || t.includes('adProgramId')) continue;
-      const rawScan = /https:\/\/(?:m\.media-amazon\.com|images-amazon\.com)\/images\/I\/[A-Za-z0-9%+\-_.]+\.(?:jpg|jpeg|png|webp)/g;
-      let match;
-      while ((match = rawScan.exec(t)) !== null) {
-        addHiResImg(match[0]);
-      }
-      if (r.images.length > 0) break;
+    const landingImage = document.getElementById('landingImage');
+    if (landingImage) {
+      const oldHires = landingImage.getAttribute('data-old-hires');
+      if (oldHires) addHiResImg(oldHires);  // data-old-hires = true hi-res
+      else addFallbackImg(landingImage.src); // src = fallback
     }
+
+    document.querySelectorAll('.a-button-thumbnail img').forEach(img => {
+      addHiResImg(img.getAttribute('data-old-hires') || '');
+      addFallbackImg(pickAmazonDynamic(img) || img.src || '');
+    });
+
+    const imgEls = document.querySelectorAll(
+      '#altImages img, #imgTagWrapperId img, #imageBlock img, .imageThumbnail img'
+    );
+    imgEls.forEach(img => {
+      if (img.closest('[class*="review"]')) return;
+      addHiResImg(img.getAttribute('data-old-hires') || '');
+      addFallbackImg(
+        pickAmazonDynamic(img) ||
+        img.getAttribute('data-zoom-image') ||
+        img.getAttribute('data-large-image') ||
+        img.src || img.getAttribute('data-src') || ''
+      );
+    });
   }
 
 
@@ -1942,11 +1817,23 @@ async function scrapeTemu() {
   // koi product data hota bhi nahi — is liye wahan ye strategy skip (console error khatam).
   const temuIsSellerCenter = /^seller\./i.test(location.hostname) || !/-g-\d+|goods_id=\d+/.test(location.href);
   try {
-    // v10.2.3: inline <script> ki jagah background chrome.scripting (MAIN world) — temu.com ki CSP inline block karti hai
     const temuData = temuIsSellerCenter ? null : await new Promise((resolve) => {
-      let done = false; const fin = (v) => { if (!done) { done = true; resolve(v); } };
-      try { chrome.runtime.sendMessage({ action: 'ZH_PAGE_INIT_DATA' }, (r) => { void chrome.runtime.lastError; try { fin(r?.data ? JSON.parse(r.data) : null); } catch (_) { fin(null); } }); } catch (_) { fin(null); }
-      setTimeout(() => fin(null), 2500);
+      const msgKey = '__zhunter_temu_' + Date.now();
+      const script = document.createElement('script');
+      script.textContent = '(function(){' +
+        'var d=window.__init_data__||null;' +
+        'window.postMessage({__zhunterKey:"' + msgKey + '",payload:d?JSON.stringify(d):null},"*");' +
+        '})();';
+      const handler = (e) => {
+        if (e.source === window && e.data && e.data.__zhunterKey === msgKey) {
+          window.removeEventListener('message', handler);
+          resolve(e.data.payload ? JSON.parse(e.data.payload) : null);
+        }
+      };
+      window.addEventListener('message', handler);
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+      setTimeout(() => { window.removeEventListener('message', handler); resolve(null); }, 500);
     });
 
     if (temuData) {
@@ -2603,8 +2490,6 @@ function parseDimsIn(raw) {
 
 function cleanBrand(b) {
   b = String(b || '').replace(/^(visit the|brand:|by)\s+/i, '').replace(/\s+store$/i, '').replace(/\s+/g, ' ').trim();
-  // v9.8.1: page-navigation text jo brand nahi hai
-  if (/^(brand shop directory|brands?|brands? & intellectual property|shop all|see all|shop now|sponsored|departments?|services?|all departments)$/i.test(b)) return '';
   return b.length > 1 && b.length <= 60 ? b : '';
 }
 
@@ -2664,15 +2549,7 @@ function extractProductDetails(platform) {
     }
     // ── Walmart / Sam's Club (same front-end family) ──
     else if (h.includes('walmart.') || h.includes('samsclub.com')) {
-      // v9.8.1: Walmart ka asal brand link `a[data-seo-id="brand-name"]` (e.g. "Great Value"); generic `a[href*="/brand/"]` footer ka
-      // "Brand Shop Directory" / sponsored carousel pakar leta tha → ab sirf main product area ke andar aur junk reject.
-      d.brand = cleanBrand(txt(document.querySelector('a[data-seo-id="brand-name"], a[data-testid="product-brand-link"], [link-identifier="brandName"], [data-testid="brand-link"], .prod-brandName')));
-      if (!d.brand) {
-        const scope = document.querySelector('#maincontent [data-testid="flex-container"], #maincontent, main') || document;
-        const cand = [...scope.querySelectorAll('a[href*="/brand/"], a[href*="/cp/"], [class*="brand-name" i]')].find(a => !/branddirectory|\/brand\/?$/i.test(a.getAttribute('href') || '') && !a.closest('footer, nav, [data-testid*="carousel" i], [data-test-id="gpt-main"], [aria-label="Advertisement"]'));
-        d.brand = cleanBrand(txt(cand));
-      }
-      if (/^(brand shop directory|brands?( & intellectual property)?|shop all|see all|visit the store)$/i.test(d.brand)) d.brand = '';
+      d.brand = cleanBrand(txt(document.querySelector('a[data-testid="product-brand-link"], [link-identifier="brandName"], [data-testid="brand-link"], a[href*="/brand/"], .prod-brandName, [class*="brand-name" i]')));
       // selected variant chip / "Actual Color: White"
       const chip = document.querySelector('[data-testid="variant-group"] [aria-checked="true"], [aria-pressed="true"][data-testid*="variant" i], .variant-option.selected, [class*="selected" i][class*="variant" i]');
       const chipTxt = txt(chip?.getAttribute?.('aria-label') ? { innerText: chip.getAttribute('aria-label') } : chip);
@@ -2745,7 +2622,6 @@ function pickPlatform() {
 }
 
 async function scrapePageData() {
-  const botWarn = checkBotChallenge();
   let data;
   try {
     const platformFn = pickPlatform();
@@ -2753,7 +2629,6 @@ async function scrapePageData() {
   } catch (_) {
     data = { title: document.title || '', price: '', images: [], videos: [], variants: [] };
   }
-  if (botWarn) data.botWarning = botWarn;
 
   data = await enhanceWithGlobals(data);
 
@@ -2806,18 +2681,10 @@ async function scrapePageData() {
 // Panel sends TEMU_UPLOAD_FILE {b64, filename}; we switch to the
 // "general template" tab, tick the disclaimer, and attach the file.
 // ═══════════════════════════════════════════════════════════════
-// v9.10.2 — Temu ke div[role=button] React buttons: sirf mousedown+click register nahi hota; poora pointer sequence
-function temuClick(el) {
-  if (!el) return false;
-  for (const t of ['pointerover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) { try { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, button: 0 })); } catch (_) {} }
-  return true;
-}
-let _temuAbort = false; // v10.3.2 — side panel Stop → background TEMU_ABORT → sab waits foran khatam
 function temuWait(fn, timeout = 8000, step = 200) {
   return new Promise(resolve => {
     const t0 = Date.now();
     (function poll() {
-      if (_temuAbort) return resolve(null);
       let v = null;
       try { v = fn(); } catch (_) {}
       if (v) return resolve(v);
@@ -2832,25 +2699,9 @@ function temuHistorySection() {
   try {
     // general section ki table: title "Upload history" (categories wali "Spreadsheet upload status" hoti hai)
     const heading = [...document.querySelectorAll('div,span,h1,h2,h3')].find(e => /^\s*upload history\s*$/i.test((e.textContent || '').trim()));
-    if (heading) return heading.closest('[class*="wrap-"]') || heading.closest('[class]')?.parentElement || heading.parentElement;
-    // v9.9.2 fallback: general table ka header th "File name / Date uploaded, Upload ID" (categories table mein alag th hote hain)
-    const th = [...document.querySelectorAll('th[data-testid="beast-core-table-th"]')].find(t => /date uploaded,\s*upload id/i.test(t.textContent || ''));
-    if (th) return th.closest('[class*="wrap-"]') || th.closest('[data-testid="beast-core-table"]')?.parentElement?.parentElement || null;
-    return null;
+    if (!heading) return null;
+    return heading.closest('[class*="wrap-"]') || heading.closest('[class]')?.parentElement || heading.parentElement;
   } catch (_) { return null; }
-}
-// v9.9.2 — page reload/naya tab "Add products by categories" par khulta hai; tab general section (aur uski Upload history) DOM mein hoti hi nahi.
-// Pehle general template tab select karo, phir section ka 8s tak wait.
-async function temuEnsureHistorySection(report) {
-  let sec = temuHistorySection();
-  if (sec) return sec;
-  try {
-    const title = [...document.querySelectorAll('[class*="upload_page_tab_item_title"]')].find(d => /general template/i.test(d.textContent || ''));
-    const item = title && (title.closest('[class*="upload_page_tab_item-"]') || title.parentElement);
-    if (item && !/active/i.test(item.className)) { item.click(); title.click(); report && report.push('• "Add products via general template" tab select kiya'); }
-  } catch (_) {}
-  sec = await temuWait(temuHistorySection, 8000, 300);
-  return sec;
 }
 // Sab se upar wali (naya-tareen) upload row ki "signature" — uska Upload ID (13-20 digit number)
 // ya, agar ID abhi nahi bana, file ka naam + uske paas ka "Cancel"/"Processing" text.
@@ -2874,9 +2725,8 @@ function temuTopHistorySignature() {
 
 async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, hiddenMode }) {
   const report = [];
-  _temuAbort = false;
   const ok = (m) => report.push('✓ ' + m);
-  const fail = (m) => { if (_temuAbort) { report.push('🛑 Stop dabaya'); return { success: false, aborted: true, report }; } report.push('✗ ' + m); return { success: false, report }; };
+  const fail = (m) => { report.push('✗ ' + m); return { success: false, report }; };
 
   // 0) Safety: make sure the right store is open in Seller Center
   if (expectStore) {
@@ -3012,14 +2862,13 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
     // phase 1: Temu ne file uthaa li — progress text / Cancel button / naya Upload ID / nayi history row — max 90s
     let accepted = false, uploadId = null, lastNote = 0;
     while (Date.now() - t0 < 90000) {
-      if (_temuAbort) return { success: false, aborted: true, report: [...report, '🛑 Stop dabaya — Temu ne abhi file uthai nahi thi'] };
       await new Promise(r => setTimeout(r, 700));
       uploadId = newId();
       if (progressText() !== null || uploadId || cancelVisible() || temuTopHistorySignature() !== beforeSig) { accepted = true; break; }
       progress('uploading');
       if (Date.now() - lastNote > 30000) { lastNote = Date.now(); report.push(`• File upload ho rahi hai… (${Math.round((Date.now() - t0) / 1000)}s)`); }
     }
-    if (!accepted) { report.push('• 90s mein Temu ne file uthai nahi (na progress, na Upload ID) — peeche se Upload history dekhta rahunga'); return { success: true, confirmed: false, beforeSig, report }; }
+    if (!accepted) { report.push('• 90s mein Temu ne file uthai nahi (na progress, na Upload ID) — Temu tab par dekh lein'); return { success: true, confirmed: false, report }; }
     progress('accepted', { uploadId });
     ok(`File Temu ne uthaa li (${Math.round((Date.now() - t0) / 1000)}s)` + (uploadId ? ` — Upload ID ${uploadId}` : ''));
     // phase 2: processing complete — "Processing data" gayab + section mein Completed/records count (ya nayi history row) — max 200s
@@ -3038,7 +2887,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
         if (uploadId && temuTopHistorySignature() !== beforeSig && temuTopHistorySignature() === 'id:' + uploadId) { finished = true; break; }
       }
     }
-    if (!finished) { report.push(`• Processing 200s mein poori nahi hui (last ${lastPct}%) — peeche se Upload history dekhta rahunga (10 min tak)`); return { success: true, confirmed: false, uploadId, beforeSig, report }; }
+    if (!finished) { report.push(`• Processing 200s mein poori nahi hui (last ${lastPct}%) — Temu tab saamne chhod diya; complete hone par "Mark as listed" daba dein`); return { success: true, confirmed: false, uploadId, report }; }
     const secs = Math.round((Date.now() - t1) / 1000);
     if (info && info.processed != null) {
       ok(`Processing mukammal (${secs}s) — ${info.status}: ${info.processed} records processed, ${info.added} added, ${info.errors} errors` + (uploadId ? ` (ID ${uploadId})` : ''));
@@ -3075,8 +2924,6 @@ function temuVisible(el) {
 function temuSelectCurrent(sel) {
   const rend = sel.querySelector('[class*="inputItemRenderer"]');
   const inp = sel.querySelector('input');
-  const tags = [...sel.querySelectorAll('[class*="IPT_tag"], [class*="tagItem"], [class*="Tag_"], [class*="ST_tag"]')].map(t => t.textContent.replace(/[✕x×]/g, '').trim()).filter(Boolean);
-  if (tags.length) return tags.join(', ');
   return ((rend && rend.textContent) || (inp && inp.value) || '').trim();
 }
 // All option-like nodes that appeared for an open dropdown (rendered in a portal at body level)
@@ -3090,18 +2937,8 @@ function temuDropdownOptions() {
   return out;
 }
 async function temuPickSelectValue(sel, want) {
-  // v9.14.0: candidates array → pehla jo dropdown mein mile; '__first__' → dropdown ka pehla option
-  if (Array.isArray(want)) { for (const w of want) { const r = await temuPickSelectValue(sel, w); if (r === 'set' || r === 'already') return r; } return 'no_option'; }
-  if (want === '__first__') {
-    const head = sel.querySelector('[data-testid="beast-core-select-header"]') || sel;
-    head.scrollIntoView({ block: 'center' }); await temuSleep(120); temuClick(head); await temuSleep(400);
-    let opts = []; const t0 = Date.now(); while (Date.now() - t0 < 4000 && !opts.length) { await temuSleep(200); opts = temuDropdownOptions().filter(o => (o.textContent || '').trim()); }
-    if (!opts.length) { try { document.body.click(); } catch (_) {} return 'no_option'; }
-    temuClick(opts[0]); await temuSleep(350); try { document.body.click(); } catch (_) {}
-    return temuSelectCurrent(sel) || sel.querySelector('[class*="IPT_tag"] [class*="tag"], [class*="Tag_"]') ? 'set' : 'verify_failed';
-  }
   const wantL = String(want).trim().toLowerCase();
-  if (temuSelectCurrent(sel).toLowerCase().includes(wantL)) return 'already';
+  if (temuSelectCurrent(sel).toLowerCase() === wantL) return 'already';
   const head = sel.querySelector('[data-testid="beast-core-select-header"]') || sel;
   head.scrollIntoView({ block: 'center' });
   await temuSleep(120);
@@ -3118,24 +2955,20 @@ async function temuPickSelectValue(sel, want) {
     const opts = temuDropdownOptions();
     opt = opts.find(o => o.textContent.trim().toLowerCase() === wantL)
        || opts.find(o => o.textContent.trim().toLowerCase().startsWith(wantL))
-       || opts.find(o => o.textContent.trim().toLowerCase().includes(wantL))
-       || opts.find(o => wantL.includes(o.textContent.trim().toLowerCase()))
        || null;
   }
   if (!opt) {
     if (inp) { try { inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })); } catch (_) {} }
     await temuSleep(300);
-    if (temuSelectCurrent(sel).toLowerCase().includes(wantL)) return 'set';
+    if (temuSelectCurrent(sel).toLowerCase() === wantL) return 'set';
     try { document.body.click(); } catch (_) {}
     return 'no_option';
   }
   opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   opt.click();
-  await temuSleep(400);
-  try { document.body.click(); } catch (_) {}
-  await temuSleep(200);
+  await temuSleep(350);
   const cur = temuSelectCurrent(sel).toLowerCase();
-  return cur.includes(wantL) || wantL.includes(cur) || cur === wantL || cur.startsWith(wantL) || sel.querySelector('[class*="IPT_tag"], [class*="Tag_"], [class*="tagItem"]') ? 'set' : 'verify_failed';
+  return cur === wantL || cur.startsWith(wantL) ? 'set' : 'verify_failed';
 }
 function temuFormItemsByLabel(scope, label) {
   const want = label.trim().toLowerCase();
@@ -3149,16 +2982,28 @@ function temuFormItemsByLabel(scope, label) {
 // Applicable Age Group=14 Years+). Pehle se bhare fields ko haath nahi lagta. (DOM 2026-09-04:
 // tr.TB_father_123 > [data-testid=beast-core-form-item] > label.Form_itemLabelContent_123 (+ .Form_itemRequired_123),
 // select [data-testid=beast-core-select], filled value .inputItemRenderer-*, row category text "Category: A/B/C".)
-const TEMU_DRAFT_FALLBACKS = { 'material': 'Other', 'applicable age group': '14 Years+', 'age group': '14 Years+' };
+const TEMU_DRAFT_FALLBACKS = { 
+  'material': 'Other', 
+  'applicable age group': '14 Years+', 
+  'age group': '14 Years+',
+  'power supply mode': 'None',
+  'pattern': 'Solid Color',
+  'theme': 'Other',
+  'target audience': 'Adults',
+  'care instructions': 'Hand Wash Only',
+  'occasion': 'Casual',
+  'season': 'All-Season'
+};
 function temuRowFields(row) {
   const out = [];
-  for (const fi of row.querySelectorAll('[data-testid="beast-core-form-item"]')) {
-    const lb = fi.querySelector('[class*="Form_itemLabelContent"]');
+  const formItems = row.querySelectorAll('[data-testid="beast-core-form-item"], [class*="Form_item"], .form-item');
+  for (const fi of formItems) {
+    const lb = fi.querySelector('[class*="Form_itemLabelContent"], label, [class*="itemLabel"]');
     if (!lb) continue;
-    const label = lb.textContent.trim();
+    const label = lb.textContent.replace(/\*/g, '').trim();
     if (!label || /^variant\s*\d/i.test(label)) continue; // Variant 1/2 selectors — never touch
-    const required = !!fi.querySelector('[class*="Form_itemRequired"]');
-    const sel = fi.querySelector('[data-testid="beast-core-select"]');
+    const required = !!fi.querySelector('[class*="Form_itemRequired"], [class*="required"]') || lb.textContent.includes('*');
+    const sel = fi.querySelector('[data-testid="beast-core-select"], [class*="select"], [role="combobox"]');
     const inp = sel ? null : fi.querySelector('input, textarea');
     const current = sel ? temuSelectCurrent(sel) : (inp ? (inp.value || '').trim() : '');
     out.push({ fi, label, required, sel, inp, current, empty: !current || /^select$/i.test(current) });
@@ -3173,14 +3018,9 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   if (expectStore) {
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
     if (mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
-      warn(`Active store is "${mall}" (extension: "${expectStore}") — proceeding with "${mall}"…`);
+      return fail(`Ghalat store khula hai: Temu par "${mall}" hai, extension mein "${expectStore}" active hai.`);
   }
-  const rows = await temuWait(() => {
-    const fathers = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"].TB_father_123, tr.TB_father_123, tr[class*="TB_father"]')];
-    if (fathers.length) return fathers;
-    const fallback = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')].filter(tr => /^\d{10,}$/.test(tr.getAttribute('data-row-key') || ''));
-    return fallback.length ? fallback : null;
-  }, 10000);
+  const rows = await temuWait(() => { const r = [...document.querySelectorAll('tr[class*="TB_father"]')]; return r.length ? r : null; }, 10000);
   if (!rows) return fail('Koi draft row nahi mili — "Complete product details" page khula hai?');
   let changed = 0, stillEmpty = 0;
   const pick = (attrs, label) => {
@@ -3199,27 +3039,12 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const notes = [];
     if (!need.length) { ok(`${name.slice(0, 45)} — sab required fields bhare hain` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
-      // v9.15.1: rule → defaults → attr guess/fallback list → '__first__'; composition table support; 8s limit per field (stuck na ho)
-      const isSensitive = /allergen|ingredient|drug\s*fact|nutrition|dietary|expiration|warning/i.test(f.label);
-      const want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? temuAttrGuess(f.label, name) ?? (!isSensitive ? TEMU_DRAFT_FALLBACKS[f.label.trim().toLowerCase()] : null) ?? (!isSensitive ? '__first__' : null);
-      if (!want) {
-        notes.push(`${f.label}: auto-fill skip (khud check karein)`);
-        stillEmpty++;
-        continue;
-      }
-      const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r('timeout'), ms))]);
-      const isComp = !!f.fi.querySelector('table');
-      if (isComp) {
-        const res = await withTimeout(temuFillComposition(f.fi, want), 9000);
-        if (res === 'set' || res === 'already') { changed++; notes.push(`${f.label}=${Array.isArray(want) ? want[0] : want} 100%`); } else { notes.push(`${f.label}: composition nahi bhar saka (${res})`); stillEmpty++; }
-        try { document.body.click(); } catch (_) {}
-        continue;
-      }
+      const want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? TEMU_DRAFT_FALLBACKS[f.label.trim().toLowerCase()] ?? null;
+      if (want == null) { notes.push(`${f.label}: KHALI (profile mein value likhein)`); stillEmpty++; continue; }
       if (f.sel) {
-        let res = await withTimeout(temuPickSelectValue(f.sel, want), 8000);
-        if (res !== 'set' && res !== 'already' && want !== '__first__' && !isSensitive) { try { document.body.click(); } catch (_) {} await temuSleep(200); res = await withTimeout(temuPickSelectValue(f.sel, '__first__'), 8000); }
-        if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${temuSelectCurrent(f.sel) || want}`); }
-        else { notes.push(`${f.label}: "${Array.isArray(want) ? want.join('/') : want}" dropdown mein nahi mila (${res})`); stillEmpty++; try { document.body.click(); } catch (_) {} }
+        const res = await temuPickSelectValue(f.sel, want);
+        if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${want}`); }
+        else { notes.push(`${f.label}: "${want}" dropdown mein nahi mila (${res})`); stillEmpty++; }
       } else if (f.inp) {
         temuSetNativeValue(f.inp, want); changed++; notes.push(`${f.label}=${want} (typed)`);
       } else { notes.push(`${f.label}: field type samajh nahi aaya`); stillEmpty++; }
@@ -3230,237 +3055,27 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     if (stillEmpty > 0) warn(`${stillEmpty} required field(s) abhi bhi khali — Submit NAHI dabaya; upar wale fields Categories tab ke profile mein "attributes" mein likhein, ya page par khud bhar kar Submit karein`);
     else {
       const btn = [...document.querySelectorAll('[role="button"], button')].find(b => /^\s*submit\s*$/i.test(b.textContent || '') && temuVisible(b) && !/disable/i.test(b.className));
-      if (btn) {
-        temuClick(btn);
-        await temuSleep(600);
-        try {
-          const confirmBtn = [...document.querySelectorAll('[data-testid="beast-core-modal"] [role="button"], [class*="Modal_"] [role="button"], [class*="modal"] button')].find(b => /^\s*(confirm|ok|yes|submit)\s*$/i.test((b.textContent || '').trim()) && temuVisible(b));
-          if (confirmBtn && confirmBtn !== btn) temuClick(confirmBtn);
-        } catch (_) {}
-        ok('Submit dabaya — Temu par drafts save ho gaye');
-      } else {
-        warn('Submit button nahi mila / disabled — page par khud Submit dabayen');
-      }
+      if (btn) { btn.click(); ok('Submit dabaya — Temu par result dekhein (agar confirm popup aaye to OK karein)'); }
+      else warn('Submit button nahi mila / disabled — page par khud Submit dabayen');
     }
   }
   report.unshift(`${rows.length} drafts, ${changed} fields set, ${stillEmpty} still empty`);
   return { success: true, report, changed, total: rows.length, stillEmpty };
 }
 
-// ═══ v9.14.0 — "Product action required → Missing required attributes" (product-action.html?reform_type=excel_publish_complete_attributes) ═══
-// DOM (Sep 2026): rows tr[data-testid=beast-core-table-body-tr] jin mein .pId-* "Goods ID: N" + .catName-* "Category: A / B / C";
-// fields [data-testid=beast-core-form-item][id="<goodsId>.goodsProperty.<n>"] → label .Form_itemLabelContent_123, select [data-testid=beast-core-select]
-// (filled = .inputItemRenderer-*, khali = placeholder "Select"); composition fields (Material / Cover Material / Filling Material) = nested table:
-// select "Enter" + % input + "Add material" + "Sum (0.00%)". Row Submit = last td .btn-*.primary-* "Submit".
-const TEMU_ATTR_FALLBACKS = {
-  'power mode': ['Without electricity', 'Room electrical/hard wiring'],
-  'battery properties': ['No Battery', 'Without Battery', 'No battery', 'Not Contain Battery', '__first__'],
-  'wireless property': ['Not Wireless', 'No', 'Wired', '__first__'],
-  'operating voltage': ['120V', '110V', '110-120V', '__first__'],
-  'power supply': ['Use Without Electricity', 'Battery', '__first__'],
-  'indoor outdoor usage': ['Indoor', '__first__'],
-  'composition': ['Others', 'Other', '__first__'],
-  'estimated burn time (single candle)': ['__first__'],
-  'contain sku area ≥ 2.16m²': ['No'], 'contain sku longest side ≥1.8m': ['No'],
-  'material type': ['Textile Material', '__first__'],
-  'material': ['Plastic', 'Other', 'Others', '__first__'], 'cover material': ['Polyester', 'Cotton', '__first__'], 'filling material': ['Polyester', 'Cotton', '__first__'],
-  'applicable age group': ['14 Years+', 'Adults', '__first__'], 'age group': ['14 Years+', '__first__']
-};
-function temuAttrGuess(label, title) {
-  const l = label.trim().toLowerCase(), t = String(title || '').toLowerCase();
-  if (/allergen/i.test(l)) {
-    const matched = [];
-    if (/\bprotein\b|shake|whey|casein|milk|dairy|latte|vanilla|chocolate/i.test(t)) {
-      matched.push("Contains cow's milk", "Cow's milk", "Milk", "Dairy");
-    }
-    if (/\balmond|cashew|walnut|pecan|pistachio|hazelnut|tree nut/i.test(t)) {
-      matched.push("Contains Tree nuts", "Tree nuts", "Almond");
-    }
-    if (/\bpeanut|peanuts|peanut butter\b/i.test(t)) {
-      matched.push("Contains Peanuts", "Peanuts");
-    }
-    if (/\begg\b|\beggs\b/i.test(t) && !/eggplant/i.test(t)) {
-      matched.push("Contains hen's egg", "Hen's egg", "Egg");
-    }
-    if (/\bsoy\b|soybean|soya/i.test(t)) {
-      matched.push("Contains Soybean", "Soybean", "Soy");
-    }
-    if (/\bwheat\b|gluten|flour|cereal|biscuit|cookie|cinnamon roll/i.test(t)) {
-      matched.push("Contains Wheat", "Wheat");
-    }
-    if (/\bfish\b|salmon|tuna/i.test(t)) {
-      matched.push("Contains Fish", "Fish");
-    }
-    if (/\bsesame\b/i.test(t)) {
-      matched.push("Contains Sesame", "Sesame");
-    }
-    return matched.length ? matched : ["Contains cow's milk", "Milk", "Contains Tree nuts", "__first__"];
-  }
-  if (l === 'power mode') return /corded|electric|plug|watt|\bv\b|volt|toaster|cooker|mixer|blender|heater|lamp|led/.test(t) && !/battery|cordless|manual/.test(t) ? ['Room electrical/hard wiring', 'Without electricity'] : ['Without electricity', 'Room electrical/hard wiring'];
-  if (l === 'material') { if (/stainless|steel|metal|iron/.test(t)) return ['Stainless Steel', 'Metal', 'Other', '__first__']; if (/glass/.test(t)) return ['Glass', 'Other', '__first__']; if (/wood|bamboo/.test(t)) return ['Wood', 'Bamboo', 'Other', '__first__']; if (/cotton|fabric|plush|fleece|towel/.test(t)) return ['Cotton', 'Polyester', 'Other', '__first__']; if (/coir|jute/.test(t)) return ['Coir', 'Jute', 'Natural Fiber', 'Other', '__first__']; }
-  return TEMU_ATTR_FALLBACKS[l] || null;
-}
-async function temuFillComposition(fi, wantList) {
-  // nested material table: "No data" ho to pehle "Add material" dabao; phir pehli row ka select + 100%
-  const tbl = () => fi.querySelector('table'); if (!tbl()) return 'no_table';
-  let sel = tbl().querySelector('[data-testid="beast-core-select"]');
-  if (!sel) {
-    const addBtn = [...fi.querySelectorAll('[role="button"]')].find(b => /add material/i.test(b.textContent || ''));
-    if (!addBtn) return 'no_add_btn';
-    temuClick(addBtn); await temuSleep(700);
-    sel = await temuWait(() => tbl() && tbl().querySelector('[data-testid="beast-core-select"]'), 4000, 200);
-    if (!sel) return 'no_select';
-  }
-  const r = await temuPickSelectValue(sel, wantList);
-  if (r !== 'set' && r !== 'already') return r;
-  const pct = tbl().querySelector('input[data-testid="beast-core-inputNumber-htmlInput"]');
-  if (pct) { pct.focus(); temuSetNativeValue(pct, '100'); pct.dispatchEvent(new Event('blur', { bubbles: true })); await temuSleep(300); }
-  return 'set';
-}
-function temuAttrRowName(row) {
-  return (
-    row.querySelector('[class*="p_name-"]')?.innerText ||
-    row.querySelector('[class*="pName-"]')?.innerText ||
-    row.querySelector('[class*="elli_outerWrapper"]')?.innerText ||
-    row.querySelector('[data-testid="beast-core-ellipsis"]')?.innerText ||
-    row.querySelector('[class*="name"]')?.innerText ||
-    ''
-  ).replace(/\s+/g, ' ').trim();
-}
-function temuAttrRowId(row) {
-  const dataKey = row.getAttribute('data-row-key') || '';
-  if (/^\d{10,}$/.test(dataKey)) return dataKey;
-  return (
-    (row.querySelector('[class*="p_id-"], [class*="pId-"]')?.textContent || '').match(/\d{10,}/)?.[0] ||
-    (row.textContent || '').match(/Goods ID:\s*(\d+)/i)?.[1] ||
-    ''
-  );
-}
-async function temuPageFillAttributes({ rules = [], defaults = {}, autoSubmit = true, expectStore } = {}) {
-  const report = [];
-  const ok = m => report.push('✓ ' + m); const warn = m => report.push('• ' + m);
-  const fail = m => { report.push('✗ ' + m); return { success: false, report }; };
-  if (expectStore) {
-    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
-      warn(`Active store is "${mall}" (extension: "${expectStore}") — proceeding with "${mall}"…`);
-  }
-  const rowsOf = () => {
-    const fathers = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"].TB_father_123, tr.TB_father_123, tr[class*="TB_father"]')];
-    if (fathers.length) return fathers;
-    const trs = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')].filter(tr => {
-      const k = tr.getAttribute('data-row-key') || '';
-      return /^\d{10,}$/.test(k) || !!tr.querySelector('[class*="p_id-"], [class*="pId-"]') || /Goods ID:/i.test(tr.textContent || '');
-    });
-    if (trs.length) return trs;
-    return [...document.querySelectorAll('tbody tr')].filter(tr => !!tr.querySelector('[data-testid*="form-item"], [data-testid*="select"]'));
-  };
-  const first = await temuWait(() => { const r = rowsOf(); return r.length ? r : null; }, 10000);
-  if (!first) return fail('"Missing required attributes" rows nahi mili — Product action required page khula hai?');
-  const pick = (attrs, label) => { const want = label.trim().toLowerCase(); for (const k of Object.keys(attrs || {})) if (k.trim().toLowerCase() === want && attrs[k] !== '' && attrs[k] != null) return attrs[k]; return null; };
-  const ids = first.map(temuAttrRowId).filter(Boolean);
-  let changed = 0, submitted = 0; const manual = [];
-  // v9.14.2: har product ko Goods ID se dobara dhoondo (Submit ke baad React table dobara banata hai — purane refs bekaar);
-  // jo field na bhar sake us par ruko mat — aakhir mein "khud bharo" list. 2 passes (doosra '__first__' se).
-  const fillRow = async (row, pass) => {
-    const name = temuAttrRowName(row), catTxt = (row.querySelector('[class*="catName-"]')?.textContent || '').replace(/^\s*Category:\s*/i, '').trim();
-    const tl = (name + ' ' + catTxt).toLowerCase();
-    const rule = rules.find(r => (r.match || []).some(m => m && tl.includes(String(m).toLowerCase())));
-    const ruleAttrs = (rule && rule.attributes) || {};
-    const notes = [], left = [];
-    for (const fi of row.querySelectorAll('[data-testid="beast-core-form-item"][id*="goodsProperty"]')) {
-      if (!fi.isConnected) continue;
-      const lb = fi.querySelector('[class*="Form_itemLabelContent"]'); if (!lb) continue;
-      const label = lb.textContent.trim(); const isComp = !!fi.querySelector('table');
-      const sel = isComp ? null : fi.querySelector('[data-testid="beast-core-select"]');
-      const isMulti = !!(sel && sel.querySelector('[class*="ST_selectValueMultiple"]'));
-      const cur = isComp ? (fi.querySelector('table [class*="inputItemRenderer"]')?.textContent || '').trim() : (sel ? (isMulti ? (sel.querySelector('[class*="IPT_tag"] [class*="Tag_"], [class*="tagItem"], [class*="ST_tag"]')?.textContent || '') : temuSelectCurrent(sel)) : '');
-      const hasErr = !!fi.querySelector('.error-field, [class*="error-field"], [class*="Form_itemError"] span');
-      const filled = cur && !/^(select|enter)$/i.test(cur) && !hasErr;
-      if (filled) continue;
-      const isSensitive = /allergen|ingredient|drug\s*fact|nutrition|dietary|expiration|warning/i.test(label);
-      let want = pick(ruleAttrs, label) ?? pick(defaults, label) ?? temuAttrGuess(label, name);
-      if (!want && !isSensitive) want = '__first__';
-      if (pass === 2 && !isSensitive) want = '__first__';
-      if (!want) { left.push(label); notes.push(`${label}: auto-fill skip (khud check karein)`); continue; }
-      let res;
-      try {
-        if (isComp) res = await temuFillComposition(fi, want);
-        else if (sel) { res = await temuPickSelectValue(sel, want); if (isMulti) { try { document.body.click(); } catch (_) {} await temuSleep(200); } }
-        else { const inp = fi.querySelector('input, textarea'); if (inp && typeof want === 'string' && want !== '__first__') { temuSetNativeValue(inp, want); res = 'set'; } else res = 'no_field'; }
-      } catch (e) { res = 'err:' + (e?.message || e); }
-      if (res === 'set' || res === 'already') { changed++; notes.push(`${label}=${(sel && temuSelectCurrent(sel)) || (Array.isArray(want) ? want[0] : want)}`); }
-      else left.push(label);
-    }
-    return { name, catTxt, notes, left };
-  };
-  for (const id of ids) {
-    let row = rowsOf().find(r => temuAttrRowId(r) === id); if (!row) continue;
-    let r1 = await fillRow(row, 1);
-    if (r1.left.length) { row = rowsOf().find(r => temuAttrRowId(r) === id); if (row) { const r2 = await fillRow(row, 2); r1 = { ...r1, notes: r1.notes.concat(r2.notes), left: r2.left }; } }
-    row = rowsOf().find(r => temuAttrRowId(r) === id);
-    let sub = '';
-    if (autoSubmit && row && !r1.left.length) {
-      const btn = [...row.querySelectorAll('[role="button"]')].find(b => /^\s*submit\s*$/i.test((b.textContent || '').trim()) && !/disable/i.test(b.className));
-      if (btn) { temuClick(btn); await temuSleep(1800); const still = rowsOf().find(r => temuAttrRowId(r) === id); if (still && still.querySelector('.error-field, [class*="error-field"]')) { sub = 'Submit reject (field error)'; r1.left.push('(page error dekhein)'); } else { submitted++; sub = 'Submit ✓'; } }
-    }
-    if (r1.left.length) manual.push(`${r1.name.slice(0, 40)} → ${r1.left.join(', ')}`);
-    ok(`${r1.name.slice(0, 45)}${r1.catTxt ? ' [' + r1.catTxt.split('/').pop().trim() + ']' : ''} → ${r1.notes.join(', ') || '—'}${sub ? ' · ' + sub : ''}${r1.left.length ? ' · KHUD BHARO: ' + r1.left.join(', ') : ''}`);
-  }
-  if (manual.length) { warn(`${manual.length} product(s) mein kuch fields extension nahi bhar saki — page par khud bhar kar us row ka Submit dabayen:`); manual.forEach(m => warn('   ' + m)); }
-  report.unshift(`${ids.length} products, ${changed} fields set, ${submitted} submitted, ${manual.length} khud bharne wale`);
-  return { success: true, report, changed, total: ids.length, stillEmpty: manual.length, submitted, manual };
-}
-
 // ═══ v9.6.0 — "View failed details" popup parhna (upload-goods-multiple.html) ═══
 // DOM (2026-09-04): Upload history row → button "View failed details" → modal [data-testid=beast-core-modal]
 // title "N product(s) failed to upload"; rows: td0 = name ([class*=elli_outerWrapper]) + "Goods ID: N" ([class*="id-"]),
 // td1 = reason (e.g. "Contribution SKU duplicated with another product (Goods ID: 6109…)"). Close: [class*=modalCloseButton].
-// v9.8.3 — late confirm: upload ke waqt 90s/200s time-out ho gaya to side panel is se har 15s poochta hai
-// ke Upload history row (ID se) Completed/Action required ho gayi ya nahi. Row text (Sept 2026):
-// "Action required — 28 processed, 26 added, 2 errors" ya "Processing NN%".
-async function temuPageCheckUpload({ uploadId, notSig, expectStore } = {}) {
-  const report = [];
-  const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-  if (expectStore && mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
-    return { success: false, wrongStore: true, mall, report: [`✗ Ye tab store "${mall}" ka hai, extension mein "${expectStore}" active hai`] };
-  const sec0 = await temuEnsureHistorySection(report);
-  if (!sec0) return { success: false, report: [...report, '✗ Upload history section nahi mili'] };
-  const secNow = () => (document.contains(sec0) ? sec0 : temuHistorySection()) || sec0;
-  try { document.querySelectorAll('[data-testid="beast-core-modal"] [class*="modalCloseButton"], [data-testid="beast-core-modal"] [class*="closeIcon"]').forEach(b => b.click()); } catch (_) {}
-  try { const b = [...secNow().querySelectorAll('[role="button"], button')].find(b => /^\s*refresh\s*$/i.test((b.textContent || '').trim())); if (b) { temuClick(b); } } catch (_) {}
-  await new Promise(r => setTimeout(r, 2500));
-  const rows = [...secNow().querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  const idOf = r => { const t = (r.querySelector('[class*="info-"] div')?.textContent || '').trim(); return /^\d{13,20}$/.test(t) ? t : ((r.innerText || '').match(/\b\d{15}\b/) || [''])[0]; };
-  let row = null;
-  if (uploadId) row = rows.find(r => (r.innerText || '').includes(String(uploadId))) || null;
-  if (!row && !uploadId && rows.length) { const top = rows[0]; const tid = idOf(top); if (tid && ('id:' + tid) !== String(notSig || '')) row = top; }
-  if (!row) return { success: true, done: false, noRow: true, report: ['• Upload history mein row abhi nahi' + (uploadId ? ` (ID ${uploadId})` : '')] };
-  const txt = (row.innerText || '').replace(/\s+/g, ' ');
-  const id = idOf(row) || uploadId || null;
-  // v9.14.0: dono formats — "28 processed, 26 added, 2 errors" YA "records processed from this upload: 74 … records added: 59 … records with errors: 15"
-  let m = txt.match(/(\d+)\s*(?:records\s*)?processed\b[\s\S]*?(\d+)\s*(?:records\s*)?added\b[\s\S]*?(\d+)\s*(?:records\s*with\s*)?errors?/i);
-  if (!m) { const a = txt.match(/processed[^:]*:\s*(\d+)/i), b = txt.match(/records added\s*:\s*(\d+)/i), e = txt.match(/with errors\s*:\s*(\d+)/i); if (a && b && e) m = [null, a[1], b[1], e[1]]; }
-  const status = /\bCompleted\b/.test(txt) ? 'Completed' : (/Action required/i.test(txt) ? 'Action required' : null);
-  const pm = txt.match(/Processing(?:\s*data)?\s*\(?\s*(\d+)%/i);
-  if (!m && !status) return { success: true, done: false, uploadId: id, pct: pm ? +pm[1] : null, report: [`• Abhi processing${pm ? ` ${pm[1]}%` : ''}${id ? ` (ID ${id})` : ''}…`] };
-  const out = { success: true, done: true, uploadId: id, status: status || 'Done', processed: m ? +m[1] : null, added: m ? +m[2] : null, errors: m ? +m[3] : null, report };
-  report.push(`✓ Upload history: ${out.status}${m ? ` — ${m[1]} records processed, ${m[2]} added, ${m[3]} errors` : ''}${id ? ` (ID ${id})` : ''}`);
-  return out;
-}
-
 async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const report = [];
   const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
   if (expectStore && mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
     return { success: false, wrongStore: true, mall, report: [`✗ Ye tab store "${mall}" ka hai, extension mein "${expectStore}" active hai`] };
-  const sec = await temuEnsureHistorySection(report);
-  if (!sec) return { success: false, report: [...report, '✗ Upload history section nahi mili (general template tab kholein)'] };
-  const secNow = () => (document.contains(sec) ? sec : temuHistorySection()) || sec; // v9.8.1: Refresh ke baad React table dobara banata hai — stale node se rows nahi milti
-  const rowsOf = () => [...secNow().querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  const btnOf = row => [...row.querySelectorAll('[role="button"], button, [class*="textButton"], div, span, a')].find(b =>
-    /view (processing results|failed details)/i.test((b.textContent || '').trim())
-  );
+  const sec = temuHistorySection();
+  if (!sec) return { success: false, report: ['✗ Upload history section nahi mili'] };
+  const rowsOf = () => [...sec.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
+  const btnOf = row => [...row.querySelectorAll('[role="button"], button')].find(b => /view failed details/i.test(b.textContent || ''));
   const pickRow = () => {
     const rows = rowsOf();
     if (uploadId) { const r = rows.find(r => (r.innerText || '').includes(String(uploadId))); if (r) return r; }
@@ -3471,12 +3086,12 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   let row = pickRow();
   if (!row || !btnOf(row)) {
     // history table upload ke baad refresh nahi hoti — Refresh dohrao, 25s tak (v9.7.5)
-    const rf = () => [...secNow().querySelectorAll('[role="button"], button')].find(b => /^\s*refresh\s*$/i.test((b.textContent || '').trim()));
+    const rf = () => [...sec.querySelectorAll('[role="button"], button')].find(b => /^\s*refresh\s*$/i.test((b.textContent || '').trim()));
     report.push('• Upload history refresh…');
     const t0 = Date.now();
     while (Date.now() - t0 < 25000) {
       closeTemuModals();
-      const b = rf(); if (b) { temuClick(b); }
+      const b = rf(); if (b) { b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b.click(); }
       row = await temuWait(() => { const r = pickRow(); return (r && btnOf(r)) ? r : null; }, 5000, 400);
       if (row) break;
     }
@@ -3484,677 +3099,33 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   }
   if (!row) return { success: true, failed: [], report: ['• Upload history mein ye upload nahi mila' + (uploadId ? ` (ID ${uploadId})` : '')] };
   const btn = btnOf(row);
-  if (!btn) return { success: true, failed: [], report: ['• Is upload par "View processing results" button nahi hai (koi failed product nahi, ya abhi processing)'] };
-  temuClick(btn);
-  const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m => /processing results|failed to upload/i.test(m.innerText || m.textContent || '')), 8000);
-  if (!modal) return { success: false, report: ['✗ "Processing results" popup nahi khula'] };
+  if (!btn) return { success: true, failed: [], report: ['• Is upload par "View failed details" button nahi hai (koi failed product nahi, ya abhi processing)'] };
+  btn.click();
+  const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m => /failed to upload/i.test(m.innerText || '')), 8000);
+  if (!modal) return { success: false, report: ['✗ "failed to upload" popup nahi khula'] };
   await temuWait(() => modal.querySelector('tr[data-testid="beast-core-table-body-tr"]'), 5000);
   const failed = [];
-  const trs = [...modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  for (const tr of trs) {
-    const tds = [...tr.querySelectorAll('td')];
-    if (!tds.length) continue;
-    let line = '', goodsId = '', skuId = '', status = '', reason = '', name = '';
-    if (tds.length >= 4) {
-      // 5-column table (Sept 2026): Line | Goods ID / SKU ID | Status | Failure reason | Processing notes
-      line = (tds[0]?.innerText || tds[0]?.textContent || '').trim();
-      const idText = (tds[1]?.innerText || tds[1]?.textContent || '').trim();
-      const gidM = idText.match(/\b\d{13,20}\b/g) || [];
-      goodsId = gidM[0] || '';
-      skuId = gidM[1] || '';
-      status = (tds[2]?.innerText || tds[2]?.textContent || '').trim();
-      reason = (tds[3]?.innerText || tds[3]?.textContent || '').trim();
-      name = (tr.querySelector('[class*="elli_outerWrapper"]')?.textContent || '').trim();
-    } else {
-      // Legacy 2-column or 3-column table
-      name = (tr.querySelector('[class*="elli_outerWrapper"]')?.textContent || tds[0]?.innerText || '').trim();
-      goodsId = ((tr.querySelector('[class*="id-"]')?.textContent || '').match(/\d{10,}/) || [''])[0];
-      reason = (tds[1]?.innerText || tds[1]?.textContent || '').trim();
-      status = (tds[2]?.innerText || tds[2]?.textContent || 'Saved as draft').trim();
-    }
-    const dupMatch = reason.match(/Goods ID:\s*(\d{10,})/i);
-    const isDup = /duplicat/i.test(reason) || /already (listed|exists)/i.test(reason);
-    const isMissingAttr = /missing.*attribute|attribute.*missing|required attribute/i.test(reason);
-    const isPrice = /price|abnormal/i.test(reason);
-    if (!/^\s*added\s*$/i.test(status) || (reason && reason !== '-')) {
-      failed.push({
-        line,
-        name,
-        goodsId,
-        skuId,
-        status,
-        reason,
-        duplicate: isDup,
-        dupGoodsId: dupMatch ? dupMatch[1] : '',
-        missingAttributes: isMissingAttr,
-        priceIssue: isPrice
-      });
-    }
+  for (const tr of modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')) {
+    const tds = tr.querySelectorAll('td');
+    const name = (tr.querySelector('[class*="elli_outerWrapper"]')?.textContent || tds[0]?.innerText || '').trim();
+    const goodsId = ((tr.querySelector('[class*="id-"]')?.textContent || '').match(/\d{10,}/) || [''])[0];
+    const reason = (tds[1]?.innerText || '').trim();
+    const dup = reason.match(/Goods ID:\s*(\d{10,})/i);
+    failed.push({ name, goodsId, reason, duplicate: /duplicat/i.test(reason), dupGoodsId: dup ? dup[1] : '' });
   }
   const total = ((modal.innerText || '').match(/Total\s+(\d+)\s+items?/i) || [])[1];
-  try { (modal.querySelector('[class*="modalCloseButton"], [class*="closeIcon"], [role="button"]') || modal.querySelector('[data-testid*="close"]'))?.click(); } catch (_) {}
-  report.push(`✓ Processing results parhe: ${failed.length} error/draft item(s)${total && +total > failed.length ? ` (Temu total ${total})` : ''}`);
+  try { (modal.querySelector('[class*="modalCloseButton"]') || modal.querySelector('[role="button"]'))?.click(); } catch (_) {}
+  report.push(`✓ Failed details parhe: ${failed.length}${total && +total > failed.length ? ` (Temu total ${total} — sirf pehla page)` : ''}`);
   return { success: true, failed, total: total ? +total : failed.length, report };
-}
-
-// v9.8.0 — Upload history row par "Complete product infomation" (sic) button dabao → Temu "Complete product details" page kholta hai
-// DOM (Sept 2026): row `tr[data-testid=beast-core-table-body-tr]`, ID `.info-* > div`, actions `.actions_wrapper-* .btn-*.primary-*` text "Complete product infomation"
-async function temuPageOpenComplete({ uploadId, expectStore } = {}) {
-  const report = [];
-  const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-  if (expectStore && mall && mall.toLowerCase() !== String(expectStore).toLowerCase()) {
-    report.push(`• Active Temu store is "${mall}" (extension had "${expectStore}") — continuing with "${mall}"…`);
-  }
-  const sec = await temuEnsureHistorySection(report);
-  if (!sec) return { success: false, report: [...report, '✗ Upload history section nahi mili (general template tab kholein)'] };
-  const secNow = () => (document.contains(sec) ? sec : temuHistorySection()) || sec; // v9.8.1: Refresh ke baad React table dobara banata hai — stale node se rows nahi milti
-  const rowsOf = () => [...secNow().querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  const btnOf = row => [...row.querySelectorAll('[role="button"], button')].find(b => /complete product inf/i.test(b.textContent || ''));
-  const pickRow = () => {
-    const rows = rowsOf();
-    if (uploadId) { const r = rows.find(r => (r.innerText || '').includes(String(uploadId))); if (r) return r; return null; }
-    return rows[0] || null;
-  };
-  const closeTemuModals = () => { try { document.querySelectorAll('[data-testid="beast-core-modal"] [class*="modalCloseButton"], [data-testid="beast-core-modal"] [class*="closeIcon"]').forEach(b => b.click()); } catch (_) {} };
-  let row = pickRow();
-  if (!row || !btnOf(row)) {
-    const rf = () => [...secNow().querySelectorAll('[role="button"], button')].find(b => /^\s*refresh\s*$/i.test((b.textContent || '').trim()));
-    report.push('• Upload history refresh…');
-    const t0 = Date.now();
-    while (Date.now() - t0 < 25000) {
-      closeTemuModals();
-      const b = rf(); if (b) { temuClick(b); }
-      row = await temuWait(() => { const r = pickRow(); return (r && btnOf(r)) ? r : null; }, 5000, 400);
-      if (row) break;
-    }
-  }
-  if (!row) return { success: false, report: ['• Upload history mein ye upload nahi mila' + (uploadId ? ` (ID ${uploadId})` : '')] };
-  const rowTxt = (row.innerText || '');
-  const errMatch = rowTxt.match(/records\s+with\s+errors\s*:\s*(\d+)/i);
-  const readyMatch = rowTxt.match(/Ready\s+to\s+Submit\s*:\s*(\d+)/i);
-  const isCompleted = /\bCompleted\b/i.test(rowTxt);
-  if (errMatch && +errMatch[1] === 0 && (!readyMatch || +readyMatch[1] === 0) && isCompleted) {
-    report.push('✓ Upload row check: 0 errors, 0 drafts — tamam products already publish hain, draft fix ki zaroorat nahi');
-    return { success: true, noDraftsNeeded: true, report };
-  }
-  const btn = btnOf(row);
-  if (!btn) return { success: false, report: ['• Is row par "Complete product infomation" button nahi hai (abhi processing?)'] };
-  const st = (row.querySelector('[class*="success-"], [class*="error-"]')?.textContent || '').trim();
-  closeTemuModals();
-  // v9.10.1: React button — poora pointer sequence (pehle sirf mousedown+click tha, page khulta nahi tha)
-  const hrefBefore = location.href;
-  const fire = (el) => { for (const t of ['pointerover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) { try { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, button: 0 })); } catch (_) {} } };
-  fire(btn);
-  await new Promise(r => setTimeout(r, 1200));
-  let navigated = location.href !== hrefBefore;
-  if (!navigated) { const inner = btn.querySelector('[class*="content-"]') || btn.firstElementChild; if (inner) fire(inner); await new Promise(r => setTimeout(r, 1200)); navigated = location.href !== hrefBefore; }
-  report.push(`✓ "Complete product infomation" dabaya (row: ${st || '?'})${navigated ? ' — isi tab mein page khula' : ''}`);
-  // v10.1.1: agar button link hai to href bhi bhejo — popup block ho jaye to extension khud tab kholegi
-  let href = ''; try { const an = btn.closest('a[href]') || row.querySelector('a[href*="excel-multiple-edit"]'); if (an) href = an.href; } catch (_) {}
-  const btnHtml = (() => { try { return (btn.outerHTML || '').slice(0, 400); } catch (_) { return ''; } })();
-  return { success: true, clicked: true, navigated, status: st, href, btnHtml, report };
-}
-
-// ── v9.12.0 Brands & IP reader (seller.temu.com/brands-property.html, Trademark tab) ──
-// DOM (Sep 2026): rows tr[data-testid=beast-core-table-body-tr]; td0 Trademark ID, td1 status ([data-color] "In Effect"),
-// td2 name, td7 categories: har block mein ellipsis "Home & Kitchen(ID: 9711)" + "Remaining sellable units:59";
-// pagination: li.PGT_pagerItem_123, next [data-testid=beast-core-pagination-next] (PGT_disabled_123 = last).
-async function temuPageReadBrands() {
-  const report = [];
-  const mall = (document.querySelector('[class*="mall_name"], #mms-layout-user-setting [class*="Space_outWrapper"] > div:first-child > div')?.textContent || '').trim();
-  const tabLbl = [...document.querySelectorAll('[data-testid="beast-core-tab-itemLabel"]')].find(e => /^\s*trademark\s*$/i.test(e.textContent || ''));
-  if (tabLbl && !/active/i.test(tabLbl.className)) { temuClick(tabLbl); await new Promise(r => setTimeout(r, 1200)); }
-  const rowsOf = () => [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')].filter(tr => tr.querySelectorAll('td').length >= 8);
-  const readRows = () => rowsOf().map(tr => {
-    const tds = tr.querySelectorAll('td');
-    const txt = el => (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
-    const id = txt(tds[0]), status = txt(tds[1]).replace(/\s*$/, ''), name = txt(tds[2]);
-    const cats = [];
-    const catTd = tds[7];
-    if (catTd) {
-      // har category block: ellipsis (name + (ID: n)) aur uske baad "Remaining sellable units:N"
-      catTd.querySelectorAll('[data-testid="beast-core-ellipsis"]').forEach(el => {
-        const t = txt(el); const m = t.match(/^(.*?)\s*\(ID:\s*(\d+)\)\s*$/); if (!m) return;
-        let units = null; let sib = el.parentElement?.nextElementSibling; if (!sib || !/remaining/i.test(sib.textContent || '')) sib = el.nextElementSibling;
-        const blk = el.closest('div') && el.parentElement?.parentElement;
-        const uTxt = (sib && /remaining/i.test(sib.textContent || '')) ? sib.textContent : (blk ? blk.textContent : '');
-        const um = String(uTxt || '').match(/remaining sellable units\s*:?\s*(\d+)/i); if (um) units = +um[1];
-        cats.push({ name: m[1].trim(), id: m[2], units });
-      });
-    }
-    return { id, status, name, cats };
-  });
-  const firstId = () => (rowsOf()[0]?.querySelector('td')?.textContent || '').trim();
-  if (!rowsOf().length) return { success: false, mall, report: ['✗ Trademark table nahi mili — Brands & intellectual property page (Trademark tab) khula hai?'] };
-  const all = []; const seen = new Set(); let page = 1;
-  while (page <= 15) {
-    for (const b of readRows()) { const k = b.id || (b.name + '|' + page); if (!seen.has(k)) { seen.add(k); all.push(b); } }
-    const next = document.querySelector('[data-testid="beast-core-pagination-next"]');
-    if (!next || /disabled/i.test(next.className)) break;
-    const before = firstId(); temuClick(next);
-    const changed = await temuWait(() => firstId() && firstId() !== before ? true : null, 8000, 250);
-    if (!changed) { report.push(`• Page ${page + 1} load nahi hui — ${all.length} brands tak parhe`); break; }
-    page++;
-  }
-  report.push(`✓ ${all.length} trademarks parhe (${page} page${page > 1 ? 's' : ''})${mall ? ` — store ${mall}` : ''}`);
-  return { success: true, mall, brands: all, report };
-}
-
-// ═══ v9.15.0 — ZHunter page frame (TobyFlow-style rangdaar border) ═══
-// Temu seller pages: har store ka apna rang + naam ka badge (ghalat store ki pehchaan). Product pages: hunt ke doran pulse, done par green.
-// Setting: chrome.storage.local.zhPageFrame (default on) — side panel Settings → "Page frame".
-const ZH_FRAME_COLORS = ['#22D3EE', '#34D399', '#A78BFA', '#F59E0B', '#60A5FA', '#2DD4BF', '#A3E635', '#818CF8', '#FBBF24', '#38BDF8']; // v9.15.1: soft palette (red sirf error)
-const ZH_FRAME_HOSTS = /(^|\.)(amazon\.[a-z.]+|walmart\.com|samsclub\.com|ebay\.[a-z.]+|temu\.com|target\.com|costco\.com|homedepot\.com|aliexpress\.[a-z.]+|bestbuy\.com|lowes\.com|wayfair\.com)$/i;
-function zhFrameColorFor(name) { let h = 0; for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ZH_FRAME_COLORS[h % ZH_FRAME_COLORS.length]; }
-let _zhFrameOn = true, _zhFrameTimer = null, _zhFrameCustomColor = '#FF1E56', _zhFrameCustomWidth = 5.5, _zhFrameCustomBrightness = 100, _zhFrameCustomCorners = 'square', _zhFrameMoving = false, _zhFrameStyle = 'laser', _zhFrameSpeed = 3.5;
-function zhApplyFrameColors(f, hexColor) {
-  if (!f) return;
-  const col = hexColor || _zhFrameCustomColor || '#FF1E56';
-  const isRainbow = col === 'rainbow';
-  const isMoving = !!_zhFrameMoving;
-
-  f.classList.toggle('zh-rainbow', isRainbow);
-  f.classList.toggle('zh-moving', isMoving);
-
-  const w = parseFloat(_zhFrameCustomWidth) || 5.5;
-  const br = (parseFloat(_zhFrameCustomBrightness) || 100) / 100;
-  const speed = Math.max(0.8, Math.min(10, parseFloat(_zhFrameSpeed) || 3.5));
-
-  let rad = '0px';
-  if (_zhFrameCustomCorners === 'round') rad = '14px';
-  else if (_zhFrameCustomCorners === 'curved') rad = '28px';
-  f.style.setProperty('--zh-bradius', rad);
-  f.style.setProperty('--zh-bwidth', `${w}px`);
-  f.style.setProperty('--zh-bbright', br);
-  f.style.setProperty('--zh-anim-speed', `${speed}s`);
-
-  let beam = f.querySelector('#zh-frame-beam');
-  if (!beam) {
-    beam = document.createElement('div');
-    beam.id = 'zh-frame-beam';
-    f.prepend(beam);
-  }
-  beam.style.animationDuration = `${speed}s`;
-
-  const insetSpread = Math.round(18 * Math.pow(br, 1.5));
-  const outerSpread = Math.round(28 * Math.pow(br, 1.5));
-
-  let r = 255, g = 30, b = 86;
-  if (!isRainbow) {
-    const rgbMatch = col.match(/[0-9a-f]{2}/gi);
-    if (rgbMatch && rgbMatch.length >= 3) {
-      [r, g, b] = rgbMatch.slice(0, 3).map(x => parseInt(x, 16));
-    }
-  }
-  const col2 = `rgb(${Math.min(255, Math.round(r + (255 - r) * 0.45))}, ${Math.min(255, Math.round(g + (255 - g) * 0.45))}, ${Math.min(255, Math.round(b + (255 - b) * 0.45))})`;
-
-  // Calculate beam background gradient based on styleMode and color
-  let beamBg = col;
-  const styleMode = _zhFrameStyle || 'laser';
-
-  if (isMoving) {
-    if (isRainbow) {
-      if (styleMode === 'laser') {
-        // ⚡ Rainbow Laser Comet: White glowing head with trailing vibrant rainbow tail
-        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), transparent 0deg, transparent 130deg, #FF0055 180deg, #FFAA00 225deg, #00FF66 270deg, #00F2FE 315deg, #EC4899 350deg, #FFFFFF 360deg)';
-      } else if (styleMode === 'dual') {
-        // 💫 Rainbow Dual Beams: Two opposite white heads with rainbow tails 180deg apart
-        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), #FFFFFF 0deg, #00F2FE 30deg, #00FF66 65deg, transparent 90deg, transparent 180deg, #FFFFFF 180deg, #FF0055 210deg, #FFAA00 245deg, transparent 270deg, transparent 360deg)';
-      } else {
-        // 🌊 Rainbow Fluid Wave: Continuous rotating smooth rainbow
-        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), #FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899, #FF0055)';
-      }
-    } else {
-      // Single color custom / preset
-      if (styleMode === 'laser') {
-        // ⚡ Single Color Laser Comet: Bright white head with fading single-color tail
-        beamBg = `conic-gradient(from var(--zh-angle, 0deg), transparent 0deg, transparent 150deg, rgba(${r},${g},${b},0.08) 200deg, rgba(${r},${g},${b},0.5) 280deg, ${col} 345deg, #FFFFFF 360deg)`;
-      } else if (styleMode === 'dual') {
-        // 💫 Single Color Dual Beams: Two white heads opposite to each other with colored tails
-        beamBg = `conic-gradient(from var(--zh-angle, 0deg), #FFFFFF 0deg, ${col} 28deg, rgba(${r},${g},${b},0.15) 75deg, transparent 90deg, transparent 180deg, #FFFFFF 180deg, ${col2} 208deg, rgba(${r},${g},${b},0.15) 255deg, transparent 270deg, transparent 360deg)`;
-      } else {
-        // 🌊 Wave on single color: Multi-tone harmonic gradient wave
-        beamBg = `conic-gradient(from var(--zh-angle, 0deg), ${col}, ${col2}, #FFFFFF, ${col2}, ${col}, ${col2}, #FFFFFF, ${col})`;
-      }
-    }
-  } else {
-    // Static mode
-    if (isRainbow) {
-      beamBg = 'conic-gradient(from 45deg, #FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899, #FF0055)';
-    } else {
-      beamBg = col;
-    }
-  }
-
-  f.style.setProperty('--zh-beam-bg', beamBg);
-  beam.style.background = beamBg;
-
-  // Corner brackets
-  const isSquare = (!_zhFrameCustomCorners || _zhFrameCustomCorners === 'square') && !isMoving;
-  f.querySelectorAll('.zh-corner').forEach(c => {
-    if (!isSquare) {
-      c.style.display = 'none';
-    } else {
-      c.style.display = 'block';
-      c.style.borderColor = col2;
-      c.style.borderRadius = '0px';
-      if (c.id === 'zh-frame-c-tl') c.style.borderWidth = `${w}px 0 0 ${w}px`;
-      else if (c.id === 'zh-frame-c-tr') c.style.borderWidth = `${w}px ${w}px 0 0`;
-      else if (c.id === 'zh-frame-c-bl') c.style.borderWidth = `0 0 ${w}px ${w}px`;
-      else if (c.id === 'zh-frame-c-br') c.style.borderWidth = `0 ${w}px ${w}px 0`;
-    }
-  });
-
-  // Dynamic Glow & Ambient Halo
-  const alpha1 = Math.min(0.95, Math.max(0.08, 0.65 * br)).toFixed(3);
-  const alpha2 = Math.min(0.85, Math.max(0.05, 0.45 * br)).toFixed(3);
-
-  if (isRainbow || (isMoving && styleMode === 'wave')) {
-    f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(0,242,254,${(0.55*br).toFixed(2)}), 0 0 ${outerSpread}px rgba(255,0,85,${(0.55*br).toFixed(2)})`;
-    f.style.filter = `drop-shadow(0 0 ${Math.round(10 * br)}px rgba(0,242,254,0.65)) drop-shadow(0 0 ${Math.round(18 * br)}px rgba(255,0,85,0.45)) brightness(${Math.min(1.6, 0.8 + 0.3 * br).toFixed(2)})`;
-  } else {
-    f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${outerSpread}px rgba(${r},${g},${b},${alpha2})`;
-    f.style.filter = `drop-shadow(0 0 ${Math.round(12 * br)}px rgba(${r},${g},${b},${alpha1})) brightness(${Math.min(1.6, 0.7 + 0.35 * br).toFixed(2)})`;
-  }
-}
-
-// v10.3.2 — frame on all supported e-commerce sites
-function zhFramePageOk() {
-  const h = location.hostname;
-  if (/^seller\.temu\.com$/i.test(h)) return true;
-  return ZH_FRAME_HOSTS.test(h);
-}
-
-function zhFrame(state, label, color) {
-  try {
-    if (!_zhFrameOn || window.top !== window) return;
-    if (!zhFramePageOk()) return;
-    let f = document.getElementById('zh-frame');
-    if (state === 'off') { if (f) f.remove(); return; }
-    const col = color || (state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : _zhFrameCustomColor || '#22D3EE');
-    if (!f) {
-      f = document.createElement('div'); f.id = 'zh-frame';
-      f.innerHTML = '<div id="zh-frame-beam"></div><div id="zh-frame-c-tl" class="zh-corner"></div><div id="zh-frame-c-tr" class="zh-corner"></div><div id="zh-frame-c-bl" class="zh-corner"></div><div id="zh-frame-c-br" class="zh-corner"></div><div id="zh-frame-l"><span id="zh-frame-dot"></span><span id="zh-frame-t"></span></div>';
-      const st = document.createElement('style'); st.id = 'zh-frame-css';
-      st.textContent = `@property --zh-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
-@keyframes zhRotateFrame{to{--zh-angle:360deg}}
-#zh-frame{
-  position:fixed;inset:0;pointer-events:none;z-index:2147483646;box-sizing:border-box;
-  border:none !important;
-  border-radius:var(--zh-bradius,0px);
-  transition:border-radius .15s ease, box-shadow .12s ease;
-}
-#zh-frame-beam{
-  position:absolute;inset:0;border-radius:inherit;pointer-events:none;
-  padding:var(--zh-bwidth,5.5px);
-  background:var(--zh-beam-bg,var(--zh-bcol,#FF1E56));
-  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
-  -webkit-mask-composite:xor;
-  mask-composite:exclude;
-  transition:padding .15s ease,border-radius .15s ease;
-}
-#zh-frame.zh-moving #zh-frame-beam{
-  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
-}
-#zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot{animation-play-state:paused !important}
-#zh-frame:not(.zh-moving) #zh-frame-beam{
-  animation:zhBorderPulse 2.5s ease-in-out infinite alternate;
-}
-.zh-corner{position:absolute;width:24px;height:24px;border:solid var(--zh-bcol2,#FFB800);pointer-events:none;transition:all .25s ease;z-index:2}
-#zh-frame-c-tl{top:0;left:0;border-width:var(--zh-bwidth,5.5px) 0 0 var(--zh-bwidth,5.5px);border-top-left-radius:var(--zh-bradius,0px)}
-#zh-frame-c-tr{top:0;right:0;border-width:var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0 0;border-top-right-radius:var(--zh-bradius,0px)}
-#zh-frame-c-bl{bottom:0;left:0;border-width:0 0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px);border-bottom-left-radius:var(--zh-bradius,0px)}
-#zh-frame-c-br{bottom:0;right:0;border-width:0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0;border-bottom-right-radius:var(--zh-bradius,0px)}
-@keyframes zhBorderPulse{
-  0%{ opacity: 0.82; }
-  100%{ opacity: 1.0; }
-}
-#zh-frame.zh-working{
-  border-color:#00F2FE !important;
-  animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate;
-}
-#zh-frame.zh-working .zh-corner{border-color:#00F2FE;filter:drop-shadow(0 0 12px #00F2FE)}
-#zh-frame.zh-done{
-  border-color:#10B981 !important;
-  box-shadow:inset 0 0 20px rgba(16,185,129,.7),0 0 24px rgba(52,211,153,.6);
-  animation:none;
-}
-#zh-frame.zh-done .zh-corner{border-color:#10B981;filter:drop-shadow(0 0 10px #10B981)}
-@keyframes zhFrameWorkingPulse{
-  from{filter:drop-shadow(0 0 8px #00F2FE);box-shadow:inset 0 0 16px rgba(0,242,254,.5),0 0 16px rgba(56,189,248,.5)}
-  to{filter:drop-shadow(0 0 16px #00F2FE) brightness(1.3);box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
-}
-#zh-frame-l{
-  position:absolute;left:16px;bottom:16px;display:none;align-items:center;gap:8px;
-  height:26px;padding:0 12px 0 9px;border-radius:4px;
-  background:rgba(8,14,26,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:#FFFFFF;font:700 11px/1 var(--mono,'JetBrains Mono',ui-monospace,sans-serif);
-  letter-spacing:0.5px;
-  border:1px solid rgba(255,184,0,.4);
-  box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 10px rgba(255,184,0,.25);
-  transition:all .3s ease;
-  z-index:3;
-}
-#zh-frame.zh-working #zh-frame-l,#zh-frame.zh-done #zh-frame-l{display:inline-flex}
-#zh-frame.zh-working #zh-frame-l{border-color:rgba(0,242,254,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(0,242,254,.35)}
-#zh-frame.zh-done #zh-frame-l{border-color:rgba(16,185,129,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(16,185,129,.35)}
-#zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800;box-shadow:0 0 8px #FFB800}
-#zh-frame.zh-working #zh-frame-dot{background:#00F2FE;box-shadow:0 0 10px #00F2FE;animation:zhDot .8s ease-in-out infinite}
-#zh-frame.zh-done #zh-frame-dot{background:#10B981;box-shadow:0 0 8px #10B981}
-@keyframes zhDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.85)}}`;
-      (document.head || document.documentElement).appendChild(st);
-      (document.body || document.documentElement).appendChild(f);
-    }
-    f.classList.toggle('zh-working', state === 'working');
-    f.classList.toggle('zh-done', state === 'done' || state === 'error');
-    zhApplyFrameColors(f, _zhFrameCustomColor || col);
-    const t = f.querySelector('#zh-frame-t'); if (t) t.textContent = label || 'ZHunter';
-    f.title = label || 'ZHunter';
-    clearTimeout(_zhFrameTimer);
-    if (state === 'done' || state === 'error') { _zhFrameTimer = setTimeout(() => { try { zhFrameIdle(); } catch (_) {} }, 6000); }
-  } catch (_) {}
-}
-
-function zhFrameIdle() {
-  if (!_zhFrameOn) { const f = document.getElementById('zh-frame'); if (f) f.remove(); return; }
-  if (!zhFramePageOk()) { const f = document.getElementById('zh-frame'); if (f) f.remove(); return; }
-  if (/seller\.temu\.com$/i.test(location.hostname)) {
-    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    zhFrame('idle', mall ? `ZHunter · ${mall}` : 'ZHunter · Temu', zhFrameColorFor(mall || 'temu'));
-  } else {
-    const pf = zhFramePlatform();
-    zhFrame('idle', `ZHunter · ${pf.name}`, _zhFrameCustomColor || pf.color);
-  }
-}
-
-// v10.0.2 — har platform ka apna rang (product pages ke idle frame ke liye)
-function zhFramePlatform() {
-  const h = location.hostname;
-  if (/amazon\./i.test(h)) return { name: 'Amazon', color: '#F59E0B' };
-  if (/walmart\.com$/i.test(h)) return { name: 'Walmart', color: '#60A5FA' };
-  if (/samsclub\.com$/i.test(h)) return { name: "Sam's Club", color: '#38BDF8' };
-  if (/ebay\./i.test(h)) return { name: 'eBay', color: '#A78BFA' };
-  if (/temu\.com$/i.test(h)) return { name: 'Temu', color: '#FB923C' };
-  if (/target\.com$/i.test(h)) return { name: 'Target', color: '#FB7185' };
-  if (/costco\.com$/i.test(h)) return { name: 'Costco', color: '#818CF8' };
-  if (/homedepot\.com$/i.test(h)) return { name: 'Home Depot', color: '#FBBF24' };
-  if (/aliexpress\./i.test(h)) return { name: 'AliExpress', color: '#F472B6' };
-  if (/bestbuy\.com$/i.test(h)) return { name: 'Best Buy', color: '#FACC15' };
-  if (/lowes\.com$/i.test(h)) return { name: "Lowe's", color: '#2DD4BF' };
-  if (/wayfair\.com$/i.test(h)) return { name: 'Wayfair', color: '#C084FC' };
-  return { name: 'ready', color: '#22D3EE' };
-}
-
-(function zhFrameBoot() {
-  try {
-    let _lastHref = location.href;
-    // v10.3.4: background tab mein frame animation pause (CPU/GPU bachao)
-    const _zhVis = () => { try { const f = document.getElementById('zh-frame'); if (f) f.classList.toggle('zh-paused', document.hidden); } catch (_) {} };
-    document.addEventListener('visibilitychange', _zhVis);
-    setInterval(() => {
-      _zhVis();
-      try {
-        if (location.href !== _lastHref) {
-          _lastHref = location.href;
-          zhFrameIdle();
-        } else if (_zhFrameOn && zhFramePageOk() && !document.getElementById('zh-frame')) {
-          zhFrameIdle();
-        }
-      } catch (_) {}
-    }, 4000);
-
-    chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
-      _zhFrameOn = x?.zhPageFrame !== false;
-      if (x?.zhFrameColor) _zhFrameCustomColor = x.zhFrameColor;
-      if (x?.zhFrameWidth != null) _zhFrameCustomWidth = x.zhFrameWidth;
-      if (x?.zhFrameBrightness != null) _zhFrameCustomBrightness = x.zhFrameBrightness;
-      if (x?.zhFrameCorners) _zhFrameCustomCorners = x.zhFrameCorners;
-      if (x?.zhFrameMoving != null) _zhFrameMoving = !!x.zhFrameMoving;
-      if (x?.zhFrameStyle) _zhFrameStyle = x.zhFrameStyle;
-      if (x?.zhFrameSpeed != null) _zhFrameSpeed = x.zhFrameSpeed;
-      if (_zhFrameOn) {
-        setTimeout(zhFrameIdle, 400);
-        setTimeout(zhFrameIdle, 2000);
-      }
-    });
-
-    chrome.storage.onChanged.addListener((ch, area) => {
-      if (area === 'local') {
-        if (ch.zhPageFrame) {
-          _zhFrameOn = ch.zhPageFrame.newValue !== false;
-          if (!_zhFrameOn) {
-            const f = document.getElementById('zh-frame');
-            if (f) f.remove();
-          } else {
-            zhFrameIdle();
-          }
-        }
-        if (ch.zhFrameColor) _zhFrameCustomColor = ch.zhFrameColor.newValue || '#FF1E56';
-        if (ch.zhFrameWidth != null) _zhFrameCustomWidth = ch.zhFrameWidth.newValue || 5.5;
-        if (ch.zhFrameBrightness != null) _zhFrameCustomBrightness = ch.zhFrameBrightness.newValue || 100;
-        if (ch.zhFrameCorners) _zhFrameCustomCorners = ch.zhFrameCorners.newValue || 'square';
-        if (ch.zhFrameMoving != null) _zhFrameMoving = !!ch.zhFrameMoving.newValue;
-        if (ch.zhFrameStyle) _zhFrameStyle = ch.zhFrameStyle.newValue || 'laser';
-        if (ch.zhFrameSpeed != null) _zhFrameSpeed = ch.zhFrameSpeed.newValue || 3.5;
-        if (ch.zhFrameColor || ch.zhFrameWidth || ch.zhFrameBrightness || ch.zhFrameCorners || ch.zhFrameMoving || ch.zhFrameStyle || ch.zhFrameSpeed) {
-          let f = document.getElementById('zh-frame');
-          if (!f && _zhFrameOn && zhFramePageOk()) {
-            zhFrameIdle();
-            f = document.getElementById('zh-frame');
-          }
-          if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
-        }
-      }
-    });
-
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (msg && msg.action === 'zhUpdateFrame') {
-        if (msg.enabled != null) {
-          _zhFrameOn = !!msg.enabled;
-          if (!_zhFrameOn) {
-            const f = document.getElementById('zh-frame');
-            if (f) f.remove();
-            return;
-          }
-        }
-        if (msg.width != null) _zhFrameCustomWidth = msg.width;
-        if (msg.brightness != null) _zhFrameCustomBrightness = msg.brightness;
-        if (msg.color != null) _zhFrameCustomColor = msg.color;
-        if (msg.corners != null) _zhFrameCustomCorners = msg.corners;
-        if (msg.moving != null) _zhFrameMoving = !!msg.moving;
-        if (msg.style != null) _zhFrameStyle = msg.style;
-        if (msg.speed != null) _zhFrameSpeed = msg.speed;
-        
-        if (!_zhFrameOn) return;
-        let f = document.getElementById('zh-frame');
-        if (!f && zhFramePageOk()) {
-          zhFrameIdle();
-          f = document.getElementById('zh-frame');
-        }
-        if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
-        if (typeof _zhZoomBox !== 'undefined' && _zhZoomBox && msg.color) {
-          _zhZoomBox.style.borderColor = msg.color;
-          _zhZoomBox.style.boxShadow = `0 16px 48px rgba(0, 0, 0, 0.85), 0 0 25px ${msg.color}55`;
-        }
-      }
-    });
-  } catch (_) {}
-})();
-
-// ── Visual Hunting Indicators (Tab Strip & Floating Top Cyber HUD) ──
-let _zhBeaconTimer = null;
-let _origTabTitle = null;
-
-function zhHuntingBeacon(state, info = {}) {
-  try {
-    if (window.top !== window) return;
-    
-    // Store original document.title once
-    if (!_origTabTitle) {
-      _origTabTitle = (document.title || 'Product').replace(/^[🎯✅⚠️·⌛]\s*(\[[^\]]+\]\s*)?/, '').trim();
-    }
-
-    const tabNum = info.tabIndex != null ? (info.tabIndex + 1) : '';
-    const total = info.totalTabs || '';
-    const progressTag = tabNum && total ? ` #${tabNum}/${total}` : (tabNum ? ` #${tabNum}` : '');
-
-    // 1. Dynamic Tab Title Update (Instantly identifiable in Chrome Tab Strip among 70+ tabs)
-    if (state === 'hunting') {
-      const cleanOrig = _origTabTitle.replace(/^[🎯✅⚠️·⌛]\s*(\[[^\]]+\]\s*)?/, '').trim();
-      document.title = `🎯 [HUNTING${progressTag}] ${cleanOrig}`;
-    } else if (state === 'done') {
-      const cleanOrig = _origTabTitle.replace(/^[🎯✅⚠️·⌛]\s*(\[[^\]]+\]\s*)?/, '').trim();
-      document.title = `✅ ${cleanOrig}`;
-    } else if (state === 'error' || state === 'captcha') {
-      const cleanOrig = _origTabTitle.replace(/^[🎯✅⚠️·⌛]\s*(\[[^\]]+\]\s*)?/, '').trim();
-      document.title = `⚠️ [ACTION NEEDED] ${cleanOrig}`;
-    }
-
-    // 2. Floating Cyber Top HUD Banner on the Web Page
-    let beacon = document.getElementById('zh-hunt-beacon');
-    if (!beacon) {
-      beacon = document.createElement('div');
-      beacon.id = 'zh-hunt-beacon';
-      beacon.innerHTML = `
-        <div class="zh-bcn-pulse"></div>
-        <div class="zh-bcn-icon">🎯</div>
-        <div class="zh-bcn-content">
-          <div class="zh-bcn-title">ZHUNTER PRO <span class="zh-bcn-badge">NOW HUNTING${progressTag}</span></div>
-          <div class="zh-bcn-status" id="zhBcnStatus">Scanning page & extracting product data…</div>
-        </div>
-      `;
-      const st = document.createElement('style');
-      st.id = 'zh-bcn-css';
-      st.textContent = `
-        #zh-hunt-beacon {
-          position: fixed !important;
-          top: 14px !important;
-          left: 50% !important;
-          transform: translateX(-50%) !important;
-          z-index: 2147483647 !important;
-          display: flex !important;
-          align-items: center !important;
-          gap: 10px !important;
-          padding: 8px 18px 8px 14px !important;
-          background: rgba(8, 14, 26, 0.94) !important;
-          backdrop-filter: blur(16px) !important;
-          -webkit-backdrop-filter: blur(16px) !important;
-          border: 1.5px solid #F97316 !important;
-          border-radius: 6px !important;
-          box-shadow: 0 10px 36px rgba(0, 0, 0, 0.85), 0 0 20px rgba(249, 115, 22, 0.45) !important;
-          color: #FFFFFF !important;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-          font-size: 12px !important;
-          pointer-events: none !important;
-          animation: zhBcnDrop 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
-          transition: all 0.3s ease !important;
-        }
-        #zh-hunt-beacon.done {
-          border-color: #10B981 !important;
-          box-shadow: 0 10px 36px rgba(0, 0, 0, 0.85), 0 0 20px rgba(16, 185, 129, 0.45) !important;
-        }
-        #zh-hunt-beacon.warn {
-          border-color: #F43F5E !important;
-          box-shadow: 0 10px 36px rgba(0, 0, 0, 0.85), 0 0 24px rgba(244, 63, 94, 0.6) !important;
-          background: rgba(24, 8, 12, 0.96) !important;
-        }
-        .zh-bcn-pulse {
-          width: 9px !important;
-          height: 9px !important;
-          border-radius: 2px !important;
-          background: #F97316 !important;
-          box-shadow: 0 0 10px #F97316 !important;
-          animation: zhBcnBlink 0.9s ease-in-out infinite !important;
-        }
-        #zh-hunt-beacon.done .zh-bcn-pulse {
-          background: #10B981 !important;
-          box-shadow: 0 0 10px #10B981 !important;
-          animation: none !important;
-        }
-        #zh-hunt-beacon.warn .zh-bcn-pulse {
-          background: #F43F5E !important;
-          box-shadow: 0 0 12px #F43F5E !important;
-        }
-        .zh-bcn-icon { font-size: 16px !important; line-height: 1 !important; }
-        .zh-bcn-content { display: flex !important; flex-direction: column !important; gap: 2px !important; }
-        .zh-bcn-title {
-          font-size: 11px !important;
-          font-weight: 800 !important;
-          letter-spacing: 0.05em !important;
-          color: #CBD5E1 !important;
-          display: flex !important;
-          align-items: center !important;
-          gap: 6px !important;
-        }
-        .zh-bcn-badge {
-          background: rgba(249, 115, 22, 0.2) !important;
-          border: 1px solid rgba(249, 115, 22, 0.4) !important;
-          color: #FB923C !important;
-          font-size: 9.5px !important;
-          font-weight: 700 !important;
-          padding: 1px 6px !important;
-          border-radius: 3px !important;
-        }
-        #zh-hunt-beacon.done .zh-bcn-badge {
-          background: rgba(16, 185, 129, 0.2) !important;
-          border-color: rgba(16, 185, 129, 0.4) !important;
-          color: #34D399 !important;
-        }
-        .zh-bcn-status {
-          font-size: 11.5px !important;
-          color: #F8FAFC !important;
-          font-weight: 600 !important;
-        }
-        @keyframes zhBcnDrop {
-          from { opacity: 0; transform: translate(-50%, -16px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
-        }
-        @keyframes zhBcnBlink {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.3; transform: scale(0.85); }
-        }
-      `;
-      (document.head || document.documentElement).appendChild(st);
-      (document.body || document.documentElement).appendChild(beacon);
-    }
-
-    const stEl = beacon.querySelector('#zhBcnStatus');
-    const badgeEl = beacon.querySelector('.zh-bcn-badge');
-
-    if (state === 'hunting') {
-      beacon.className = '';
-      if (stEl) stEl.textContent = info.statusText || 'Scanning images, specifications & pricing…';
-      if (badgeEl) badgeEl.textContent = `NOW HUNTING${progressTag}`;
-    } else if (state === 'done') {
-      beacon.className = 'done';
-      if (stEl) stEl.textContent = `✓ Scraped: ${info.images || 0} images · ${info.price || 'Price extracted'}`;
-      if (badgeEl) badgeEl.textContent = 'DONE ✓';
-      clearTimeout(_zhBeaconTimer);
-      _zhBeaconTimer = setTimeout(() => {
-        try { beacon.remove(); } catch (_) {}
-      }, 4000);
-    } else if (state === 'captcha' || state === 'error') {
-      beacon.className = 'warn';
-      if (stEl) stEl.textContent = info.error || '⚠️ Bot Verification or Captcha detected — Please solve';
-      if (badgeEl) badgeEl.textContent = 'ACTION REQUIRED ⚠';
-    }
-  } catch (_) {}
 }
 
 // ── Message Listener ────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   try {
     if (message?.action === 'SCRAPE_PAGE') {
-      zhFrame('working', 'ZHunter · hunting…'); // v9.15.0
-      zhHuntingBeacon('hunting', { tabIndex: message.tabIndex, totalTabs: message.totalTabs });
-      
-      simulateHumanInteraction().then(() => scrapePageData()).then(data => {
-        const imgCount = (data?.images || []).length;
-        zhFrame('done', `ZHunter · ${imgCount} img ✓`);
-        zhHuntingBeacon('done', { images: imgCount, price: data?.price });
+      scrapePageData().then(data => {
         sendResponse({ success: true, data });
       }).catch(err => {
-        zhHuntingBeacon('error', { error: err?.message || 'scrape_failed' });
         sendResponse({
           success: false,
           error: err?.message || 'scrape_failed',
@@ -4185,40 +3156,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: true, url: location.href, title: document.title || '' });
       return true;
     }
-    if (message?.action === 'PEEK') { // v9.16.0 — side panel Open tabs list ke liye halka: main image + price
-      try {
-        const h = location.hostname;
-        let price = '';
-        try { price = /walmart\.com$/i.test(h) ? readWalmartPrice() : /samsclub\.com$/i.test(h) ? readSamsClubPrice() : universalPrice(); } catch (_) {}
-        let image = document.querySelector('meta[property="og:image"], meta[property="og:image:secure_url"], meta[name="twitter:image"]')?.content || '';
-        if (!image) { const im = [...document.images].filter(i => i.naturalWidth >= 200 && i.naturalHeight >= 200 && /^https?:/.test(i.currentSrc || i.src)).sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)[0]; if (im) image = im.currentSrc || im.src; }
-        sendResponse({ image, price: price ? String(price).slice(0, 24) : '' });
-      } catch (e) { sendResponse({ image: '', price: '' }); }
-      return true;
-    }
     if (message?.action === 'PING') {
       sendResponse({ success: true, ready: true });
       return true;
     }
-    if (message?.action === 'TEMU_ABORT') { _temuAbort = true; try { zhFrame('error', 'ZHunter · stopped'); } catch (_) {} sendResponse({ ok: true }); return true; }
     if (message?.action === 'TEMU_UPLOAD_FILE') {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      zhFrame('working', 'ZHunter · Temu upload…'); // v9.15.0
-      temuPageAutoUpload(message).then(r => { zhFrame(r?.success ? 'done' : 'error', r?.success ? 'ZHunter · upload ✓' : 'ZHunter · upload ✗'); sendResponse(r); }).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
-      return true;
-    }
-    if (message?.action === 'TEMU_READ_BRANDS') { // v9.12.0
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      temuPageReadBrands().then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
-      return true;
-    }
-    if (message?.action === 'TEMU_GET_MALL') { // v9.10.0 store auto-detect
-      try { sendResponse({ mall: /seller\.temu\.com$/i.test(location.hostname) ? (document.querySelector('[class*="mall_name"]')?.textContent || '').trim() : '' }); } catch (_) { sendResponse({ mall: '' }); }
-      return true;
-    }
-    if (message?.action === 'TEMU_CHECK_UPLOAD') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      temuPageCheckUpload(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
+      temuPageAutoUpload(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
       return true;
     }
     if (message?.action === 'TEMU_READ_FAILED') {
@@ -4226,21 +3170,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       temuPageReadFailed(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
       return true;
     }
-    if (message?.action === 'TEMU_OPEN_COMPLETE') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      temuPageOpenComplete(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
-      return true;
-    }
-    if (message?.action === 'TEMU_FILL_ATTRS') { // v9.14.0
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      zhFrame('working', 'ZHunter · attributes…'); // v9.15.0
-      temuPageFillAttributes(message).then(r => { zhFrame('done', `ZHunter · ${r?.submitted || 0} submitted`); sendResponse(r); }).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
-      return true;
-    }
     if (message?.action === 'TEMU_FIX_DRAFTS') {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      zhFrame('working', 'ZHunter · fix drafts…'); // v9.15.0
-      temuPageFixDrafts(message).then(r => { zhFrame('done', 'ZHunter · drafts ✓'); sendResponse(r); }).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
+      temuPageFixDrafts(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
       return true;
     }
   } catch (err) {
@@ -4598,22 +3530,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       String(srcset).split(',').forEach(part => push(part.trim().split(/\s+/)[0] || ''));
       if (el.tagName === 'IMG') push(el.currentSrc || el.src || '');
     };
-    const isAmz = h.includes('amazon.');
-    const gallerySelectors = isAmz
-      ? ['#landingImage, #imgTagWrapperId img, #altImages img, #imageBlock img, .imageThumbnail img']
-      : [
-          '#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img',
-          '[data-testid="vertical-carousel-container"] img',
-          '[data-testid="vertical-hero-carousel"] img',
-          '[data-testid="item-page-vertical-carousel-hero-image-button"] img',
-          '[data-testid="media-thumbnail"] img, [data-testid="hero-image"] img',
-          '[data-testid="hero-image-container"] img, [data-testid="zoom-image"] img',
-          '[data-testid="zoom-panel"] img, [data-automation-id="product-media"] img',
-          '[class*="product-gallery"] img, [class*="ProductGallery"] img',
-          '[class*="product-image"] img, [class*="ProductImage"] img',
-          '[class*="carousel"] img, [class*="gallery"] img',
-          'img[data-zoom-image], img[data-image-url], img[data-image-src], img[data-lazy-src]'
-        ];
+    const gallerySelectors = [
+      '#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img',
+      '[data-testid="vertical-carousel-container"] img',
+      '[data-testid="vertical-hero-carousel"] img',
+      '[data-testid="item-page-vertical-carousel-hero-image-button"] img',
+      '[data-testid="media-thumbnail"] img, [data-testid="hero-image"] img',
+      '[data-testid="hero-image-container"] img, [data-testid="zoom-image"] img',
+      '[data-testid="zoom-panel"] img, [data-automation-id="product-media"] img',
+      '[class*="product-gallery"] img, [class*="ProductGallery"] img',
+      '[class*="product-image"] img, [class*="ProductImage"] img',
+      '[class*="carousel"] img, [class*="gallery"] img',
+      'img[data-zoom-image], img[data-image-url], img[data-image-src], img[data-lazy-src]'
+    ];
     const gallery = document.querySelectorAll(gallerySelectors.join(', '));
     gallery.forEach(addElement);
     if (!gallery.length) document.querySelectorAll('meta[property="og:image"], meta[name="og:image"]').forEach(m => push(m.content));
@@ -4685,28 +3614,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       /* ── Panel Wrapper with Rainbow Border ── */
-      /* ── Panel Wrapper with Gold & Crimson Fire Border ── */
       .panel-wrap {
         position: relative;
         border-radius: 18px;
         padding: 2px;
         overflow: hidden; /* clips the ring to rounded shape */
-        box-shadow: 0 0 28px rgba(255, 46, 84, 0.25), 0 12px 36px rgba(0, 0, 0, 0.75);
+        box-shadow: 0 0 24px rgba(120,0,255,0.25), 0 8px 32px rgba(0,0,0,0.65);
       }
-      /* Uniform spinning Fire gradient around the perimeter */
+      /* This ::before pseudo is MUCH larger than parent so the conic-gradient
+         sweeps uniformly around all 4 edges when it spins */
       .panel-wrap::before {
         content: '';
         position: absolute;
         top: 50%; left: 50%;
         width: 400%; height: 400%;
         transform: translate(-50%, -50%) rotate(0deg);
-        background: conic-gradient(from 0deg, #FFB800, #FF2E54, #F59E0B, #FF2E54, #FFB800);
+        background: conic-gradient(from 0deg, #ff0000, #ff7f00, #ffff00, #00ff00, #00ffff, #0000ff, #8b00ff, #ff0000);
         animation: zh-panel-spin 4s linear infinite;
         z-index: 0;
       }
       .panel {
-        width: 318px;
-        background: rgba(6, 9, 15, 0.98);
+        width: 295px;
+        background: rgba(4, 8, 20, 0.97);
         backdrop-filter: blur(20px) saturate(180%);
         border-radius: 16px;
         overflow: hidden;
@@ -4716,7 +3645,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         position: relative; z-index: 1;
       }
       .panel-wrap.collapsed { display: none; }
-      /* ── Minimized FAB: Fire Gold & Crimson Style ── */
+      /* ── Minimized FAB: PRO Grade Premium Style ── */
       @keyframes zh-spin {
         from { transform: rotate(0deg); }
         to   { transform: rotate(360deg); }
@@ -4725,14 +3654,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         from { transform: rotate(360deg); }
         to   { transform: rotate(0deg); }
       }
+      /* zh-panel-spin: for panel ::before — must keep translate so centering stays */
       @keyframes zh-panel-spin {
         from { transform: translate(-50%, -50%) rotate(0deg); }
         to   { transform: translate(-50%, -50%) rotate(360deg); }
       }
       @keyframes zh-badge-pulse {
-        0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(255,46,84,0.7); }
-        40%  { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(255,46,84,0.0); }
-        100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(255,46,84,0.0); }
+        0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(0,229,255,0.7); }
+        40%  { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(0,229,255,0.0); }
+        100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(0,229,255,0.0); }
       }
       @keyframes zh-badge-ripple {
         0%   { opacity: 0.7; transform: scale(1); }
@@ -4741,71 +3671,69 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       /* FAB outer wrapper */
       .mini-widget-wrap {
         position: relative;
-        width: 64px; height: 64px;
+        width: 68px; height: 68px;
         display: flex; align-items: center; justify-content: center;
       }
-      /* Spinning Fire Ring layer */
+      /* Spinning premium ring layer (behind FAB button) */
       .mini-ring {
         position: absolute;
         inset: 0;
         border-radius: 50%;
-        background: conic-gradient(from 0deg, #FFB800, #FF2E54, #FBBF24, #FF1E56, #FFB800);
+        background: conic-gradient(from 0deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff, #38bdf8, #7c3aed, #00e5ff);
         animation: zh-spin 3s linear infinite;
         z-index: 0;
       }
-      /* Reverse-spin Fire glow layer */
+      /* Reverse-spin blurred glow layer for depth effect */
       .mini-glow {
         position: absolute;
         inset: -2px;
         border-radius: 50%;
-        background: conic-gradient(from 180deg, #FFB800, #FF2E54, #FBBF24, #FF2E54, #FFB800);
+        background: conic-gradient(from 180deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff);
         animation: zh-spin-rev 4s linear infinite;
-        filter: blur(10px);
-        opacity: 0.8;
+        filter: blur(12px);
+        opacity: 0.65;
         transition: opacity 0.25s ease, filter 0.25s ease;
         z-index: 0;
       }
-      .mini-widget-wrap:hover .mini-glow { filter: blur(16px); opacity: 1; }
+      .mini-widget-wrap:hover .mini-glow { filter: blur(20px); opacity: 1; }
       .mini-widget {
-        width: 54px; height: 54px;
+        width: 60px; height: 60px;
         border-radius: 50%;
         position: relative;
         display: flex; align-items: center; justify-content: center;
         cursor: grab; user-select: none; touch-action: none;
-        background: #06090F;
-        border: 2px solid rgba(255,184,0,0.55) !important;
-        box-shadow: 0 6px 24px rgba(0,0,0,0.85), 0 0 14px rgba(255,184,0,0.3) !important;
+        background: radial-gradient(circle at 38% 32%, #0f2347 0%, #050d1c 70%, #020812 100%);
+        box-shadow: 0 4px 24px rgba(0,0,0,0.7), inset 0 0 16px rgba(0,229,255,0.07);
         transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s;
         z-index: 1;
+        border: none;
         outline: none;
-        padding: 0;
-        overflow: hidden;
       }
-      .mini-widget:hover { transform: scale(1.06); cursor: grab; border-color: #FFB800 !important; box-shadow: 0 8px 32px rgba(0,0,0,0.95), 0 0 20px rgba(255,184,0,0.5) !important; }
-      .mini-widget:active { cursor: grabbing; transform: scale(0.95); }
+      .mini-widget:hover { transform: scale(1.1); cursor: grab; box-shadow: 0 6px 28px rgba(0,0,0,0.8), inset 0 0 20px rgba(0,229,255,0.12); }
+      .mini-widget:active { cursor: grabbing; transform: scale(0.93); }
       .mini-widget img {
-        width: 100%; height: 100%; object-fit: cover; pointer-events: none;
+        width: 36px; height: 36px; object-fit: contain; pointer-events: none;
         border-radius: 50%;
-        display: block;
         transition: transform 0.2s ease;
+        filter: drop-shadow(0 0 6px rgba(0,229,255,0.6));
       }
-      .mini-widget:hover img { transform: scale(1.05); }
-      .mini-logo-fallback { display: none; color: #FFB800; font: 900 18px/1 system-ui, sans-serif; letter-spacing: -1px; text-shadow: 0 0 14px rgba(255,184,0,0.9); pointer-events: none; }
+      .mini-widget:hover img { transform: scale(1.08); }
+      .mini-logo-fallback { display: none; color: #00e5ff; font: 900 18px/1 system-ui, sans-serif; letter-spacing: -1px; text-shadow: 0 0 14px rgba(0,229,255,0.9), 0 0 28px rgba(0,229,255,0.5); pointer-events: none; }
       /* Hover tooltip */
       .mini-tooltip {
         position: absolute;
         bottom: calc(100% + 10px);
         left: 50%; transform: translateX(-50%) scale(0.85);
-        background: rgba(6,9,15,0.96);
-        border: 1px solid rgba(255,184,0,0.4);
+        background: rgba(4,8,20,0.94);
+        border: 1px solid rgba(0,229,255,0.4);
         backdrop-filter: blur(12px);
-        color: #FEF08A; font-size: 10px; font-weight: 600;
+        color: #e0f7fa; font-size: 10px; font-weight: 600;
         white-space: nowrap; padding: 5px 10px;
         border-radius: 8px;
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16,1,0.3,1);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(255,184,0,0.25);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(0,229,255,0.2);
         z-index: 10;
       }
       .mini-tooltip::after {
@@ -4813,26 +3741,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         position: absolute; top: 100%; left: 50%;
         transform: translateX(-50%);
         border: 5px solid transparent;
-        border-top-color: rgba(255,184,0,0.4);
+        border-top-color: rgba(0,229,255,0.4);
       }
       .mini-widget-wrap:hover .mini-tooltip {
         opacity: 1; transform: translateX(-50%) scale(1);
       }
-      /* Count badge — Fire Crimson badge with ripple pulse */
+      /* Count badge — cyan brand color with ripple pulse */
       .mini-count {
         position: absolute;
-        top: -3px; right: -3px;
-        min-width: 18px; height: 18px;
-        background: linear-gradient(135deg, #FFB800, #FF2E54);
-        color: #FFFFFF; font-weight: 800; font-size: 10px;
-        padding: 0 4px; border-radius: 4px;
-        border: 1.5px solid #06090F;
-        box-shadow: 0 0 10px rgba(255,46,84,0.9), 0 0 16px rgba(255,184,0,0.5);
+        top: -5px; right: -5px;
+        min-width: 20px; height: 20px;
+        background: #00e5ff;
+        color: #020812; font-weight: 900; font-size: 10.5px;
+        padding: 0 5px; border-radius: 999px;
+        border: 2px solid #050d1c;
+        box-shadow: 0 0 10px rgba(0,229,255,0.8), 0 0 20px rgba(0,229,255,0.4);
         pointer-events: none;
         font-family: 'JetBrains Mono', ui-monospace, system-ui, sans-serif;
         display: flex; align-items: center; justify-content: center;
         z-index: 12;
-        letter-spacing: -0.2px;
+        letter-spacing: -0.3px;
       }
       .mini-count.pulse { animation: zh-badge-pulse 0.5s cubic-bezier(0.16,1,0.3,1); }
 
@@ -4842,12 +3770,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .header {
         display: flex; align-items: center; justify-content: space-between;
         padding: 11px 12px;
-        background: linear-gradient(135deg, rgba(255,184,0,0.14) 0%, rgba(255,46,84,0.08) 100%);
-        border-bottom: 1px solid rgba(255,184,0,0.2);
+        background: linear-gradient(135deg, rgba(0,229,255,0.13) 0%, rgba(6,182,212,0.06) 50%, rgba(14,165,233,0.04) 100%);
+        border-bottom: 1px solid rgba(0,229,255,0.15);
         cursor: pointer; user-select: none;
         transition: background 0.2s;
       }
-      .header:hover { background: linear-gradient(135deg, rgba(255,184,0,0.2) 0%, rgba(255,46,84,0.12) 100%); }
+      .header:hover { background: linear-gradient(135deg, rgba(0,229,255,0.18) 0%, rgba(6,182,212,0.10) 100%); }
       .header-left { display: flex; align-items: center; gap: 8px; }
       .header-icon {
         width: 28px; height: 28px;
@@ -4860,25 +3788,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       .header-icon img {
         width: 28px; height: 28px; object-fit: contain; display: block; pointer-events: none;
-        filter: drop-shadow(0 0 6px rgba(255,184,0,0.6));
+        filter: drop-shadow(0 0 6px rgba(0,229,255,0.6));
         border-radius: 7px;
       }
-      .header:hover .header-icon { transform: rotate(-5deg) scale(1.08); box-shadow: 0 4px 18px rgba(255,184,0,0.6); }
-      .header-title { color: #FFFFFF; font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-shadow: 0 0 12px rgba(255,184,0,0.4); }
+      .header:hover .header-icon { transform: rotate(-5deg) scale(1.08); box-shadow: 0 4px 18px rgba(0,229,255,0.7); }
+      .header-title { color: #e0f7fa; font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-shadow: 0 0 12px rgba(0,229,255,0.4); }
       .header-count {
         font-size: 10px; font-weight: 700; padding: 2px 8px;
-        background: rgba(255,184,0,0.18); border: 1px solid rgba(255,184,0,0.4);
-        border-radius: 9999px; color: #FDE047;
+        background: rgba(0,229,255,0.15); border: 1px solid rgba(0,229,255,0.35);
+        border-radius: 9999px; color: #67e8f9;
         transition: background 0.2s, transform 0.15s;
       }
       .toggle-btn {
         background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-        cursor: pointer; color: #FDE047; padding: 5px 8px;
+        cursor: pointer; color: #7dd3fc; padding: 5px 8px;
         line-height: 1; border-radius: 6px; display: flex; align-items: center; justify-content: center;
         transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.2s cubic-bezier(0.16,1,0.3,1);
       }
       .toggle-btn svg { pointer-events: none; transition: transform 0.3s cubic-bezier(0.16,1,0.3,1); }
-      .toggle-btn:hover { background: rgba(255,184,0,0.15); border-color: rgba(255,184,0,0.45); color: #FFB800; transform: scale(1.12); }
+      .toggle-btn:hover { background: rgba(0,229,255,0.12); border-color: rgba(0,229,255,0.4); color: #00e5ff; transform: scale(1.12); }
       .toggle-btn:hover svg { transform: scale(1.1); }
 
       .body {
@@ -4887,14 +3815,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       .body::-webkit-scrollbar { width: 3px; }
       .body::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
-      .body::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, #FFB800, #FF2E54); border-radius: 3px; }
+      .body::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, #00e5ff, #0ea5e9); border-radius: 3px; }
 
-      .empty { text-align: center; padding: 28px 12px; color: #64748B; font-size: 11px; line-height: 1.7; }
+      .empty { text-align: center; padding: 28px 12px; color: #3b6a8a; font-size: 11px; line-height: 1.7; }
 
       .skeleton { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
       .skel-item {
         aspect-ratio: 1; border-radius: 8px;
-        background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,184,0,0.08) 50%, rgba(255,255,255,0.04) 75%);
+        background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(0,229,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
         background-size: 200% 100%; animation: zh-shimmer 1.5s ease-in-out infinite;
       }
       .skel-item:nth-child(2) { animation-delay: 0.15s; }
@@ -4907,8 +3835,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       .img-wrap {
         position: relative; border-radius: 9px; overflow: hidden;
-        border: 2px solid rgba(255,255,255,0.08); cursor: pointer;
-        aspect-ratio: 1; background: #080C14;
+        border: 2px solid rgba(255,255,255,0.06); cursor: pointer;
+        aspect-ratio: 1; background: #080f1e;
         transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
         animation: zh-fade-up 0.4s cubic-bezier(0.16,1,0.3,1) both;
       }
@@ -4925,12 +3853,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .img-wrap:nth-child(11) { animation-delay: 0.55s; }
       .img-wrap:nth-child(12) { animation-delay: 0.60s; }
       .img-wrap:hover {
-        border-color: rgba(255,184,0,0.55);
+        border-color: rgba(0,229,255,0.5);
         transform: scale(1.06) translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 12px rgba(255,184,0,0.25);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 12px rgba(0,229,255,0.2);
         z-index: 2;
       }
-      .img-wrap.selected { border-color: #FFB800; box-shadow: 0 0 0 1px rgba(255,184,0,0.4), 0 4px 16px rgba(255,46,84,0.25); }
+      .img-wrap.selected { border-color: #00e5ff; box-shadow: 0 0 0 1px rgba(0,229,255,0.4), 0 4px 16px rgba(0,229,255,0.2); }
       .img-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.25s; }
       .img-wrap:hover img { transform: scale(1.08); }
 
@@ -4944,13 +3872,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         pointer-events: none;
       }
       .img-wrap.selected .img-check { 
-        background: linear-gradient(135deg, #FFB800, #FF2E54); border-color: #FFB800; 
-        box-shadow: 0 0 10px rgba(255,184,0,0.6); 
+        background: #00e5ff; border-color: #00e5ff; 
+        box-shadow: 0 0 10px rgba(0,229,255,0.6); 
       }
       .img-wrap.selected .img-check::after {
         content: '';
         width: 4px; height: 8px;
-        border: solid #FFFFFF;
+        border: solid #000;
         border-width: 0 2px 2px 0;
         transform: rotate(45deg);
         margin-bottom: 2px;
@@ -4963,168 +3891,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         padding: 2px 6px; border-radius: 6px;
       }
-      .img-res {
-        position: absolute; top: 6px; right: 6px;
-        font-size: 8px; font-weight: 800;
-        padding: 2px 5px; border-radius: 5px;
-        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-        display: none; line-height: 1; letter-spacing: 0.3px;
-        pointer-events: none; z-index: 2;
-      }
-      .img-res.show { display: block; }
-      .img-res.hd {
-        background: rgba(16, 185, 129, 0.9); color: #FFFFFF;
-        border: 1px solid rgba(52, 211, 153, 0.7);
-        box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
-      }
-      .img-res.sd {
-        background: rgba(15, 23, 42, 0.85); color: #94A3B8;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-      }
-      .img-actions {
-        position: absolute; bottom: 6px; left: 6px;
-        display: flex; gap: 4px; z-index: 3;
-        opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease;
-        transform: translateY(2px);
-      }
-      .img-wrap:hover .img-actions { opacity: 1; transform: translateY(0); }
-      .img-btn-action {
-        width: 20px; height: 20px; border-radius: 5px;
-        background: rgba(6, 9, 15, 0.9); border: 1px solid rgba(255, 184, 0, 0.45);
-        color: #FFB800; font-size: 10px; display: flex; align-items: center; justify-content: center;
-        cursor: pointer; padding: 0; transition: all 0.15s cubic-bezier(0.16,1,0.3,1);
-      }
-      .img-btn-action:hover {
-        background: #FFB800; color: #000000;
-        transform: scale(1.15); box-shadow: 0 0 8px rgba(255, 184, 0, 0.6);
-      }
-      .img-wrap.dragging {
-        opacity: 0.4;
-        border: 2px dashed #FFB800 !important;
-        transform: scale(0.95);
-      }
-      .img-wrap.drag-over {
-        border-color: #10B981 !important;
-        box-shadow: 0 0 16px rgba(16, 185, 129, 0.6) !important;
-        transform: scale(1.06) translateY(-2px);
-      }
-      .img-main-badge {
-        position: absolute; bottom: 6px; left: 6px;
-        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-        color: #FFFFFF; font-size: 8px; font-weight: 900;
-        padding: 2px 5px; border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(255, 46, 84, 0.5);
-        letter-spacing: 0.5px; line-height: 1; z-index: 2;
-        display: flex; align-items: center; gap: 3px;
-        pointer-events: none;
-      }
-      .img-wrap:hover .img-main-badge { display: none; }
-      .img-btn-action.btn-main { color: #FEF08A; }
-      .img-btn-action.btn-main:hover {
-        background: #FF2E54; color: #FFFFFF; border-color: #FF2E54;
-        box-shadow: 0 0 8px rgba(255, 46, 84, 0.7);
-      }
 
       .footer {
-        padding: 8px 10px;
-        border-top: 1px solid rgba(255,184,0,0.15);
-        background: rgba(255,184,0,0.02);
-        display: flex; flex-direction: column; gap: 6px;
-      }
-      .footer-row {
-        display: flex; gap: 6px; align-items: center; width: 100%;
-      }
-      .footer-sel-group {
-        display: flex; gap: 4px; align-items: center;
+        padding: 9px 10px;
+        border-top: 1px solid rgba(0,229,255,0.1);
+        background: rgba(0,229,255,0.02);
+        display: flex; gap: 6px; align-items: center;
       }
       .btn-sm {
         padding: 6px 10px; border-radius: 7px;
-        font-size: 11px; font-weight: 700;
+        font-size: 10px; font-weight: 700;
         cursor: pointer; border: 1px solid transparent;
         font-family: inherit; white-space: nowrap;
         transition: all 0.18s cubic-bezier(0.16,1,0.3,1);
         position: relative; overflow: hidden;
-        display: inline-flex; align-items: center; justify-content: center;
-        box-sizing: border-box;
       }
-      .btn-sm:active { transform: scale(0.95) !important; }
-      .btn-ghost {
-        background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); color: #FEF08A;
-        padding: 5px 8px; font-size: 10px;
-      }
-      .btn-ghost:hover { background: rgba(255,184,0,0.14); border-color: rgba(255,184,0,0.4); color: #FFB800; transform: translateY(-1px); }
-      .btn-temu {
-        flex: 1;
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-        color: #FFFFFF; font-weight: 800; border: 1px solid rgba(16,185,129,0.5);
-        box-shadow: 0 2px 10px rgba(16,185,129,0.35);
-        padding: 6px 10px;
-      }
-      .btn-temu:hover {
-        background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
-        box-shadow: 0 4px 14px rgba(16,185,129,0.6);
-        transform: translateY(-1px);
-      }
-      .btn-zip {
-        flex: 1;
-        background: rgba(255,184,0,0.12);
-        border: 1px solid rgba(255,184,0,0.38);
-        color: #FFB800; font-weight: 700;
-        padding: 6px 10px;
-      }
-      .btn-zip:not(:disabled):hover {
-        background: rgba(255,184,0,0.22);
-        border-color: #FFB800;
-        box-shadow: 0 2px 10px rgba(255,184,0,0.25);
-        transform: translateY(-1px);
-      }
-      .btn-zip:disabled { opacity: 0.32; cursor: not-allowed; border-color: rgba(255,255,255,0.1); color: #64748B; }
+      .btn-sm:active { transform: scale(0.94) !important; }
+      .btn-ghost { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); color: #7dd3fc; }
+      .btn-ghost:hover { background: rgba(0,229,255,0.1); border-color: rgba(0,229,255,0.4); color: #00e5ff; transform: translateY(-1px); }
       .btn-dl {
         flex: 1;
-        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-        color: #FFFFFF; font-weight: 800; letter-spacing: 0.3px;
-        box-shadow: 0 4px 14px rgba(255,46,84,0.4);
-        padding: 6px 10px;
+        background: linear-gradient(90deg, #00c8ff, #0ea5e9, #00e5ff, #0ea5e9, #00c8ff);
+        background-size: 200% auto;
+        color: #000; font-weight: 900; letter-spacing: 0.3px;
+        box-shadow: 0 2px 12px rgba(0,229,255,0.3);
+        transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
       }
       .btn-dl:not(:disabled):hover {
-        box-shadow: 0 6px 20px rgba(255,46,84,0.65);
+        background-position: right center;
+        box-shadow: 0 4px 20px rgba(0,229,255,0.55);
         transform: translateY(-1px);
+        animation: zh-btn-shine 1.2s linear infinite;
       }
-      .btn-dl:disabled { opacity: 0.32; cursor: not-allowed; background: rgba(255,255,255,0.1); box-shadow: none; color: #94A3B8; }
-      .btn-video {
-        background: linear-gradient(135deg, rgba(255,184,0,0.18) 0%, rgba(255,46,84,0.18) 100%);
-        border: 1px solid rgba(255,184,0,0.4);
-        color: #FFB800; padding: 5px 8px; font-size: 10px;
-        display: none;
-        align-items: center;
-        gap: 4px;
-      }
-      .btn-video:hover {
-        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-        color: #fff;
-        box-shadow: 0 4px 16px rgba(255,46,84,0.45);
-        transform: translateY(-1px);
-      }
-      .img-sourcing {
-        position: absolute;
-        top: 4px; left: 4px;
-        width: 18px; height: 18px;
-        border-radius: 4px;
-        background: rgba(6, 9, 15, 0.88);
-        border: 1px solid rgba(255,184,0,0.5);
-        color: #FFB800;
-        font-size: 10px;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity 0.2s, transform 0.2s;
-        z-index: 5;
-        padding: 0;
-      }
-      .img-wrap:hover .img-sourcing { opacity: 1; transform: scale(1.05); }
-      .img-sourcing:hover { background: #FFB800; color: #06090F; }
+      .btn-dl:not(:disabled):active { transform: translateY(1px) scale(0.97); box-shadow: 0 1px 8px rgba(0,229,255,0.3); }
+      .btn-dl:disabled { opacity: 0.3; cursor: not-allowed; background: rgba(255,255,255,0.1); box-shadow: none; }
 
-      .status-bar { padding: 4px 10px 8px; font-size: 10px; color: #64748B; text-align: center; min-height: 20px; transition: color 0.3s; }
+      .status-bar { padding: 4px 10px 8px; font-size: 10px; color: #3b6a8a; text-align: center; min-height: 20px; transition: color 0.3s; }
       .status-bar.ok  { color: #34d399; text-shadow: 0 0 8px rgba(52,211,153,0.4); }
       .status-bar.err { color: #f87171; }
     `;
@@ -5155,7 +3957,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     miniWidget.className = 'mini-widget';
     miniWidget.type = 'button';
     miniWidget.setAttribute('aria-label', 'Open ZHunter Images');
-    miniWidget.innerHTML = `<img src="${chrome.runtime.getURL('icon128.png')}" alt="ZHunter" draggable="false"><span class="mini-logo-fallback" aria-hidden="true">ZH</span>`;
+    miniWidget.innerHTML = `<img src="${chrome.runtime.getURL('icon48.png')}" alt="ZHunter" draggable="false"><span class="mini-logo-fallback" aria-hidden="true">ZH</span>`;
     miniWrap.appendChild(miniWidget);
 
     const miniTooltip = document.createElement('div');
@@ -5181,7 +3983,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     header.className = 'header';
     header.innerHTML = `
       <div class="header-left">
-        <div class="header-icon"><img src="${chrome.runtime.getURL('icon128.png')}" alt="ZH" onerror="this.style.display='none';this.parentNode.textContent='ZH'"></div>
+        <div class="header-icon"><img src="${chrome.runtime.getURL('icon48.png')}" alt="ZH" onerror="this.style.display='none';this.parentNode.textContent='ZH'"></div>
         <span class="header-title">ZHunter Images</span>
         <span class="header-count" id="zh-img-count">0</span>
       </div>
@@ -5204,18 +4006,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const footer = document.createElement('div');
     footer.className = 'footer';
     footer.innerHTML = `
-      <div class="footer-row">
-        <div class="footer-sel-group">
-          <button class="btn-sm btn-ghost" id="zh-sel-all" title="Select All">All</button>
-          <button class="btn-sm btn-ghost" id="zh-sel-none" title="Deselect All">None</button>
-        </div>
-        <button class="btn-sm btn-temu" id="zh-send-temu" title="Send Product & Selected Images to Temu Review & Library">🚀 Send to Temu</button>
-        <button class="btn-sm btn-video" id="zh-dl-video" style="display:none;" title="Download Product Video">🎥 Video</button>
-      </div>
-      <div class="footer-row">
-        <button class="btn-sm btn-zip" id="zh-dl-zip" disabled title="Download all selected images as a single ZIP file">📦 ZIP</button>
-        <button class="btn-sm btn-dl" id="zh-dl-btn" disabled title="Download individual files">↓ Files</button>
-      </div>
+      <button class="btn-sm btn-ghost" id="zh-sel-all">All</button>
+      <button class="btn-sm btn-ghost" id="zh-sel-none">None</button>
+      <button class="btn-sm btn-dl" id="zh-dl-btn" disabled>\u2193 Download</button>
     `;
     panel.appendChild(footer);
 
@@ -5228,7 +4021,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // ── State
     let images = [];
     let selected = new Set();
-    let draggedIdx = null;
     // v8: the card always starts minimized; the user expands it by clicking the mini button.
     let collapsed = true;
     let widgetPosition = { top: null, bottom: 20, left: null, right: 20 };
@@ -5259,20 +4051,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     const saveWidgetState = () => {
-      try {
-        if (!chrome?.storage?.local?.set) return;
-        chrome.storage.local.set({ [WIDGET_STATE_KEY]: {
-          collapsed,
-          top: widgetPosition.top,
-          bottom: widgetPosition.bottom,
-          left: widgetPosition.left,
-          right: widgetPosition.right
-        } }).catch(() => {});
-      } catch (_) {}
+      chrome.storage.local.set({ [WIDGET_STATE_KEY]: {
+        collapsed,
+        top: widgetPosition.top,
+        bottom: widgetPosition.bottom,
+        left: widgetPosition.left,
+        right: widgetPosition.right
+      } }).catch(() => {});
     };
     const applyWidgetPosition = () => {
-      const widgetHeight = collapsed ? 68 : 396;
-      const widgetWidth = collapsed ? 68 : 322;
+      const widgetHeight = collapsed ? 68 : 384;
+      const widgetWidth = collapsed ? 68 : 299;
 
       if (Number.isFinite(widgetPosition.top)) {
         const maxTop = Math.max(8, window.innerHeight - widgetHeight - 8);
@@ -5370,126 +4159,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     widgetPosition = { top: null, bottom: 20, left: null, right: 20 };
     applyCollapsedState();
 
-    // ── Fullscreen Zoom Lightbox Modal
-    function openLightbox(startIdx) {
-      if (!images.length) return;
-      let currentIdx = Math.max(0, Math.min(startIdx, images.length - 1));
-      let lb = document.getElementById('zh-lightbox-modal');
-      if (lb) lb.remove();
-
-      lb = document.createElement('div');
-      lb.id = 'zh-lightbox-modal';
-      lb.innerHTML = `
-        <div class="zh-lb-backdrop"></div>
-        <div class="zh-lb-card">
-          <div class="zh-lb-header">
-            <div class="zh-lb-counter">Image <span id="zh-lb-num">${currentIdx + 1}</span> / ${images.length}</div>
-            <div class="zh-lb-badge" id="zh-lb-res">Calculating...</div>
-            <div class="zh-lb-header-right">
-              <button class="zh-lb-btn zh-lb-sel-btn" id="zh-lb-sel-btn" type="button">
-                ${selected.has(currentIdx) ? '✓ Selected' : '+ Select'}
-              </button>
-              <button class="zh-lb-close" id="zh-lb-close" type="button" title="Close (Esc)">✕</button>
-            </div>
-          </div>
-          <div class="zh-lb-body">
-            <button class="zh-lb-nav zh-lb-prev" id="zh-lb-prev" type="button" title="Previous (Left Arrow)">❮</button>
-            <div class="zh-lb-stage">
-              <img id="zh-lb-image" src="${images[currentIdx]}" alt="High Definition Preview">
-            </div>
-            <button class="zh-lb-nav zh-lb-next" id="zh-lb-next" type="button" title="Next (Right Arrow)">❯</button>
-          </div>
-          <div class="zh-lb-footer">
-            <button class="zh-lb-tool" id="zh-lb-dl" type="button">💾 Download HD</button>
-            <button class="zh-lb-tool" id="zh-lb-source" type="button">🌐 Find Suppliers</button>
-            <button class="zh-lb-tool" id="zh-lb-copy" type="button">📋 Copy URL</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(lb);
-
-      const imgEl = lb.querySelector('#zh-lb-image');
-      const numEl = lb.querySelector('#zh-lb-num');
-      const resEl = lb.querySelector('#zh-lb-res');
-      const selBtn = lb.querySelector('#zh-lb-sel-btn');
-      if (selected.has(currentIdx)) selBtn.classList.add('selected');
-
-      const updateView = () => {
-        imgEl.src = images[currentIdx];
-        numEl.textContent = currentIdx + 1;
-        resEl.textContent = 'Calculating...';
-        resEl.className = 'zh-lb-badge';
-        const isSel = selected.has(currentIdx);
-        selBtn.textContent = isSel ? '✓ Selected' : '+ Select';
-        selBtn.classList.toggle('selected', isSel);
-
-        const onDim = () => {
-          const w = imgEl.naturalWidth;
-          const h = imgEl.naturalHeight;
-          if (w && h) {
-            const isHD = w >= 1000 || h >= 1000;
-            resEl.textContent = `${w} × ${h} px • ${isHD ? 'HD Quality' : 'Standard'}`;
-            resEl.className = 'zh-lb-badge ' + (isHD ? 'hd' : 'sd');
-          }
-        };
-        if (imgEl.complete && imgEl.naturalWidth) onDim();
-        else imgEl.onload = onDim;
-      };
-
-      updateView();
-
-      const nav = (dir) => {
-        currentIdx = (currentIdx + dir + images.length) % images.length;
-        updateView();
-      };
-
-      const toggleSel = () => {
-        if (selected.has(currentIdx)) selected.delete(currentIdx);
-        else selected.add(currentIdx);
-        renderGrid();
-        updateView();
-      };
-
-      const closeLb = () => {
-        window.removeEventListener('keydown', onKey);
-        lb.remove();
-      };
-
-      const onKey = (e) => {
-        if (e.key === 'Escape') closeLb();
-        else if (e.key === 'ArrowLeft') nav(-1);
-        else if (e.key === 'ArrowRight') nav(1);
-        else if (e.key === ' ') { e.preventDefault(); toggleSel(); }
-      };
-      window.addEventListener('keydown', onKey);
-
-      lb.querySelector('.zh-lb-backdrop').addEventListener('click', closeLb);
-      lb.querySelector('#zh-lb-close').addEventListener('click', closeLb);
-      lb.querySelector('#zh-lb-prev').addEventListener('click', () => nav(-1));
-      lb.querySelector('#zh-lb-next').addEventListener('click', () => nav(1));
-      selBtn.addEventListener('click', toggleSel);
-
-      lb.querySelector('#zh-lb-dl').addEventListener('click', () => {
-        const u = images[currentIdx];
-        const ext = (u.match(/\.(jpe?g|png|webp|gif)/i)?.[1] || 'jpg').toLowerCase();
-        const pSlug = (document.title || 'product').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 25);
-        downloadViaBackground(u, `${pSlug}-hd${currentIdx + 1}.${ext}`);
-      });
-
-      lb.querySelector('#zh-lb-source').addEventListener('click', (e) => {
-        openSourcingMenu(images[currentIdx], e.clientX, e.clientY);
-      });
-
-      lb.querySelector('#zh-lb-copy').addEventListener('click', () => {
-        navigator.clipboard.writeText(images[currentIdx]).then(() => {
-          const btn = lb.querySelector('#zh-lb-copy');
-          const old = btn.textContent;
-          btn.textContent = '✓ Copied!';
-          setTimeout(() => { btn.textContent = old; }, 1500);
-        });
-      });
-    }
-
     // ── Render grid
     function renderGrid() {
       const b = shadow.getElementById('zh-img-body');
@@ -5506,93 +4175,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       images.forEach((url, i) => {
         const wrap = document.createElement('div');
         wrap.className = 'img-wrap' + (selected.has(i) ? ' selected' : '');
-        wrap.setAttribute('draggable', 'true');
         wrap.innerHTML = `
-          <img src="${url}" loading="lazy" alt="img ${i+1}" title="Double-click to preview HD"
+          <img src="${url}" loading="lazy" alt="img ${i+1}" title="${url}"
                onerror="this.style.opacity='0.2';this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>\u{1F5BC}</text></svg>'">
           <div class="img-check"></div>
-          <div class="img-res" id="res-${i}">...</div>
-          ${i === 0 ? '<div class="img-main-badge" title="Hero / Primary Image">★ MAIN</div>' : ''}
           <div class="img-idx">${i + 1}</div>
-          <div class="img-actions">
-            ${i > 0 ? '<button class="img-btn-action btn-main" type="button" title="Set as Main (Hero) Photo">★</button>' : ''}
-            <button class="img-btn-action btn-zoom" type="button" title="Zoom & Inspect">🔍</button>
-          </div>
         `;
-
-        const imgEl = wrap.querySelector('img');
-        const resEl = wrap.querySelector('.img-res');
-        const checkRes = () => {
-          const w = imgEl.naturalWidth;
-          const h = imgEl.naturalHeight;
-          if (w && h) {
-            const isHD = w >= 1000 || h >= 1000;
-            resEl.textContent = isHD ? `${Math.max(w, h)}w HD` : `${w}×${h}`;
-            resEl.className = 'img-res show ' + (isHD ? 'hd' : 'sd');
-          }
-        };
-        if (imgEl.complete && imgEl.naturalWidth) checkRes();
-        else imgEl.addEventListener('load', checkRes);
-
-        // ── Drag and Drop Reordering
-        wrap.addEventListener('dragstart', (e) => {
-          draggedIdx = i;
-          e.dataTransfer.effectAllowed = 'move';
-          wrap.classList.add('dragging');
-          try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
-        });
-        wrap.addEventListener('dragend', () => {
-          draggedIdx = null;
-          wrap.classList.remove('dragging');
-          grid.querySelectorAll('.img-wrap').forEach(w => w.classList.remove('drag-over'));
-        });
-        wrap.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          if (draggedIdx !== null && draggedIdx !== i) {
-            wrap.classList.add('drag-over');
-          }
-        });
-        wrap.addEventListener('dragleave', () => {
-          wrap.classList.remove('drag-over');
-        });
-        wrap.addEventListener('drop', (e) => {
-          e.preventDefault();
-          wrap.classList.remove('drag-over');
-          if (draggedIdx !== null && draggedIdx !== i) {
-            const selectedUrls = new Set([...selected].map(idx => images[idx]));
-            const [moved] = images.splice(draggedIdx, 1);
-            images.splice(i, 0, moved);
-            selected = new Set(images.map((u, idx) => selectedUrls.has(u) ? idx : -1).filter(idx => idx >= 0));
-            draggedIdx = null;
-            renderGrid();
-          }
-        });
-
-        // ── Set as Main (Hero) Photo
-        wrap.querySelector('.btn-main')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const selectedUrls = new Set([...selected].map(idx => images[idx]));
-          const [hero] = images.splice(i, 1);
-          images.unshift(hero);
-          selected = new Set(images.map((u, idx) => selectedUrls.has(u) ? idx : -1).filter(idx => idx >= 0));
-          selected.add(0);
-          renderGrid();
-          status.className = 'status-bar ok';
-          status.textContent = `★ Photo set as Main (Hero)!`;
-          setTimeout(() => { if (status.textContent.includes('★')) { status.textContent = ''; status.className = 'status-bar'; } }, 2500);
-        });
-
-        wrap.querySelector('.btn-zoom')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          openLightbox(i);
-        });
-        wrap.addEventListener('dblclick', (e) => {
-          e.stopPropagation();
-          openLightbox(i);
-        });
-        wrap.addEventListener('click', (e) => {
-          if (e.target.closest('.img-actions')) return;
+        wrap.addEventListener('click', () => {
           if (selected.has(i)) selected.delete(i);
           else selected.add(i);
           wrap.classList.toggle('selected', selected.has(i));
@@ -5608,12 +4197,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     function updateDlBtn() {
       const n = selected.size;
       dlBtn.disabled = n === 0;
-      dlBtn.textContent = n > 0 ? `\u2193 Files (${n})` : '\u2193 Files';
-      const zipBtn = shadow.getElementById('zh-dl-zip');
-      if (zipBtn) {
-        zipBtn.disabled = n === 0;
-        zipBtn.textContent = n > 0 ? `📦 ZIP (${n})` : '📦 ZIP';
-      }
+      dlBtn.textContent = n > 0 ? `\u2193 Download ${n}` : '\u2193 Download';
     }
 
     // ── Select All / None
@@ -5626,109 +4210,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       renderGrid();
     });
 
-    // ── 1-Click ZIP Download
-    const zipBtn = shadow.getElementById('zh-dl-zip');
-    zipBtn?.addEventListener('click', async () => {
-      if (!selected.size) return;
-      zipBtn.disabled = true;
-      const toZip = [...selected].sort((a, b) => a - b).map(idx => images[idx]).filter(Boolean);
-
-      status.className = 'status-bar';
-      status.textContent = `Packing 0 / ${toZip.length} images into ZIP...`;
-
-      const productSlug = (document.title || 'product').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 30) || 'product';
-
-      try {
-        if (typeof JSZip === 'undefined') {
-          throw new Error('ZIP library initializing, please try again');
-        }
-        const zip = new JSZip();
-        let packed = 0;
-
-        for (let i = 0; i < toZip.length; i++) {
-          const url = toZip[i];
-          const ext = (url.match(/\.(jpe?g|png|webp|gif)/i)?.[1] || 'jpg').toLowerCase();
-          const filename = `${productSlug}-img${i + 1}.${ext}`;
-
-          const b64Res = await new Promise(resolve => {
-            chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url }, res => resolve(res));
-          });
-
-          if (b64Res?.base64) {
-            let rawData = b64Res.base64;
-            if (rawData.includes(',')) rawData = rawData.split(',')[1];
-            zip.file(filename, rawData, { base64: true });
-            packed++;
-          }
-          status.textContent = `Packing ${packed} / ${toZip.length} into ZIP...`;
-        }
-
-        status.textContent = `Generating ${productSlug}.zip...`;
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const blobUrl = URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `${productSlug}_images.zip`;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => { a.remove(); URL.revokeObjectURL(blobUrl); }, 2000);
-
-        status.className = 'status-bar ok';
-        status.textContent = `✓ ${packed} images downloaded as ZIP!`;
-      } catch (err) {
-        status.className = 'status-bar err';
-        status.textContent = `ZIP error: ${err.message}`;
-      } finally {
-        zipBtn.disabled = selected.size === 0;
-        setTimeout(() => { status.textContent = ''; status.className = 'status-bar'; }, 4000);
-      }
-    });
-
-    // ── 1-Click Send to Temu / Library
-    const temuBtn = shadow.getElementById('zh-send-temu');
-    temuBtn?.addEventListener('click', async () => {
-      temuBtn.disabled = true;
-      status.className = 'status-bar';
-      status.textContent = '⏳ Preparing product data for Temu...';
-
-      try {
-        let pData = null;
-        try { pData = await scrapePageData(); } catch (_) {}
-
-        if (!pData) {
-          pData = {
-            title: document.title || '',
-            url: location.href,
-            price: '',
-            images: [],
-            platform: host().replace(/^www\./, '')
-          };
-        }
-
-        const chosenImages = [...selected].sort((a, b) => a - b).map(i => images[i]).filter(Boolean);
-        if (chosenImages.length) pData.images = chosenImages;
-        else if (images.length) pData.images = images.slice(0, 10);
-
-        chrome.runtime.sendMessage({ action: 'SEND_TO_TEMU_REVIEW', product: pData }, res => {
-          if (res?.success) {
-            status.className = 'status-bar ok';
-            status.textContent = `✓ Sent "${(pData.title || '').slice(0, 22)}..." to Temu!`;
-          } else {
-            status.className = 'status-bar ok';
-            status.textContent = `✓ Added to Temu Review & Library!`;
-          }
-          setTimeout(() => { status.textContent = ''; status.className = 'status-bar'; }, 4000);
-        });
-      } catch (err) {
-        status.className = 'status-bar err';
-        status.textContent = `Failed: ${err.message}`;
-        setTimeout(() => { status.textContent = ''; status.className = 'status-bar'; }, 4000);
-      } finally {
-        temuBtn.disabled = false;
-      }
-    });
-
-    // ── Download Individual Files
+    // ── Download Selected
     dlBtn.addEventListener('click', async () => {
       if (!selected.size) return;
       dlBtn.disabled = true;
@@ -5793,406 +4275,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // ── Kick off
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      initImagePanel();
-      initReverseImageSourcing();
-      initListingVideoDownloader();
-    });
+    document.addEventListener('DOMContentLoaded', initImagePanel);
   } else {
     initImagePanel();
-    initReverseImageSourcing();
-    initListingVideoDownloader();
   }
 })();
 
-// ════════════════════════════════════════════════════════════════
-// 1-Click Reverse Image Sourcing & Video Downloader Superpowers
-// ════════════════════════════════════════════════════════════════
-
-function openSourcingMenu(imgUrl, x, y) {
-  const existing = document.getElementById('zh-sourcing-menu');
-  if (existing) { existing.remove(); return; }
-
-  const enc = encodeURIComponent(imgUrl);
-  const menu = document.createElement('div');
-  menu.id = 'zh-sourcing-menu';
-  menu.className = 'zh-sourcing-popover';
-
-  const top = Math.min(y + 10, window.innerHeight - 230);
-  const left = Math.min(x + 10, window.innerWidth - 195);
-  menu.style.top = `${Math.max(10, top)}px`;
-  menu.style.left = `${Math.max(10, left)}px`;
-
-  menu.innerHTML = `
-    <div class="zh-sourcing-title">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      Find Supplier
-    </div>
-    <a class="zh-sourcing-item" href="https://lens.google.com/uploadbyurl?url=${enc}" target="_blank" rel="noopener">
-      <span>🌐</span> Google Lens
-    </a>
-    <a class="zh-sourcing-item" href="https://www.aliexpress.com/wholesale?SearchText=&imageAddress=${enc}" target="_blank" rel="noopener">
-      <span>📦</span> AliExpress
-    </a>
-    <a class="zh-sourcing-item" href="https://www.alibaba.com/trade/search?fsb=y&IndexArea=product_en&CatId=&SearchText=&imageAddress=${enc}" target="_blank" rel="noopener">
-      <span>🏭</span> Alibaba
-    </a>
-    <a class="zh-sourcing-item" href="https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageAddress=${enc}" target="_blank" rel="noopener">
-      <span>🇨🇳</span> 1688 Source
-    </a>
-    <div class="zh-sourcing-item" id="zh-copy-img-link">
-      <span>📋</span> Copy HD Link
-    </div>
-  `;
-
-  menu.querySelector('#zh-copy-img-link')?.addEventListener('click', () => {
-    navigator.clipboard.writeText(imgUrl).then(() => {
-      const el = menu.querySelector('#zh-copy-img-link');
-      if (el) el.innerHTML = '<span>✓</span> Copied!';
-      setTimeout(() => menu.remove(), 700);
-    });
-  });
-
-  document.body.appendChild(menu);
-
-  const closeMenu = (e) => {
-    if (!menu.contains(e.target) && !e.target.closest('.zh-sourcing-trigger') && !e.target.closest('.img-sourcing')) {
-      menu.remove();
-      document.removeEventListener('click', closeMenu);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', closeMenu), 100);
-}
-
-function initReverseImageSourcing() {
-  if (window.top !== window) return;
-
-  if (!document.getElementById('zh-sourcing-css')) {
-    const st = document.createElement('style');
-    st.id = 'zh-sourcing-css';
-    st.textContent = `
-      .zh-sourcing-trigger {
-        position: absolute; top: 12px; left: 12px; z-index: 2147483640;
-        width: 34px; height: 34px; border-radius: 50%;
-        background: #06090F; border: 1.5px solid #FFB800; color: #FFB800;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 10px rgba(255,184,0,0.4);
-        transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-        padding: 0;
-      }
-      .zh-sourcing-trigger:hover {
-        transform: scale(1.12);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.85), 0 0 16px rgba(255,46,84,0.7);
-        border-color: #FF2E54; color: #FF2E54;
-      }
-      .zh-sourcing-popover {
-        position: fixed; z-index: 2147483647;
-        background: rgba(6, 9, 15, 0.96);
-        border: 1px solid rgba(255, 184, 0, 0.4);
-        border-radius: 12px; padding: 10px 8px;
-        box-shadow: 0 12px 36px rgba(0,0,0,0.9), 0 0 20px rgba(255,184,0,0.18);
-        backdrop-filter: blur(16px);
-        display: flex; flex-direction: column; gap: 5px;
-        min-width: 175px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      .zh-sourcing-title {
-        font-size: 10.5px; font-weight: 800; color: #FFB800; text-transform: uppercase;
-        letter-spacing: 0.5px; padding: 2px 8px 5px; border-bottom: 1px solid rgba(255,184,0,0.18);
-        display: flex; align-items: center; gap: 6px;
-      }
-      .zh-sourcing-item {
-        display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-        border-radius: 7px; color: #F1F5F9; font-size: 11.5px; font-weight: 600;
-        text-decoration: none; cursor: pointer; transition: all 0.15s ease;
-        background: rgba(255,255,255,0.03); border: 1px solid transparent;
-      }
-      .zh-sourcing-item:hover {
-        background: rgba(255,184,0,0.12); border-color: rgba(255,184,0,0.4);
-        color: #FFB800; transform: translateX(2px);
-      }
-      .zh-video-overlay-btn {
-        position: absolute; top: 14px; right: 14px; z-index: 2147483640;
-        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-        color: #FFFFFF; border: none; border-radius: 8px; padding: 7px 14px;
-        font: 800 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        cursor: pointer; box-shadow: 0 4px 18px rgba(0,0,0,0.7), 0 0 14px rgba(255,46,84,0.6);
-        display: inline-flex; align-items: center; gap: 6px;
-        transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s;
-      }
-      .zh-video-overlay-btn:hover {
-        transform: scale(1.06); box-shadow: 0 6px 24px rgba(255,46,84,0.85);
-      }
-      .zh-video-overlay-btn:active { transform: scale(0.96); }
-
-      /* ── Fullscreen Zoom Lightbox Modal ── */
-      #zh-lightbox-modal {
-        position: fixed; inset: 0; z-index: 2147483647;
-        display: flex; align-items: center; justify-content: center;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      }
-      .zh-lb-backdrop {
-        position: absolute; inset: 0;
-        background: rgba(4, 7, 13, 0.88);
-        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-        animation: zh-fade-in 0.2s ease-out;
-      }
-      .zh-lb-card {
-        position: relative; z-index: 1;
-        max-width: 90vw; max-height: 92vh;
-        display: flex; flex-direction: column;
-        background: rgba(11, 15, 25, 0.98);
-        border: 1px solid rgba(255, 184, 0, 0.35);
-        border-radius: 18px; overflow: hidden;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(255,184,0,0.18);
-        animation: zh-scale-up 0.25s cubic-bezier(0.16,1,0.3,1);
-      }
-      .zh-lb-header {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 12px 18px; border-bottom: 1px solid rgba(255,184,0,0.15);
-        background: rgba(255,184,0,0.03); gap: 12px;
-      }
-      .zh-lb-counter { font-size: 13px; font-weight: 700; color: #FEF08A; }
-      .zh-lb-badge {
-        font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 6px;
-        background: rgba(255, 255, 255, 0.08); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.15);
-      }
-      .zh-lb-badge.hd {
-        background: rgba(16, 185, 129, 0.2); color: #34D399; border-color: rgba(16, 185, 129, 0.45);
-        box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
-      }
-      .zh-lb-header-right { display: flex; align-items: center; gap: 8px; }
-      .zh-lb-sel-btn {
-        padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        cursor: pointer; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.2);
-        background: rgba(255,255,255,0.08); color: #FFF;
-      }
-      .zh-lb-sel-btn.selected {
-        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-        border-color: #FFB800; color: #FFF; box-shadow: 0 2px 12px rgba(255,46,84,0.4);
-      }
-      .zh-lb-close {
-        background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-        color: #94A3B8; width: 30px; height: 30px; border-radius: 50%;
-        cursor: pointer; display: flex; align-items: center; justify-content: center;
-        font-size: 14px; font-weight: bold; transition: all 0.2s;
-      }
-      .zh-lb-close:hover {
-        background: rgba(255,46,84,0.2); color: #FF2E54; border-color: #FF2E54; transform: scale(1.1);
-      }
-      .zh-lb-body {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px; gap: 14px; flex: 1; min-height: 360px;
-      }
-      .zh-lb-nav {
-        background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
-        color: #F8FAFC; width: 42px; height: 42px; border-radius: 50%;
-        cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
-        transition: all 0.2s; flex-shrink: 0;
-      }
-      .zh-lb-nav:hover {
-        background: rgba(255,184,0,0.2); border-color: #FFB800; color: #FFB800; transform: scale(1.12);
-      }
-      .zh-lb-stage {
-        display: flex; align-items: center; justify-content: center;
-        max-width: 78vw; max-height: 68vh; overflow: hidden;
-      }
-      #zh-lb-image {
-        max-width: 100%; max-height: 68vh; object-fit: contain;
-        border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-        transition: transform 0.25s ease;
-      }
-      .zh-lb-footer {
-        display: flex; align-items: center; justify-content: center; gap: 10px;
-        padding: 12px 18px; border-top: 1px solid rgba(255,184,0,0.15);
-        background: rgba(255,184,0,0.02);
-      }
-      .zh-lb-tool {
-        padding: 7px 14px; border-radius: 8px; font-size: 11.5px; font-weight: 700;
-        background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
-        color: #E2E8F0; cursor: pointer; transition: all 0.2s;
-      }
-      .zh-lb-tool:hover {
-        background: rgba(255,184,0,0.16); border-color: #FFB800; color: #FFB800; transform: translateY(-1px);
-      }
-      @keyframes zh-fade-in { from { opacity: 0; } to { opacity: 1; } }
-      @keyframes zh-scale-up { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-    `;
-    (document.head || document.documentElement).appendChild(st);
-  }
-
-  const imgSelectors = [
-    '#landingImage',
-    '#imgTagWrapperId img',
-    '#main-image-container img',
-    '.imgTagWrapper img',
-    '#leftCol .imageWrapper img',
-    '[data-testid="hero-image-container"] img',
-    '.prod-HeroImage img',
-    'div[class*="mainImage"] img'
-  ];
-
-  function attachSourcingTrigger() {
-    for (const sel of imgSelectors) {
-      const img = document.querySelector(sel);
-      if (img && img.src && !img.src.startsWith('data:')) {
-        const parent = img.closest('#imgTagWrapperId') || img.closest('#main-image-container') || img.parentElement;
-        if (parent && !parent.querySelector('.zh-sourcing-trigger')) {
-          const pPos = window.getComputedStyle(parent).position;
-          if (pPos === 'static') parent.style.position = 'relative';
-
-          const btn = document.createElement('button');
-          btn.className = 'zh-sourcing-trigger';
-          btn.type = 'button';
-          btn.title = 'ZHunter — Find Wholesale Suppliers';
-          btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
-
-          btn.addEventListener('click', e => {
-            e.preventDefault(); e.stopPropagation();
-            openSourcingMenu(img.currentSrc || img.src, e.clientX, e.clientY);
-          });
-          parent.appendChild(btn);
-        }
-        break;
-      }
-    }
-  }
-
-  setTimeout(attachSourcingTrigger, 1200);
-  setTimeout(attachSourcingTrigger, 3500);
-}
-
-function detectListingVideos() {
-  const found = [];
-  document.querySelectorAll('video').forEach(v => {
-    let src = v.currentSrc || v.src;
-    if (!src) {
-      const s = v.querySelector('source[src]');
-      if (s) src = s.src;
-    }
-    if (src && !src.startsWith('blob:') && !found.includes(src)) found.push(src);
-  });
-
-  const amazonSelectors = [
-    '[data-video-url]',
-    '.vse-video-container video',
-    '#vse-video-container video',
-    '#dp-video-container video',
-    '#video-block video',
-    '.review-video video'
-  ];
-  amazonSelectors.forEach(sel => {
-    document.querySelectorAll(sel).forEach(el => {
-      const u = el.getAttribute('data-video-url') || el.currentSrc || el.src;
-      if (u && !u.startsWith('blob:') && !found.includes(u)) found.push(u);
-    });
-  });
-
-  try {
-    const scripts = document.querySelectorAll('script:not([src])');
-    for (const s of scripts) {
-      const txt = s.textContent || '';
-      if (txt.includes('.mp4') && (txt.includes('vseVideoData') || txt.includes('videoUrl') || txt.includes('initialVideo'))) {
-        const matches = txt.match(/https:\/\/[^"'\s\\]+\.mp4[^"'\s\\]*/g);
-        if (matches) {
-          matches.forEach(m => {
-            const clean = m.replace(/\\u002F/g, '/').replace(/\\/g, '');
-            if (!found.includes(clean)) found.push(clean);
-          });
-        }
-      }
-    }
-  } catch (_) {}
-
-  return found;
-}
-
-function initListingVideoDownloader() {
-  if (window.top !== window) return;
-
-  function attachVideoButtons() {
-    const videos = detectListingVideos();
-    if (!videos.length) return;
-
-    const videoContainers = [
-      '#vse-video-container',
-      '.vse-video-container',
-      '#dp-video-container',
-      '#video-block',
-      '.review-video'
-    ];
-    videoContainers.forEach(sel => {
-      const container = document.querySelector(sel);
-      if (container && !container.querySelector('.zh-video-overlay-btn')) {
-        const pos = window.getComputedStyle(container).position;
-        if (pos === 'static') container.style.position = 'relative';
-
-        const btn = document.createElement('button');
-        btn.className = 'zh-video-overlay-btn';
-        btn.type = 'button';
-        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Download MP4`;
-        btn.addEventListener('click', e => {
-          e.preventDefault(); e.stopPropagation();
-          const title = (document.title || 'product').replace(/[^a-z0-9]/gi, '_').slice(0, 30);
-          chrome.runtime.sendMessage({
-            action: 'DOWNLOAD_URL',
-            url: videos[0],
-            filename: `zhunter_${title}_video.mp4`
-          });
-          btn.innerHTML = `✓ Download Started`;
-          setTimeout(() => {
-            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Download MP4`;
-          }, 3000);
-        });
-        container.appendChild(btn);
-      }
-    });
-
-    const panelRoot = document.getElementById('zhunter-img-panel-root');
-    if (panelRoot?.shadowRoot) {
-      const videoBtn = panelRoot.shadowRoot.getElementById('zh-dl-video');
-      if (videoBtn) {
-        videoBtn.style.display = 'inline-flex';
-        videoBtn.textContent = `🎥 Video (${videos.length})`;
-        videoBtn.onclick = () => {
-          const title = (document.title || 'product').replace(/[^a-z0-9]/gi, '_').slice(0, 30);
-          chrome.runtime.sendMessage({
-            action: 'DOWNLOAD_URL',
-            url: videos[0],
-            filename: `zhunter_${title}_video.mp4`
-          });
-          videoBtn.textContent = '✓ Started';
-          setTimeout(() => {
-            videoBtn.textContent = `🎥 Video (${videos.length})`;
-          }, 3000);
-        };
-      }
-    }
-  }
-
-  setTimeout(attachVideoButtons, 1500);
-  setTimeout(attachVideoButtons, 4000);
-  setTimeout(attachVideoButtons, 8000);
-}
-
 } // end __zhunterContentLoaded guard
 
-// ── In-page toast (feedback for the right-click menu) & Temu category bridge ──
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.action === 'TEMU_GET_ACTIVE_CATEGORY') {
-    let cat = '';
-    const catDiv = [...document.querySelectorAll('div, span, td, p')].find(el => /^\s*Category:\s*[A-Za-z0-9]/i.test(el.textContent));
-    if (catDiv) cat = catDiv.textContent.replace(/^\s*Category:\s*/i, '').trim();
-    if (!cat) {
-      const el = document.querySelector('[class*="categoryPath"], [class*="category-selector"], [class*="breadcrumb"], [data-testid*="category"]');
-      if (el) cat = el.textContent.trim();
-    }
-    if (!cat) {
-      const opt = document.querySelector('[class*="inputItemRenderer"], [class*="select-selection-item"]');
-      if (opt) cat = opt.textContent.trim();
-    }
-    sendResponse({ success: true, category: cat || '', url: location.href });
-    return true;
-  }
+// ── In-page toast (feedback for the right-click menu) ─────────
+chrome.runtime.onMessage.addListener(message => {
   if (message?.action !== 'ZH_PAGE_TOAST') return;
   try {
     let host = document.getElementById('zhunter-page-toast');
@@ -6211,312 +4303,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; setTimeout(() => el.remove(), 250); }, 2600);
   } catch (_) {}
 });
-
-// ═══════════════════════════════════════════════════════════════
-// UNIVERSAL IN-PAGE HOVER IMAGE ZOOM (Walmart, Amazon, Sam's Club, etc.)
-// ═══════════════════════════════════════════════════════════════
-let _zhZoomBox = null;
-let _zhZoomImg = null;
-let _zhZoomHoverTimer = null;
-let _zhZoomActiveImg = null;
-
-function zhGetHighResImageUrl(img) {
-  if (!img) return '';
-  let url = img.currentSrc || img.src || img.getAttribute('data-src') || '';
-  if (!url || url.startsWith('data:image/svg') || url.startsWith('blob:')) return '';
-
-  // 1. Walmart: i5.walmartimages.com
-  if (url.includes('walmartimages.com')) {
-    const zoomAttr = img.getAttribute('data-zoom-image') || img.getAttribute('data-zoom-src');
-    if (zoomAttr) return zoomAttr;
-    return url.replace(/odnHeight=\d+/gi, 'odnHeight=612').replace(/odnWidth=\d+/gi, 'odnWidth=612');
-  }
-
-  // 2. Amazon: m.media-amazon.com, images-na.ssl-images-amazon.com
-  if (url.includes('amazon.com') || url.includes('media-amazon.com')) {
-    const oldHires = img.getAttribute('data-old-hires');
-    if (oldHires) return oldHires;
-    const dyn = img.getAttribute('data-a-dynamic-image');
-    if (dyn) {
-      try {
-        const parsed = JSON.parse(dyn);
-        const keys = Object.keys(parsed);
-        if (keys.length) {
-          keys.sort((a, b) => (parsed[b][0] * parsed[b][1]) - (parsed[a][0] * parsed[a][1]));
-          return keys[0];
-        }
-      } catch (_) {}
-    }
-    if (/\._[A-Z0-9_,]+_\./.test(url)) {
-      return url.replace(/\._[A-Z0-9_,]+_\./, '._SL800_.');
-    }
-  }
-
-  // 3. Sam's Club: scene7.samsclub.com, samsclubimages.com, samsclub.com
-  if (url.includes('samsclub.com') || url.includes('scene7') || url.includes('samsclubimages')) {
-    if (url.includes('scene7')) {
-      // Strip any Scene7 image preset qualifiers like $SC_Item_Small_Image$ and query string
-      let base = url.split('?')[0].replace(/\$[^$]+\$/g, '');
-      return base + '?wid=1500&hei=1500&fmt=jpg&qlt=90,1';
-    }
-    if (url.includes('samsclubimages.com') || url.includes('walmartimages.com')) {
-      return url.replace(/odnHeight=\d+/gi, 'odnHeight=1200')
-                .replace(/odnWidth=\d+/gi, 'odnWidth=1200')
-                .replace(/odnBg=[^&]+/gi, 'odnBg=FFFFFF');
-    }
-    let u = url.split('?')[0];
-    return u + '?wid=1500&hei=1500&fmt=jpg';
-  }
-
-  // 4. AliExpress / Alibaba: alicdn.com
-  if (url.includes('alicdn.com')) {
-    return url.replace(/_\d+x\d+q?\d*\.(?:jpg|jpeg|png|webp)/i, '');
-  }
-
-  // 5. eBay: i.ebayimg.com
-  if (url.includes('ebayimg.com')) {
-    return url.replace(/s-l\d+\./i, 's-l1600.');
-  }
-
-  // 6. Check srcset for largest candidate
-  if (img.srcset) {
-    try {
-      const candidates = img.srcset.split(',').map(s => s.trim().split(/\s+/)).filter(p => p[0]);
-      if (candidates.length) {
-        candidates.sort((a, b) => (parseFloat(b[1]) || 1) - (parseFloat(a[1]) || 1));
-        if (candidates[0][0]) return candidates[0][0];
-      }
-    } catch (_) {}
-  }
-
-  // 7. Check common high-res data attributes on element or wrapper
-  const wrap = img.closest('a, button, [data-zoom], [data-image]');
-  if (wrap) {
-    const zoomUrl = wrap.getAttribute('data-zoom-image') ||
-                    wrap.getAttribute('data-zoom') ||
-                    wrap.getAttribute('data-highres') ||
-                    wrap.getAttribute('data-large-img-url') ||
-                    wrap.getAttribute('href');
-    if (zoomUrl && /\.(?:jpe?g|png|webp)(\?|$)/i.test(zoomUrl)) {
-      return zoomUrl;
-    }
-  }
-
-  return url;
-}
-
-function zhEnsureZoomBox() {
-  if (_zhZoomBox && document.documentElement.contains(_zhZoomBox)) return _zhZoomBox;
-  const box = document.createElement('div');
-  box.id = 'zh-inpage-zoom';
-  const color = (typeof _zhFrameCustomColor !== 'undefined' && _zhFrameCustomColor) ? _zhFrameCustomColor : '#F97316';
-  box.style.cssText = `
-    position: fixed;
-    z-index: 2147483647;
-    width: 340px;
-    height: 340px;
-    background: rgba(10, 16, 29, 0.96);
-    border: 2px solid ${color};
-    border-radius: 8px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 25px ${color}55;
-    backdrop-filter: blur(10px);
-    padding: 6px;
-    pointer-events: none;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    transition: opacity 0.15s ease, transform 0.15s ease;
-    opacity: 0;
-    transform: scale(0.94);
-  `;
-  const img = document.createElement('img');
-  img.style.cssText = `
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    border-radius: 4px;
-    background: #ffffff;
-    display: block;
-    image-rendering: -webkit-optimize-contrast;
-  `;
-  box.appendChild(img);
-  document.documentElement.appendChild(box);
-  _zhZoomBox = box;
-  _zhZoomImg = img;
-  return box;
-}
-
-function zhPositionZoomBox(e) {
-  if (!_zhZoomBox) return;
-  const pad = 16;
-  const w = 340;
-  const h = 340;
-  let left = e.clientX + pad;
-  let top = e.clientY - (h / 2);
-
-  // Flip to left if overflowing right edge
-  if (left + w > window.innerWidth - 8) {
-    left = e.clientX - w - pad;
-  }
-  // Clamp within viewport
-  if (left < 8) left = 8;
-  if (top + h > window.innerHeight - 8) top = window.innerHeight - h - 8;
-  if (top < 8) top = 8;
-
-  _zhZoomBox.style.left = `${left}px`;
-  _zhZoomBox.style.top = `${top}px`;
-}
-
-function zhIsProductThumbnail(img, url) {
-  if (!img || !url) return false;
-
-  // 1. Must be thumbnail size (between 24px and 220px)
-  const rect = img.getBoundingClientRect();
-  if (rect.width < 24 || rect.height < 24) return false;
-  if (rect.width > 220 || rect.height > 220) return false;
-
-  // Aspect ratio check: square or standard rectangular product thumb
-  const ar = rect.width / rect.height;
-  if (ar < 0.4 || ar > 2.5) return false;
-
-  // 2. Strict UI Blacklist: never trigger inside headers, navbars, footers, or utility bars
-  if (img.closest('header, nav, footer, [role="navigation"], [role="banner"], [role="complementary"], [id*="header"], [class*="header"], [id*="nav"], [class*="nav"]')) return false;
-  if (img.closest('[class*="fulfillment"], [class*="shipping"], [class*="delivery"], [class*="pickup"], [data-automation-id*="fulfillment"], [class*="add-to-cart"], [id*="cart"], [class*="payment"], [class*="review"], [class*="rating"], [class*="star"], [class*="badge"], [class*="search-bar"], [class*="searchBox"], [class*="logo"]')) return false;
-
-  // 3. Blacklist by URL tokens (UI icons, trucks, logos, delivery, badges)
-  if (/(?:icon|logo|truck|badge|banner|arrow|star|rating|avatar|delivery|pickup|shipping|sprite|spinner|loader|placeholder|credit|payment|affirm|klarna|paypal|visa|mastercard|feedback)\b/i.test(url)) {
-    return false;
-  }
-
-  // 4. Blacklist by class / id / alt
-  const meta = `${img.className} ${img.id} ${img.alt || ''} ${img.parentElement?.className || ''}`.toLowerCase();
-  if (/(?:icon|logo|truck|badge|banner|arrow|star|rating|avatar|delivery|pickup|shipping|credit|payment|nav|header)\b/i.test(meta)) {
-    return false;
-  }
-
-  // 5. Positive container match: MUST be in a verified product gallery or product tile
-  const inProductGallery = !!img.closest(
-    '[data-testid*="thumbnail"], [aria-label*="Thumbnail"], [class*="media-thumbnail"], ' +
-    '[class*="vertical-carousel"], [class*="sc-carousel-item"], [class*="product-images"] [class*="thumbnail"], ' +
-    '#altImages, .imageThumbnail, [data-action="thumb-action"], ' +
-    '[data-item-id] [class*="tile-image"], [data-testid*="product-tile"] img'
-  );
-  if (!inProductGallery) return false;
-
-  // 6. Platform-specific product item ID validation
-  if (url.includes('samsclub.com') || url.includes('scene7')) {
-    // Only allow scene7 product images with numeric/sku ID (e.g. 00193... or item numbers)
-    if (!/\/is\/image\/samsclub\/\d+/i.test(url) && !/samsclubimages\.com/i.test(url)) return false;
-  }
-  if (url.includes('amazon.com') || url.includes('media-amazon.com')) {
-    if (!url.includes('/images/I/')) return false;
-  }
-  if (url.includes('walmartimages.com')) {
-    if (!/(?:\/asr\/|\/seo\/|\/ip\/)/.test(url)) return false;
-  }
-
-  return true;
-}
-
-function zhHideZoomBox() {
-  clearTimeout(_zhZoomHoverTimer);
-  _zhZoomActiveImg = null;
-  if (_zhZoomBox) {
-    _zhZoomBox.style.opacity = '0';
-    _zhZoomBox.style.transform = 'scale(0.94)';
-    _zhZoomBox.style.display = 'none';
-    if (_zhZoomImg) _zhZoomImg.src = '';
-  }
-}
-
-function zhInitInPageZoom() {
-  document.addEventListener('mouseover', (e) => {
-    // Ignore ZHunter's own UI elements
-    if (e.target.closest('#zh-frame, #zh-inpage-zoom, #zhunter-page-toast')) return;
-
-    let img = e.target.tagName === 'IMG' ? e.target : e.target.querySelector('img');
-    if (!img) {
-      const wrap = e.target.closest('button, a, [role="button"], li');
-      if (wrap) img = wrap.querySelector('img');
-    }
-    if (!img) {
-      if (_zhZoomActiveImg) zhHideZoomBox();
-      return;
-    }
-
-    const rawUrl = img.currentSrc || img.src || img.getAttribute('data-src') || '';
-    if (!zhIsProductThumbnail(img, rawUrl)) {
-      if (_zhZoomActiveImg) zhHideZoomBox();
-      return;
-    }
-
-    const hiResUrl = zhGetHighResImageUrl(img);
-    if (!hiResUrl) {
-      if (_zhZoomActiveImg) zhHideZoomBox();
-      return;
-    }
-
-    _zhZoomActiveImg = img;
-    clearTimeout(_zhZoomHoverTimer);
-
-    // 60ms debounce
-    _zhZoomHoverTimer = setTimeout(() => {
-      if (_zhZoomActiveImg !== img) return;
-      zhEnsureZoomBox();
-      _zhZoomImg.src = hiResUrl;
-      _zhZoomBox.style.display = 'flex';
-      zhPositionZoomBox(e);
-      requestAnimationFrame(() => {
-        if (_zhZoomBox && _zhZoomActiveImg === img) {
-          _zhZoomBox.style.opacity = '1';
-          _zhZoomBox.style.transform = 'scale(1)';
-        }
-      });
-    }, 60);
-  }, { passive: true });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!_zhZoomBox || _zhZoomBox.style.display !== 'flex') return;
-    if (!_zhZoomActiveImg || !document.documentElement.contains(_zhZoomActiveImg)) {
-      zhHideZoomBox();
-      return;
-    }
-
-    // DIRECT PHYSICAL BOUNDING BOX CHECK
-    // If mouse coordinates leave the thumbnail rectangle by more than 4px, HIDE IMMEDIATELY!
-    const rect = _zhZoomActiveImg.getBoundingClientRect();
-    const pad = 4;
-    if (
-      e.clientX < rect.left - pad ||
-      e.clientX > rect.right + pad ||
-      e.clientY < rect.top - pad ||
-      e.clientY > rect.bottom + pad
-    ) {
-      zhHideZoomBox();
-      return;
-    }
-
-    zhPositionZoomBox(e);
-  }, { passive: true });
-
-  document.addEventListener('mouseout', (e) => {
-    if (_zhZoomActiveImg && (e.target === _zhZoomActiveImg || _zhZoomActiveImg.contains(e.target))) {
-      zhHideZoomBox();
-    }
-  }, { passive: true });
-
-  // Instantly dismiss on scroll, click, or Escape
-  window.addEventListener('scroll', zhHideZoomBox, { passive: true });
-  document.addEventListener('pointerdown', zhHideZoomBox, { passive: true });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') zhHideZoomBox();
-  }, { passive: true });
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', zhInitInPageZoom);
-} else {
-  zhInitInPageZoom();
-}
-

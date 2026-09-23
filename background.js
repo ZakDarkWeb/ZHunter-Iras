@@ -1,24 +1,5 @@
 // ============================================================
-// ZHunter PRO v11.0.0 - Background Service Worker
-
-// v10.1.0 — Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
-let _zhExportFolder = true;
-try { chrome.storage.local.get('zhExportFolder', x => { _zhExportFolder = x?.zhExportFolder !== false; }); } catch (_) {}
-try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.zhExportFolder) _zhExportFolder = ch.zhExportFolder.newValue !== false; }); } catch (_) {}
-try {
-  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    try {
-      const mine = item.byExtensionId === chrome.runtime.id || String(item.url || '').includes('chrome-extension://' + chrome.runtime.id) || String(item.referrer || '').startsWith('chrome-extension://' + chrome.runtime.id);
-      if (!_zhExportFolder || !mine) return;
-      const rel = String(item.filename || 'file').replace(/\\/g, '/').replace(/^\/+/, '');
-      if (/^ZHunter Export\//i.test(rel)) return;
-      const d = new Date(), pad = n => String(n).padStart(2, '0');
-      const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-      suggest({ filename: `ZHunter Export/${day}/${rel}`, conflictAction: 'uniquify' });
-    } catch (_) {}
-  });
-} catch (_) {}
-
+// ZHunter PRO v9.7.5 - Background Service Worker
 // Handles storage operations, messaging, content script orchestration, and AI generation
 // ============================================================
 'use strict';
@@ -58,7 +39,7 @@ const VID_CAP = 12;
 const SECRET_SETTING_KEYS = new Set([]); // no secrets since v7.12 (AI removed)
 const PUBLIC_SETTING_KEYS = new Set([
   'autoCategory', 'duplicateCheck', 'badgeEnabled', 'saveToCurrentFolder',
-  'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup', 'bulkSkipImageDownload', 'queueParallel',
+  'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup',
   'imageFormat', 'imageRatio', 'imageBg', 'imageMinSize', 'imageMax5MB',
   'bulkQueueAutoCapture', 'bulkSheetColumns', 'customBulkColumns',
   'temuConfig', 'temuTemplateB64', 'temuTemplateName',
@@ -195,7 +176,6 @@ const DEFAULT_DATA = {
     autoSkipDuplicates:  true,
     bulkAutoCloseTabs:   true,
     bulkTabGroup:        true,        // v9.5.0: product tabs → one 'ZHunter' tab group
-    bulkSkipImageDownload: false,   // v9.8.1: Fast mode — hunt mein images download (base64) nahi, sirf URLs (Temu ke liye kaafi)
     imageFormat:         'jpg',        // 'original' | 'jpg' | 'png'
     imageRatio:          'original',
     imageBg:             'white',
@@ -994,7 +974,6 @@ function setupContextMenus() {
     chrome.contextMenus.create({ id: 'zh-add-link',      title: 'ZHunter: Add link to queue',            contexts: ['link'] });
     chrome.contextMenus.create({ id: 'zh-add-selection', title: 'ZHunter: Add selected URL to queue',    contexts: ['selection'] });
     chrome.contextMenus.create({ id: 'zh-reverse-image', title: 'ZHunter: Find supplier for this image', contexts: ['image'] });
-    chrome.contextMenus.create({ id: 'zh-set-slot-image', title: 'ZHunter: Set as Active Product Image', contexts: ['image'] });
   });
 }
 
@@ -1026,17 +1005,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     case 'zh-reverse-image':
       if (info.srcUrl) chrome.tabs.create({ url: 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(info.srcUrl) });
       else broadcastToast('Could not find image URL', 'err');
-      return;
-    case 'zh-set-slot-image':
-      if (info.srcUrl) {
-        try {
-          await chrome.storage.local.set({ flowCapturedImage: { url: info.srcUrl, time: Date.now() } });
-          chrome.runtime.sendMessage({ action: 'FLOW_IMAGE_CAPTURED', url: info.srcUrl }).catch(() => {});
-          broadcastToast('✓ Image sent to ZHunter active slot!', 'ok');
-        } catch (_) {}
-      } else {
-        broadcastToast('Could not find image URL', 'err');
-      }
       return;
     default: return;
   }
@@ -1079,7 +1047,7 @@ function isAuthorizedMessage(msg, sender) {
 // content script attaches + waits for Temu to register the upload → if the hidden
 // page refuses to mount its upload box, the content script asks TEMU_NEED_VISIBLE
 // and we flash the tab forward for a moment, then restore the user's tab.
-const _temuUpload = { tabId: null, activated: false, prevTabId: null, phase: '', aborted: false };
+const _temuUpload = { tabId: null, activated: false, prevTabId: null };
 function tabsSend(tabId, message) {
   return new Promise(res => {
     try {
@@ -1101,14 +1069,13 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background }) {
     // background tab mein throttle ho kar bohat slow ho jati hai. bg=true ka matlab: kaam khatam hote hi
     // focus khud aap ke pichle tab par wapas.
     const tab = await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
-    _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null; _temuUpload.phase = ''; _temuUpload.aborted = false;
+    _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null;
     report.push(bg ? '✓ Temu tab khola (processing ke baad focus wapas aa jayega)' : '✓ Temu tab khola');
 
     // wait for content script
     let ready = false;
     for (let i = 0; i < 50 && !ready; i++) {
       await new Promise(r => setTimeout(r, i === 0 ? 1200 : 500));
-      if (_temuUpload.aborted) { report.push('🛑 Stop dabaya — Temu tab band kar diya'); return finish({ success: false, aborted: true, report }); }
       const r = await tabsSend(tab.id, { action: 'PING' });
       ready = !!(r && r.ready);
     }
@@ -1119,10 +1086,9 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background }) {
       action: 'TEMU_UPLOAD_FILE', b64, filename: filename || 'temu_upload.xlsx', expectStore,
       waitForUpload: true, hiddenMode: false
     });
-    if (_temuUpload.aborted || result?.aborted) { report.push(...(result?.report || [])); report.push('🛑 Stop dabaya — upload rok diya'); return finish({ success: false, aborted: true, report }); }
-    if (!result || result.__err) { report.push('✗ ' + (result?.__err || (_temuUpload.aborted ? 'Stop dabaya' : 'no response from Temu tab'))); return finish({ success: false, aborted: _temuUpload.aborted, report }); }
+    if (!result || result.__err) { report.push('✗ ' + (result?.__err || 'no response from Temu tab')); return finish({ success: false, report }); }
     report.push(...(result.report || []));
-    return finish({ success: !!result.success, confirmed: !!result.confirmed, uploadId: result.uploadId || null, beforeSig: result.beforeSig || null, report, tabId: tab.id }); // v9.8.3: uploadId/beforeSig for late confirm
+    return finish({ success: !!result.success, confirmed: !!result.confirmed, report, tabId: tab.id });
   } catch (e) {
     report.push('✗ ' + (e?.message || e));
     return finish({ success: false, report });
@@ -1135,7 +1101,7 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background }) {
         out.report.push('✓ Focus wapas aap ke tab par');
       }
     } catch (_) {}
-    _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null; _temuUpload.phase = ''; _temuUpload.aborted = false;
+    _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
     try { await chrome.storage.local.set({ temuLastUploadReport: { t: Date.now(), ...out } }); } catch (_) {}
     stopKeepAlive();
     return out;
@@ -1162,37 +1128,9 @@ async function handleMessage(msg, sender) {
       const data = await getData();
       return { ...data, settings: getPublicSettings(data.settings) };
     }
-    case 'DOWNLOAD_URL': {
-      if (!msg.url) return { success: false, error: 'no_url' };
-      try {
-        const downloadId = await chrome.downloads.download({
-          url: msg.url,
-          filename: msg.filename || 'zhunter_download',
-          conflictAction: 'uniquify'
-        });
-        return { success: true, downloadId };
-      } catch (err) {
-        return { success: false, error: err.message };
-      }
-    }
     case 'GET_LINK_IMAGES':    return { success: true, images: await getImagesFromIndexedDB(msg.id) };
     case 'START_KEEPALIVE':    startKeepAlive(); return { success: true };
     case 'TEMU_AUTO_UPLOAD':   return await temuBgAutoUpload(msg);
-    case 'TEMU_ABORT_UPLOAD': {
-      // v10.3.3 — side panel ka Stop: file attach hone se pehle → Temu tab band; Temu processing shuru ho chuki ho → tab saamne la kar user ko Temu ka apna Cancel dabane do
-      const tid = _temuUpload.tabId;
-      if (!tid) return { success: true, note: '(koi upload chal nahi raha tha)' };
-      _temuUpload.aborted = true;
-      const ph = _temuUpload.phase;
-      const started = ph === 'accepted' || ph === 'processing' || ph === 'finishing';
-      try { await tabsSend(tid, { action: 'TEMU_ABORT' }); } catch (_) {}
-      if (!started) {
-        try { await chrome.tabs.remove(tid); } catch (_) {}
-        return { success: true, closed: true, note: '✓ Temu tab band kar diya — file upload nahi hui' };
-      }
-      try { await chrome.tabs.update(tid, { active: true }); } catch (_) {}
-      return { success: true, closed: false, note: '⚠ Temu ne file already utha li hai (processing) — Temu tab par "Cancel" khud dabayein, extension ne rukna band kar diya' };
-    }
     case 'TEMU_NEED_VISIBLE': {
       // content script (hidden Temu tab) says the page won't mount its upload box while hidden →
       // bring the tab forward briefly; temuBgAutoUpload restores the previous tab afterwards.
@@ -1209,7 +1147,6 @@ async function handleMessage(msg, sender) {
       const tid = sender?.tab?.id;
       if (!tid || _temuUpload.tabId !== tid) return { success: false };
       const prog = { t: Date.now(), phase: String(msg.phase || ''), pct: msg.pct ?? null, uploadId: msg.uploadId || null, secs: msg.secs ?? null };
-      _temuUpload.phase = prog.phase;
       try { chrome.storage.local.set({ temuUploadProgress: prog }); } catch (_) {}
       try { chrome.runtime.sendMessage({ action: 'TEMU_UPLOAD_PROGRESS', ...prog }, () => void chrome.runtime.lastError); } catch (_) {}
       return { success: true };
@@ -1228,74 +1165,8 @@ async function handleMessage(msg, sender) {
     case 'FETCH_BASE64_BATCH': {
       const settings = (await getData())?.settings || {};
       const urls = Array.isArray(msg.urls) ? msg.urls.slice(0, 15) : [];
-      // v9.8.1: pehli image fail (CDN block/timeout) → baaki ke liye 12s × 7 intezar mat karo, seedha fail return
-      if (urls.length > 1) {
-        const first = await fetchImageAsBase64(urls[0], settings);
-        if (!first?.success) return { success: true, results: urls.map((_, i) => i === 0 ? first : { success: false, reason: 'skipped_after_first_fail' }) };
-        const rest = await mapPool(urls.slice(1), FETCH_CONCURRENCY, u => fetchImageAsBase64(u, settings));
-        return { success: true, results: [first, ...(rest || [])] };
-      }
       const results = await mapPool(urls, FETCH_CONCURRENCY, u => fetchImageAsBase64(u, settings));
       return { success: true, results: results || [] };
-    }
-    case 'SEND_TO_TEMU_REVIEW': {
-      const p = msg.product;
-      if (!p) return { success: false, reason: 'no_product' };
-      try {
-        // 1. Add to Library / MasterSheet
-        const masterRes = await chrome.storage.local.get('zhunterMasterSheet');
-        const masterRows = masterRes.zhunterMasterSheet || [];
-        const pUrl = (p.url || '').toLowerCase();
-        const existingIdx = masterRows.findIndex(r => (r.url || '').toLowerCase() === pUrl);
-        const rowItem = {
-          id: 'zh_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-          title: p.title || '',
-          price: p.price || '',
-          cost: p.price || '',
-          url: p.url || '',
-          platform: p.platform || 'Amazon',
-          sku: p.sku || '',
-          brand: p.brand || '',
-          images: Array.isArray(p.images) ? p.images : [],
-          time: Date.now()
-        };
-        if (existingIdx >= 0) masterRows[existingIdx] = { ...masterRows[existingIdx], ...rowItem };
-        else masterRows.unshift(rowItem);
-        await chrome.storage.local.set({ zhunterMasterSheet: masterRows.slice(0, 500) });
-
-        // 2. Add to Saved Temu Review Session
-        const temuRes = await chrome.storage.local.get('zh_saved_temu_session');
-        const session = temuRes.zh_saved_temu_session || { items: [], skipped: [] };
-        const items = Array.isArray(session.items) ? session.items : [];
-        let basePrice = parseFloat(String(p.price || '').replace(/[^0-9.]/g, '')) || 15;
-        const temuItem = {
-          title: p.title || '',
-          sku: p.sku || ('SKU-' + Date.now().toString().slice(-6)),
-          brand: p.brand || '',
-          base: Math.round(basePrice * 1.35 * 100) / 100,
-          list: Math.round(basePrice * 1.6 * 100) / 100,
-          cost: basePrice,
-          source_price: basePrice,
-          weight: parseFloat(p.weight) || 1.4,
-          images: Array.isArray(p.images) ? p.images : [],
-          url: p.url || '',
-          category_keyword: p.category || '',
-          warn: []
-        };
-        items.unshift(temuItem);
-        await chrome.storage.local.set({
-          zh_saved_temu_session: {
-            items: items.slice(0, 200),
-            skipped: session.skipped || [],
-            savedAt: Date.now()
-          }
-        });
-
-        chrome.runtime.sendMessage({ action: 'TEMU_SESSION_UPDATED', item: temuItem }).catch(() => {});
-        return { success: true, count: items.length };
-      } catch (err) {
-        return { success: false, error: err.message };
-      }
     }
     case 'DOWNLOAD_PAGE_IMAGES': {
       const urls = Array.isArray(msg.urls) ? [...new Set(msg.urls.filter(isValidURL))].slice(0, 7) : [];
@@ -1361,13 +1232,6 @@ async function handleMessage(msg, sender) {
         return { success: true, pending };
       }
       return { success: true, pending: null };
-    }
-    case 'ZH_PAGE_INIT_DATA': { // v10.2.3: temu.com ka window.__init_data__ MAIN world se (inline <script> CSP block karta tha)
-      try {
-        const tabId = sender?.tab?.id; if (!Number.isInteger(tabId)) return { success: false, data: null };
-        const r = await chrome.scripting.executeScript({ target: { tabId, frameIds: [sender.frameId || 0] }, world: 'MAIN', func: () => { try { const d = window.__init_data__ || window.rawData || null; return d ? JSON.stringify(d) : null; } catch (_) { return null; } } });
-        return { success: true, data: r?.[0]?.result || null };
-      } catch (e) { return { success: false, data: null, error: e?.message }; }
     }
     case 'GET_SETTINGS': {
       const d = await getData();
@@ -1663,7 +1527,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // Sirf UNGROUPED tabs ko chhua jata hai (user ke apne groups ko nahi). Group khali hone par Chrome
 // usse khud hata deta hai. Pinned tabs group nahi ho sakte → skip.
 const ZH_GROUP_TITLE = 'ZHunter';
-const ZH_GROUP_COLOR = 'red';
+const ZH_GROUP_COLOR = 'cyan';
 async function bgFindZhGroup(windowId) {
   try {
     if (!chrome.tabGroups) return null;

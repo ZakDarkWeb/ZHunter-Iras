@@ -9,20 +9,13 @@
   const $ = id => document.getElementById(id);
   const $$ = sel => [...document.querySelectorAll(sel)];
 
-  // ── Hunt tab: Images | Videos sub-nav ───────────────────────
-  // Videos are NOT needed for Temu uploads — they are hidden by default.
-  (function initHuntSubnav() {
-    const btns = document.querySelectorAll('.hunt-sub-btn');
-    const panes = { images: document.getElementById('hunt-images-pane'), videos: document.getElementById('hunt-videos-pane') };
-    btns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const sub = btn.dataset.sub;
-        btns.forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-selected', b === btn ? 'true' : 'false'); });
-        Object.entries(panes).forEach(([key, pane]) => { if (pane) pane.hidden = key !== sub; });
-      });
-    });
-  })();
-
+  // ── Tab hooks ───────────────────────────────────────────────
+  // Hunt tab (data-tab="images") also scans videos; Library loads the master sheet.
+  document.querySelector('#tab-btn-images')?.addEventListener('click', () => {
+    if (typeof scanVideos === 'function' && typeof VidTabState !== 'undefined' && !VidTabState.videos.length && !VidTabState.isScanning) {
+      setTimeout(() => scanVideos(), 200);
+    }
+  });
   document.querySelector('#tab-btn-library')?.addEventListener('click', () => {
     if (typeof updateMasterStats === 'function') updateMasterStats();
   });
