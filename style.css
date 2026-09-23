@@ -414,7 +414,7 @@ body.light-mode .brand-name { background: linear-gradient(125deg, #0F172A, #0369
 .stat-pill svg.i { width: 13px; height: 13px; }
 .stat-pill .dot { display: none; }
 .hdr-btn { width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; transition: box-shadow var(--dur), border-color var(--dur), color var(--dur), background var(--dur); }
-.hdr-btn svg.i { width: 16px; height: 16px; display: block; margin: auto; pointer-events: none; flex-shrink: 0; }
+.hdr-btn svg.i { width: 16px; height: 16px; margin: auto; pointer-events: none; flex-shrink: 0; }
 .hdr-btn:hover { border-color: var(--accent-line); color: var(--accent-ink); box-shadow: 0 0 14px var(--accent-glow); }
 
 /* tabs */
@@ -544,9 +544,12 @@ html[data-fx="off"] .btn-primary, html[data-fx="off"] .hunt-row { box-shadow: no
 .sw-wrap input:focus-visible + .sw { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* theme button: moon in dark, sun in light */
-.theme-btn .ico-sun { display: none; }
-body.light-mode .theme-btn .ico-moon { display: none; }
-body.light-mode .theme-btn .ico-sun { display: block; }
+.theme-btn .ico-moon { display: block; }
+.theme-btn .ico-sun { display: none !important; }
+body.light-mode .theme-btn .ico-moon,
+html.light-mode .theme-btn .ico-moon { display: none !important; }
+body.light-mode .theme-btn .ico-sun,
+html.light-mode .theme-btn .ico-sun { display: block; }
 
 /* ============================================================
    v8.3 Polish — motion, depth, rainbow borders
