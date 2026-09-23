@@ -273,36 +273,47 @@
           </select>
         </div>
         <div class="master-filter-chips" id="masterFilterChips">
-          <button type="button" class="filter-chip active" data-filter="all">All</button>
-          <button type="button" class="filter-chip" data-filter="amz">Amazon</button>
-          <button type="button" class="filter-chip" data-filter="wmt">Walmart</button>
-          <button type="button" class="filter-chip" data-filter="tmu">Temu</button>
-          <button type="button" class="filter-chip" data-filter="sam">Sam's Club</button>
-          <button type="button" class="filter-chip" data-filter="ali">AliExpress</button>
-          <button type="button" class="filter-chip filter-chip-star" data-filter="starred">★ Starred</button>
-          <button type="button" class="filter-chip filter-chip-warn" data-filter="problems" id="masterFilterProblems" title="Show only items with errors, missing price, or warnings">⚠️ Problems (<span id="masterProblemCount">0</span>)</button>
-          <button type="button" class="filter-chip filter-chip-toggle" id="compactModeToggle" title="Toggle ultra-compact row height">🗜️ Compact</button>
+          <div class="filter-chips-scroll">
+            <button type="button" class="filter-chip active" data-filter="all">All</button>
+            <button type="button" class="filter-chip" data-filter="amz">Amazon</button>
+            <button type="button" class="filter-chip" data-filter="wmt">Walmart</button>
+            <button type="button" class="filter-chip" data-filter="tmu">Temu</button>
+            <button type="button" class="filter-chip" data-filter="sam">Sam's Club</button>
+            <button type="button" class="filter-chip" data-filter="ali">AliExpress</button>
+            <button type="button" class="filter-chip filter-chip-star" data-filter="starred">★ Starred</button>
+          </div>
+          <div class="filter-chips-tools">
+            <button type="button" class="filter-chip filter-chip-warn" data-filter="problems" id="masterFilterProblems" title="Show only items with errors, missing price, or warnings">⚠️ Problems (<span id="masterProblemCount">0</span>)</button>
+            <button type="button" class="filter-chip filter-chip-toggle" id="compactModeToggle" title="Toggle ultra-compact row height">🗜️ Compact</button>
+          </div>
         </div>
-        <!-- ── Groq AI Studio Prompt Bar ── -->
+        <!-- ── AI Studio Prompt Bar ── -->
         <div class="ai-prompt-bar" id="masterAiPromptBar">
-          <div class="ai-bar-header">
-            <span class="ai-bar-title"><svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> <b>Groq AI Studio</b></span>
-            <span class="ai-bar-model-badge" id="aiActiveModelBadge" title="Groq Fast Inference">gpt-oss-20b</span>
+          <div class="ai-bar-header" id="aiBarHeader" title="Click to collapse / expand AI Studio">
+            <div class="ai-bar-header-left">
+              <span class="ai-bar-title"><svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> <b>AI Studio</b></span>
+              <span class="ai-bar-model-badge" id="aiActiveModelBadge" title="Fast Inference">gpt-oss-20b</span>
+            </div>
+            <button type="button" class="ai-collapse-btn" id="aiCollapseBtn" title="Minimize / Maximize AI Studio" aria-label="Toggle AI Studio">
+              <svg class="i ai-collapse-ico" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
           </div>
-          <div class="ai-input-row">
-            <input type="text" id="aiPromptInput" class="inp" placeholder="e.g. Remove brand, add 'Pack of 2', optimize for Temu..." />
-            <button type="button" id="aiApplyBtn" class="btn btn-primary btn-xs" title="Apply AI to selected or all products">⚡ Run AI</button>
-          </div>
-          <div class="ai-quick-actions">
-            <button type="button" class="ai-quick-btn" data-ai-action="clean-brand" title="Strip brand names, model numbers and promo buzzwords">🧹 Clean Brand</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="seo-title" title="SEO Title: keyword-rich, concise, high CTR under 80 chars">🎯 SEO Title</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="uppercase-words" title="Proper Title Case keywords">✨ Title Case</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="temu-bullet" title="Temu compliant short title">📦 Temu Polish</button>
-            <button type="button" id="aiUndoBtn" class="ai-quick-btn undo-btn hidden" title="Revert last AI changes">↺ Undo</button>
-          </div>
-          <div id="aiStatusProgress" class="ai-progress-strip hidden">
-            <div class="ai-progress-bar"><div id="aiProgressBarFill" class="ai-progress-fill" style="width:0%"></div></div>
-            <span id="aiProgressText" class="ai-progress-text">Processing...</span>
+          <div class="ai-bar-body" id="aiBarBody">
+            <div class="ai-input-row">
+              <input type="text" id="aiPromptInput" class="inp" placeholder="e.g. Remove brand, add 'Pack of 2', optimize for Temu..." />
+              <button type="button" id="aiApplyBtn" class="btn btn-primary btn-xs" title="Apply AI to selected or all products">⚡ Run AI</button>
+            </div>
+            <div class="ai-quick-actions">
+              <button type="button" class="ai-quick-btn" data-ai-action="clean-brand" title="Strip brand names, model numbers and promo buzzwords">🧹 Clean Brand</button>
+              <button type="button" class="ai-quick-btn" data-ai-action="seo-title" title="SEO Title: keyword-rich, concise, high CTR under 80 chars">🎯 SEO Title</button>
+              <button type="button" class="ai-quick-btn" data-ai-action="uppercase-words" title="Proper Title Case keywords">✨ Title Case</button>
+              <button type="button" class="ai-quick-btn" data-ai-action="temu-bullet" title="Temu compliant short title">📦 Temu Polish</button>
+              <button type="button" id="aiUndoBtn" class="ai-quick-btn undo-btn hidden" title="Revert last AI changes">↺ Undo</button>
+            </div>
+            <div id="aiStatusProgress" class="ai-progress-strip hidden">
+              <div class="ai-progress-bar"><div id="aiProgressBarFill" class="ai-progress-fill" style="width:0%"></div></div>
+              <span id="aiProgressText" class="ai-progress-text">Processing...</span>
+            </div>
           </div>
         </div>
         <div class="h">
@@ -395,10 +406,10 @@
         <div class="it"><div class="l"><b>Reset Library</b><span>Deletes hunted items & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
         <div class="it"><div class="l"><b>Wipe everything</b><span>Products, queue & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spWipeAllBtn">Wipe all</button></div>
       </div>
-      <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> Groq AI Engine</span>
+      <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> AI Engine</span>
       <div class="set" id="spGroqSettings">
         <div class="it">
-          <div class="l"><b>Groq API Key</b><span>Batch title rewriter, brand stripper & SEO optimizer</span></div>
+          <div class="l"><b>AI API Key</b><span>Batch title rewriter, brand stripper & SEO optimizer</span></div>
           <div style="display:flex;gap:5px;align-items:center;">
             <input type="password" id="groqApiKeyInput" class="inp" style="width:140px;font-family:var(--mono);" placeholder="gsk_..." />
             <button type="button" id="saveGroqKeyBtn" class="btn btn-ghost btn-xs">Save</button>

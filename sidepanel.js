@@ -3504,7 +3504,7 @@ Do not wrap in markdown quotes if possible, return raw JSON array only.`;
   setTimeout(() => {
     if (progressStrip) progressStrip.classList.add('hidden');
   }, 2500);
-  toast(`✓ Groq AI optimization completed!`, 'ok');
+  toast(`✓ AI optimization completed!`, 'ok');
 }
 
 function initGroqStudio() {
@@ -3521,13 +3521,32 @@ function initGroqStudio() {
     if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
   });
 
+  // Restore AI Studio collapse state
+  chrome.storage.local.get('aiStudioCollapsed', res => {
+    if (res?.aiStudioCollapsed) {
+      $('masterAiPromptBar')?.classList.add('collapsed');
+    }
+  });
+
+  const toggleAiCollapse = () => {
+    const bar = $('masterAiPromptBar');
+    if (!bar) return;
+    const isCollapsed = bar.classList.toggle('collapsed');
+    chrome.storage.local.set({ aiStudioCollapsed: isCollapsed });
+  };
+  $('aiCollapseBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAiCollapse();
+  });
+  $('aiBarHeader')?.addEventListener('click', toggleAiCollapse);
+
   $('saveGroqKeyBtn')?.addEventListener('click', async () => {
     const key = $('groqApiKeyInput')?.value?.trim() || '';
     const model = $('groqModelSel')?.value || DEFAULT_GROQ_MODEL;
     await new Promise(r => chrome.storage.local.set({ groqApiKey: key, groqModel: model }, r));
     const badge = $('aiActiveModelBadge');
     if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
-    toast('Groq Settings saved!', 'ok');
+    toast('AI Settings saved!', 'ok');
   });
 
   $('groqModelSel')?.addEventListener('change', async e => {
