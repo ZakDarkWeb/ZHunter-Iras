@@ -3826,6 +3826,7 @@ function initBulkTab() {
   chrome.runtime.onMessage.addListener(m => {
     if (m?.action === 'BULK_QUEUE_UPDATED') loadBulkQueue();
     if (m?.action === 'BULK_PRODUCT_QUEUE_UPDATED') updateMasterStats();
+    if (m?.action === 'FLOW_IMAGE_CAPTURED') handleFlowImageCaptured(m.url);
   });
   document.querySelector('[data-tab="bulk"]')?.addEventListener('click', () => {
     if (BulkState.view === 'tabs') loadBulkTabs();
@@ -10280,6 +10281,67 @@ function temuCheckFlags(it, cfg) {
   }
   return f;
 }
+
+function renderTckImgSlots(it, itemIdx) {
+  let imgs = Array.isArray(it.images) && it.images.length > 0 ? it.images : (it.image ? [it.image] : []);
+  if (!imgs.length) imgs = [''];
+  return imgs.map((imgUrl, sIdx) => {
+    const isMain = sIdx === 0;
+    const badgeTxt = isMain ? '⭐ Slot 1 (Main Hero)' : `Slot ${sIdx + 1}`;
+    return `<div class="tck-img-slot" data-i="${itemIdx}" data-slot="${sIdx}">
+      <div class="tck-slot-badge ${isMain ? 'main' : ''}">
+        <span>${badgeTxt}</span>
+        ${!isMain ? `<button type="button" class="temu-link-btn tck-slot-act-main" data-i="${itemIdx}" data-slot="${sIdx}" title="Make this the Main Image">⭐ Make Main</button>` : ''}
+      </div>
+      <div class="tck-slot-thumb-wrap">
+        <img class="tck-slot-thumb" src="${esc(imgUrl || '')}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>🖼️</text></svg>'">
+      </div>
+      <div class="tck-slot-acts">
+        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn tck-flow-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Open Flow AI and link this slot">🎨 Edit in Flow</button>
+        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn tck-paste-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Paste image URL from clipboard">📋 Paste</button>
+        <button type="button" class="btn btn-ghost btn-xs tck-slot-act-btn btn-danger tck-del-img-btn" data-i="${itemIdx}" data-slot="${sIdx}" title="Delete image">✕</button>
+      </div>
+    </div>`;
+  }).join('') + `<div class="tck-img-add-card" data-i="${itemIdx}"><span>➕</span><b>Add Image</b></div>`;
+}
+
+async function handleFlowImageCaptured(url) {
+  if (!url) return;
+  let target = null;
+  try {
+    const res = await chrome.storage.local.get('flowActiveTarget');
+    target = res?.flowActiveTarget;
+  } catch (_) {}
+  if (!target || target.itemIdx == null || target.slotIdx == null) {
+    toast('Image captured from Flow, but no active product slot selected in ZHunter', 'warn');
+    return;
+  }
+  const i = target.itemIdx, slot = target.slotIdx;
+  if (!TemuCheck?.items || !TemuCheck.items[i]) {
+    toast('Active product not found in current review session', 'warn');
+    return;
+  }
+  const it = TemuCheck.items[i];
+  it.images = Array.isArray(it.images) && it.images.length > 0 ? it.images : [it.image || ''];
+  it.images[slot] = url;
+  if (slot === 0) it.image = url;
+  const list = $('temuCheckList');
+  if (list) {
+    const slotsEl = list.querySelector(`.tck-img-slots[data-i="${i}"]`);
+    if (slotsEl) slotsEl.innerHTML = renderTckImgSlots(it, i);
+    const row = list.querySelector(`.tck-row[data-i="${i}"]`);
+    if (row) {
+      const imgBtn = row.querySelector('.tck-img-btn');
+      if (imgBtn) imgBtn.textContent = `🖼️ ${(it.images || []).length || 1} imgs ▾`;
+      const mainThumb = row.querySelector('.tck-thumb');
+      const firstImg = it.images?.[0] || it.image;
+      if (mainThumb && firstImg) mainThumb.src = firstImg;
+    }
+  }
+  saveTemuCheckSession();
+  toast(`✓ Slot ${slot + 1} updated with Flow AI image!`, 'ok');
+}
+
 function temuCheckRender(items, skipped, cfg, rows) {
   TemuCheck = { items, skipped, cfg, showAll: true, rows: rows || TemuCheck?.rows || null, view: { filter: 'all', q: '', hideClean: null, minimized: false } };
   const card = $('temuCheckCard'), list = $('temuCheckList'); if (!card || !list) return;
@@ -10337,7 +10399,7 @@ function temuCheckRender(items, skipped, cfg, rows) {
           <span class="tck-sku">${esc(it.sku || '')}</span>
           <span class="tck-badge tck-cost" title="Original Cost">Cost: ${(it.source_price ?? it.cost) ? (String(it.source_price ?? it.cost).trim().startsWith('$') ? esc(String(it.source_price ?? it.cost).trim()) : '$' + esc(String(it.source_price ?? it.cost).trim())) : '—'}</span>
           <span class="tck-badge tck-badge-weight" title="Shipping weight">${it.weight || 1.4} lb</span>
-          <span class="tck-badge" title="Listing images">${(it.images || []).length || 1} imgs</span>
+          <button type="button" class="tck-img-btn" data-i="${i}" title="View and edit product images in Flow AI">🖼️ ${(it.images || []).length || 1} imgs ▾</button>
           <span class="tck-dim">${esc(it.color || '')}${it.brand ? ' · ' + esc(it.brand) : ''}</span>
           ${it.attributes ? `<div class="tck-attr-badges">
             ${it.attributes.material ? `<span class="tck-attr-chip">🧶 <b>${esc(it.attributes.material)}</b></span>` : ''}
@@ -10353,6 +10415,26 @@ function temuCheckRender(items, skipped, cfg, rows) {
           <input class="inp tck-weight" data-i="${i}" type="number" step="0.1" min="0.1" value="${it.weight ?? 1.4}" title="Item Shipping Weight in lb (Click to edit)">
           <span class="tck-wt-unit">lb</span>
           <select class="sel tck-cat" data-i="${i}" title="Temu category keyword">${opts.join('')}</select>
+          <span class="tck-lbl" title="Pack size">📦</span>
+          <select class="sel tck-pack-sel" data-i="${i}" title="Product pack size">
+            <option value="1"${(!it.attributes?.pack_count || it.attributes.pack_count <= 1) ? ' selected' : ''}>1-Pack</option>
+            <option value="2"${it.attributes?.pack_count == 2 ? ' selected' : ''}>2-Pack</option>
+            <option value="3"${it.attributes?.pack_count == 3 ? ' selected' : ''}>3-Pack</option>
+            <option value="4"${it.attributes?.pack_count == 4 ? ' selected' : ''}>4-Pack</option>
+            <option value="5"${it.attributes?.pack_count == 5 ? ' selected' : ''}>5-Pack</option>
+            <option value="6"${it.attributes?.pack_count == 6 ? ' selected' : ''}>6-Pack</option>
+          </select>
+        </div>
+        <div class="tck-img-drawer" id="tckImgDrawer_${i}" hidden>
+          <div class="tck-img-drawer-head">
+            <div class="tck-img-drawer-title">
+              <span>🖼️ Product Images (Flow AI &amp; URLs)</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-xs tck-add-img-btn" data-i="${i}">+ Add Image URL</button>
+          </div>
+          <div class="tck-img-slots" data-i="${i}">
+            ${renderTckImgSlots(it, i)}
+          </div>
         </div>
         </div>
       </div>
@@ -10424,6 +10506,150 @@ function temuCheckRender(items, skipped, cfg, rows) {
     chk.addEventListener('change', () => {
       saveTemuCheckSession();
     });
+  });
+
+  // Image drawer toggle
+  list.querySelectorAll('.tck-img-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const i = +btn.dataset.i;
+      const drawer = $(`tckImgDrawer_${i}`);
+      if (!drawer) return;
+      const isHidden = drawer.hidden;
+      drawer.hidden = !isHidden;
+      btn.classList.toggle('active', !isHidden);
+      const row = btn.closest('.tck-row');
+      if (row && row.classList.contains('tck-collapsed') && !isHidden) {
+        row.classList.remove('tck-collapsed');
+      }
+    });
+  });
+
+  // Pack selector change
+  list.querySelectorAll('.tck-pack-sel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const i = +sel.dataset.i;
+      if (!items[i]) return;
+      const pack = parseInt(sel.value, 10) || 1;
+      items[i].attributes = items[i].attributes || {};
+      items[i].attributes.pack_count = pack;
+      let t = items[i].title || '';
+      if (pack > 1) {
+        if (!/(pack of|\b\d+-pack\b)/i.test(t)) {
+          items[i].title = `${t.trim()} (${pack}-Pack)`;
+        } else {
+          items[i].title = t.replace(/(pack of\s*\d+|\b\d+-pack\b|\(\d+-pack\))/gi, `(${pack}-Pack)`);
+        }
+      } else {
+        items[i].title = t.replace(/\s*\([1-9]\d*-Pack\)/gi, '').replace(/\s*\b[1-9]\d*-Pack\b/gi, '').trim();
+      }
+      const titleInp = sel.closest('.tck-row')?.querySelector('.tck-title-inp');
+      if (titleInp) titleInp.value = items[i].title;
+      saveTemuCheckSession();
+      toast(`✓ Updated to ${pack}-Pack`, 'ok');
+    });
+  });
+
+  // Image slots interaction handler (delegated on list)
+  const refreshRowDrawer = (itemIdx) => {
+    const slotsEl = list.querySelector(`.tck-img-slots[data-i="${itemIdx}"]`);
+    if (slotsEl && items[itemIdx]) {
+      slotsEl.innerHTML = renderTckImgSlots(items[itemIdx], itemIdx);
+    }
+    const row = list.querySelector(`.tck-row[data-i="${itemIdx}"]`);
+    if (row && items[itemIdx]) {
+      const imgBtn = row.querySelector('.tck-img-btn');
+      if (imgBtn) imgBtn.textContent = `🖼️ ${(items[itemIdx].images || []).length || 1} imgs ▾`;
+      const mainThumb = row.querySelector('.tck-thumb');
+      const firstImg = items[itemIdx].images?.[0] || items[itemIdx].image;
+      if (mainThumb && firstImg) mainThumb.src = firstImg;
+    }
+  };
+
+  list.addEventListener('click', async (e) => {
+    const flowBtn = e.target.closest('.tck-flow-btn');
+    if (flowBtn) {
+      e.stopPropagation();
+      const i = +flowBtn.dataset.i, slot = +flowBtn.dataset.slot;
+      const it = items[i]; if (!it) return;
+      list.querySelectorAll('.tck-img-slot').forEach(s => s.classList.remove('active-flow'));
+      flowBtn.closest('.tck-img-slot')?.classList.add('active-flow');
+      await chrome.storage.local.set({
+        flowActiveTarget: { itemIdx: i, slotIdx: slot, sku: it.sku || '', time: Date.now() }
+      });
+      const curImg = (it.images || [])[slot] || it.image || '';
+      if (curImg) {
+        try { await navigator.clipboard.writeText(curImg); } catch (_) {}
+      }
+      chrome.tabs.create({ url: 'https://flow.google.com/project/a1e6e7b6-b581-4e66-8f69-bee201d83517' });
+      toast('🎨 Flow AI tab khola gaya! Image URL clipboard par copy ho chuka hai. Edit ke baad right-click karein ya Paste dabayein.', 'ok');
+      return;
+    }
+
+    const pasteBtn = e.target.closest('.tck-paste-btn');
+    if (pasteBtn) {
+      e.stopPropagation();
+      const i = +pasteBtn.dataset.i, slot = +pasteBtn.dataset.slot;
+      const it = items[i]; if (!it) return;
+      let clip = '';
+      try { clip = await navigator.clipboard.readText(); } catch(_) {}
+      if (!clip || !clip.startsWith('http')) {
+        clip = prompt('Paste new image URL:', (it.images || [])[slot] || it.image || '');
+      }
+      if (clip && clip.trim().startsWith('http')) {
+        it.images = Array.isArray(it.images) && it.images.length > 0 ? it.images : [it.image || ''];
+        it.images[slot] = clip.trim();
+        if (slot === 0) it.image = clip.trim();
+        refreshRowDrawer(i);
+        saveTemuCheckSession();
+        toast('✓ Image slot updated!', 'ok');
+      }
+      return;
+    }
+
+    const mainBtn = e.target.closest('.tck-slot-act-main');
+    if (mainBtn) {
+      e.stopPropagation();
+      const i = +mainBtn.dataset.i, slot = +mainBtn.dataset.slot;
+      const it = items[i]; if (!it || !it.images || !it.images[slot]) return;
+      const picked = it.images.splice(slot, 1)[0];
+      it.images.unshift(picked);
+      it.image = it.images[0];
+      refreshRowDrawer(i);
+      saveTemuCheckSession();
+      toast('✓ Moved to Slot 1 (Main Hero Image)!', 'ok');
+      return;
+    }
+
+    const delBtn = e.target.closest('.tck-del-img-btn');
+    if (delBtn) {
+      e.stopPropagation();
+      const i = +delBtn.dataset.i, slot = +delBtn.dataset.slot;
+      const it = items[i]; if (!it || !it.images) return;
+      it.images.splice(slot, 1);
+      if (it.images.length === 0) it.images.push('');
+      it.image = it.images[0] || '';
+      refreshRowDrawer(i);
+      saveTemuCheckSession();
+      toast('✓ Image removed', 'ok');
+      return;
+    }
+
+    const addBtn = e.target.closest('.tck-add-img-btn') || e.target.closest('.tck-img-add-card');
+    if (addBtn) {
+      e.stopPropagation();
+      const i = +addBtn.dataset.i;
+      const it = items[i]; if (!it) return;
+      let url = prompt('Enter new Image URL:');
+      if (url && url.trim().startsWith('http')) {
+        it.images = Array.isArray(it.images) ? it.images : (it.image ? [it.image] : []);
+        it.images.push(url.trim());
+        refreshRowDrawer(i);
+        saveTemuCheckSession();
+        toast('✓ New image added!', 'ok');
+      }
+      return;
+    }
   });
 
   // v10.3.3: ek hi visibility engine — default: masle hon to saaf products chhupe

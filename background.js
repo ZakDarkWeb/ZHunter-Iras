@@ -994,6 +994,7 @@ function setupContextMenus() {
     chrome.contextMenus.create({ id: 'zh-add-link',      title: 'ZHunter: Add link to queue',            contexts: ['link'] });
     chrome.contextMenus.create({ id: 'zh-add-selection', title: 'ZHunter: Add selected URL to queue',    contexts: ['selection'] });
     chrome.contextMenus.create({ id: 'zh-reverse-image', title: 'ZHunter: Find supplier for this image', contexts: ['image'] });
+    chrome.contextMenus.create({ id: 'zh-set-slot-image', title: 'ZHunter: Set as Active Product Image', contexts: ['image'] });
   });
 }
 
@@ -1025,6 +1026,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     case 'zh-reverse-image':
       if (info.srcUrl) chrome.tabs.create({ url: 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(info.srcUrl) });
       else broadcastToast('Could not find image URL', 'err');
+      return;
+    case 'zh-set-slot-image':
+      if (info.srcUrl) {
+        try {
+          await chrome.storage.local.set({ flowCapturedImage: { url: info.srcUrl, time: Date.now() } });
+          chrome.runtime.sendMessage({ action: 'FLOW_IMAGE_CAPTURED', url: info.srcUrl }).catch(() => {});
+          broadcastToast('✓ Image sent to ZHunter active slot!', 'ok');
+        } catch (_) {}
+      } else {
+        broadcastToast('Could not find image URL', 'err');
+      }
       return;
     default: return;
   }

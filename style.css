@@ -10554,3 +10554,158 @@ html[data-fx="off"] .tstep.run .tstep-node { animation: none !important; box-sha
   .brand-text    { display: none; }
   .brand-logo-wrap { width: 26px; height: 26px; }
 }
+
+/* ═══ Temu Image Drawer & Pack Manager ═══ */
+.tck-img-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 184, 0, 0.08);
+  border: 1px solid rgba(255, 184, 0, 0.25);
+  color: var(--tck-accent, #ffb800);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font: 600 10.5px var(--font);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.tck-img-btn:hover {
+  background: rgba(255, 184, 0, 0.16);
+  border-color: rgba(255, 184, 0, 0.4);
+}
+.tck-img-btn.active {
+  background: var(--tck-accent, #ffb800);
+  color: #0b0f19;
+  border-color: var(--tck-accent, #ffb800);
+}
+.tck-pack-sel {
+  height: 26px !important;
+  font-size: 10.5px !important;
+  background: var(--tck-bg, #0d1117) !important;
+  border: 1px solid var(--tck-line, rgba(255,255,255,0.1)) !important;
+  color: #38bdf8 !important;
+  border-radius: var(--tck-r-sm, 4px) !important;
+  padding: 0 6px !important;
+  font-weight: 600 !important;
+  min-width: 78px !important;
+}
+.tck-img-drawer {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(255, 184, 0, 0.2);
+  border-radius: 6px;
+  animation: zhMiniPop 0.18s ease;
+}
+.tck-img-drawer[hidden] {
+  display: none !important;
+}
+.tck-img-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--tck-ink-2, #94a3b8);
+}
+.tck-img-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.tck-img-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+.tck-img-slot {
+  position: relative;
+  background: var(--tck-bg-2, #161b22);
+  border: 1px solid var(--tck-line, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: all 0.2s ease;
+}
+.tck-img-slot:hover {
+  border-color: rgba(255, 184, 0, 0.35);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.tck-img-slot.active-flow {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4) !important;
+  animation: zhPulse 1.5s infinite;
+}
+.tck-slot-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tck-slot-badge.main {
+  background: rgba(255, 184, 0, 0.15);
+  color: #ffb800;
+  border: 1px solid rgba(255, 184, 0, 0.3);
+}
+.tck-slot-thumb-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tck-slot-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+.tck-slot-thumb:hover {
+  transform: scale(1.08);
+}
+.tck-slot-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.tck-slot-act-btn {
+  flex: 1 1 auto;
+  font-size: 9.5px !important;
+  padding: 2px 4px !important;
+  height: 22px !important;
+  white-space: nowrap;
+}
+.tck-img-add-card {
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  min-height: 140px;
+  color: #94a3b8;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s ease;
+}
+.tck-img-add-card:hover {
+  background: rgba(255, 184, 0, 0.06);
+  border-color: var(--tck-accent, #ffb800);
+  color: var(--tck-accent, #ffb800);
+}
