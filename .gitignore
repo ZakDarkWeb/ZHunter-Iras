@@ -1,0 +1,18 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Build artefacts / packaging
+*.zip
+*.crx
+*.pem
+node_modules/
+
+# Local scratch
+*.log
+tmp/
+*.bak*
+.bak_*
