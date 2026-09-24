@@ -3730,14 +3730,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         z-index: 1;
         border: none;
         outline: none;
+        overflow: hidden;
       }
       .mini-widget:hover { transform: scale(1.1); cursor: grab; box-shadow: 0 6px 28px rgba(0,0,0,0.8), inset 0 0 20px rgba(0,229,255,0.12); }
       .mini-widget:active { cursor: grabbing; transform: scale(0.93); }
       .mini-widget img {
-        width: 36px; height: 36px; object-fit: contain; pointer-events: none;
+        width: 100%; height: 100%; object-fit: cover; pointer-events: none;
         border-radius: 50%;
         transition: transform 0.2s ease;
-        filter: drop-shadow(0 0 6px rgba(0,229,255,0.6));
+        display: block;
       }
       .mini-widget:hover img { transform: scale(1.08); }
       .mini-logo-fallback { display: none; color: #00e5ff; font: 900 18px/1 system-ui, sans-serif; letter-spacing: -1px; text-shadow: 0 0 14px rgba(0,229,255,0.9), 0 0 28px rgba(0,229,255,0.5); pointer-events: none; }
