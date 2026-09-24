@@ -148,6 +148,68 @@ svg.i-xs { width: 11px; height: 11px; }
 .hdr-btn { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; color: var(--ink-2); transition: background var(--dur), color var(--dur), border-color var(--dur), box-shadow var(--dur); z-index: 1; }
 .hdr-btn:hover { background: var(--surface-2); color: var(--ink); }
 
+/* Temu Top Header Pill (Quick Access to Temu Export) */
+.temu-top-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 10px rgba(0, 229, 255, 0.08);
+  font: 600 11px var(--mono);
+  color: #F0F9FF;
+  position: relative;
+  z-index: 2;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.temu-top-pill:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(0, 229, 255, 0.6);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 16px rgba(0, 229, 255, 0.28);
+  transform: translateY(-1px);
+}
+.temu-top-pill:active {
+  transform: translateY(0px) scale(0.98);
+}
+.temu-dot-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
+  display: inline-block;
+  flex-shrink: 0;
+  animation: temuDotPulse 2s infinite ease-in-out;
+}
+@keyframes temuDotPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); box-shadow: 0 0 6px #10B981; }
+  50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 12px #10B981, 0 0 18px rgba(16, 185, 129, 0.5); }
+}
+.temu-pill-name {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #E2E8F0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.temu-pill-divider {
+  color: rgba(148, 163, 184, 0.4);
+  font-weight: 300;
+  font-size: 11px;
+}
+.temu-pill-count {
+  font-weight: 700;
+  color: #FFB800;
+  text-shadow: 0 0 8px rgba(255, 184, 0, 0.35);
+}
+
 .tab-nav { display: flex; height: 36px; padding: 0 6px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .tab-btn { padding: 0 10px; font-weight: 500; color: var(--ink-2); position: relative; display: flex; align-items: center; gap: 6px; }
 .tab-btn:hover { color: var(--ink); }

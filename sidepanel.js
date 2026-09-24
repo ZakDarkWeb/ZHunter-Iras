@@ -6378,6 +6378,7 @@ function filterAndRenderMasterRows() {
 
   MasterUIState.visibleRows = rows; // v9.7.3
   renderMasterRows(rows);
+  if (typeof updateTopTemuStorePill === 'function') updateTopTemuStorePill();
 }
 
 function setMasterLibraryViewMode(view) {
@@ -10198,8 +10199,27 @@ function temuInitActivitySummary() {
   sync();
 }
 
+async function updateTopTemuStorePill() {
+  const pill = $('topTemuStorePill');
+  if (!pill) return;
+  const storeNameEl = $('topTemuStoreName');
+  const storeCountEl = $('topTemuStoreCount');
+
+  const store = temuActiveStoreName() || 'HQ TWO';
+  if (storeNameEl) storeNameEl.textContent = store;
+
+  try {
+    const rows = await getMasterRows();
+    const readyCount = rows.length;
+    if (storeCountEl) storeCountEl.textContent = `${readyCount}/50`;
+  } catch (_) {
+    if (storeCountEl) storeCountEl.textContent = '0/50';
+  }
+}
+
 function initTemuExport() {
   temuInitActivitySummary();
+  updateTopTemuStorePill();
   document.addEventListener('change', e => {
     if (e.target && e.target.id === 'tgSkipListed') temuUpdateSrcInfo();
     if (e.target && e.target.id === 'temuSource') { 
@@ -10214,6 +10234,7 @@ function initTemuExport() {
       if ((await temuSaveStores(temuStores(), e.target.value)) === true) {
         TemuLast = null;
         temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm();
+        updateTopTemuStorePill();
         toast(`Active store: ${e.target.value}`, 'ok');
       }
     })();
@@ -10223,7 +10244,7 @@ function initTemuExport() {
     const tb = e.target.closest('#temuModal .temu-tab'); if (tb) { temuSwitchTab(tb.dataset.ttab); return; }
     if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) {} }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
-    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
+    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
     if (e.target.closest('#temuAiToggleListBtn')) {
       const list = $('temuAiTitleList');
       if (list) {
