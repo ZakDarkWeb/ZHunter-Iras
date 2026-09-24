@@ -8176,13 +8176,9 @@ function renderImgGrid() {
     grid.appendChild(card);
   });
 
-  // Update count: "N of M" when filter is active
+  // Update count
   if (countEl) {
-    if (roleFilter !== 'all') {
-      countEl.textContent = `${visible} of ${total}`;
-    } else {
-      countEl.textContent = `${total}`;
-    }
+    countEl.textContent = `${total}`;
   }
 }
 
@@ -8376,25 +8372,6 @@ function initImagesTab() {
         if (!isNaN(idx)) ImgState.selected.delete(idx);
         c.classList.remove('selected');
       }
-    });
-  });
-
-  document.querySelectorAll('#imgFilterChips .img-filter-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('#imgFilterChips .img-filter-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      ImgState.minSize = Number(chip.dataset.min || 0);
-      renderImgGrid();
-    });
-  });
-
-  // Role filter chips
-  document.querySelectorAll('#roleFilterBar .role-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('#roleFilterBar .role-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      ImgState.roleFilter = chip.dataset.role || 'all';
-      renderImgGrid();
     });
   });
 
