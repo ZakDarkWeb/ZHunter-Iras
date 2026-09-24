@@ -3916,6 +3916,51 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         padding: 2px 6px; border-radius: 6px;
       }
+      .img-res {
+        position: absolute; top: 6px; right: 6px;
+        font-size: 8px; font-weight: 800;
+        padding: 2px 5px; border-radius: 5px;
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+        display: none; line-height: 1; letter-spacing: 0.3px;
+        pointer-events: none; z-index: 2;
+      }
+      .img-res.show { display: block; }
+      .img-res.hd {
+        background: rgba(16, 185, 129, 0.9); color: #FFFFFF;
+        border: 1px solid rgba(52, 211, 153, 0.7);
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+      }
+      .img-res.sd {
+        background: rgba(15, 23, 42, 0.85); color: #94A3B8;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+      .img-main-badge {
+        position: absolute; bottom: 6px; left: 6px;
+        font-size: 8px; font-weight: 800; color: #FFFFFF;
+        background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
+        border: 1px solid rgba(255, 184, 0, 0.5);
+        padding: 2px 5px; border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(255,46,84,0.4);
+        pointer-events: none; z-index: 2;
+      }
+      .img-actions {
+        position: absolute; bottom: 6px; left: 6px;
+        display: flex; gap: 4px; z-index: 3;
+        opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease;
+        transform: translateY(2px);
+      }
+      .img-wrap:hover .img-actions { opacity: 1; transform: translateY(0); }
+      .img-wrap:hover .img-main-badge { opacity: 0; }
+      .img-btn-action {
+        width: 20px; height: 20px; border-radius: 5px;
+        background: rgba(6, 9, 15, 0.9); border: 1px solid rgba(255, 184, 0, 0.45);
+        color: #FFB800; font-size: 10px; display: flex; align-items: center; justify-content: center;
+        cursor: pointer; padding: 0; transition: all 0.15s cubic-bezier(0.16,1,0.3,1);
+      }
+      .img-btn-action:hover {
+        background: #FFB800; color: #000000;
+        transform: scale(1.15); box-shadow: 0 0 8px rgba(255, 184, 0, 0.6);
+      }
 
       .footer {
         padding: 9px 10px;
@@ -4184,6 +4229,310 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     widgetPosition = { top: null, bottom: 20, left: null, right: 20 };
     applyCollapsedState();
 
+    // ── Reverse Image Sourcing Popover ──────────────────────────
+    function openSourcingMenu(imgUrl, x, y) {
+      const existing = document.getElementById('zh-sourcing-menu');
+      if (existing) { existing.remove(); return; }
+
+      const enc = encodeURIComponent(imgUrl);
+      const menu = document.createElement('div');
+      menu.id = 'zh-sourcing-menu';
+      menu.className = 'zh-sourcing-popover';
+
+      const top = Math.min(y + 10, window.innerHeight - 230);
+      const left = Math.min(x + 10, window.innerWidth - 195);
+      menu.style.top = `${Math.max(10, top)}px`;
+      menu.style.left = `${Math.max(10, left)}px`;
+
+      menu.innerHTML = `
+        <div class="zh-sourcing-title">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          Find Supplier
+        </div>
+        <a class="zh-sourcing-item" href="https://lens.google.com/uploadbyurl?url=${enc}" target="_blank" rel="noopener">
+          <span>🌐</span> Google Lens
+        </a>
+        <a class="zh-sourcing-item" href="https://www.aliexpress.com/wholesale?SearchText=&imageAddress=${enc}" target="_blank" rel="noopener">
+          <span>📦</span> AliExpress
+        </a>
+        <a class="zh-sourcing-item" href="https://www.alibaba.com/trade/search?fsb=y&IndexArea=product_en&CatId=&SearchText=&imageAddress=${enc}" target="_blank" rel="noopener">
+          <span>🏭</span> Alibaba
+        </a>
+        <a class="zh-sourcing-item" href="https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageAddress=${enc}" target="_blank" rel="noopener">
+          <span>🇨🇳</span> 1688 Source
+        </a>
+        <div class="zh-sourcing-item" id="zh-copy-img-link">
+          <span>📋</span> Copy HD Link
+        </div>
+      `;
+
+      document.body.appendChild(menu);
+
+      menu.querySelector('#zh-copy-img-link')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(imgUrl).then(() => {
+          const el = menu.querySelector('#zh-copy-img-link');
+          if (el) el.innerHTML = '<span>✓</span> Link Copied!';
+          setTimeout(() => menu.remove(), 800);
+        });
+      });
+
+      const closeMenu = (e) => {
+        if (!menu.contains(e.target)) {
+          menu.remove();
+          document.removeEventListener('click', closeMenu);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', closeMenu), 10);
+    }
+
+    // ── Fullscreen Zoom Lightbox Modal ──────────────────────────
+    function ensureLightboxStyles() {
+      if (document.getElementById('zh-lightbox-style')) return;
+      const st = document.createElement('style');
+      st.id = 'zh-lightbox-style';
+      st.textContent = `
+        #zh-lightbox-modal {
+          position: fixed; inset: 0; z-index: 2147483647;
+          display: flex; align-items: center; justify-content: center;
+          font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        .zh-lb-backdrop {
+          position: absolute; inset: 0;
+          background: rgba(4, 7, 13, 0.88);
+          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          animation: zh-fade-in 0.2s ease-out;
+        }
+        .zh-lb-card {
+          position: relative; z-index: 1;
+          max-width: 90vw; max-height: 92vh;
+          display: flex; flex-direction: column;
+          background: rgba(11, 15, 25, 0.98);
+          border: 1px solid rgba(255, 184, 0, 0.35);
+          border-radius: 18px; overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(255,184,0,0.18);
+          animation: zh-scale-up 0.25s cubic-bezier(0.16,1,0.3,1);
+        }
+        .zh-lb-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 12px 18px; border-bottom: 1px solid rgba(255,184,0,0.15);
+          background: rgba(255,184,0,0.03); gap: 12px;
+        }
+        .zh-lb-counter { font-size: 13px; font-weight: 700; color: #FEF08A; }
+        .zh-lb-badge {
+          font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 6px;
+          background: rgba(255, 255, 255, 0.08); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .zh-lb-badge.hd {
+          background: rgba(16, 185, 129, 0.2); color: #34D399; border-color: rgba(16, 185, 129, 0.45);
+          box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+        }
+        .zh-lb-header-right { display: flex; align-items: center; gap: 8px; }
+        .zh-lb-sel-btn {
+          padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+          cursor: pointer; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.2);
+          background: rgba(255,255,255,0.08); color: #FFF;
+        }
+        .zh-lb-sel-btn.selected {
+          background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
+          border-color: #FFB800; color: #FFF; box-shadow: 0 2px 12px rgba(255,46,84,0.4);
+        }
+        .zh-lb-close {
+          background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+          color: #94A3B8; width: 30px; height: 30px; border-radius: 50%;
+          cursor: pointer; display: flex; align-items: center; justify-content: center;
+          font-size: 14px; font-weight: bold; transition: all 0.2s;
+        }
+        .zh-lb-close:hover {
+          background: rgba(255,46,84,0.2); color: #FF2E54; border-color: #FF2E54; transform: scale(1.1);
+        }
+        .zh-lb-body {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 10px 14px; gap: 14px; flex: 1; min-height: 360px;
+        }
+        .zh-lb-nav {
+          background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+          color: #F8FAFC; width: 42px; height: 42px; border-radius: 50%;
+          cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+          transition: all 0.2s; flex-shrink: 0;
+        }
+        .zh-lb-nav:hover {
+          background: rgba(255,184,0,0.2); border-color: #FFB800; color: #FFB800; transform: scale(1.12);
+        }
+        .zh-lb-stage {
+          display: flex; align-items: center; justify-content: center;
+          max-width: 78vw; max-height: 68vh; overflow: hidden;
+        }
+        #zh-lb-image {
+          max-width: 100%; max-height: 68vh; object-fit: contain;
+          border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+          transition: transform 0.25s ease;
+        }
+        .zh-lb-footer {
+          display: flex; align-items: center; justify-content: center; gap: 10px;
+          padding: 12px 18px; border-top: 1px solid rgba(255,184,0,0.15);
+          background: rgba(255,184,0,0.02);
+        }
+        .zh-lb-tool {
+          padding: 7px 14px; border-radius: 8px; font-size: 11.5px; font-weight: 700;
+          background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+          color: #E2E8F0; cursor: pointer; transition: all 0.2s;
+        }
+        .zh-lb-tool:hover {
+          background: rgba(255,184,0,0.16); border-color: #FFB800; color: #FFB800; transform: translateY(-1px);
+        }
+        .zh-sourcing-popover {
+          position: fixed; z-index: 2147483647;
+          background: rgba(6, 9, 15, 0.96);
+          border: 1px solid rgba(255, 184, 0, 0.4);
+          border-radius: 12px; padding: 10px 8px;
+          box-shadow: 0 12px 36px rgba(0,0,0,0.9), 0 0 20px rgba(255,184,0,0.18);
+          backdrop-filter: blur(16px);
+          display: flex; flex-direction: column; gap: 5px;
+          min-width: 175px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .zh-sourcing-title {
+          font-size: 10.5px; font-weight: 800; color: #FFB800; text-transform: uppercase;
+          letter-spacing: 0.5px; padding: 2px 8px 5px; border-bottom: 1px solid rgba(255,184,0,0.18);
+          display: flex; align-items: center; gap: 6px;
+        }
+        .zh-sourcing-item {
+          display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+          border-radius: 7px; color: #F1F5F9; font-size: 11.5px; font-weight: 600;
+          text-decoration: none; cursor: pointer; transition: all 0.15s ease;
+          background: rgba(255,255,255,0.03); border: 1px solid transparent;
+        }
+        .zh-sourcing-item:hover {
+          background: rgba(255,184,0,0.12); border-color: rgba(255,184,0,0.4);
+          color: #FFB800; transform: translateX(2px);
+        }
+        @keyframes zh-fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes zh-scale-up { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+      `;
+      (document.head || document.documentElement).appendChild(st);
+    }
+
+    function openLightbox(startIdx) {
+      if (!images.length) return;
+      ensureLightboxStyles();
+      let currentIdx = Math.max(0, Math.min(startIdx, images.length - 1));
+      let lb = document.getElementById('zh-lightbox-modal');
+      if (lb) lb.remove();
+
+      lb = document.createElement('div');
+      lb.id = 'zh-lightbox-modal';
+      lb.innerHTML = `
+        <div class="zh-lb-backdrop"></div>
+        <div class="zh-lb-card">
+          <div class="zh-lb-header">
+            <div class="zh-lb-counter">Image <span id="zh-lb-num">${currentIdx + 1}</span> / ${images.length}</div>
+            <div class="zh-lb-badge" id="zh-lb-res">Calculating...</div>
+            <div class="zh-lb-header-right">
+              <button class="zh-lb-btn zh-lb-sel-btn" id="zh-lb-sel-btn" type="button">
+                ${selected.has(currentIdx) ? '✓ Selected' : '+ Select'}
+              </button>
+              <button class="zh-lb-close" id="zh-lb-close" type="button" title="Close (Esc)">✕</button>
+            </div>
+          </div>
+          <div class="zh-lb-body">
+            <button class="zh-lb-nav zh-lb-prev" id="zh-lb-prev" type="button" title="Previous (Left Arrow)">❮</button>
+            <div class="zh-lb-stage">
+              <img id="zh-lb-image" src="${images[currentIdx]}" alt="High Definition Preview">
+            </div>
+            <button class="zh-lb-nav zh-lb-next" id="zh-lb-next" type="button" title="Next (Right Arrow)">❯</button>
+          </div>
+          <div class="zh-lb-footer">
+            <button class="zh-lb-tool" id="zh-lb-dl" type="button">📥 Download HD</button>
+            <button class="zh-lb-tool" id="zh-lb-source" type="button">🌐 Find Suppliers</button>
+            <button class="zh-lb-tool" id="zh-lb-copy" type="button">📋 Copy URL</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(lb);
+
+      const imgEl = lb.querySelector('#zh-lb-image');
+      const numEl = lb.querySelector('#zh-lb-num');
+      const resEl = lb.querySelector('#zh-lb-res');
+      const selBtn = lb.querySelector('#zh-lb-sel-btn');
+      if (selected.has(currentIdx)) selBtn.classList.add('selected');
+
+      const updateView = () => {
+        imgEl.src = images[currentIdx];
+        numEl.textContent = currentIdx + 1;
+        resEl.textContent = 'Calculating...';
+        resEl.className = 'zh-lb-badge';
+        const isSel = selected.has(currentIdx);
+        selBtn.textContent = isSel ? '✓ Selected' : '+ Select';
+        selBtn.classList.toggle('selected', isSel);
+
+        const onDim = () => {
+          const w = imgEl.naturalWidth;
+          const h = imgEl.naturalHeight;
+          if (w && h) {
+            const isHD = w >= 1000 || h >= 1000;
+            resEl.textContent = `${w} × ${h} px • ${isHD ? 'HD Quality' : 'Standard'}`;
+            resEl.className = 'zh-lb-badge ' + (isHD ? 'hd' : 'sd');
+          }
+        };
+        if (imgEl.complete && imgEl.naturalWidth) onDim();
+        else imgEl.onload = onDim;
+      };
+
+      updateView();
+
+      const nav = (dir) => {
+        currentIdx = (currentIdx + dir + images.length) % images.length;
+        updateView();
+      };
+
+      const toggleSel = () => {
+        if (selected.has(currentIdx)) selected.delete(currentIdx);
+        else selected.add(currentIdx);
+        const isSel = selected.has(currentIdx);
+        selBtn.textContent = isSel ? '✓ Selected' : '+ Select';
+        selBtn.classList.toggle('selected', isSel);
+        renderGrid();
+      };
+
+      const closeLb = () => {
+        window.removeEventListener('keydown', onKey);
+        lb.remove();
+      };
+
+      const onKey = (e) => {
+        if (e.key === 'Escape') closeLb();
+        else if (e.key === 'ArrowLeft') nav(-1);
+        else if (e.key === 'ArrowRight') nav(1);
+        else if (e.key === ' ') { e.preventDefault(); toggleSel(); }
+      };
+      window.addEventListener('keydown', onKey);
+
+      lb.querySelector('.zh-lb-backdrop').addEventListener('click', closeLb);
+      lb.querySelector('#zh-lb-close').addEventListener('click', closeLb);
+      lb.querySelector('#zh-lb-prev').addEventListener('click', () => nav(-1));
+      lb.querySelector('#zh-lb-next').addEventListener('click', () => nav(1));
+      selBtn.addEventListener('click', toggleSel);
+
+      lb.querySelector('#zh-lb-dl').addEventListener('click', () => {
+        const u = images[currentIdx];
+        const ext = (u.match(/\.(jpe?g|png|webp|gif)/i)?.[1] || 'jpg').toLowerCase();
+        const pSlug = (document.title || 'product').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 25);
+        downloadViaBackground(u, `${pSlug}-hd${currentIdx + 1}.${ext}`);
+      });
+
+      lb.querySelector('#zh-lb-source').addEventListener('click', (e) => {
+        openSourcingMenu(images[currentIdx], e.clientX, e.clientY);
+      });
+
+      lb.querySelector('#zh-lb-copy').addEventListener('click', () => {
+        navigator.clipboard.writeText(images[currentIdx]).then(() => {
+          const btn = lb.querySelector('#zh-lb-copy');
+          const old = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          setTimeout(() => { btn.textContent = old; }, 1500);
+        });
+      });
+    }
+
     // ── Render grid
     function renderGrid() {
       const b = shadow.getElementById('zh-img-body');
@@ -4201,12 +4550,56 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const wrap = document.createElement('div');
         wrap.className = 'img-wrap' + (selected.has(i) ? ' selected' : '');
         wrap.innerHTML = `
-          <img src="${url}" loading="lazy" alt="img ${i+1}" title="${url}"
+          <img src="${url}" loading="lazy" alt="img ${i+1}" title="Double-click to preview HD"
                onerror="this.style.opacity='0.2';this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>\u{1F5BC}</text></svg>'">
           <div class="img-check"></div>
+          <div class="img-res" id="res-${i}">...</div>
+          ${i === 0 ? '<div class="img-main-badge" title="Hero / Primary Image">★ MAIN</div>' : ''}
           <div class="img-idx">${i + 1}</div>
+          <div class="img-actions">
+            ${i > 0 ? '<button class="img-btn-action btn-main" type="button" title="Set as Main (Hero) Photo">★</button>' : ''}
+            <button class="img-btn-action btn-zoom" type="button" title="Zoom & Inspect">🔍</button>
+          </div>
         `;
-        wrap.addEventListener('click', () => {
+
+        const imgEl = wrap.querySelector('img');
+        const resEl = wrap.querySelector('.img-res');
+        const checkRes = () => {
+          const w = imgEl.naturalWidth;
+          const h = imgEl.naturalHeight;
+          if (w && h) {
+            const isHD = w >= 1000 || h >= 1000;
+            resEl.textContent = isHD ? `${Math.max(w, h)}w HD` : `${w}×${h}`;
+            resEl.className = 'img-res show ' + (isHD ? 'hd' : 'sd');
+          }
+        };
+        if (imgEl.complete && imgEl.naturalWidth) checkRes();
+        else imgEl.addEventListener('load', checkRes);
+
+        // Set as Main (Hero) Photo
+        wrap.querySelector('.btn-main')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const selectedUrls = new Set([...selected].map(idx => images[idx]));
+          const [hero] = images.splice(i, 1);
+          images.unshift(hero);
+          selected = new Set(images.map((u, idx) => selectedUrls.has(u) ? idx : -1).filter(idx => idx >= 0));
+          selected.add(0);
+          renderGrid();
+          status.className = 'status-bar ok';
+          status.textContent = `★ Photo set as Main (Hero)!`;
+          setTimeout(() => { if (status.textContent.includes('★')) { status.textContent = ''; status.className = 'status-bar'; } }, 2500);
+        });
+
+        wrap.querySelector('.btn-zoom')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openLightbox(i);
+        });
+        wrap.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          openLightbox(i);
+        });
+        wrap.addEventListener('click', (e) => {
+          if (e.target.closest('.img-actions')) return;
           if (selected.has(i)) selected.delete(i);
           else selected.add(i);
           wrap.classList.toggle('selected', selected.has(i));
