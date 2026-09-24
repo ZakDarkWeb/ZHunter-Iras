@@ -3319,6 +3319,147 @@ function initSettingsPanel() {
     });
   }
 
+  // ── Page Frame Controls ──
+  {
+    const sendToActiveTab = (payload) => {
+      try {
+        chrome.tabs.query({ active: true }, tabs => {
+          (tabs || []).forEach(tab => {
+            if (tab && tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'zhUpdateFrame', ...payload }).catch(() => {});
+            }
+          });
+        });
+      } catch (_) {}
+    };
+
+    const pf = $('zhPageFrameToggle');
+    if (pf) {
+      chrome.storage.local.get('zhPageFrame', x => { pf.checked = x?.zhPageFrame !== false; });
+      pf.addEventListener('change', () => {
+        chrome.storage.local.set({ zhPageFrame: pf.checked });
+        sendToActiveTab({ enabled: pf.checked });
+        toast(pf.checked ? 'Page frame ON' : 'Page frame OFF', 'ok');
+      });
+    }
+
+    const updateFrameColor = (color) => {
+      chrome.storage.local.set({ zhFrameColor: color });
+      if ($('zhFrameColorPicker') && color !== 'rainbow') $('zhFrameColorPicker').value = color;
+      document.querySelectorAll('.zh-fcol-preset').forEach(btn => {
+        const isSel = (btn.dataset.color || '').toLowerCase() === color.toLowerCase();
+        btn.classList.toggle('zh-fcol-active', isSel);
+      });
+      sendToActiveTab({ color });
+      toast(color === 'rainbow' ? '🌈 Colorful Rainbow Border' : `Border color: ${color}`, 'ok');
+    };
+
+    const updateFrameMoving = (moving) => {
+      chrome.storage.local.set({ zhFrameMoving: !!moving });
+      const mt = $('zhFrameMovingToggle');
+      if (mt) mt.checked = !!moving;
+      sendToActiveTab({ moving: !!moving });
+      toast(moving ? '⚡ Moving Animated Border ON' : 'Moving Border OFF', 'ok');
+    };
+
+    const updateFrameStyle = (style) => {
+      chrome.storage.local.set({ zhFrameStyle: style });
+      document.querySelectorAll('.zh-style-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.style === style);
+      });
+      sendToActiveTab({ style });
+      const names = { laser: '⚡ Laser Comet', dual: '💫 Dual Beams', wave: '🌊 Fluid Rainbow Wave' };
+      toast(`Style: ${names[style] || style}`, 'ok');
+    };
+
+    const updateFrameSpeed = (speed) => {
+      const num = parseFloat(speed) || 3.5;
+      chrome.storage.local.set({ zhFrameSpeed: num });
+      if ($('zhFrameSpeedVal')) $('zhFrameSpeedVal').textContent = `${num}s`;
+      if ($('zhFrameSpeedSlider')) $('zhFrameSpeedSlider').value = num;
+      sendToActiveTab({ speed: num });
+    };
+
+    const updateFrameCorners = (corner) => {
+      chrome.storage.local.set({ zhFrameCorners: corner });
+      document.querySelectorAll('.zh-corner-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.corner === corner);
+      });
+      sendToActiveTab({ corners: corner });
+      toast(`Border corners: ${corner}`, 'ok');
+    };
+
+    const updateFrameWidth = (w) => {
+      const num = parseFloat(w) || 5.5;
+      chrome.storage.local.set({ zhFrameWidth: num });
+      if ($('zhFrameWidthVal')) $('zhFrameWidthVal').textContent = `${num}px`;
+      if ($('zhFrameWidthSlider')) $('zhFrameWidthSlider').value = num;
+      sendToActiveTab({ width: num });
+    };
+
+    const updateFrameBright = (b) => {
+      const num = parseInt(b, 10) || 100;
+      chrome.storage.local.set({ zhFrameBrightness: num });
+      if ($('zhFrameBrightVal')) $('zhFrameBrightVal').textContent = `${num}%`;
+      if ($('zhFrameBrightSlider')) $('zhFrameBrightSlider').value = num;
+      sendToActiveTab({ brightness: num });
+    };
+
+    chrome.storage.local.get(['zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
+      const col = x?.zhFrameColor || '#FF1E56';
+      if ($('zhFrameColorPicker') && col !== 'rainbow') $('zhFrameColorPicker').value = col;
+      document.querySelectorAll('.zh-fcol-preset').forEach(btn => {
+        btn.classList.toggle('zh-fcol-active', (btn.dataset.color || '').toLowerCase() === col.toLowerCase());
+      });
+
+      const w = x?.zhFrameWidth != null ? x.zhFrameWidth : 5.5;
+      if ($('zhFrameWidthSlider')) $('zhFrameWidthSlider').value = w;
+      if ($('zhFrameWidthVal')) $('zhFrameWidthVal').textContent = `${w}px`;
+
+      const br = x?.zhFrameBrightness != null ? x.zhFrameBrightness : 100;
+      if ($('zhFrameBrightSlider')) $('zhFrameBrightSlider').value = br;
+      if ($('zhFrameBrightVal')) $('zhFrameBrightVal').textContent = `${br}%`;
+
+      const c = x?.zhFrameCorners || 'square';
+      document.querySelectorAll('.zh-corner-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.corner === c);
+      });
+
+      const moving = !!x?.zhFrameMoving;
+      if ($('zhFrameMovingToggle')) $('zhFrameMovingToggle').checked = moving;
+
+      const style = x?.zhFrameStyle || 'laser';
+      document.querySelectorAll('.zh-style-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.style === style);
+      });
+
+      const speed = x?.zhFrameSpeed != null ? x.zhFrameSpeed : 3.5;
+      if ($('zhFrameSpeedSlider')) $('zhFrameSpeedSlider').value = speed;
+      if ($('zhFrameSpeedVal')) $('zhFrameSpeedVal').textContent = `${speed}s`;
+    });
+
+    $('zhFrameColorPicker')?.addEventListener('input', e => updateFrameColor(e.target.value));
+    $('zhFrameMovingToggle')?.addEventListener('change', e => updateFrameMoving(e.target.checked));
+    $('zhFrameSpeedSlider')?.addEventListener('input', e => updateFrameSpeed(e.target.value));
+    $('zhFrameWidthSlider')?.addEventListener('input', e => updateFrameWidth(e.target.value));
+    $('zhFrameBrightSlider')?.addEventListener('input', e => updateFrameBright(e.target.value));
+
+    document.addEventListener('click', e => {
+      const preset = e.target.closest('.zh-fcol-preset');
+      if (preset && preset.dataset.color) {
+        updateFrameColor(preset.dataset.color);
+      }
+      const cornerBtn = e.target.closest('.zh-corner-btn');
+      if (cornerBtn && cornerBtn.dataset.corner) {
+        updateFrameCorners(cornerBtn.dataset.corner);
+      }
+      const styleBtn = e.target.closest('.zh-style-btn');
+      if (styleBtn && styleBtn.dataset.style) {
+        updateFrameStyle(styleBtn.dataset.style);
+      }
+    });
+  }
+
   function updateStorageDisplay() {
     const el = $('spStorageDesc');
     if (!el) return;

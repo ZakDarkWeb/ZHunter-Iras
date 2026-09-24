@@ -389,6 +389,75 @@
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Failed tabs always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>URLs only; Master ZIP won't include images. Hunt runs 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Every download (sheet, ZIP, images) goes to Downloads → <b>ZHunter Export</b> → today's date folder (e.g. ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>On e-commerce &amp; Temu Seller Center pages: each store gets its own colour; pulses during hunt/upload, turns green when done.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <div class="it zh-frame-setting-row" id="zhFrameColorRow">
+          <div class="l"><b>Border Shine Color</b><span>Custom colour and shine glow for the browser frame</span></div>
+          <div class="zh-frame-colors-ctrl">
+            <button type="button" class="zh-fcol-preset" data-color="rainbow" title="🌈 Colorful / Rainbow Spectrum"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#FF1E56" title="Cyber Red" style="background:#FF1E56;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#00F2FE" title="Electric Cyan" style="background:#00F2FE;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#10B981" title="Neon Emerald" style="background:#10B981;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#A855F7" title="Cyber Purple" style="background:#A855F7;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#FFB800" title="Gold Amber" style="background:#FFB800;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#EC4899" title="Hot Pink" style="background:#EC4899;"></button>
+            <button type="button" class="zh-fcol-preset" data-color="#3B82F6" title="Royal Blue" style="background:#3B82F6;"></button>
+            <label class="zh-fcol-picker-label" title="Pick Custom Color">
+              <input type="color" id="zhFrameColorPicker" value="#FF1E56">
+            </label>
+          </div>
+        </div>
+        <div class="it zh-frame-setting-row" id="zhFrameStyleRow">
+          <div class="l"><b>Border Thickness &amp; Glow</b><span>Frame thickness, brightness and moving animation</span></div>
+          <div class="zh-frame-controls-stack">
+            <div class="zh-frame-sub-row">
+              <span class="zh-sub-lbl">⚡ Moving / Animated Border:</span>
+              <label class="sw-wrap">
+                <input type="checkbox" id="zhFrameMovingToggle">
+                <span class="sw"></span>
+              </label>
+            </div>
+            <div class="zh-frame-sub-row" id="zhFrameMovingStyleRow">
+              <span class="zh-sub-lbl">🎆 Moving Style:</span>
+              <div class="seg zh-seg-sm">
+                <button type="button" class="zh-style-btn active" data-style="laser">⚡ Laser</button>
+                <button type="button" class="zh-style-btn" data-style="dual">💫 Dual</button>
+                <button type="button" class="zh-style-btn" data-style="wave">🌊 Wave</button>
+              </div>
+            </div>
+            <div class="zh-frame-sub-row" id="zhFrameSpeedRow">
+              <span class="zh-sub-lbl">⏱️ Speed: <b id="zhFrameSpeedVal" class="mono">3.5s</b></span>
+              <div class="zh-slider-wrap">
+                <span class="zh-slider-lbl">Fast</span>
+                <input type="range" id="zhFrameSpeedSlider" min="1.0" max="8.0" step="0.5" value="3.5">
+                <span class="zh-slider-lbl">Chill</span>
+              </div>
+            </div>
+            <div class="zh-frame-sub-row">
+              <span class="zh-sub-lbl">📐 Corners:</span>
+              <div class="seg zh-seg-sm">
+                <button type="button" class="zh-corner-btn active" data-corner="square">⏹️ Square</button>
+                <button type="button" class="zh-corner-btn" data-corner="round">🔲 Round</button>
+                <button type="button" class="zh-corner-btn" data-corner="curved">⚪ Curved</button>
+              </div>
+            </div>
+            <div class="zh-frame-sub-row">
+              <span class="zh-sub-lbl">📏 Thickness: <b id="zhFrameWidthVal" class="mono">5.5px</b></span>
+              <div class="zh-slider-wrap">
+                <span class="zh-slider-lbl">Thin</span>
+                <input type="range" id="zhFrameWidthSlider" min="2" max="10" step="0.5" value="5.5">
+                <span class="zh-slider-lbl">Bold</span>
+              </div>
+            </div>
+            <div class="zh-frame-sub-row">
+              <span class="zh-sub-lbl">✨ Glow: <b id="zhFrameBrightVal" class="mono">100%</b></span>
+              <div class="zh-slider-wrap">
+                <span class="zh-slider-lbl">Soft</span>
+                <input type="range" id="zhFrameBrightSlider" min="30" max="150" step="5" value="100">
+                <span class="zh-slider-lbl">Neon</span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="it"><div class="l"><b>Auto-skip duplicates</b><span>Uncheck tabs already in the Library</span></div><label class="sw-wrap"><input type="checkbox" data-setting="autoSkipDuplicates"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Sheet filename prefix</b></div><input class="inp" style="width:120px;font-family:var(--mono)" data-setting="bulkFilenamePrefix" maxlength="40" placeholder="zhunter_"></div>
       </div>

@@ -3145,9 +3145,13 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   try {
     if (message?.action === 'SCRAPE_PAGE') {
+      try { zhFrame('working', 'ZHunter · hunting…'); } catch (_) {}
       scrapePageData().then(data => {
+        const imgCount = (data?.images || []).length;
+        try { zhFrame('done', `ZHunter · ${imgCount} img ✓`); } catch (_) {}
         sendResponse({ success: true, data });
       }).catch(err => {
+        try { zhFrame('error', 'ZHunter · failed ✗'); } catch (_) {}
         sendResponse({
           success: false,
           error: err?.message || 'scrape_failed',
@@ -4719,3 +4723,346 @@ chrome.runtime.onMessage.addListener(message => {
     setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; setTimeout(() => el.remove(), 250); }, 2600);
   } catch (_) {}
 });
+
+// ══════════════════════════════════════════════════════════════
+// ZHunter Page Frame (Professional Coloured & Animated Border)
+// ══════════════════════════════════════════════════════════════
+const ZH_FRAME_COLORS = ['#22D3EE', '#34D399', '#A78BFA', '#F59E0B', '#60A5FA', '#2DD4BF', '#A3E635', '#818CF8', '#FBBF24', '#38BDF8'];
+const ZH_FRAME_HOSTS = /(^|\.)(amazon\.[a-z.]+|walmart\.com|samsclub\.com|ebay\.[a-z.]+|temu\.com|target\.com|costco\.com|homedepot\.com|aliexpress\.[a-z.]+|bestbuy\.com|lowes\.com|wayfair\.com|shein\.com|alibaba\.com|etsy\.com|faire\.com)$/i;
+
+function zhFrameColorFor(name) {
+  let h = 0;
+  for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return ZH_FRAME_COLORS[h % ZH_FRAME_COLORS.length];
+}
+
+let _zhFrameOn = true;
+let _zhFrameTimer = null;
+let _zhFrameCustomColor = '#FF1E56';
+let _zhFrameCustomWidth = 5.5;
+let _zhFrameCustomBrightness = 100;
+let _zhFrameCustomCorners = 'square';
+let _zhFrameMoving = false;
+let _zhFrameStyle = 'laser';
+let _zhFrameSpeed = 3.5;
+
+function zhFramePageOk() {
+  const h = location.hostname;
+  if (/^seller\.temu\.com$/i.test(h)) return true;
+  return ZH_FRAME_HOSTS.test(h);
+}
+
+function zhFramePlatform() {
+  const h = location.hostname;
+  if (/amazon\./i.test(h)) return { name: 'Amazon', color: '#F59E0B' };
+  if (/walmart\.com$/i.test(h)) return { name: 'Walmart', color: '#60A5FA' };
+  if (/samsclub\.com$/i.test(h)) return { name: "Sam's Club", color: '#38BDF8' };
+  if (/ebay\./i.test(h)) return { name: 'eBay', color: '#A78BFA' };
+  if (/temu\.com$/i.test(h)) return { name: 'Temu', color: '#FB923C' };
+  if (/target\.com$/i.test(h)) return { name: 'Target', color: '#FB7185' };
+  if (/costco\.com$/i.test(h)) return { name: 'Costco', color: '#818CF8' };
+  if (/homedepot\.com$/i.test(h)) return { name: 'Home Depot', color: '#FBBF24' };
+  if (/aliexpress\./i.test(h)) return { name: 'AliExpress', color: '#F472B6' };
+  if (/bestbuy\.com$/i.test(h)) return { name: 'Best Buy', color: '#FACC15' };
+  if (/lowes\.com$/i.test(h)) return { name: "Lowe's", color: '#2DD4BF' };
+  if (/wayfair\.com$/i.test(h)) return { name: 'Wayfair', color: '#C084FC' };
+  if (/shein\.com$/i.test(h)) return { name: 'SHEIN', color: '#F43F5E' };
+  return { name: 'Ready', color: '#22D3EE' };
+}
+
+function zhApplyFrameColors(f, hexColor) {
+  if (!f) return;
+  const col = hexColor || _zhFrameCustomColor || '#FF1E56';
+  const isRainbow = col === 'rainbow';
+  const isMoving = !!_zhFrameMoving;
+
+  f.classList.toggle('zh-rainbow', isRainbow);
+  f.classList.toggle('zh-moving', isMoving);
+
+  const w = parseFloat(_zhFrameCustomWidth) || 5.5;
+  const br = (parseFloat(_zhFrameCustomBrightness) || 100) / 100;
+  const speed = Math.max(0.8, Math.min(10, parseFloat(_zhFrameSpeed) || 3.5));
+
+  let rad = '0px';
+  if (_zhFrameCustomCorners === 'round') rad = '14px';
+  else if (_zhFrameCustomCorners === 'curved') rad = '28px';
+  f.style.setProperty('--zh-bradius', rad);
+  f.style.setProperty('--zh-bwidth', `${w}px`);
+  f.style.setProperty('--zh-bbright', br);
+  f.style.setProperty('--zh-anim-speed', `${speed}s`);
+
+  let beam = f.querySelector('#zh-frame-beam');
+  if (!beam) {
+    beam = document.createElement('div');
+    beam.id = 'zh-frame-beam';
+    f.prepend(beam);
+  }
+  beam.style.animationDuration = `${speed}s`;
+
+  const insetSpread = Math.round(18 * Math.pow(br, 1.5));
+  const outerSpread = Math.round(28 * Math.pow(br, 1.5));
+
+  let r = 255, g = 30, b = 86;
+  if (!isRainbow) {
+    const rgbMatch = col.match(/[0-9a-f]{2}/gi);
+    if (rgbMatch && rgbMatch.length >= 3) {
+      [r, g, b] = rgbMatch.slice(0, 3).map(x => parseInt(x, 16));
+    }
+  }
+  const col2 = `rgb(${Math.min(255, Math.round(r + (255 - r) * 0.45))}, ${Math.min(255, Math.round(g + (255 - g) * 0.45))}, ${Math.min(255, Math.round(b + (255 - b) * 0.45))})`;
+
+  let beamBg = col;
+  const styleMode = _zhFrameStyle || 'laser';
+
+  if (isMoving) {
+    if (isRainbow) {
+      if (styleMode === 'laser') {
+        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), transparent 0deg, transparent 130deg, #FF0055 180deg, #FFAA00 225deg, #00FF66 270deg, #00F2FE 315deg, #EC4899 350deg, #FFFFFF 360deg)';
+      } else if (styleMode === 'dual') {
+        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), #FFFFFF 0deg, #00F2FE 30deg, #00FF66 65deg, transparent 90deg, transparent 180deg, #FFFFFF 180deg, #FF0055 210deg, #FFAA00 245deg, transparent 270deg, transparent 360deg)';
+      } else {
+        beamBg = 'conic-gradient(from var(--zh-angle, 0deg), #FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899, #FF0055)';
+      }
+    } else {
+      if (styleMode === 'laser') {
+        beamBg = `conic-gradient(from var(--zh-angle, 0deg), transparent 0deg, transparent 150deg, rgba(${r},${g},${b},0.08) 200deg, rgba(${r},${g},${b},0.5) 280deg, ${col} 345deg, #FFFFFF 360deg)`;
+      } else if (styleMode === 'dual') {
+        beamBg = `conic-gradient(from var(--zh-angle, 0deg), #FFFFFF 0deg, ${col} 28deg, rgba(${r},${g},${b},0.15) 75deg, transparent 90deg, transparent 180deg, #FFFFFF 180deg, ${col2} 208deg, rgba(${r},${g},${b},0.15) 255deg, transparent 270deg, transparent 360deg)`;
+      } else {
+        beamBg = `conic-gradient(from var(--zh-angle, 0deg), ${col}, ${col2}, #FFFFFF, ${col2}, ${col}, ${col2}, #FFFFFF, ${col})`;
+      }
+    }
+  } else {
+    if (isRainbow) {
+      beamBg = 'conic-gradient(from 45deg, #FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899, #FF0055)';
+    } else {
+      beamBg = col;
+    }
+  }
+
+  f.style.setProperty('--zh-beam-bg', beamBg);
+  beam.style.background = beamBg;
+
+  const isSquare = (!_zhFrameCustomCorners || _zhFrameCustomCorners === 'square') && !isMoving;
+  f.querySelectorAll('.zh-corner').forEach(c => {
+    if (!isSquare) {
+      c.style.display = 'none';
+    } else {
+      c.style.display = 'block';
+      c.style.borderColor = col2;
+      c.style.borderRadius = '0px';
+      if (c.id === 'zh-frame-c-tl') c.style.borderWidth = `${w}px 0 0 ${w}px`;
+      else if (c.id === 'zh-frame-c-tr') c.style.borderWidth = `${w}px ${w}px 0 0`;
+      else if (c.id === 'zh-frame-c-bl') c.style.borderWidth = `0 0 ${w}px ${w}px`;
+      else if (c.id === 'zh-frame-c-br') c.style.borderWidth = `0 ${w}px ${w}px 0`;
+    }
+  });
+
+  const alpha1 = Math.min(0.95, Math.max(0.08, 0.65 * br)).toFixed(3);
+  const alpha2 = Math.min(0.85, Math.max(0.05, 0.45 * br)).toFixed(3);
+
+  if (isRainbow || (isMoving && styleMode === 'wave')) {
+    f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(0,242,254,${(0.55 * br).toFixed(2)}), 0 0 ${outerSpread}px rgba(255,0,85,${(0.55 * br).toFixed(2)})`;
+    f.style.filter = `drop-shadow(0 0 ${Math.round(10 * br)}px rgba(0,242,254,0.65)) drop-shadow(0 0 ${Math.round(18 * br)}px rgba(255,0,85,0.45)) brightness(${Math.min(1.6, 0.8 + 0.3 * br).toFixed(2)})`;
+  } else {
+    f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${outerSpread}px rgba(${r},${g},${b},${alpha2})`;
+    f.style.filter = `drop-shadow(0 0 ${Math.round(12 * br)}px rgba(${r},${g},${b},${alpha1})) brightness(${Math.min(1.6, 0.7 + 0.35 * br).toFixed(2)})`;
+  }
+}
+
+function zhFrame(state, label, color) {
+  try {
+    if (!_zhFrameOn || window.top !== window) return;
+    if (!zhFramePageOk()) return;
+    let f = document.getElementById('zh-frame');
+    if (state === 'off') { if (f) f.remove(); return; }
+    const col = color || (state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : _zhFrameCustomColor || '#22D3EE');
+    if (!f) {
+      f = document.createElement('div');
+      f.id = 'zh-frame';
+      f.innerHTML = '<div id="zh-frame-beam"></div><div id="zh-frame-c-tl" class="zh-corner"></div><div id="zh-frame-c-tr" class="zh-corner"></div><div id="zh-frame-c-bl" class="zh-corner"></div><div id="zh-frame-c-br" class="zh-corner"></div><div id="zh-frame-l"><span id="zh-frame-dot"></span><span id="zh-frame-t"></span></div>';
+      const st = document.createElement('style');
+      st.id = 'zh-frame-css';
+      st.textContent = `@property --zh-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
+@keyframes zhRotateFrame{to{--zh-angle:360deg}}
+#zh-frame{
+  position:fixed;inset:0;pointer-events:none !important;z-index:2147483646;box-sizing:border-box;
+  border:none !important;
+  border-radius:var(--zh-bradius,0px);
+  transition:border-radius .15s ease, box-shadow .12s ease;
+}
+#zh-frame-beam{
+  position:absolute;inset:0;border-radius:inherit;pointer-events:none !important;
+  padding:var(--zh-bwidth,5.5px);
+  background:var(--zh-beam-bg,var(--zh-bcol,#FF1E56));
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  transition:padding .15s ease,border-radius .15s ease;
+}
+#zh-frame.zh-moving #zh-frame-beam{
+  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
+}
+#zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot{animation-play-state:paused !important}
+#zh-frame:not(.zh-moving) #zh-frame-beam{
+  animation:zhBorderPulse 2.5s ease-in-out infinite alternate;
+}
+.zh-corner{position:absolute;width:24px;height:24px;border:solid var(--zh-bcol2,#FFB800);pointer-events:none !important;transition:all .25s ease;z-index:2}
+#zh-frame-c-tl{top:0;left:0;border-width:var(--zh-bwidth,5.5px) 0 0 var(--zh-bwidth,5.5px);border-top-left-radius:var(--zh-bradius,0px)}
+#zh-frame-c-tr{top:0;right:0;border-width:var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0 0;border-top-right-radius:var(--zh-bradius,0px)}
+#zh-frame-c-bl{bottom:0;left:0;border-width:0 0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px);border-bottom-left-radius:var(--zh-bradius,0px)}
+#zh-frame-c-br{bottom:0;right:0;border-width:0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0;border-bottom-right-radius:var(--zh-bradius,0px)}
+@keyframes zhBorderPulse{0%{opacity:0.82}100%{opacity:1.0}}
+#zh-frame.zh-working{border-color:#00F2FE !important;animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate}
+#zh-frame.zh-working .zh-corner{border-color:#00F2FE;filter:drop-shadow(0 0 12px #00F2FE)}
+#zh-frame.zh-done{border-color:#10B981 !important;box-shadow:inset 0 0 20px rgba(16,185,129,.7),0 0 24px rgba(52,211,153,.6);animation:none}
+#zh-frame.zh-done .zh-corner{border-color:#10B981;filter:drop-shadow(0 0 10px #10B981)}
+@keyframes zhFrameWorkingPulse{
+  from{filter:drop-shadow(0 0 8px #00F2FE);box-shadow:inset 0 0 16px rgba(0,242,254,.5),0 0 16px rgba(56,189,248,.5)}
+  to{filter:drop-shadow(0 0 16px #00F2FE) brightness(1.3);box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
+}
+#zh-frame-l{
+  position:absolute;left:16px;bottom:16px;display:none;align-items:center;gap:8px;
+  height:26px;padding:0 12px 0 9px;border-radius:6px;
+  background:rgba(8,14,26,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:#FFFFFF;font:700 11px/1 ui-monospace,monospace,sans-serif;
+  letter-spacing:0.5px;
+  border:1px solid rgba(255,184,0,.4);
+  box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 10px rgba(255,184,0,.25);
+  transition:all .3s ease;
+  z-index:3;
+  pointer-events:none !important;
+}
+#zh-frame.zh-working #zh-frame-l,#zh-frame.zh-done #zh-frame-l{display:inline-flex}
+#zh-frame.zh-working #zh-frame-l{border-color:rgba(0,242,254,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(0,242,254,.35)}
+#zh-frame.zh-done #zh-frame-l{border-color:rgba(16,185,129,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(16,185,129,.35)}
+#zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800;box-shadow:0 0 8px #FFB800}
+#zh-frame.zh-working #zh-frame-dot{background:#00F2FE;box-shadow:0 0 10px #00F2FE;animation:zhDot .8s ease-in-out infinite}
+#zh-frame.zh-done #zh-frame-dot{background:#10B981;box-shadow:0 0 8px #10B981}
+@keyframes zhDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.85)}}`;
+      (document.head || document.documentElement).appendChild(st);
+      (document.body || document.documentElement).appendChild(f);
+    }
+    f.classList.toggle('zh-working', state === 'working');
+    f.classList.toggle('zh-done', state === 'done' || state === 'error');
+    zhApplyFrameColors(f, _zhFrameCustomColor || col);
+    const t = f.querySelector('#zh-frame-t'); if (t) t.textContent = label || 'ZHunter';
+    f.title = label || 'ZHunter';
+    clearTimeout(_zhFrameTimer);
+    if (state === 'done' || state === 'error') {
+      _zhFrameTimer = setTimeout(() => { try { zhFrameIdle(); } catch (_) {} }, 6000);
+    }
+  } catch (_) {}
+}
+
+function zhFrameIdle() {
+  if (!_zhFrameOn || !zhFramePageOk()) {
+    const f = document.getElementById('zh-frame');
+    if (f) f.remove();
+    return;
+  }
+  if (/seller\.temu\.com$/i.test(location.hostname)) {
+    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
+    zhFrame('idle', mall ? `ZHunter · ${mall}` : 'ZHunter · Temu', zhFrameColorFor(mall || 'temu'));
+  } else {
+    const pf = zhFramePlatform();
+    zhFrame('idle', `ZHunter · ${pf.name}`, _zhFrameCustomColor || pf.color);
+  }
+}
+
+(function zhFrameBoot() {
+  try {
+    let _lastHref = location.href;
+    const _zhVis = () => {
+      try {
+        const f = document.getElementById('zh-frame');
+        if (f) f.classList.toggle('zh-paused', document.hidden);
+      } catch (_) {}
+    };
+    document.addEventListener('visibilitychange', _zhVis);
+    setInterval(() => {
+      _zhVis();
+      try {
+        if (location.href !== _lastHref) {
+          _lastHref = location.href;
+          zhFrameIdle();
+        } else if (_zhFrameOn && zhFramePageOk() && !document.getElementById('zh-frame')) {
+          zhFrameIdle();
+        }
+      } catch (_) {}
+    }, 4000);
+
+    chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
+      _zhFrameOn = x?.zhPageFrame !== false;
+      if (x?.zhFrameColor) _zhFrameCustomColor = x.zhFrameColor;
+      if (x?.zhFrameWidth != null) _zhFrameCustomWidth = x.zhFrameWidth;
+      if (x?.zhFrameBrightness != null) _zhFrameCustomBrightness = x.zhFrameBrightness;
+      if (x?.zhFrameCorners) _zhFrameCustomCorners = x.zhFrameCorners;
+      if (x?.zhFrameMoving != null) _zhFrameMoving = !!x.zhFrameMoving;
+      if (x?.zhFrameStyle) _zhFrameStyle = x.zhFrameStyle;
+      if (x?.zhFrameSpeed != null) _zhFrameSpeed = x.zhFrameSpeed;
+      if (_zhFrameOn) {
+        setTimeout(zhFrameIdle, 400);
+        setTimeout(zhFrameIdle, 2000);
+      }
+    });
+
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'local') {
+        if (ch.zhPageFrame) {
+          _zhFrameOn = ch.zhPageFrame.newValue !== false;
+          if (!_zhFrameOn) {
+            const f = document.getElementById('zh-frame');
+            if (f) f.remove();
+          } else {
+            zhFrameIdle();
+          }
+        }
+        if (ch.zhFrameColor) _zhFrameCustomColor = ch.zhFrameColor.newValue || '#FF1E56';
+        if (ch.zhFrameWidth != null) _zhFrameCustomWidth = ch.zhFrameWidth.newValue || 5.5;
+        if (ch.zhFrameBrightness != null) _zhFrameCustomBrightness = ch.zhFrameBrightness.newValue || 100;
+        if (ch.zhFrameCorners) _zhFrameCustomCorners = ch.zhFrameCorners.newValue || 'square';
+        if (ch.zhFrameMoving != null) _zhFrameMoving = !!ch.zhFrameMoving.newValue;
+        if (ch.zhFrameStyle) _zhFrameStyle = ch.zhFrameStyle.newValue || 'laser';
+        if (ch.zhFrameSpeed != null) _zhFrameSpeed = ch.zhFrameSpeed.newValue || 3.5;
+        if (ch.zhFrameColor || ch.zhFrameWidth || ch.zhFrameBrightness || ch.zhFrameCorners || ch.zhFrameMoving || ch.zhFrameStyle || ch.zhFrameSpeed) {
+          let f = document.getElementById('zh-frame');
+          if (!f && _zhFrameOn && zhFramePageOk()) {
+            zhFrameIdle();
+            f = document.getElementById('zh-frame');
+          }
+          if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
+        }
+      }
+    });
+
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.action === 'zhUpdateFrame') {
+        if (msg.enabled != null) {
+          _zhFrameOn = !!msg.enabled;
+          if (!_zhFrameOn) {
+            const f = document.getElementById('zh-frame');
+            if (f) f.remove();
+            return;
+          }
+        }
+        if (msg.width != null) _zhFrameCustomWidth = msg.width;
+        if (msg.brightness != null) _zhFrameCustomBrightness = msg.brightness;
+        if (msg.color != null) _zhFrameCustomColor = msg.color;
+        if (msg.corners != null) _zhFrameCustomCorners = msg.corners;
+        if (msg.moving != null) _zhFrameMoving = !!msg.moving;
+        if (msg.style != null) _zhFrameStyle = msg.style;
+        if (msg.speed != null) _zhFrameSpeed = msg.speed;
+
+        if (!_zhFrameOn) return;
+        let f = document.getElementById('zh-frame');
+        if (!f && zhFramePageOk()) {
+          zhFrameIdle();
+          f = document.getElementById('zh-frame');
+        }
+        if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
+      }
+    });
+  } catch (_) {}
+})();
+

@@ -1510,3 +1510,152 @@ body.compact-mode .row-quick-actions {
 .hunt-temu-note .i { width: 15px; height: 15px; flex-shrink: 0; color: var(--accent); }
 .hunt-temu-note b { color: var(--accent-ink); }
 
+/* ══════════════════════════════════════════════════════════════
+   Page Frame Settings Controls & Presets
+══════════════════════════════════════════════════════════════ */
+.zh-frame-setting-row {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+
+.zh-frame-colors-ctrl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 4px 0;
+}
+
+.zh-fcol-preset {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, border-color 0.18s ease;
+  position: relative;
+  outline: none;
+}
+.zh-fcol-preset:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.zh-fcol-preset.zh-fcol-active {
+  transform: scale(1.15);
+  border-color: #FFFFFF !important;
+  box-shadow: 0 0 0 3px rgba(255, 184, 0, 0.4), 0 0 14px rgba(255, 184, 0, 0.6) !important;
+}
+.zh-fcol-preset[data-color="rainbow"] {
+  background: linear-gradient(135deg, #FF0055 0%, #FFAA00 25%, #00FF66 50%, #00F2FE 75%, #7928CA 100%) !important;
+}
+
+.zh-fcol-picker-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  margin-left: 2px;
+}
+.zh-fcol-picker-label input[type="color"] {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.zh-fcol-picker-label input[type="color"]:hover {
+  transform: scale(1.1);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.zh-frame-controls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.zh-frame-sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.zh-sub-lbl {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.zh-sub-lbl .mono {
+  font-family: var(--mono);
+  color: var(--ink-1);
+  font-weight: 700;
+  margin-left: 3px;
+}
+
+.zh-seg-sm {
+  background: rgba(0, 0, 0, 0.35) !important;
+  padding: 2px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  display: inline-flex;
+  gap: 2px;
+}
+.zh-seg-sm button {
+  height: 24px !important;
+  padding: 0 9px !important;
+  font-size: 10.5px !important;
+  border-radius: 4px !important;
+  font-weight: 500;
+  background: transparent;
+  color: var(--ink-3);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.zh-seg-sm button:hover {
+  color: var(--ink-1);
+  background: rgba(255, 255, 255, 0.06);
+}
+.zh-seg-sm button.active {
+  background: var(--accent) !important;
+  color: #0b0f19 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+.zh-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  max-width: 175px;
+}
+.zh-slider-lbl {
+  font-size: 9.5px;
+  color: var(--ink-4);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.zh-slider-wrap input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 4px;
+  border-radius: 2px;
+}
+
