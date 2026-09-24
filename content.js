@@ -1072,55 +1072,32 @@ function scrapeAmazon() {
     if (w) r.price = `$${w}.${f}`;
   }
 
-  // ── TWO-TIER URL QUALITY STRATEGY ────────────────────────────────────────
-  //
-  // PROBLEM: Different Amazon JSON keys have different URL quality contracts:
-  //   "hiRes"  = true original upload URL (clean or has modifier, always best)
-  //   "large"  = bounded-size URL (e.g. ._SL1500_.) guaranteed by Amazon CDN
-  //   "thumb"  = tiny thumbnail URL
-  //
-  // WRONG approach (caused the bug): stripping modifier from ALL sources.
-  //   For "hiRes" → strip modifier → clean URL → Amazon serves ORIGINAL ✅
-  //   For "large" → strip modifier → clean URL → Amazon may serve DEFAULT
-  //                 size (e.g. 500px) which is WORSE than the original _SL1500_ ❌
-  //
-  // CORRECT approach: different treatment per source:
-  //   "hiRes"  → strip modifier → clean URL → original upload quality
-  //   "large"  → replace modifier with _SL1500_ → guaranteed 1500px
-  //   "thumb"  → replace modifier with _SL1500_ → guaranteed 1500px
-  //   raw scan → replace modifier with _SL1500_ → guaranteed 1500px
-  //
-  // This way: products where ALL images have hiRes → original quality for all.
-  //           Products where SOME images have hiRes=null → 1500px for those.
-
-  // For hiRes source: strip modifier entirely → original upload quality
-  function cleanHiRes(url) {
+  // ── Amazon Auto-Crop 1500px Strategy ────────────────────────────────────
+  // Amazon product images: use _AC_SL1500_ (Auto-Crop 1500px).
+  // Amazon's _AC_ automatically detects and crops out excess white margins around the product,
+  // framing the item tightly and sharply at 1500px HD resolution (identical to right-click saving).
+  function toAmazonAutoCrop(url) {
     if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
-    return url.replace(/\._[A-Za-z0-9_,]+_\./g, '.');
-  }
-
-  // For large/thumb/fallback: replace modifier with _SL1500_ → guaranteed 1500px
-  // NOT stripping, because Amazon may not CDN-cache the original for these paths.
-  function upscaleTo1500(url) {
-    if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
-    return url.replace(/\._[A-Za-z0-9_,]+_\./g, '._SL1500_.');
+    let clean = url.split('?')[0];
+    clean = clean.replace(/(?:\._[A-Za-z0-9_.,-]+_\.?)+/g, '.');
+    return clean.replace(/(\.[a-zA-Z0-9]+)$/i, '._AC_SL1500_$1');
   }
 
   const seenKeys = new Set();
 
-  // Add image from hiRes source → original quality
+  // Add image from hiRes source → Auto-cropped 1500px HD quality
   function addHiResImg(url) {
-    const clean = cleanHiRes(url);
-    if (!clean) return;
-    const key = canonImageKey(clean);
+    const sized = toAmazonAutoCrop(url);
+    if (!sized) return;
+    const key = canonImageKey(sized);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
-    r.images.push(clean);
+    r.images.push(sized);
   }
 
-  // Add image from fallback source → 1500px quality
+  // Add image from fallback source → Auto-cropped 1500px HD quality
   function addFallbackImg(url) {
-    const sized = upscaleTo1500(url);
+    const sized = toAmazonAutoCrop(url);
     if (!sized) return;
     const key = canonImageKey(sized);
     if (seenKeys.has(key)) return;
