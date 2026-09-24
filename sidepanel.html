@@ -956,7 +956,18 @@
         <button id="bulkPasteClose" class="modal-close" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="bulk-paste-hint">Har line me ek link paste karein — extension supported URLs khud detect kar lega.</p>
+        <p class="bulk-paste-hint">Har line me ek link paste karein — ya Temu/ZHunter sheet (.xlsx/.csv) import karein for Store Copy.</p>
+        <div class="row-inline bulk-paste-import" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <button id="bulkPasteImportBtn" class="btn btn-ghost btn-xs" type="button" style="display:inline-flex;align-items:center;gap:4px;">
+            <svg style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Import sheet (.xlsx / .csv)
+          </button>
+          <input id="bulkPasteFile" type="file" accept=".xlsx,.xls,.csv,.tsv" style="display:none">
+          <span id="bulkPasteImportMsg" class="temu-inline-msg" style="font-size:11px;"></span>
+        </div>
+        <div id="bulkCopyRemoveWrap" class="row-inline" style="margin-bottom:8px;" hidden>
+          <input id="bulkCopyRemoveWords" class="inp" type="text" placeholder="Store Copy: remove words from titles (e.g. Brand, 12pk)" title="Words stripped from imported Temu titles during hunt">
+        </div>
         <textarea id="bulkPasteTextarea" class="inp inp-ta bulk-paste-ta" placeholder="https://www.amazon.com/dp/...&#10;https://www.walmart.com/ip/...&#10;https://www.temu.com/...&#10;..." spellcheck="false" autocomplete="off"></textarea>
         <!-- Live preview -->
         <div id="bulkPastePreview" class="bulk-paste-preview hidden">

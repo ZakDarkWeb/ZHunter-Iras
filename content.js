@@ -1142,8 +1142,27 @@ function scrapeAmazon() {
       '[\\s\\S]{0,600}?' + q + 'large' + q + '\\s*:\\s*' + q + '(https?:\\/\\/[^"\\\\]+)' + q +
       '(?:[\\s\\S]{0,40}?' + q + 'main' + q + '\\s*:\\s*\\{([\\s\\S]{0,4000}?)\\})?', 'g');
     for (const script of document.querySelectorAll('script')) {
-      const t = script.textContent || '';
+      let t = script.textContent || '';
       if (!t.includes('colorImages') && !t.includes('ImageBlockATF')) continue;
+      // v10.3.1 BUG FIX: variation products (Color: White / Yellow / ...) have images for ALL variants in script.
+      // Strictly slice to 'initial' (current selected variant) array so variants don't mix.
+      try {
+        const ci = t.indexOf('colorImages');
+        if (ci >= 0) {
+          const ii = t.indexOf('initial', ci);
+          const ab = ii >= 0 ? t.indexOf('[', ii) : -1;
+          if (ab >= 0 && ab - ii < 20) {
+            let depth = 0, end = -1;
+            for (let i = ab; i < t.length && i < ab + 400000; i++) {
+              const ch = t[i];
+              if (ch === '[') depth++;
+              else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } }
+            }
+            if (end > ab) t = t.slice(ab, end + 1);
+          }
+        }
+      } catch (_) {}
+      re.lastIndex = 0;
       let m;
       while ((m = re.exec(t)) !== null) {
         const hiRes = m[1] === 'null' ? null : m[1].replace(/^\\?"|\\?"$/g, '');
@@ -1161,7 +1180,13 @@ function scrapeAmazon() {
     }
     return out;
   }
-  const entries = amazonEntriesFromScripts();
+  let entries = amazonEntriesFromScripts();
+  // Sanity check: if page has landingImage and it does not match extracted entries, script is for wrong variant → fallback to DOM gallery
+  try {
+    const li = document.getElementById('landingImage');
+    const liKey = li ? canonImageKey(li.getAttribute('data-old-hires') || li.src || '') : '';
+    if (liKey && entries.length && !entries.some(e => canonImageKey(e.hiRes || e.best || '') === liKey)) entries = [];
+  } catch (_) {}
   entries.forEach(e => { if (e.hiRes) addHiResImg(e.hiRes); else addFallbackImg(e.best); });
 
   // ── DOM gallery fallback: one url per <img>, best candidate only ───────

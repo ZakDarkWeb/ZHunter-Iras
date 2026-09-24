@@ -4320,6 +4320,108 @@ function onQueueAddUrl() {
     }
   }
 
+  // ── Store Copy & Sheet Metadata ──────────────────────────────
+  const SHEET_META_KEY = 'zhunterSheetMeta';
+  let _sheetMetaCache = null;
+  async function sheetMetaFor(url) {
+    try {
+      if (!_sheetMetaCache) _sheetMetaCache = await new Promise(res => chrome.storage.local.get(SHEET_META_KEY, x => res(x?.[SHEET_META_KEY] || {})));
+      let key; try { key = new URL(url).href.split('#')[0].toLowerCase(); } catch (_) { return null; }
+      return _sheetMetaCache[key] || null;
+    } catch (_) { return null; }
+  }
+  window.sheetMetaFor = sheetMetaFor;
+
+  function parseTemuStoreExport(rows) {
+    const hi = rows.findIndex(r => r.some(c => /^product name$/i.test(c)) && r.some(c => /^contribution goods$/i.test(c)));
+    if (hi < 0) return null;
+    const h = rows[hi].map(c => c.toLowerCase().trim());
+    const col = re => h.findIndex(c => re.test(c));
+    const cTitle = col(/^product name$/), cGoods = col(/^contribution goods$/), cGid = col(/^goods id$/), cVar = col(/^variation$/), cPrice = col(/^base price$/), cCat = col(/^category$/), cQty = col(/^quantity$/), cStatus = col(/^status$/);
+    const out = [], seen = new Set();
+    rows.slice(hi + 1).forEach(r => {
+      const title = r[cTitle] || ''; const goods = r[cGoods] || ''; if (!title || !goods) return;
+      const sid = goods.replace(/^[A-Za-z]{1,8}-/, '').trim();
+      let url = '', alt = '';
+      if (cGid >= 0 && /^\d{12,}$/.test(r[cGid] || '')) url = `https://www.temu.com/goods.html?goods_id=${r[cGid]}`;
+      if (/^[A-Z0-9]{10}$/.test(sid) && /^B0/.test(sid)) alt = `https://www.amazon.com/dp/${sid}`;
+      else if (/^\d{6,13}$/.test(sid)) alt = `https://www.walmart.com/ip/${sid}`;
+      if (!url) url = alt;
+      if (!url || seen.has(url)) return; seen.add(url);
+      out.push({ url, alt, title, sid, goodsId: cGid >= 0 ? r[cGid] : '', color: cVar >= 0 ? r[cVar] : '', price: cPrice >= 0 ? String(r[cPrice]).replace(/[^\d.]/g, '') : '',
+        cat: cCat >= 0 ? String(r[cCat]).split('/').pop().trim() : '', qty: cQty >= 0 ? r[cQty] : '', status: cStatus >= 0 ? r[cStatus] : '' });
+    });
+    return out;
+  }
+  window.parseTemuStoreExport = parseTemuStoreExport;
+
+  async function importStoreCopy(list, fileName, say) {
+    const meta = {};
+    list.forEach(it => { let key; try { key = new URL(it.url).href.split('#')[0].toLowerCase(); } catch (_) { return; }
+      meta[key] = { title: it.title, price: it.price, color: it.color, cat: it.cat, goodsId: it.goodsId, alt: it.alt || '', copy: true }; });
+    const old = await new Promise(res => chrome.storage.local.get(SHEET_META_KEY, x => res(x?.[SHEET_META_KEY] || {})));
+    const merged = { ...old, ...meta }; const keys = Object.keys(merged); if (keys.length > 5000) keys.slice(0, keys.length - 5000).forEach(k => delete merged[k]);
+    await new Promise(res => chrome.storage.local.set({ [SHEET_META_KEY]: merged }, res));
+    _sheetMetaCache = null;
+    const ta = $('bulkPasteTextarea'); if (ta) { ta.value = list.map(i => i.url).join('\n'); ta.dispatchEvent(new Event('input', { bubbles: true })); }
+    const rw = $('bulkCopyRemoveWrap'); if (rw) rw.hidden = false;
+    const nt = list.filter(i => /temu\.com/.test(i.url)).length, no = list.length - nt;
+    if (typeof say === 'function') say(`✓ Store Copy: ${list.length} products (${fileName}) — ${nt} Temu live page se (exact copy: edited images/title)${no ? `, ${no} source page se` : ''}. Queue mein add ho gaye — Bulk → "Hunt all" dabayen. Base price / variation / category Temu sheet se.`, 'ok');
+    try { renderBulkPastePreview(parsePastedLinks()); } catch (_) {}
+    try { document.querySelector('[data-tab="bulk"]')?.click(); } catch (_) {}
+    try { await addBulkPastedLinks(); } catch (_) {}
+    toast(`Store Copy: ${list.length} products queue mein — ab Bulk mein "Hunt all" dabayen, phir Temu Export`, 'ok');
+  }
+  window.importStoreCopy = importStoreCopy;
+
+  async function importLinksSheet(file) {
+    const m = $('bulkPasteImportMsg'); const say = (t, k) => { if (m) { m.textContent = t; m.className = 'temu-inline-msg' + (k ? ' ' + k : ''); } };
+    try {
+      say('⏳ Sheet parh raha hoon…');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }).map(r => (r || []).map(c => String(c ?? '').trim()));
+      if (!rows.length) { say('✗ Sheet khali hai', 'bad'); return; }
+      {
+        const sc = parseTemuStoreExport(rows);
+        if (sc) {
+          if (!sc.length) { say('✗ Temu export mein koi product nahi (Contribution Goods khali?)', 'bad'); return; }
+          await importStoreCopy(sc, file.name, say);
+          return;
+        }
+      }
+      const ncol = Math.max(...rows.map(r => r.length));
+      const cnt = Array(ncol).fill(0);
+      rows.forEach(r => r.forEach((c, i) => { if (/^https?:\/\//i.test(c)) cnt[i]++; }));
+      const urlCol = cnt.indexOf(Math.max(...cnt));
+      if (cnt[urlCol] === 0) { say('✗ Sheet mein koi link column nahi mila', 'bad'); return; }
+      const headerIdx = rows.findIndex(r => r.some(c => /^https?:\/\//i.test(c))) - 1;
+      const header = headerIdx >= 0 ? rows[headerIdx].map(c => c.toLowerCase()) : [];
+      const findCol = (re) => header.findIndex(c => re.test(c));
+      let titleCol = findCol(/tit|name|product/), priceCol = findCol(/price|cost|\$/);
+      if (titleCol < 0) {
+        const len = Array(ncol).fill(0); rows.forEach(r => r.forEach((c, i) => { if (i !== urlCol && !/^https?:/i.test(c) && !/^[\d.,$]+$/.test(c)) len[i] += c.length; })); titleCol = len.indexOf(Math.max(...len)); if (len[titleCol] === 0) titleCol = -1;
+      }
+      if (priceCol < 0) {
+        const num = Array(ncol).fill(0); rows.forEach(r => r.forEach((c, i) => { if (i !== urlCol && /^\$?\d+(\.\d{1,2})?$/.test(c) && parseFloat(c) > 0 && parseFloat(c) < 100000 && !/^\d{1,4}$/.test(c)) num[i]++; })); priceCol = num.indexOf(Math.max(...num)); if (num[priceCol] === 0) priceCol = -1;
+      }
+      const meta = {}; const links = [];
+      rows.forEach(r => {
+        const u = r[urlCol]; if (!/^https?:\/\//i.test(u)) return;
+        let key; try { key = new URL(u).href.split('#')[0].toLowerCase(); } catch (_) { return; }
+        links.push(u.split('#')[0]);
+        meta[key] = { title: titleCol >= 0 ? r[titleCol] : '', price: priceCol >= 0 ? r[priceCol].replace(/[^\d.]/g, '') : '' };
+      });
+      const old = await new Promise(res => chrome.storage.local.get(SHEET_META_KEY, x => res(x?.[SHEET_META_KEY] || {})));
+      const merged = { ...old, ...meta }; const keys = Object.keys(merged); if (keys.length > 5000) keys.slice(0, keys.length - 5000).forEach(k => delete merged[k]);
+      await new Promise(res => chrome.storage.local.set({ [SHEET_META_KEY]: merged }, res));
+      const ta = $('bulkPasteTextarea'); if (ta) { ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + links.join('\n'); ta.dispatchEvent(new Event('input', { bubbles: true })); }
+      say(`✓ ${links.length} links (${file.name})${titleCol >= 0 ? ' · title' : ''}${priceCol >= 0 ? ' · price fallback' : ''}`, 'ok');
+      renderBulkPastePreview(parsePastedLinks());
+    } catch (e) { say('✗ ' + (e?.message || e), 'bad'); }
+  }
+
   // Wire up listeners after DOM ready
   document.addEventListener('DOMContentLoaded', () => {
     $('queueBulkPasteBtn')?.addEventListener('click', openBulkPasteModal);
@@ -4327,6 +4429,8 @@ function onQueueAddUrl() {
     $('bulkPasteCancelBtn')?.addEventListener('click', closeBulkPasteModal);
     $('bulkPastePreviewBtn')?.addEventListener('click', () => renderBulkPastePreview(parsePastedLinks()));
     $('bulkPasteAddBtn')?.addEventListener('click', addBulkPastedLinks);
+    $('bulkPasteImportBtn')?.addEventListener('click', () => $('bulkPasteFile')?.click());
+    $('bulkPasteFile')?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) importLinksSheet(f); e.target.value = ''; });
     // Close on backdrop click
     $('bulkPasteModal')?.addEventListener('click', e => { if (e.target === $('bulkPasteModal')) closeBulkPasteModal(); });
     // Auto-preview on typing (debounced)
@@ -4435,11 +4539,13 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     return await scrapeQueueItem(queueItem, workerTabId);
   }
 
+  const sMeta = await sheetMetaFor(queueItem.url);
   const resultItem = {
     tabId: fakeId,
     url: scraped?.url || queueItem.url,
     title: scraped?.title || queueItem.title || queueItem.url,
-    price: scraped?.price || '',
+    price: scraped?.price || sMeta?.price || '',
+    copy: sMeta?.copy ? sMeta : null,
     platform: typeof queueItem.platform === 'string' ? queueItem.platform : (queueItem.platform?.name || 'Other'),
     images: scraped?.images || [], imagesBase64: [],
     videos: scraped?.videos || [], variants: scraped?.variants || [],
@@ -4449,6 +4555,17 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     error: status === 'fail' ? (errorCode || 'no_response') : '',
     scrapedAt: new Date().toISOString()
   };
+  if (resultItem.copy) {
+    const cp = resultItem.copy; let t = cp.title || resultItem.title;
+    const extra = String($('bulkCopyRemoveWords')?.value || '').split(',').map(w => w.trim()).filter(Boolean);
+    extra.forEach(w => { t = t.replace(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi'), ' '); });
+    resultItem.title = t.replace(/\s+/g, ' ').trim();
+    if (cp.price) resultItem.temuBase = cp.price;
+    if (cp.color) resultItem.copyColor = cp.color;
+    if (cp.cat) resultItem.copyCat = cp.cat;
+    resultItem.copyGoodsId = cp.goodsId || '';
+    if (status === 'fail' && resultItem.title) { resultItem.status = 'partial'; resultItem.error = ''; }
+  }
   BulkState.results.push(resultItem);
   if (status !== 'fail') BulkState.pendingFlush.push(resultItem);
 
@@ -7024,6 +7141,7 @@ async function parseImportFile(file) {
     const pick = (...keys) => { for (const k of keys) { const v = r[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim(); } return ''; };
     const url = pick('url', 'Link', 'link', 'URL', 'Product Link', 'Soursing link', 'Sourcing link');
     if (!/^https?:\/\//i.test(url)) return null;
+    const basePx = pick('Base Price', 'base', 'temuBase', 'BasePrice', 'price', 'Price');
     return {
       id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       title: pick('title', 'Product Title', 'Title', 'name') || url,
@@ -7031,7 +7149,8 @@ async function parseImportFile(file) {
       brand: pick('brand', 'Brand'), color: pick('color', 'Color', 'Variant'),
       weight: pick('weight', 'Weight'), dimL: pick('dimL', 'Length'), dimW: pick('dimW', 'Width'), dimH: pick('dimH', 'Height'),
       bullets: Array.isArray(r.bullets) ? r.bullets : String(pick('bullets', 'Bullet Points')).split(' | ').filter(Boolean),
-      price: pick('price', 'Price', 'Scraped Price'),
+      price: pick('price', 'Price', 'Scraped Price') || basePx,
+      temuBase: basePx || pick('price', 'Price', 'Scraped Price'),
       labelCost: pick('labelCost', 'Sourcing Price', 'Label Cost'), listPrice: pick('listPrice', 'List Price'),
       description: pick('description', 'Description'), tags: pick('tags', 'Tags'), variants: pick('variants', 'Variants'),
       imageCount: Number(pick('imageCount', 'Images')) || 0, videoCount: Number(pick('videoCount', 'Videos')) || 0,
@@ -9099,9 +9218,18 @@ function temuEnrich(rows, cfg) {
 
     // variation: smart (Color / Quantity / Weight / Capacity / Size / fallback) — see temuSmartVariation
     const variation = temuSmartVariation(title, r.color, cfg, prof, sid);
-    const vtype = variation.type, color = variation.value;
+    let vtype = variation.type, color = variation.value;
+    if (r.copyColor) { color = String(r.copyColor).trim(); vtype = 'Color'; } // Store Copy override
 
-    const [base, list] = temuPrice(r.price, cfg);
+    let [base, list] = temuPrice(r.price, cfg);
+    if (r.temuBase) {
+      const tb = parseFloat(String(r.temuBase).replace(/[$,]/g, ''));
+      if (isFinite(tb) && tb > 0) {
+        base = Math.round(tb * 100) / 100;
+        list = Math.round(base * (cfg.list_price_multiplier || 1.25) * 100) / 100;
+        if (cfg.price_round_to_99 !== false) list = Math.floor(list) + 0.99;
+      }
+    }
     const goods = `${cfg.sku_prefix}-${sid}`;
     const vsfx = color.replace(/[^A-Za-z0-9]+/g, '') || 'Std';
     let sku = `${goods}-${vsfx}`;
@@ -9111,11 +9239,18 @@ function temuEnrich(rows, cfg) {
     const num = (v, def) => { const x = parseFloat(v); return isFinite(x) && x > 0 ? Math.round(x * 10) / 10 : def; };
     const images = (Array.isArray(r.images) ? r.images : []).filter(u => /^https?:\/\//.test(u) && /\.(jpe?g|png)(\?|$)/i.test(u)).slice(0, cfg.max_sku_images);
 
+    if (r.copyCat && !profName) {
+      const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) =>
+        String(p.category_keyword || '').toLowerCase() === String(r.copyCat).toLowerCase());
+      if (hit) { profName = hit[0]; prof = hit[1]; }
+      else prof = { category_keyword: r.copyCat };
+    }
+
     const warn = [];
     if (!images.length) warn.push('NO_IMAGES');
     if (!brand) warn.push('NO_BRAND_MATCH');
     if (base === null) warn.push('NO_PRICE');
-    if (!profName) warn.push('NO_CATEGORY_PROFILE');
+    if (!profName && !r.copyCat) warn.push('NO_CATEGORY_PROFILE');
 
     // weight: profile → title (smart) → scraped (0.1–8 lb) → global default; > max → skip
     let weight = (prof.weight_lb != null) ? prof.weight_lb : null, wsrc = weight != null ? 'profile' : '';
@@ -9496,6 +9631,18 @@ function temuParseTemuFile(buf) {
 async function temuImportSheet(file) {
   const rep = $('temuReport');
   const name = (file.name || '').toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv')) {
+    try {
+      const buf2 = await file.arrayBuffer(); const wb2 = XLSX.read(buf2, { type: 'array' }); const ws2 = wb2.Sheets[wb2.SheetNames[0]];
+      const rows2 = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: '' }).map(r => (r || []).map(c => String(c ?? '').trim()));
+      const sc = (typeof parseTemuStoreExport === 'function') ? parseTemuStoreExport(rows2) : null;
+      if (sc) {
+        if (!sc.length) { if (rep) rep.textContent = '✗ Temu export mein koi product nahi'; return; }
+        await importStoreCopy(sc, file.name, (t) => { if (rep) rep.textContent = t + '\n\nAgla qadam: Bulk tab → "Hunt all" dabayen → wapas Temu Export → "Export + Upload to Temu".'; });
+        return;
+      }
+    } catch (_) {}
+  }
   if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
     const buf = await file.arrayBuffer();
     const items = temuParseTemuFile(buf);
@@ -9507,9 +9654,7 @@ async function temuImportSheet(file) {
       if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = `Temu file — ${file.name} (${items.length}) · as-is`; } sel.value = 'sheet'; }
       { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${items.length} as listed`; } }
       temuUpdateSrcInfo();
-      if (rep) rep.textContent = `✓ Temu file: ${file.name} — ${items.length} products (as-is, koi conversion nahi; already-listed skip bhi nahi).
-Store check karein, phir "Export + Upload to Temu".
-` + items.slice(0, 60).map(it => `${it.sku}  ${it.vtype}: ${it.color}  $${it.base}`).join('\n');
+      if (rep) rep.textContent = `✓ Temu file: ${file.name} — ${items.length} products (as-is, koi conversion nahi; already-listed skip bhi nahi).\nStore check karein, phir "Export + Upload to Temu".\n` + items.slice(0, 60).map(it => `${it.sku}  ${it.vtype}: ${it.color}  $${it.base}`).join('\n');
       toast(`Temu file ready — ${items.length} products, as-is upload`, 'ok');
       return;
     }
