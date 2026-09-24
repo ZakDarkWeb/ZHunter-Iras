@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-fx="full">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -212,7 +212,13 @@
           <button id="queueClearDoneBtn" class="btn btn-ghost btn-xs" type="button">Clear done</button>
           <button id="queueClearAllBtn" class="btn btn-ghost btn-xs btn-danger" type="button" style="margin-left:auto">Clear all</button>
         </div>
-        <div id="bulkQueueList" class="tbl"><div class="empty"><p>Nothing queued. Paste a link above or browse product pages with Auto-capture on.</p></div></div>
+        <div id="bulkQueueList" class="tbl">
+          <div class="empty">
+            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+            <h3>Nothing queued yet</h3>
+            <p>Paste product links above or browse pages with Auto-capture on.</p>
+          </div>
+        </div>
         <div class="summary" id="bulkQueueSummary"><span id="bulkQueueCount">0 queued</span><span id="bulkQueueEta"></span></div>
         <div class="card-actions">
           <button id="bulkQueueHuntBtn" class="btn btn-primary btn-lg rainbow" type="button" disabled><span class="bulk-main-text">Hunt these links</span></button>
@@ -301,7 +307,13 @@
             <button id="masterDeselectAllBtn" class="btn btn-ghost btn-xs" type="button">None</button>
           </div>
         </div>
-        <div id="masterRowsList" class="tbl"><div class="empty"><p>Nothing saved yet. Run a bulk hunt first.</p></div></div>
+        <div id="masterRowsList" class="tbl">
+          <div class="empty">
+            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></div>
+            <h3>Library is empty</h3>
+            <p>Nothing saved yet. Run a bulk hunt to start building your catalog.</p>
+          </div>
+        </div>
         <div class="batch-bar hidden" id="masterBulkBar">
           <div class="batch-bar-left">
             <svg class="i" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
