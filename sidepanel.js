@@ -3707,24 +3707,6 @@ function initGroqStudio() {
     if (badge) badge.textContent = model.includes('120b') ? 'gpt-oss-120b' : 'gpt-oss-20b';
   });
 
-  // Restore AI Studio collapse state
-  chrome.storage.local.get('aiStudioCollapsed', res => {
-    if (res?.aiStudioCollapsed) {
-      $('masterAiPromptBar')?.classList.add('collapsed');
-    }
-  });
-
-  const toggleAiCollapse = () => {
-    const bar = $('masterAiPromptBar');
-    if (!bar) return;
-    const isCollapsed = bar.classList.toggle('collapsed');
-    chrome.storage.local.set({ aiStudioCollapsed: isCollapsed });
-  };
-  $('aiCollapseBtn')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleAiCollapse();
-  });
-  $('aiBarHeader')?.addEventListener('click', toggleAiCollapse);
 
   $('saveGroqKeyBtn')?.addEventListener('click', async () => {
     const key = $('groqApiKeyInput')?.value?.trim() || '';

@@ -286,35 +286,6 @@
             <button type="button" class="filter-chip filter-chip-toggle" id="compactModeToggle" title="Toggle ultra-compact row height">🗜️ Compact</button>
           </div>
         </div>
-        <!-- ── AI Studio Prompt Bar ── -->
-        <div class="ai-prompt-bar" id="masterAiPromptBar">
-          <div class="ai-bar-header" id="aiBarHeader" title="Click to collapse / expand AI Studio">
-            <div class="ai-bar-header-left">
-              <span class="ai-bar-title"><svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> <b>AI Studio</b></span>
-              <span class="ai-bar-model-badge" id="aiActiveModelBadge" title="Fast Inference">gpt-oss-20b</span>
-            </div>
-            <button type="button" class="ai-collapse-btn" id="aiCollapseBtn" title="Minimize / Maximize AI Studio" aria-label="Toggle AI Studio">
-              <svg class="i ai-collapse-ico" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-          </div>
-          <div class="ai-bar-body" id="aiBarBody">
-            <div class="ai-input-row">
-              <input type="text" id="aiPromptInput" class="inp" placeholder="e.g. Remove brand, add 'Pack of 2', optimize for Temu..." />
-              <button type="button" id="aiApplyBtn" class="btn btn-primary btn-xs" title="Apply AI to selected or all products">⚡ Run AI</button>
-            </div>
-            <div class="ai-quick-actions">
-              <button type="button" class="ai-quick-btn" data-ai-action="clean-brand" title="Strip brand names, model numbers and promo buzzwords">🧹 Clean Brand</button>
-              <button type="button" class="ai-quick-btn" data-ai-action="seo-title" title="SEO Title: keyword-rich, concise, high CTR under 80 chars">🎯 SEO Title</button>
-              <button type="button" class="ai-quick-btn" data-ai-action="uppercase-words" title="Proper Title Case keywords">✨ Title Case</button>
-              <button type="button" class="ai-quick-btn" data-ai-action="temu-bullet" title="Temu compliant short title">📦 Temu Polish</button>
-              <button type="button" id="aiUndoBtn" class="ai-quick-btn undo-btn hidden" title="Revert last AI changes">↺ Undo</button>
-            </div>
-            <div id="aiStatusProgress" class="ai-progress-strip hidden">
-              <div class="ai-progress-bar"><div id="aiProgressBarFill" class="ai-progress-fill" style="width:0%"></div></div>
-              <span id="aiProgressText" class="ai-progress-text">Processing...</span>
-            </div>
-          </div>
-        </div>
         <div class="h" style="align-items:center;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="lbl" style="margin:0;">Saved products</span>
