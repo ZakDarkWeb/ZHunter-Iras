@@ -915,7 +915,7 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 .master-filter-chips { display: flex; flex-direction: column; gap: 6px; margin-bottom: 9px; width: 100%; box-sizing: border-box; }
 .filter-chips-scroll { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding-bottom: 1px; }
 .filter-chips-scroll::-webkit-scrollbar { display: none; }
-.filter-chips-tools { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.filter-chips-tools { display: flex; justify-content: flex-start; align-items: center; gap: 6px; }
 .filter-chip { padding: 3.5px 9px; font-size: 11px; font-weight: 500; background: var(--surface-2); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; flex-shrink: 0; }
 .filter-chip:hover { border-color: var(--accent); color: var(--ink); }
 .filter-chip.active { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #050816; border-color: transparent; font-weight: 700; box-shadow: 0 0 8px var(--accent-glow); }
