@@ -7808,60 +7808,61 @@ const results = await chrome.scripting.executeScript({
             return bare.replace(/\.(jpg|jpeg|png|webp|gif|avif)$/i, '._AC_SL1500_.$1');
           };
 
-          // ── Strategy 1: Simple Extension Logic (ImageBlockATF) ───────────────
+          // ── Strategy 1: Initial gallery array from scripts ───────────────────
           let foundInitial = false;
           for (let script of document.querySelectorAll('script:not([src])')) {
             const t = script.textContent || '';
-            if (t.includes('ImageBlockATF') && t.includes('initial')) {
-              try {
-                const hiResRegex = /"hiRes":"(https:\/\/[^"]+)"/g;
-                const largeRegex = /"large":"(https:\/\/[^"]+)"/g;
-                
-                let match;
-                let hiResCount = 0;
-                while ((match = hiResRegex.exec(t)) !== null) {
-                  addImg(match[1], false); // As requested, use exact hiRes URL
-                  hiResCount++;
+            if (!t.includes('colorImages') && !t.includes('ImageBlockATF')) continue;
+            try {
+              const ci = t.indexOf('colorImages');
+              const ii = ci >= 0 ? t.indexOf('initial', ci) : t.indexOf('initial');
+              const ab = ii >= 0 ? t.indexOf('[', ii) : -1;
+              if (ab >= 0 && ab - ii < 30) {
+                let depth = 0, end = -1;
+                for (let i = ab; i < t.length && i < ab + 400000; i++) {
+                  const ch = t[i];
+                  if (ch === '[') depth++;
+                  else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } }
                 }
-                
-                if (hiResCount > 0) {
-                  foundInitial = true;
-                  break;
+                if (end > ab) {
+                  const rawArr = t.slice(ab, end + 1);
+                  let items = null;
+                  try { items = JSON.parse(rawArr); } catch (_) {
+                    try { items = JSON.parse(rawArr.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } catch (_) {}
+                  }
+                  if (Array.isArray(items) && items.length) {
+                    items.forEach(it => {
+                      const url = (it.hiRes && it.hiRes !== 'null') ? it.hiRes : (it.large || (it.main && Object.keys(it.main)[0]) || null);
+                      if (url) addImg(amzUpgrade(url), false);
+                    });
+                    if (images.length > 0) {
+                      foundInitial = true;
+                      break;
+                    }
+                  }
                 }
-                
-                // If no hiRes, fallback to large
-                let largeCount = 0;
-                while ((match = largeRegex.exec(t)) !== null) {
-                  addImg(amzUpgrade(match[1]), false);
-                  largeCount++;
-                }
-                
-                if (largeCount > 0) {
-                  foundInitial = true;
-                  break;
-                }
-              } catch (e) {
-                console.error("Error parsing ImageBlockATF", e);
               }
+            } catch (e) {
+              console.error("Error parsing ImageBlockATF", e);
             }
           }
 
-          // ── Strategy 2: Simple Extension DOM Fallback ────────────────────────
+          // ── Strategy 2: Clean DOM Gallery Fallback (no duplicate thumbnails) ──
           if (!foundInitial) {
+            // First check landingImage
             const landingImage = document.getElementById('landingImage');
             if (landingImage) {
               const dataOldHires = landingImage.getAttribute('data-old-hires');
-              if (dataOldHires) addImg(dataOldHires, false);
-              else addImg(landingImage.src, false);
+              if (dataOldHires) addImg(amzUpgrade(dataOldHires), false);
+              else if (landingImage.src && !landingImage.src.startsWith('data:')) addImg(amzUpgrade(landingImage.src), false);
             }
-            
-            // Also look for alternate image thumbnails to extract their hi-res versions
-            const altImages = document.querySelectorAll('.a-button-thumbnail img, .imageThumbnail img');
+            // Next check thumbnails excluding videos
+            const altImages = document.querySelectorAll('#altImages li:not(.video-item) img, .imageThumbnail:not(.video-item) img');
             altImages.forEach(img => {
-              let src = img.src || '';
-              // Simple extension strips size tokens to get original
-              let hiResSrc = src.replace(/\._.*_\./, '.');
-              if (hiResSrc) addImg(hiResSrc, false);
+              if (img.closest('.video-item') || /play[-_]?button|video[-_]?thumbnail/i.test(img.src || '')) return;
+              const hires = img.getAttribute('data-old-hires') || img.getAttribute('data-zoom-image') || '';
+              if (hires) addImg(amzUpgrade(hires), false);
+              else if (img.src && !img.src.startsWith('data:')) addImg(amzUpgrade(img.src), false);
             });
           }
 

@@ -1125,17 +1125,37 @@ function scrapeAmazon() {
       // Strictly slice to 'initial' (current selected variant) array so variants don't mix.
       try {
         const ci = t.indexOf('colorImages');
-        if (ci >= 0) {
-          const ii = t.indexOf('initial', ci);
-          const ab = ii >= 0 ? t.indexOf('[', ii) : -1;
-          if (ab >= 0 && ab - ii < 20) {
-            let depth = 0, end = -1;
-            for (let i = ab; i < t.length && i < ab + 400000; i++) {
-              const ch = t[i];
-              if (ch === '[') depth++;
-              else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } }
+        const ii = ci >= 0 ? t.indexOf('initial', ci) : t.indexOf('initial');
+        const ab = ii >= 0 ? t.indexOf('[', ii) : -1;
+        if (ab >= 0 && ab - ii < 30) {
+          let depth = 0, end = -1;
+          for (let i = ab; i < t.length && i < ab + 400000; i++) {
+            const ch = t[i];
+            if (ch === '[') depth++;
+            else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } }
+          }
+          if (end > ab) {
+            const rawArr = t.slice(ab, end + 1);
+            let items = null;
+            try { items = JSON.parse(rawArr); } catch (_) {
+              try { items = JSON.parse(rawArr.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } catch (_) {}
             }
-            if (end > ab) t = t.slice(ab, end + 1);
+            if (Array.isArray(items) && items.length) {
+              items.forEach(it => {
+                const hiRes = (it.hiRes && it.hiRes !== 'null') ? it.hiRes : null;
+                let best = hiRes || it.large || null;
+                if (!best && it.main && typeof it.main === 'object') {
+                  let bestArea = 0;
+                  Object.entries(it.main).forEach(([u, dims]) => {
+                    const a = Array.isArray(dims) ? dims[0] * dims[1] : 0;
+                    if (a > bestArea) { bestArea = a; best = u; }
+                  });
+                }
+                if (hiRes || best) out.push({ hiRes, best: best || hiRes });
+              });
+              if (out.length) return out;
+            }
+            t = rawArr;
           }
         }
       } catch (_) {}
