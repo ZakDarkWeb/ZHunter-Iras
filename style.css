@@ -1659,3 +1659,159 @@ body.compact-mode .row-quick-actions {
   border-radius: 2px;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   DUAL-VIEW SWITCHER & DENSE MATRIX FOR LIBRARY SAVED PRODUCTS
+══════════════════════════════════════════════════════════════ */
+.zh-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--line-2, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.zh-view-btn {
+  background: transparent;
+  border: none;
+  color: var(--ink-3, #94a3b8);
+  font-family: var(--font, system-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+.zh-view-btn:hover {
+  color: var(--ink, #f8fafc);
+  background: rgba(255, 255, 255, 0.06);
+}
+.zh-view-btn.active {
+  background: var(--accent, #f97316);
+  color: #0b0f19 !important;
+  font-weight: 700;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Dense Matrix Mode for Library Saved Products */
+#masterRowsList.master-dense-view {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#masterRowsList.master-dense-view .master-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  min-height: 30px;
+  height: 30px;
+  border-radius: 5px;
+  animation: none;
+}
+
+#masterRowsList.master-dense-view .master-row::before {
+  top: 3px;
+  bottom: 3px;
+  width: 2.5px;
+}
+
+#masterRowsList.master-dense-view .master-row-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+#masterRowsList.master-dense-view .row-thumb-wrap {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+#masterRowsList.master-dense-view .row-thumb-img {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 3px;
+  cursor: zoom-in;
+}
+
+#masterRowsList.master-dense-view .master-row-info {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+#masterRowsList.master-dense-view .master-row-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+#masterRowsList.master-dense-view .star-btn {
+  font-size: 11px;
+  padding: 0;
+}
+
+#masterRowsList.master-dense-view .plat-pill {
+  font-size: 9.5px;
+  padding: 1px 4px;
+  height: 18px;
+  line-height: 16px;
+}
+
+#masterRowsList.master-dense-view .m-price {
+  font-size: 10px;
+  padding: 1px 4px;
+  height: 18px;
+  line-height: 16px;
+}
+
+#masterRowsList.master-dense-view .m-status {
+  font-size: 9px;
+  padding: 1px 3px;
+}
+
+#masterRowsList.master-dense-view .master-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  line-height: 24px;
+  -webkit-line-clamp: 1;
+}
+
+#masterRowsList.master-dense-view .master-row-meta {
+  display: none;
+}
+
+#masterRowsList.master-dense-view .row-acts,
+#masterRowsList.master-dense-view .row-quick-actions {
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+#masterRowsList.master-dense-view .row-act-btn,
+#masterRowsList.master-dense-view .row-quick-action-btn {
+  width: 20px;
+  height: 20px;
+}
+
+

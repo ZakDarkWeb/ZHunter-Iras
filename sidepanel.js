@@ -4123,6 +4123,14 @@ function initBulkTab() {
   $('masterSelectFailedBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterSelectByStatus('fail'); });
   $('masterSelectPartialBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterSelectByStatus('partial'); });
   $('masterDeselectAllBtn')?.addEventListener('click', (e) => { e.preventDefault(); masterDeselectAll(); });
+  document.querySelectorAll('#masterViewSwitcher .zh-view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const v = btn.dataset.view;
+      setMasterLibraryViewMode(v);
+      toast(v === 'dense' ? 'Dense Spreadsheet View active' : 'Card View active', 'ok');
+    });
+  });
   $('masterBulkDeleteBtn')?.addEventListener('click', bulkDeleteMasterRows);
   $('masterBulkCancelBtn')?.addEventListener('click', masterDeselectAll);
   $('masterBulkExportBtn')?.addEventListener('click', () => $('masterExportMenuBtn')?.click());
@@ -6390,9 +6398,32 @@ function filterAndRenderMasterRows() {
   renderMasterRows(rows);
 }
 
+function setMasterLibraryViewMode(view) {
+  const list = $('masterRowsList');
+  const switcher = $('masterViewSwitcher');
+  const isDense = (view === 'dense');
+  if (list) {
+    list.classList.toggle('master-dense-view', isDense);
+  }
+  if (switcher) {
+    switcher.querySelectorAll('.zh-view-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === (isDense ? 'dense' : 'card'));
+    });
+  }
+  localStorage.setItem('zh_lib_view', isDense ? 'dense' : 'card');
+}
+
 function renderMasterRows(rows) {
   const list = $('masterRowsList');
   if (!list) return;
+  const libView = localStorage.getItem('zh_lib_view') || 'card';
+  list.classList.toggle('master-dense-view', libView === 'dense');
+  const switcher = $('masterViewSwitcher');
+  if (switcher) {
+    switcher.querySelectorAll('.zh-view-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === libView);
+    });
+  }
   const panel = $('tab-library');
   const prevPanelScroll = panel ? panel.scrollTop : 0;
   const prevListScroll = list.scrollTop;

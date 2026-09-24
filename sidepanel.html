@@ -315,8 +315,14 @@
             </div>
           </div>
         </div>
-        <div class="h">
-          <span class="lbl">Saved products</span>
+        <div class="h" style="align-items:center;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="lbl" style="margin:0;">Saved products</span>
+            <div class="zh-view-switcher" id="masterViewSwitcher">
+              <button type="button" class="zh-view-btn active" data-view="card" title="Visual Cards View">▦ Cards</button>
+              <button type="button" class="zh-view-btn" data-view="dense" title="Dense Excel Matrix View">▤ Dense</button>
+            </div>
+          </div>
           <div class="h-actions">
             <button id="masterSelectAllBtn" class="btn btn-ghost btn-xs" type="button">All</button>
             <button id="masterSelectFailedBtn" class="btn btn-ghost btn-xs" type="button">Failed</button>
