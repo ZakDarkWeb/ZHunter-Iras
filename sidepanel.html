@@ -387,6 +387,8 @@
       <div class="set" id="spQuickSettings">
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Retries once with backoff on timeout/error</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Failed tabs always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>URLs only; Master ZIP won't include images. Hunt runs 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Every download (sheet, ZIP, images) goes to Downloads → <b>ZHunter Export</b> → today's date folder (e.g. ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Auto-skip duplicates</b><span>Uncheck tabs already in the Library</span></div><label class="sw-wrap"><input type="checkbox" data-setting="autoSkipDuplicates"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Sheet filename prefix</b></div><input class="inp" style="width:120px;font-family:var(--mono)" data-setting="bulkFilenamePrefix" maxlength="40" placeholder="zhunter_"></div>
       </div>

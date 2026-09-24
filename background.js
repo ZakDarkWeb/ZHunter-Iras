@@ -4,6 +4,24 @@
 // ============================================================
 'use strict';
 
+// Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
+let _zhExportFolder = true;
+try { chrome.storage.local.get('zhExportFolder', x => { _zhExportFolder = x?.zhExportFolder !== false; }); } catch (_) {}
+try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.zhExportFolder) _zhExportFolder = ch.zhExportFolder.newValue !== false; }); } catch (_) {}
+try {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    try {
+      const mine = item.byExtensionId === chrome.runtime.id || String(item.url || '').includes('chrome-extension://' + chrome.runtime.id) || String(item.referrer || '').startsWith('chrome-extension://' + chrome.runtime.id);
+      if (!_zhExportFolder || !mine) return;
+      const rel = String(item.filename || 'file').replace(/\\/g, '/').replace(/^\/+/, '');
+      if (/^ZHunter Export\//i.test(rel)) return;
+      const d = new Date(), pad = n => String(n).padStart(2, '0');
+      const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      suggest({ filename: `ZHunter Export/${day}/${rel}`, conflictAction: 'uniquify' });
+    } catch (_) {}
+  });
+} catch (_) {}
+
 // ── Local-only storage — cloud sync removed in v7.11.1
 // This avoids loading 500KB+ SDK files that block service worker startup
 // and cause bulk hunting failures. Pure fetch() works perfectly in MV3.
@@ -40,6 +58,7 @@ const SECRET_SETTING_KEYS = new Set([]); // no secrets since v7.12 (AI removed)
 const PUBLIC_SETTING_KEYS = new Set([
   'autoCategory', 'duplicateCheck', 'badgeEnabled', 'saveToCurrentFolder',
   'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup',
+  'bulkSkipImageDownload', 'zhExportFolder',
   'imageFormat', 'imageRatio', 'imageBg', 'imageMinSize', 'imageMax5MB',
   'bulkQueueAutoCapture', 'bulkSheetColumns', 'customBulkColumns',
   'temuConfig', 'temuTemplateB64', 'temuTemplateName',
@@ -175,6 +194,8 @@ const DEFAULT_DATA = {
     bulkFilenamePrefix:  'zhunter_',
     autoSkipDuplicates:  true,
     bulkAutoCloseTabs:   true,
+    bulkSkipImageDownload: false,
+    zhExportFolder:      true,
     bulkTabGroup:        true,        // v9.5.0: product tabs → one 'ZHunter' tab group
     imageFormat:         'jpg',        // 'original' | 'jpg' | 'png'
     imageRatio:          'original',

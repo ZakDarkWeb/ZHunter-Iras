@@ -3289,7 +3289,11 @@ function initSettingsPanel() {
       State.data.settings[k] = val;
       try {
         await msg({ action: 'UPDATE_SETTINGS', settings: patch });
-        toast('Setting saved', 'ok');
+        if (k === 'bulkSkipImageDownload') {
+          toast(val ? 'Fast mode ON — skip image downloads' : 'Fast mode OFF — download images', 'ok');
+        } else {
+          toast('Setting saved', 'ok');
+        }
       } catch (_) {}
 
       if (k.startsWith('showTab')) {
@@ -3303,6 +3307,17 @@ function initSettingsPanel() {
       el.addEventListener('change', handler);
     }
   });
+
+  const ef = $('zhExportFolderToggle');
+  if (ef) {
+    chrome.storage.local.get('zhExportFolder', x => {
+      ef.checked = x?.zhExportFolder !== false;
+    });
+    ef.addEventListener('change', () => {
+      chrome.storage.local.set({ zhExportFolder: ef.checked });
+      toast(ef.checked ? 'Downloads → ZHunter Export/<date>/' : 'Downloads → default folder', 'ok');
+    });
+  }
 
   function updateStorageDisplay() {
     const el = $('spStorageDesc');
@@ -4681,7 +4696,7 @@ async function startQueueHunt() {
   try {
     updateBulkProgressTitle('Hunting products', `Processing ${toHunt.length} queued links…`);
     await processQueueSequential(toHunt);
-    if (!BulkState.isCancelled) await imageDownloadPhase();
+    if (!BulkState.isCancelled && !isBulkFastMode()) await imageDownloadPhase();
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
   const flushDeadline = Date.now() + 10000;
@@ -4919,7 +4934,7 @@ async function startBulkHunt(tabsOverride) {
     await processSmartQueue(selectedTabs); // Phase 1: scrape all tabs
 
     // Phase 2: download images after all tabs scraped
-    if (!BulkState.isCancelled) {
+    if (!BulkState.isCancelled && !isBulkFastMode()) {
       await imageDownloadPhase();
     }
   } catch (e) {
@@ -5712,10 +5727,28 @@ async function scrapeOneTab(tabInfo) {
   updateBulkProgressBar();
 }
 
+// Helper: Determine if Fast Mode is active
+function isBulkFastMode() {
+  const el = $('zhFastModeToggle') || document.querySelector('[data-setting="bulkSkipImageDownload"]');
+  if (el) return !!el.checked;
+  return Boolean(State?.data?.settings?.bulkSkipImageDownload);
+}
+
 // ── Phase 2: Image Download (runs after all tabs scraped) ─────────────────
 async function imageDownloadPhase() {
   const pending = BulkState.results.filter(r => r.images?.length > 0 && r.status !== 'fail');
   if (!pending.length) return;
+
+  // Fast mode check: skip downloading base64 if Fast Mode is active
+  if (isBulkFastMode()) {
+    pending.forEach(r => {
+      r.imagesBase64 = [];
+      r.imgDlSkipped = true;
+      setBulkRowMeta(r.tabId, `${r.images.length} img URLs`);
+      setBulkRowStatus(r.tabId, r.status, { images: r.images.length, error: r.error });
+    });
+    return;
+  }
 
   updateBulkProgressTitle('Downloading images', `${pending.length} products — saving pictures`);
 
