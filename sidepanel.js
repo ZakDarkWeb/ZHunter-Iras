@@ -686,8 +686,38 @@ function initTabs() {
       if (id === 'links')   renderLinksTab();
       if (id === 'folders') renderFolderAccordion();
       if (id === 'export')  updateExportStats();
-      if (id === 'images')  scanPageImages();
+      if (id === 'images') {
+        const activeSub = document.querySelector('.hunt-sub-btn.active')?.dataset.sub;
+        if (activeSub === 'videos') {
+          if (typeof VidTabState !== 'undefined' && !VidTabState.videos.length && !VidTabState.isScanning) {
+            setTimeout(() => scanVideos(), 120);
+          }
+        } else {
+          scanPageImages();
+        }
+      }
       if (id === 'videos' && typeof VidTabState !== 'undefined' && !VidTabState.videos.length && !VidTabState.isScanning) {
+        setTimeout(() => scanVideos(), 120);
+      }
+    });
+  });
+  initHuntSubTabs();
+}
+
+// ── Hunt Sub-Tabs (Images | Videos) ──────────────────────────
+function initHuntSubTabs() {
+  document.querySelectorAll('.hunt-sub-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sub = btn.dataset.sub;
+      document.querySelectorAll('.hunt-sub-btn').forEach(b => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+      });
+      const imgPane = $('hunt-images-pane');
+      const vidPane = $('hunt-videos-pane');
+      if (imgPane) imgPane.hidden = (sub !== 'images');
+      if (vidPane) vidPane.hidden = (sub !== 'videos');
+      if (sub === 'videos' && typeof VidTabState !== 'undefined' && !VidTabState.videos.length && !VidTabState.isScanning) {
         setTimeout(() => scanVideos(), 120);
       }
     });

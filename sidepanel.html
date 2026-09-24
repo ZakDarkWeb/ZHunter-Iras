@@ -34,80 +34,98 @@
   <!-- ═══ HUNT (images + videos of the current page) ═══ -->
   <section id="tab-images" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-images">
     <div class="body">
-      <div class="h">
-        <span class="lbl">Images <span class="lbl-n" id="imgFoundCount">0</span></span>
-        <div class="h-actions">
+      <!-- ── Images / Videos sub-nav ── -->
+      <div class="hunt-subnav" role="tablist" aria-label="Hunt mode">
+        <button class="hunt-sub-btn active" data-sub="images" role="tab" aria-selected="true" aria-controls="hunt-images-pane">
+          <svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          Images
+          <span class="hunt-sub-count" id="imgFoundCount">0</span>
+        </button>
+        <button class="hunt-sub-btn" data-sub="videos" role="tab" aria-selected="false" aria-controls="hunt-videos-pane">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>
+          Videos
+          <span class="hunt-sub-count" id="vidFoundCount">0</span>
+        </button>
+      </div>
+
+      <!-- ── Images pane ── -->
+      <div id="hunt-images-pane" class="hunt-sub-pane" role="tabpanel">
+        <div class="h-actions h-actions-inline" style="justify-content:flex-end; margin-bottom:6px">
           <button id="imgSelectAllBtn" class="btn btn-ghost btn-xs" type="button">All</button>
           <button id="imgDeselectAllBtn" class="btn btn-ghost btn-xs" type="button">None</button>
           <button id="imgRefreshBtn" class="btn btn-ghost btn-xs" type="button" title="Re-scan page"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8M3 4v4h4M21 12a9 9 0 0 1-15.5 6.4L3 16M21 20v-4h-4"/></svg></button>
         </div>
-      </div>
-      <button id="imgHuntBtn" class="hunt-row rainbow" type="button">
-        <span class="hunt-row-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>
-        <span class="hunt-row-text"><b class="img-hunt-title">Hunt images</b><span class="img-hunt-sub">Collect every product image on this page</span></span>
-      </button>
-      <div id="imgFilterBar" class="img-filter-bar hidden">
-        <span class="img-filter-lbl">Size:</span>
-        <div class="img-filter-chips" id="imgFilterChips">
-          <button type="button" class="img-filter-chip active" data-min="0">All</button>
-          <button type="button" class="img-filter-chip" data-min="200">&ge; 200px</button>
-          <button type="button" class="img-filter-chip" data-min="500">HD (&gt; 500px)</button>
+        <button id="imgHuntBtn" class="hunt-row rainbow" type="button">
+          <span class="hunt-row-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>
+          <span class="hunt-row-text"><b class="img-hunt-title">Hunt images</b><span class="img-hunt-sub">Collect every product image on this page</span></span>
+        </button>
+        <div id="imgFilterBar" class="img-filter-bar hidden">
+          <span class="img-filter-lbl">Size:</span>
+          <div class="img-filter-chips" id="imgFilterChips">
+            <button type="button" class="img-filter-chip active" data-min="0">All</button>
+            <button type="button" class="img-filter-chip" data-min="200">&ge; 200px</button>
+            <button type="button" class="img-filter-chip" data-min="500">HD (&gt; 500px)</button>
+          </div>
         </div>
-      </div>
-      <div id="roleFilterBar" class="img-filter-bar hidden" style="margin-top:4px">
-        <span class="img-filter-lbl">Role:</span>
-        <div class="img-filter-chips">
-          <button type="button" class="role-chip img-filter-chip active" data-role="all">All <span class="lbl-n"></span></button>
-          <button type="button" class="role-chip img-filter-chip" data-role="hero">Hero <span class="lbl-n"></span></button>
-          <button type="button" class="role-chip img-filter-chip" data-role="gallery">Gallery <span class="lbl-n"></span></button>
-          <button type="button" class="role-chip img-filter-chip" data-role="variant">Variant <span class="lbl-n"></span></button>
-          <button type="button" class="role-chip img-filter-chip" data-role="lifestyle">Lifestyle <span class="lbl-n"></span></button>
-          <button type="button" class="role-chip img-filter-chip" data-role="unknown">Other <span class="lbl-n"></span></button>
+        <div id="roleFilterBar" class="img-filter-bar hidden" style="margin-top:4px">
+          <span class="img-filter-lbl">Role:</span>
+          <div class="img-filter-chips">
+            <button type="button" class="role-chip img-filter-chip active" data-role="all">All <span class="lbl-n"></span></button>
+            <button type="button" class="role-chip img-filter-chip" data-role="hero">Hero <span class="lbl-n"></span></button>
+            <button type="button" class="role-chip img-filter-chip" data-role="gallery">Gallery <span class="lbl-n"></span></button>
+            <button type="button" class="role-chip img-filter-chip" data-role="variant">Variant <span class="lbl-n"></span></button>
+            <button type="button" class="role-chip img-filter-chip" data-role="lifestyle">Lifestyle <span class="lbl-n"></span></button>
+            <button type="button" class="role-chip img-filter-chip" data-role="unknown">Other <span class="lbl-n"></span></button>
+          </div>
         </div>
-      </div>
-      <div id="imgGrid" class="img-grid">
-        <div class="empty" id="imgEmptyState">
-          <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
-          <h3 class="img-tab-empty-title">No product images yet</h3>
-          <p class="img-tab-empty-sub">Open a product page, then press Hunt images.</p>
+        <div id="imgGrid" class="img-grid">
+          <div class="empty" id="imgEmptyState">
+            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
+            <h3 class="img-tab-empty-title">No product images yet</h3>
+            <p class="img-tab-empty-sub">Open a product page, then press Hunt images.</p>
+          </div>
         </div>
+        <div id="imgScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
+        <div class="row-inline">
+          <select id="imgFormatSel" class="inp sel" aria-label="Image format">
+            <option value="original">Original</option>
+            <option value="png">PNG</option>
+            <option value="jpg" selected>JPG</option>
+          </select>
+          <button id="imgDownloadBtn" class="btn btn-primary" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Download selected</button>
+        </div>
+        <div id="imgStatusBar" class="status-inline"></div>
       </div>
-      <div id="imgScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
-      <div class="row-inline">
-        <select id="imgFormatSel" class="inp sel" aria-label="Image format">
-          <option value="original">Original</option>
-          <option value="png">PNG</option>
-          <option value="jpg" selected>JPG</option>
-        </select>
-        <button id="imgDownloadBtn" class="btn btn-primary" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Download selected</button>
-      </div>
-      <div id="imgStatusBar" class="status-inline"></div>
 
-      <div class="h" style="margin-top:6px">
-        <span class="lbl">Videos <span class="lbl-n" id="vidFoundCount">0</span></span>
-        <div class="h-actions">
+      <!-- ── Videos pane ── -->
+      <div id="hunt-videos-pane" class="hunt-sub-pane" hidden role="tabpanel">
+        <div class="hunt-temu-note">
+          <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+          <span>Videos are <b>not needed for Temu uploads</b> — you can skip this tab.</span>
+        </div>
+        <div class="h-actions h-actions-inline" style="justify-content:flex-end; margin-bottom:6px">
           <button id="vidSelectAllBtn" class="btn btn-ghost btn-xs" type="button">All</button>
           <button id="vidDeselectAllBtn" class="btn btn-ghost btn-xs" type="button">None</button>
           <button id="vidRefreshBtn" class="btn btn-ghost btn-xs" type="button" title="Re-scan page"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8M3 4v4h4M21 12a9 9 0 0 1-15.5 6.4L3 16M21 20v-4h-4"/></svg></button>
         </div>
-      </div>
-      <button id="vidHuntBtn" class="hunt-row rainbow" type="button">
-        <span class="hunt-row-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>
-        <span class="hunt-row-text"><b class="img-hunt-title">Hunt videos</b><span class="img-hunt-sub">MP4, HLS and YouTube on this page</span></span>
-      </button>
-      <div id="vidGrid" class="vid-grid">
-        <div class="empty" id="vidEmptyState">
-          <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></div>
-          <h3 class="img-tab-empty-title">No videos yet</h3>
-          <p class="img-tab-empty-sub">Open a product page with a video, then press Hunt videos.</p>
+        <button id="vidHuntBtn" class="hunt-row rainbow" type="button">
+          <span class="hunt-row-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>
+          <span class="hunt-row-text"><b class="img-hunt-title">Hunt videos</b><span class="img-hunt-sub">MP4, HLS and YouTube on this page</span></span>
+        </button>
+        <div id="vidGrid" class="vid-grid">
+          <div class="empty" id="vidEmptyState">
+            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></div>
+            <h3 class="img-tab-empty-title">No videos yet</h3>
+            <p class="img-tab-empty-sub">Open a product page with a video, then press Hunt videos.</p>
+          </div>
         </div>
+        <div id="vidScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
+        <div class="row-inline">
+          <button id="vidCopyAllBtn" class="btn btn-ghost" type="button">Copy URLs</button>
+          <button id="vidDownloadZipBtn" class="btn btn-primary" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Download all</button>
+        </div>
+        <div id="vidStatusBar" class="status-inline"></div>
       </div>
-      <div id="vidScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
-      <div class="row-inline">
-        <button id="vidCopyAllBtn" class="btn btn-ghost" type="button">Copy URLs</button>
-        <button id="vidDownloadZipBtn" class="btn btn-primary" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Download all</button>
-      </div>
-      <div id="vidStatusBar" class="status-inline"></div>
     </div>
   </section>
   <section id="tab-videos" class="tab-panel hidden" aria-hidden="true"></section>
