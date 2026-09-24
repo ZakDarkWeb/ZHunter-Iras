@@ -8096,53 +8096,17 @@ function renderImgGrid() {
   if (!images.length) {
     showImgEmpty();
     if (countEl) countEl.textContent = '0 images';
-    if (filterBar) filterBar.classList.add('hidden');
-    $('roleFilterBar')?.classList.add('hidden');
     return;
   }
-
-  if (filterBar) filterBar.classList.remove('hidden');
-  $('roleFilterBar')?.classList.remove('hidden');
-
-  const minSize    = ImgState.minSize || 0;
-  const roleFilter = ImgState.roleFilter || 'all';
 
   let visible = 0;
   const total = images.length;
 
-  // Update role chip counters
-  const roleCounts = {};
-  images.forEach(img => {
-    const r = img.role || 'unknown';
-    roleCounts[r] = (roleCounts[r] || 0) + 1;
-  });
-  document.querySelectorAll('#roleFilterBar .role-chip').forEach(chip => {
-    const role = chip.dataset.role;
-    if (role === 'all') {
-      const n = chip.querySelector('.lbl-n');
-      if (n) n.textContent = total;
-      chip.hidden = false;
-    } else {
-      const count = roleCounts[role] || 0;
-      const n = chip.querySelector('.lbl-n');
-      if (n) n.textContent = count;
-      chip.hidden = count === 0;
-    }
-  });
-
   images.forEach((img, idx) => {
-    const role = img.role || 'unknown';
-
-    // Role filter: skip if not matching
-    if (roleFilter !== 'all' && role !== roleFilter) return;
-
-    const isUnderSize = minSize > 0 && img.w && img.h && (img.w < minSize || img.h < minSize);
-
     const card = document.createElement('div');
     card.className = 'img-card' + (ImgState.selected.has(idx) ? ' selected' : '');
     card.dataset.idx = idx;
-    if (isUnderSize) card.style.display = 'none';
-    else visible++;
+    visible++;
 
     // Quality pill
     let qualityPill = '';
