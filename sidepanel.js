@@ -8103,6 +8103,7 @@ function renderImgGrid() {
   const total = images.length;
 
   images.forEach((img, idx) => {
+    const role = img.role || 'unknown';
     const card = document.createElement('div');
     card.className = 'img-card' + (ImgState.selected.has(idx) ? ' selected' : '');
     card.dataset.idx = idx;
