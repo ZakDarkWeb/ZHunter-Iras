@@ -2753,17 +2753,65 @@ function initLightbox() {
     });
   });
 
-  // Edit with Flow button
-  $('lightboxFlowBtn')?.addEventListener('click', () => {
-    if (!currentLightboxSrc) return;
-    const cleanTitle = (currentLightboxTitle || 'Product')
+  // Flow smart editor automation helper
+  async function triggerFlowEdit({ src, title, prompt }) {
+    if (!src) return;
+    const cleanTitle = (title || 'Product')
       .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
       .replace(/\s*[-–|].*$/, '')
       .trim();
-    const prompt = `High-end commercial studio product photography of ${cleanTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
-    navigator.clipboard.writeText(prompt).catch(() => {});
-    chrome.tabs.create({ url: 'https://flow.google.com', active: true });
-    toast('✓ Flow prompt copied! Opening Google Flow...', 'ok');
+    const flowPrompt = prompt || `High-end commercial studio product photography of ${cleanTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
+
+    toast('Preparing image & prompt for Flow…', 'info');
+
+    // Fetch base64 image data
+    let base64 = null;
+    try {
+      const resp = await msg({
+        action: 'FETCH_BASE64',
+        url: src,
+        settings: { imageFormat: 'original' }
+      });
+      if (resp?.success && resp.base64) base64 = resp.base64;
+    } catch (_) {}
+    if (!base64 && src.startsWith('data:')) base64 = src;
+
+    // Store action in chrome.storage.local for flow_automation.js
+    await new Promise(r => chrome.storage.local.set({
+      pendingFlowAction: {
+        productTitle: cleanTitle,
+        prompt: flowPrompt,
+        imgUrl: src,
+        imgBase64: base64,
+        timestamp: Date.now(),
+        processed: false
+      }
+    }, r));
+
+    // Also copy prompt to clipboard as fallback
+    navigator.clipboard.writeText(flowPrompt).catch(() => {});
+
+    // Check if a flow.google.com tab is already open (avoid creating duplicate tabs & projects)
+    const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+    if (tabs && tabs.length > 0) {
+      const targetTab = tabs[0];
+      await chrome.tabs.update(targetTab.id, { active: true });
+      try {
+        await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' });
+      } catch (_) {}
+      toast('✓ Flow tab focused — inserting into project session!', 'ok');
+    } else {
+      await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+      toast('✓ Opening Google Flow & automating project...', 'ok');
+    }
+  }
+
+  // Edit with Flow button
+  $('lightboxFlowBtn')?.addEventListener('click', () => {
+    triggerFlowEdit({
+      src: currentLightboxSrc,
+      title: currentLightboxTitle
+    });
   });
 
   window.addEventListener('keydown', (e) => {
@@ -10928,10 +10976,16 @@ function initTemuExport() {
       toast('Prompt copied + Gemini opened — image wahan attach karein!', 'ok');
     }
     if (e.target.closest('#temuFlowOpenBtn')) {
+      const modal = $('temuGeminiModal');
+      const imgUrl = modal?._currentImgUrl || $('temuGeminiPreviewImg')?.src || '';
       const prompt = $('temuGeminiPromptTxt')?.value || '';
-      navigator.clipboard.writeText(prompt).catch(() => {});
-      chrome.tabs.create({ url: 'https://flow.google.com', active: true });
-      toast('✓ Flow prompt copied! Opening Google Flow...', 'ok');
+      const activeTitle = $('temuModal')?.querySelector('.temu-rv-card:not(.hidden) .temu-rv-title-inp')?.value || 'Product';
+      triggerFlowEdit({
+        src: imgUrl,
+        title: activeTitle,
+        prompt: prompt
+      });
+      modal?.classList.add('hidden');
     }
 
     // History filter buttons

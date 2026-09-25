@@ -4557,15 +4557,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       });
 
-      lb.querySelector('#zh-lb-flow')?.addEventListener('click', () => {
+      lb.querySelector('#zh-lb-flow')?.addEventListener('click', async () => {
+        const u = images[currentIdx];
         const pageTitle = (document.title || 'Product').replace(/\s*[-–|].*$/, '').trim();
         const flowPrompt = `High-end commercial studio product photography of ${pageTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
         navigator.clipboard.writeText(flowPrompt).catch(() => {});
-        window.open('https://flow.google.com', '_blank');
+
+        let base64 = null;
+        try {
+          const resp = await new Promise(r => chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url: u, settings: { imageFormat: 'original' } }, r));
+          if (resp?.success && resp.base64) base64 = resp.base64;
+        } catch (_) {}
+
+        chrome.storage.local.set({
+          pendingFlowAction: {
+            productTitle: pageTitle,
+            prompt: flowPrompt,
+            imgUrl: u,
+            imgBase64: base64,
+            timestamp: Date.now(),
+            processed: false
+          }
+        }, () => {
+          chrome.runtime.sendMessage({ action: 'OPEN_OR_FOCUS_FLOW' });
+        });
+
         const btn = lb.querySelector('#zh-lb-flow');
         if (btn) {
           const orig = btn.textContent;
-          btn.textContent = '✓ Prompt Copied!';
+          btn.textContent = '✓ Flow Automated!';
           setTimeout(() => { btn.textContent = orig; }, 2000);
         }
       });

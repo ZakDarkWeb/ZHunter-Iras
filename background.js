@@ -1177,6 +1177,16 @@ async function handleMessage(msg, sender) {
       if (msg.all) return await bgGroupAllProductTabs(msg.windowId);
       return await bgGroupTabs(msg.tabIds || []);
     }
+    case 'OPEN_OR_FOCUS_FLOW': {
+      const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+      if (tabs && tabs.length > 0) {
+        await chrome.tabs.update(tabs[0].id, { active: true });
+        try { await chrome.tabs.sendMessage(tabs[0].id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
+      } else {
+        await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+      }
+      return { success: true };
+    }
     case 'STOP_KEEPALIVE':     stopKeepAlive();  return { success: true };
     case 'FETCH_BASE64': {
       const storedSettings = (await getData())?.settings || {};

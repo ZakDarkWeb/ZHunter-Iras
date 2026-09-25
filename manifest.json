@@ -77,6 +77,15 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://flow.google.com/*"
+      ],
+      "js": [
+        "flow_automation.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }
