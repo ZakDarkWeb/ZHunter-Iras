@@ -2710,6 +2710,7 @@ function openLightbox(src, title = '', imagesList = [], currentIdx = 0) {
   }
   if (link) link.href = src;
 
+  modal.style.zIndex = '5000';
   modal.classList.remove('hidden');
   modal.setAttribute('aria-hidden', 'false');
 }
@@ -10759,6 +10760,7 @@ function temuOpenGeminiModal(imgUrl, productTitle) {
   if (preview) preview.src = imgUrl;
   const defaultPrompt = `Professional commercial studio product photo of this item: "${productTitle}". Clean pure white background, soft diffused lighting, sharp focus, high resolution. Remove any watermarks, text overlays, or cluttered backgrounds. Keep the product exactly as-is, no changes to shape or color.`;
   if (promptTxt) promptTxt.value = defaultPrompt;
+  modal.style.zIndex = '2000';
   modal.classList.remove('hidden');
   // Store current img url for copy
   modal._currentImgUrl = imgUrl;
@@ -10776,7 +10778,7 @@ async function temuGetQueuedRows() {
 
 async function openTemuModal() {
   const m = $('temuModal'); if (!m) return;
-  m.style.zIndex = '99999';
+  m.style.zIndex = '1000';
   await temuMigrateLegacyIfNeeded();
   temuRenderStoreBar();
   temuUpdateTplStatus();
