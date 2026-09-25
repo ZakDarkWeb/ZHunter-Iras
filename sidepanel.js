@@ -9904,7 +9904,7 @@ async function temuRenderHistory() {
     el.innerHTML = `
       <div class="temu-hist-top">
         <div>
-          <div class="temu-hist-title">${esc(when)} · <span style="color:#f5a623">${esc(h.store || '—')}</span> · ${h.n} products</div>
+          <div class="temu-hist-title">${esc(when)} · <span style="color:var(--accent)">${esc(h.store || '—')}</span> · ${h.n} products</div>
           <div class="temu-hist-meta ${isOk ? 'ok' : (isBad ? 'bad' : '')}">
             ${esc(res)}${h.source ? ' · source: ' + esc(h.source) : ''}${h.skipped ? ' · ' + h.skipped + ' skipped' : ''}
           </div>
