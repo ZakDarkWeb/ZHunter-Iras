@@ -10806,7 +10806,11 @@ function initTemuExport() {
     if (e.target && e.target.id === 'temuSource') { 
       if (TemuLast?.asIs && e.target.value !== 'sheet') { TemuLast = null; const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; } 
       temuUpdateSrcInfo(); 
-      temuRenderAiTitles(); 
+      temuGetQueuedRows().then(rows => {
+        temuUpdateReviewCount(rows);
+        const rl = $('temuReviewList');
+        if (rl && !rl.classList.contains('hidden')) temuRenderReviewList(rows);
+      }).catch(() => {});
     }
     if (e.target && e.target.id === 'temuSheetFile') { const f = e.target.files?.[0]; if (f) temuImportSheet(f); e.target.value = ''; }
     if (e.target && e.target.id === 'temuCatTplFile') { const f = e.target.files?.[0]; if (f) temuImportTemplateCategory(f); e.target.value = ''; }
