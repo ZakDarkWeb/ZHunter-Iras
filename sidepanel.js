@@ -10468,6 +10468,253 @@ function temuSaveMsg(text, kind) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// ═══ Product Review Studio ═══
+// ═════════════════════════════════════════════════════════════════
+const TemuReviewExcluded = new Set(); // product IDs excluded from upload
+
+function temuUpdateReviewCount(rows) {
+  const countEl = $('temuReviewCount');
+  if (!countEl) return;
+  const included = rows.filter(r => !TemuReviewExcluded.has(r.id)).length;
+  countEl.textContent = `${included} / ${rows.length}`;
+}
+
+function _thumbUrl(r) {
+  if (Array.isArray(r.images) && r.images.length) {
+    if (typeof r.images[0] === 'string') return r.images[0];
+    if (r.images[0]?.url) return r.images[0].url;
+  }
+  return '';
+}
+
+function _allImgUrls(r) {
+  if (!Array.isArray(r.images)) return [];
+  return r.images.map(img => (typeof img === 'string' ? img : img?.url || '')).filter(Boolean);
+}
+
+async function temuRenderReview() {
+  const list = $('temuReviewList');
+  const countEl = $('temuReviewCount');
+  if (!list) return;
+  const rows = await temuGetQueuedRows();
+  if (countEl) temuUpdateReviewCount(rows);
+  if (list.classList.contains('hidden')) return; // collapsed — no render needed
+
+  if (!rows.length) {
+    list.innerHTML = '<div class="temu-review-empty">Koi products nahi — pehle hunt karein.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  rows.forEach((r, idx) => {
+    const thumb = _thumbUrl(r);
+    const allImgs = _allImgUrls(r);
+    const title = r.title || '';
+    const price = r.price ?? '';
+    const len = title.length;
+    const lenCls = len <= 60 ? 'ok' : len <= 80 ? 'warn' : 'over';
+    const excluded = TemuReviewExcluded.has(r.id);
+
+    const card = document.createElement('div');
+    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '');
+    card.dataset.idx = idx;
+    card.dataset.id = r.id || '';
+
+    // Image gallery HTML (compact, fixed height, horizontal scroll)
+    const imgHtml = allImgs.map((url, iIdx) => `
+      <div class="temu-rv-img-item">
+        <img src="${esc(url)}" class="temu-rv-img-thumb${iIdx === 0 ? ' main-img' : ''}" loading="lazy" alt="img${iIdx+1}" />
+        <div class="temu-rv-img-actions">
+          ${iIdx !== 0 ? `<button class="temu-rv-img-btn" data-action="setmain" data-iidx="${iIdx}" title="Set as main image">★</button>` : '<span class="temu-rv-img-main-lbl">Main</span>'}
+          <button class="temu-rv-img-btn danger" data-action="delimg" data-iidx="${iIdx}" title="Delete image">🗑</button>
+          <button class="temu-rv-img-btn gemini" data-action="gemini" data-iidx="${iIdx}" data-url="${esc(url)}" title="Edit in Gemini">🤖</button>
+        </div>
+      </div>
+    `).join('');
+
+    const imgSection = allImgs.length
+      ? `<div class="temu-rv-gallery-wrap"><div class="temu-rv-gallery">${imgHtml}</div></div>`
+      : `<div class="temu-rv-no-img">No images</div>`;
+
+    card.innerHTML = `
+      <div class="temu-rv-collapsed-row">
+        <label class="temu-rv-chk-wrap" title="Include in upload">
+          <input type="checkbox" class="temu-rv-chk" ${excluded ? '' : 'checked'} />
+        </label>
+        ${thumb ? `<img class="temu-rv-thumb" src="${esc(thumb)}" alt="" loading="lazy" />` : `<span class="temu-rv-thumb temu-rv-no-thumb">📦</span>`}
+        <span class="temu-rv-title-snippet">${esc(title.slice(0, 60))}${title.length > 60 ? '…' : ''}</span>
+        <span class="temu-rv-price-badge">${price ? '$' + price : '—'}</span>
+        <svg class="i temu-rv-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="temu-rv-expanded hidden">
+        <div class="temu-rv-fields">
+          <div class="temu-rv-field-group">
+            <label class="temu-lbl">Title</label>
+            <div class="temu-rv-title-row">
+              <input type="text" class="inp temu-rv-title-inp" value="${esc(title)}" placeholder="Product title..." />
+              <span class="temu-ai-char-badge ${lenCls}">${len}/60</span>
+              <button class="btn btn-ghost btn-xs temu-rv-ai-btn" title="AI Rewrite this title">⚡ AI</button>
+            </div>
+          </div>
+          <div class="temu-rv-field-group temu-rv-price-group">
+            <label class="temu-lbl">Price ($)</label>
+            <input type="text" class="inp temu-rv-price-inp" value="${esc(String(price))}" placeholder="0.00" inputmode="decimal" />
+          </div>
+        </div>
+        <div class="temu-rv-imgs-section">
+          <label class="temu-lbl">Images (${allImgs.length})</label>
+          ${imgSection}
+        </div>
+      </div>
+    `;
+
+    // Checkbox toggle
+    const chk = card.querySelector('.temu-rv-chk');
+    chk?.addEventListener('change', () => {
+      if (chk.checked) TemuReviewExcluded.delete(r.id);
+      else TemuReviewExcluded.add(r.id);
+      card.classList.toggle('excluded', !chk.checked);
+      temuUpdateReviewCount(rows);
+    });
+
+    // Title input live char count
+    const titleInp = card.querySelector('.temu-rv-title-inp');
+    const badge = card.querySelector('.temu-ai-char-badge');
+    titleInp?.addEventListener('input', e => {
+      const v = e.target.value; r.title = v;
+      const l = v.length;
+      badge.textContent = `${l}/60`;
+      badge.className = 'temu-ai-char-badge ' + (l <= 60 ? 'ok' : l <= 80 ? 'warn' : 'over');
+    });
+    titleInp?.addEventListener('change', async e => {
+      r.title = e.target.value;
+      if (MasterUIState?.allRows) {
+        const m = MasterUIState.allRows.find(x => x.id === r.id);
+        if (m) m.title = r.title;
+        await setMasterRows(MasterUIState.allRows);
+      }
+    });
+
+    // Price input save
+    const priceInp = card.querySelector('.temu-rv-price-inp');
+    priceInp?.addEventListener('change', async e => {
+      r.price = e.target.value;
+      if (MasterUIState?.allRows) {
+        const m = MasterUIState.allRows.find(x => x.id === r.id);
+        if (m) m.price = r.price;
+        await setMasterRows(MasterUIState.allRows);
+      }
+    });
+
+    // Per-product AI Rewrite
+    const aiBtn = card.querySelector('.temu-rv-ai-btn');
+    aiBtn?.addEventListener('click', async () => {
+      aiBtn.textContent = '⏳';
+      aiBtn.disabled = true;
+      try {
+        const instruction = 'Optimize for Temu seller catalog: remove all brand names, trademark signs, manufacturer models, and promotional buzzwords (HOT, NEW, SALE). Make the title concise, descriptive, high-converting, and strictly under 60 characters. Return ONLY the new title text, nothing else.';
+        const newTitle = await callGroqAPI({ prompt: `Instruction: ${instruction}\n\nProduct title: "${r.title || titleInp?.value || ''}"`, systemPrompt: 'You are a Temu e-commerce title optimizer. Return ONLY the new title text, no quotes, no explanation.' });
+        const cleaned = newTitle.trim().replace(/^["'`]|["'`]$/g, '');
+        if (cleaned && titleInp) {
+          titleInp.value = cleaned; r.title = cleaned;
+          const l = cleaned.length;
+          if (badge) { badge.textContent = `${l}/60`; badge.className = 'temu-ai-char-badge ' + (l <= 60 ? 'ok' : l <= 80 ? 'warn' : 'over'); }
+          if (MasterUIState?.allRows) {
+            const m = MasterUIState.allRows.find(x => x.id === r.id);
+            if (m) m.title = cleaned;
+            await setMasterRows(MasterUIState.allRows);
+          }
+          toast('Title rewritten ✓', 'ok');
+        }
+      } catch (err) { toast('AI error: ' + err.message, 'warn'); }
+      aiBtn.textContent = '⚡ AI'; aiBtn.disabled = false;
+    });
+
+    // Image action buttons (set main, delete, gemini)
+    card.querySelectorAll('.temu-rv-img-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const iIdx = parseInt(btn.dataset.iidx, 10);
+        if (action === 'setmain') {
+          if (!Array.isArray(r.images) || iIdx >= r.images.length) return;
+          const moved = r.images.splice(iIdx, 1)[0];
+          r.images.unshift(moved);
+          if (MasterUIState?.allRows) {
+            const m = MasterUIState.allRows.find(x => x.id === r.id);
+            if (m) m.images = r.images;
+            await setMasterRows(MasterUIState.allRows);
+          }
+          await temuRenderReview();
+        } else if (action === 'delimg') {
+          if (!Array.isArray(r.images) || r.images.length <= 1) { toast('Kam az kam ek image zaruri hai', 'warn'); return; }
+          r.images.splice(iIdx, 1);
+          if (MasterUIState?.allRows) {
+            const m = MasterUIState.allRows.find(x => x.id === r.id);
+            if (m) m.images = r.images;
+            await setMasterRows(MasterUIState.allRows);
+          }
+          await temuRenderReview();
+        } else if (action === 'gemini') {
+          const imgUrl = btn.dataset.url || '';
+          temuOpenGeminiModal(imgUrl, r.title || '');
+        }
+      });
+    });
+
+    // Expand/collapse on row click (not checkbox or buttons)
+    const collapsedRow = card.querySelector('.temu-rv-collapsed-row');
+    const expanded = card.querySelector('.temu-rv-expanded');
+    const chev = card.querySelector('.temu-rv-chev');
+    collapsedRow?.addEventListener('click', e => {
+      if (e.target.closest('.temu-rv-chk-wrap')) return;
+      expanded?.classList.toggle('hidden');
+      card.classList.toggle('open');
+      if (chev) chev.style.transform = card.classList.contains('open') ? 'rotate(180deg)' : '';
+    });
+
+    list.appendChild(card);
+  });
+}
+
+// Global review toggle
+function temuInitReviewToggle() {
+  const btn = $('temuReviewToggleBtn');
+  const list = $('temuReviewList');
+  const chev = btn?.querySelector('.temu-review-chev');
+  if (!btn || !list) return;
+  btn.addEventListener('click', async e => {
+    if (e.target.closest('.temu-sel-all-wrap')) return;
+    const isHidden = list.classList.toggle('hidden');
+    if (chev) chev.style.transform = isHidden ? '' : 'rotate(180deg)';
+    if (!isHidden) await temuRenderReview();
+  });
+  // Select All checkbox
+  const selAll = $('temuReviewSelectAll');
+  selAll?.addEventListener('change', async () => {
+    const rows = await temuGetQueuedRows();
+    TemuReviewExcluded.clear();
+    if (!selAll.checked) rows.forEach(r => TemuReviewExcluded.add(r.id));
+    temuUpdateReviewCount(rows);
+    if (!list.classList.contains('hidden')) await temuRenderReview();
+  });
+}
+
+// Gemini image open modal
+function temuOpenGeminiModal(imgUrl, productTitle) {
+  const modal = $('temuGeminiModal');
+  const preview = $('temuGeminiPreviewImg');
+  const promptTxt = $('temuGeminiPromptTxt');
+  if (!modal) return;
+  if (preview) preview.src = imgUrl;
+  const defaultPrompt = `Professional commercial studio product photo of this item: "${productTitle}". Clean pure white background, soft diffused lighting, sharp focus, high resolution. Remove any watermarks, text overlays, or cluttered backgrounds. Keep the product exactly as-is, no changes to shape or color.`;
+  if (promptTxt) promptTxt.value = defaultPrompt;
+  modal.classList.remove('hidden');
+  // Store current img url for copy
+  modal._currentImgUrl = imgUrl;
+}
+
+// ═════════════════════════════════════════════════════════════════
 // ═══ Temu AI Title Studio ═══
 // ═════════════════════════════════════════════════════════════════
 let TemuAiLastUndo = null;
@@ -10655,6 +10902,9 @@ async function openTemuModal() {
   temuSwitchTab('upload');
   temuRenderHistory();
   temuRenderAiTitles();
+  temuInitReviewToggle();
+  // Update review count on open
+  temuGetQueuedRows().then(rows => temuUpdateReviewCount(rows)).catch(() => {});
   // v9.7.2: purana Activity log wapas
   try { const rep = $('temuReport'); if (rep && !(rep.textContent || '').trim()) chrome.storage.local.get('temuReportText', x => { if (x?.temuReportText && rep && !(rep.textContent || '').trim()) rep.textContent = x.temuReportText; }); } catch (_) {}
   { const wp = $('temuActivityWrap'); if (wp) wp.open = false; }
@@ -10811,6 +11061,19 @@ function initTemuExport() {
     if (e.target.closest('#temuCatalogClose')) $('temuCatalogModal')?.classList.add('hidden');
     if (e.target.closest('#temuCatalogImportAllBtn')) temuImportAllCatalog();
     if (e.target.closest('#temuImportTplCatBtn')) $('temuCatTplFile')?.click();
+    // Gemini modal
+    if (e.target.closest('#temuGeminiClose')) $('temuGeminiModal')?.classList.add('hidden');
+    if (e.target.closest('#temuGeminiModal.modal-back') && !e.target.closest('.modal-box')) $('temuGeminiModal')?.classList.add('hidden');
+    if (e.target.closest('#temuGeminiCopyPromptBtn')) {
+      const txt = $('temuGeminiPromptTxt')?.value || '';
+      navigator.clipboard.writeText(txt).then(() => toast('Prompt copied! ✓', 'ok')).catch(() => { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Prompt copied!', 'ok'); });
+    }
+    if (e.target.closest('#temuGeminiOpenBtn')) {
+      const prompt = $('temuGeminiPromptTxt')?.value || '';
+      navigator.clipboard.writeText(prompt).catch(() => {});
+      chrome.tabs.create({ url: 'https://gemini.google.com/app', active: true });
+      toast('Prompt copied + Gemini opened — image wahan attach karein!', 'ok');
+    }
 
     // History filter buttons
     const hfBtn = e.target.closest('.temu-hist-fbtn');

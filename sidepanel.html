@@ -846,6 +846,25 @@
             <div id="temuSrcInfo" class="temu-src-info">—</div>
           </div>
 
+          <!-- ── Product Review Studio ── -->
+          <div class="temu-card temu-review-card" id="temuReviewCard">
+            <div class="temu-review-head" id="temuReviewToggleBtn">
+              <div class="temu-review-title">
+                <svg class="i" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                <b>Review &amp; Customize Products</b>
+                <span class="temu-review-count" id="temuReviewCount">0</span>
+              </div>
+              <div class="temu-review-head-right">
+                <label class="temu-sel-all-wrap" title="Select / Deselect All">
+                  <input type="checkbox" id="temuReviewSelectAll" checked />
+                  <span class="temu-sel-all-lbl">All</span>
+                </label>
+                <svg class="i temu-review-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+              </div>
+            </div>
+            <div id="temuReviewList" class="temu-review-list hidden"></div>
+          </div>
+
           <!-- ── Temu AI Title Studio ── -->
           <div class="temu-card temu-ai-card">
             <div class="temu-ai-head">
@@ -1154,6 +1173,34 @@
           <button id="temuCatalogImportAllBtn" class="btn btn-primary btn-xs" type="button">Import All 50+</button>
         </div>
         <div id="temuCatalogGrid" class="temu-catalog-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ GEMINI IMAGE PROMPT MODAL ═══ -->
+  <div id="temuGeminiModal" class="modal-back hidden">
+    <div class="modal-box temu-gemini-box">
+      <div class="modal-head">
+        <div class="temu-cat-picker-title">
+          <svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
+          <b>Edit Image in Gemini</b>
+        </div>
+        <button id="temuGeminiClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body temu-gemini-body">
+        <div class="temu-gemini-preview-wrap">
+          <img id="temuGeminiPreviewImg" class="temu-gemini-preview" src="" alt="Product image" />
+        </div>
+        <label class="temu-lbl" style="margin-top:12px;">Prompt (edit as needed before opening Gemini):</label>
+        <textarea id="temuGeminiPromptTxt" class="inp temu-gemini-prompt" rows="4" placeholder="Describe the edit you want..."></textarea>
+        <div class="temu-gemini-hint">Prompt copy karein, Gemini me image attach karein aur prompt paste karein.</div>
+        <div class="temu-gemini-actions">
+          <button id="temuGeminiCopyPromptBtn" class="btn btn-ghost btn-xs" type="button">📋 Copy Prompt</button>
+          <button id="temuGeminiOpenBtn" class="btn btn-primary" type="button">
+            <svg class="i" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Open in Gemini →
+          </button>
+        </div>
       </div>
     </div>
   </div>
