@@ -9081,12 +9081,23 @@ const TEMU_DEFAULT_CONFIG = {
   category_profiles: {
     golf_balls: { match: ['golf ball', 'golf balls', 'dozen balls', 'golf', 'chrome tour', 'chrome soft', 'pro v1', 'tp5', 'avx', 'velocity', 'supersoft', 'tour response', 'speedsoft', 'warbird', 'erc soft'], category_keyword: 'Standard Balls',
       keyword_attributes: 'Rubber, 14 Years+',
-      // v9.6.4: default White hata diya — variation ab title keyword (Tour/Soft/Distance/Premium…) ya rotation se aati hai
       attributes: { 'Material': 'Rubber', 'Applicable Age Group': '14 Years+' },
       weight_lb: 1.4, length_in: 7.5, width_in: 5.2, height_in: 1.5 },
     towels: { match: ['bath towel', 'hand towel', 'beach towel', 'washcloth', 'towel set'], exclude: ['paper towel', 'kitchen towel roll', 'shop towel'],
       category_keyword: 'Bath Towels',
-      weight_lb: 2.0, length_in: 12, width_in: 10, height_in: 4 }
+      weight_lb: 2.0, length_in: 12, width_in: 10, height_in: 4 },
+    swim_diapers: { match: ['swim diaper', 'swim diapers', 'swim pants', 'reusable swim diaper'],
+      category_keyword: 'Swim Diapers',
+      keyword_attributes: 'Waterproof, Polyester',
+      weight_lb: 0.8, length_in: 9, width_in: 7, height_in: 2 },
+    diapers: { match: ['baby diaper', 'baby diapers', 'diapers', 'pull-ups', 'training pants'],
+      category_keyword: 'Baby Diapers',
+      keyword_attributes: 'Cotton, Disposable',
+      weight_lb: 3.5, length_in: 14, width_in: 10, height_in: 8 },
+    disinfectant_wipes: { match: ['disinfectant wipe', 'disinfectant wipes', 'sanitizing wipes', 'surface wipes', 'antibacterial wipes', 'cleaning wipes'],
+      category_keyword: 'Disinfectant Wipes',
+      keyword_attributes: 'Bleach-free, Disposable',
+      weight_lb: 1.8, length_in: 8, width_in: 4.5, height_in: 4.5 }
   },
   colors: ['White','Red','Black','Yellow','Grey','Gray','Blue','Green','Purple','Orange','Pink','Brown','Navy Blue','Multi Color','Mixed Color','Neon'],
   smart_variations: true,
@@ -9744,30 +9755,205 @@ async function temuHistAdd(entry) {
   await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list.slice(0, 100) }, r));
   temuRenderHistory();
 }
+let TemuHistFilter = 'all';
+
 async function temuRenderHistory() {
   const box = $('temuHistList'); if (!box) return;
   const list = await temuHistGet();
   { const c = $('temuHistCount'); if (c) c.textContent = list.length ? String(list.length) : ''; }
-  box.innerHTML = '';
+
+  // 1. Calculate Today's Progress
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const dayNameDate = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const dateEl = $('temuTodayDate'); if (dateEl) dateEl.textContent = dayNameDate;
+
+  // Read saved daily target
+  let dailyTarget = 50;
+  try {
+    const res = await new Promise(r => chrome.storage.local.get('temuDailyTarget', r));
+    if (res?.temuDailyTarget) dailyTarget = parseInt(res.temuDailyTarget, 10) || 50;
+  } catch (_) {}
+  const dtInp = $('temuDailyTarget'); if (dtInp && document.activeElement !== dtInp) dtInp.value = dailyTarget;
+
+  const isToday = (t) => {
+    if (!t) return false;
+    return new Date(t).toISOString().slice(0, 10) === todayStr;
+  };
+
+  const listedMap = temuListedMap();
+  let todayListedCount = Object.values(listedMap).filter(x => x && x.d === todayStr).length;
+  
+  let todayUploadsCount = 0;
+  let todayErrorsCount = 0;
+  let uploadItemsToday = 0;
+
   for (const h of list) {
+    if (isToday(h.t)) {
+      if (h.kind === 'upload') {
+        if (h.confirmed) {
+          todayUploadsCount++;
+          uploadItemsToday += (h.added != null ? h.added : (h.items?.length || h.n || 0));
+        }
+        if (h.errors || !h.confirmed) todayErrorsCount += (h.errors || 1);
+      }
+    }
+  }
+
+  const finalListed = Math.max(todayListedCount, uploadItemsToday);
+  const remaining = Math.max(0, dailyTarget - finalListed);
+  const pct = Math.min(100, Math.round((finalListed / dailyTarget) * 100));
+
+  if ($('temuMetricListed')) $('temuMetricListed').textContent = String(finalListed);
+  if ($('temuMetricUploads')) $('temuMetricUploads').textContent = String(todayUploadsCount);
+  if ($('temuMetricErrors')) $('temuMetricErrors').textContent = String(todayErrorsCount);
+  if ($('temuMetricRemaining')) $('temuMetricRemaining').textContent = String(remaining);
+
+  const bar = $('temuProgressBar');
+  if (bar) bar.style.width = pct + '%';
+
+  const stat = $('temuProgressStatus');
+  if (stat) {
+    if (finalListed === 0) {
+      stat.textContent = 'Aaj abhi kuch listed nahi';
+    } else {
+      stat.textContent = `${finalListed} of ${dailyTarget} listed today (${pct}%)`;
+    }
+  }
+
+  // Last 7 days tracker
+  const weekBox = $('temuWeekDays');
+  if (weekBox) {
+    weekBox.innerHTML = '';
+    const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dStr = d.toISOString().slice(0, 10);
+      const isCur = i === 0;
+      const dayIdx = d.getDay();
+      const letter = dayLetters[dayIdx];
+
+      const dayUploads = list.filter(h => new Date(h.t).toISOString().slice(0, 10) === dStr);
+      const dayListed = Object.values(listedMap).filter(x => x && x.d === dStr).length;
+      const hasActivity = dayUploads.length > 0 || dayListed > 0;
+
+      const col = document.createElement('div');
+      col.className = 'temu-day-col' + (isCur ? ' today' : '');
+      col.innerHTML = `
+        <div class="temu-day-box${isCur ? ' today' : ''}">
+          ${hasActivity ? `<div class="temu-day-bar" style="height:${Math.min(100, Math.max(25, (dayListed || dayUploads.length) * 15))}%"></div>` : ''}
+        </div>
+        <span class="temu-day-lbl">${letter}</span>
+      `;
+      weekBox.appendChild(col);
+    }
+  }
+
+  // Populate Store Filter dropdown
+  const storeSel = $('temuHistStoreFilter');
+  if (storeSel) {
+    const curVal = storeSel.value;
+    const stores = Object.keys(temuStores());
+    list.forEach(h => { if (h.store && !stores.includes(h.store)) stores.push(h.store); });
+    storeSel.innerHTML = '<option value="">All Stores</option>' + stores.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    storeSel.value = curVal || '';
+  }
+
+  // 2. Filter records list
+  const search = ($('temuHistSearch')?.value || '').trim().toLowerCase();
+  const selectedStore = $('temuHistStoreFilter')?.value || '';
+
+  const filtered = list.filter(h => {
+    if (selectedStore && (h.store || '') !== selectedStore) return false;
+    if (TemuHistFilter === 'success') {
+      if (h.kind !== 'upload' || !h.confirmed || (h.errors && h.errors > 0)) return false;
+    } else if (TemuHistFilter === 'errors') {
+      if (!h.errors && h.confirmed) return false;
+    } else if (TemuHistFilter === 'file') {
+      if (h.kind !== 'export') return false;
+    }
+    if (search) {
+      const matchStore = (h.store || '').toLowerCase().includes(search);
+      const matchUpId = (h.uploadId || '').toLowerCase().includes(search);
+      const matchItems = (h.items || []).some(it => (it.sku || '').toLowerCase().includes(search) || (it.title || '').toLowerCase().includes(search));
+      if (!matchStore && !matchUpId && !matchItems) return false;
+    }
+    return true;
+  });
+
+  box.innerHTML = '';
+  if (!filtered.length) {
+    box.innerHTML = '<div class="temu-hist-empty">Koi matching Temu upload record nahi mila.</div>';
+    return;
+  }
+
+  for (const h of filtered) {
     const d = new Date(h.t);
-    const when = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const res = h.kind === 'export' ? 'Export file only (Temu par upload nahi hua)'
-      : h.kind === 'manual' ? 'Manually listed mark'
-      : h.confirmed ? `Upload confirmed${h.uploadId ? ' · ID ' + h.uploadId : ''}${h.added != null ? ` · ${h.added} added` : ''}${h.errors ? ` · ${h.errors} errors` : ''}`
-      : `Upload confirm NAHI hua${h.uploadId ? ' · ID ' + h.uploadId : ''}`;
+    const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isOk = h.kind === 'upload' ? (h.confirmed && !h.errors) : false;
+    const isBad = h.kind === 'upload' ? (!h.confirmed || h.errors > 0) : false;
+    
+    let res = h.kind === 'export' ? '📁 Export file only (Temu par upload nahi hua)'
+      : h.kind === 'manual' ? '✓ Manually listed mark'
+      : h.confirmed ? `✓ Upload confirmed${h.uploadId ? ' · ID ' + h.uploadId : ''}${h.added != null ? ` · ${h.added} added` : ''}${h.errors ? ` · ${h.errors} errors` : ''}`
+      : `✗ Upload confirm NAHI hua${h.uploadId ? ' · ID ' + h.uploadId : ''}`;
+
     const el = document.createElement('div');
     el.className = 'temu-hist';
-    el.innerHTML = `<div class="temu-hist-top"><div><div class="temu-hist-title">${esc(when)} · ${esc(h.store || '—')} · ${h.n} products</div><div class="temu-hist-meta ${h.kind === 'upload' ? (h.confirmed && !h.errors ? 'ok' : (h.confirmed ? '' : 'bad')) : ''}">${esc(res)}${h.source ? ' · source: ' + esc(h.source) : ''}${h.skipped ? ' · ' + h.skipped + ' skipped' : ''}</div></div>
-      <div class="temu-hist-acts"><button class="btn btn-ghost btn-xs" type="button" data-act="list">List</button><button class="btn btn-ghost btn-xs" type="button" data-act="csv">CSV</button></div></div>
-      <div class="temu-hist-list">${(h.items || []).map((it, i) => esc(`${i + 1}. ${it.sku || ''}  ${it.title || ''}`)).join('\n')}${(h.skippedList || []).length ? '\n\nSKIPPED (' + h.skippedList.length + '):\n' + h.skippedList.map(x => esc('• ' + x)).join('\n') : ''}</div>`;
+    el.innerHTML = `
+      <div class="temu-hist-top">
+        <div>
+          <div class="temu-hist-title">${esc(when)} · <span style="color:#f5a623">${esc(h.store || '—')}</span> · ${h.n} products</div>
+          <div class="temu-hist-meta ${isOk ? 'ok' : (isBad ? 'bad' : '')}">
+            ${esc(res)}${h.source ? ' · source: ' + esc(h.source) : ''}${h.skipped ? ' · ' + h.skipped + ' skipped' : ''}
+          </div>
+        </div>
+        <div class="temu-hist-acts">
+          <button class="btn btn-ghost btn-xs" type="button" data-act="list">List</button>
+          <button class="btn btn-ghost btn-xs" type="button" data-act="csv">CSV</button>
+        </div>
+      </div>
+      <div class="temu-hist-list">${(h.items || []).map((it, i) => esc(`${i + 1}. ${it.sku || ''}  ${it.title || ''}`)).join('\n')}${(h.skippedList || []).length ? '\n\nSKIPPED (' + h.skippedList.length + '):\n' + h.skippedList.map(x => esc('• ' + x)).join('\n') : ''}</div>
+    `;
+
     el.querySelector('[data-act="list"]').addEventListener('click', () => el.classList.toggle('open'));
     el.querySelector('[data-act="csv"]').addEventListener('click', () => {
       const lines = [['SKU', 'Title', 'URL', 'Base Price', 'Variation'].join(',')].concat((h.items || []).map(it => [it.sku, it.title, it.url, it.base, it.variation].map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')));
-      zhSaveBlob(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }), `temu_upload_${h.store || 'store'}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`);
+      zhSaveBlob(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }), `temu_upload_${h.store || 'store'}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`);
     });
+
     box.appendChild(el);
   }
+}
+
+async function temuExportAllHistoryCsv() {
+  const list = await temuHistGet();
+  if (!list.length) { toast('History khali hai', 'warn'); return; }
+  const allItems = [];
+  list.forEach(h => {
+    (h.items || []).forEach(it => {
+      allItems.push({
+        date: new Date(h.t).toISOString(),
+        store: h.store || '',
+        uploadId: h.uploadId || '',
+        status: h.confirmed ? 'Confirmed' : 'Failed',
+        sku: it.sku || '',
+        title: it.title || '',
+        url: it.url || '',
+        base: it.base || '',
+        variation: it.variation || ''
+      });
+    });
+  });
+  if (!allItems.length) { toast('Koi products history mein nahi hain', 'warn'); return; }
+  const headers = ['Date', 'Store', 'Upload ID', 'Status', 'SKU', 'Title', 'URL', 'Base Price', 'Variation'];
+  const lines = [headers.join(',')].concat(
+    allItems.map(it => [it.date, it.store, it.uploadId, it.status, it.sku, it.title, it.url, it.base, it.variation]
+      .map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(','))
+  );
+  zhSaveBlob(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }), `temu_all_history_${new Date().toISOString().slice(0, 10)}.csv`);
+  toast(`Exported ${allItems.length} records to CSV`, 'ok');
 }
 const temuHistItems = items => (items || []).map(it => ({ sku: it.sku, title: (it.title || '').slice(0, 120), url: it.url, base: it.base, variation: `${it.vtype || 'Color'}: ${it.color}` }));
 
@@ -9849,44 +10035,341 @@ async function temuSaveCfg(cfg) {
   return temuSaveStores(stores);
 }
 
+let TemuExpandedProfiles = new Set(['golf_balls']);
+
+const TEMU_CATALOG_PRESETS = [
+  { id: 'golf_balls', name: 'Golf Balls', cat: 'Standard Balls', match: ['golf ball', 'golf balls', 'dozen balls', 'golf', 'chrome tour', 'chrome soft', 'pro v1', 'tp5', 'avx', 'velocity', 'supersoft', 'tour response', 'speedsoft', 'warbird', 'erc soft'], attrs: 'Rubber, 14 Years+', w: 1.4, l: 7.5, wd: 5.2, h: 1.5 },
+  { id: 'towels', name: 'Towels', cat: 'Bath Towels', match: ['bath towel', 'hand towel', 'beach towel', 'washcloth', 'towel set'], exclude: ['paper towel', 'kitchen towel roll', 'shop towel'], attrs: '100% Cotton', w: 2.0, l: 12, wd: 10, h: 4 },
+  { id: 'swim_diapers', name: 'Swim Diapers', cat: 'Swim Diapers', match: ['swim diaper', 'swim diapers', 'swim pants', 'reusable swim diaper'], attrs: 'Waterproof, Polyester', w: 0.8, l: 9, wd: 7, h: 2 },
+  { id: 'diapers', name: 'Diapers', cat: 'Baby Diapers', match: ['baby diaper', 'baby diapers', 'diapers', 'pull-ups', 'training pants'], attrs: 'Cotton, Disposable', w: 3.5, l: 14, wd: 10, h: 8 },
+  { id: 'disinfectant_wipes', name: 'Disinfectant Wipes', cat: 'Disinfectant Wipes', match: ['disinfectant wipe', 'disinfectant wipes', 'sanitizing wipes', 'surface wipes', 'antibacterial wipes', 'cleaning wipes'], attrs: 'Bleach-free, Disposable', w: 1.8, l: 8, wd: 4.5, h: 4.5 },
+  { id: 'yoga_mats', name: 'Yoga Mats', cat: 'Yoga Mats', match: ['yoga mat', 'exercise mat', 'pilates mat', 'fitness mat', 'workout mat'], attrs: 'TPE, Non-slip', w: 2.5, l: 24, wd: 6, h: 6 },
+  { id: 'resistance_bands', name: 'Resistance Bands', cat: 'Resistance Bands', match: ['resistance band', 'exercise band', 'workout band', 'loop band', 'booty band'], attrs: 'Natural Latex, Elastic', w: 0.6, l: 8, wd: 6, h: 2 },
+  { id: 'water_bottles', name: 'Water Bottles', cat: 'Insulated Bottles', match: ['water bottle', 'sports bottle', 'stainless bottle', 'insulated tumbler', 'vacuum flask'], attrs: 'Stainless Steel, BPA Free', w: 1.1, l: 11, wd: 3.5, h: 3.5 },
+  { id: 'phone_cases', name: 'Phone Cases', cat: 'Phone Cases', match: ['phone case', 'silicone case', 'shockproof cover', 'iphone case', 'samsung case', 'clear case'], attrs: 'TPU Silicone, Shockproof', w: 0.2, l: 6.5, wd: 3.5, h: 0.6 },
+  { id: 'athletic_socks', name: 'Athletic Socks', cat: 'Athletic Socks', match: ['ankle socks', 'crew socks', 'athletic socks', 'running socks', 'cushioned socks'], attrs: 'Cotton Blend, Breathable', w: 0.5, l: 9, wd: 4, h: 2 },
+  { id: 'bed_sheets', name: 'Bed Sheets', cat: 'Bed Sheet Sets', match: ['bed sheet', 'fitted sheet', 'sheet set', 'flat sheet', 'bedspread'], attrs: 'Microfiber, Deep Pocket', w: 3.2, l: 12, wd: 10, h: 4 },
+  { id: 'pillowcases', name: 'Pillowcases', cat: 'Pillow Covers', match: ['pillowcase', 'pillow cover', 'throw pillow cover', 'cushion cover'], attrs: 'Linen Blend, Washable', w: 0.7, l: 8, wd: 6, h: 1.5 },
+  { id: 'kitchen_sponges', name: 'Kitchen Sponges', cat: 'Cleaning Sponges', match: ['kitchen sponge', 'scrub sponge', 'dish sponge', 'scouring pad', 'cleaning sponge'], attrs: 'Cellulose, Dual-sided', w: 0.4, l: 6, wd: 4, h: 3 },
+  { id: 'dog_toys', name: 'Dog Toys', cat: 'Pet Toys', match: ['dog toy', 'chew toy', 'squeaky toy', 'puppy toy', 'dog ball', 'rope toy'], attrs: 'Non-toxic Rubber', w: 0.9, l: 7, wd: 4, h: 3 },
+  { id: 'cat_toys', name: 'Cat Toys', cat: 'Cat Playthings', match: ['cat toy', 'cat teaser', 'catnip toy', 'scratcher toy', 'feather wand'], attrs: 'Plush, Catnip Infused', w: 0.3, l: 8, wd: 4, h: 2 },
+  { id: 'sunglasses', name: 'Sunglasses', cat: 'Fashion Sunglasses', match: ['sunglasses', 'polarized glasses', 'uv400 sunglasses', 'retro sunglasses', 'aviator glasses'], attrs: 'UV400, Polarized TAC', w: 0.3, l: 6.5, wd: 2.5, h: 2 },
+  { id: 'makeup_brushes', name: 'Makeup Brushes', cat: 'Cosmetic Brushes', match: ['makeup brush', 'foundation brush', 'eyeshadow brush', 'cosmetic brush set', 'blush brush'], attrs: 'Synthetic Hair, Aluminum', w: 0.5, l: 8, wd: 4, h: 2 },
+  { id: 'hair_clips', name: 'Hair Clips', cat: 'Hair Claws', match: ['hair claw', 'hair clip', 'hairpin', 'barrette', 'hair jaw', 'jaw clip'], attrs: 'Matte Acrylic, Strong Hold', w: 0.2, l: 5, wd: 3, h: 2 },
+  { id: 'coffee_mugs', name: 'Coffee Mugs', cat: 'Ceramic Mugs', match: ['coffee mug', 'ceramic cup', 'tea mug', 'travel mug', 'ceramic mug'], attrs: 'Ceramic, Microwave Safe', w: 1.2, l: 5, wd: 4, h: 4.5 },
+  { id: 'cutlery_sets', name: 'Cutlery Sets', cat: 'Flatware Sets', match: ['flatware set', 'cutlery set', 'silverware', 'fork spoon knife set'], attrs: 'Stainless Steel 304', w: 1.8, l: 9.5, wd: 3, h: 2 },
+  { id: 'kitchen_knives', name: 'Kitchen Knives', cat: 'Chef Knives', match: ['kitchen knife', 'chef knife', 'santoku knife', 'paring knife', 'utility knife'], attrs: 'High Carbon Steel', w: 0.8, l: 13, wd: 2.5, h: 1 },
+  { id: 'cutting_boards', name: 'Cutting Boards', cat: 'Chopping Boards', match: ['cutting board', 'chopping board', 'bamboo board', 'kitchen board'], attrs: 'Natural Bamboo, BPA Free', w: 2.2, l: 14, wd: 10, h: 0.8 },
+  { id: 'scented_candles', name: 'Scented Candles', cat: 'Aromatherapy Candles', match: ['scented candle', 'soy candle', 'aromatherapy candle', 'jar candle'], attrs: 'Natural Soy Wax, Cotton Wick', w: 1.2, l: 4, wd: 4, h: 4.5 },
+  { id: 'blankets', name: 'Throw Blankets', cat: 'Fleece Blankets', match: ['throw blanket', 'fleece blanket', 'plush blanket', 'bed throw', 'sherpa blanket'], attrs: 'Flannel Fleece, Warm', w: 2.5, l: 14, wd: 11, h: 4 },
+  { id: 'bath_mats', name: 'Bath Mats', cat: 'Bathroom Rugs', match: ['bath mat', 'bathroom rug', 'shower mat', 'absorbent rug'], attrs: 'Memory Foam, Non-slip', w: 1.1, l: 15, wd: 10, h: 2 },
+  { id: 'shower_curtains', name: 'Shower Curtains', cat: 'Bath Curtains', match: ['shower curtain', 'waterproof curtain', 'fabric shower curtain'], attrs: 'Water Repellent Polyester', w: 0.9, l: 11, wd: 8, h: 1.5 },
+  { id: 'backpacks', name: 'Backpacks', cat: 'Casual Backpacks', match: ['backpack', 'daypack', 'travel backpack', 'laptop backpack', 'school bag'], attrs: 'Waterproof Oxford, Padded', w: 1.8, l: 17, wd: 12, h: 5 },
+  { id: 'crossbody_bags', name: 'Crossbody Bags', cat: 'Shoulder Bags', match: ['crossbody bag', 'shoulder bag', 'messenger bag', 'sling bag', 'waist bag'], attrs: 'PU Leather, Adjustable Strap', w: 0.9, l: 10, wd: 7, h: 3 },
+  { id: 'wallets', name: 'Wallets', cat: 'RFID Wallets', match: ['leather wallet', 'rfid wallet', 'card holder', 'bifold wallet', 'slim wallet'], attrs: 'RFID Blocking, Genuine Leather', w: 0.3, l: 4.5, wd: 3.5, h: 0.8 },
+  { id: 't_shirts', name: 'T-Shirts', cat: 'Men & Women Tees', match: ['t-shirt', 'tee shirt', 'graphic tee', 'crewneck t-shirt', 'v-neck t-shirt'], attrs: '100% Ring-spun Cotton', w: 0.5, l: 10, wd: 8, h: 1 },
+  { id: 'hoodies', name: 'Hoodies', cat: 'Pullover Hoodies', match: ['hoodie', 'sweatshirt', 'pullover hoodie', 'fleece sweatshirt'], attrs: 'Fleece Blend, Drawstring', w: 1.4, l: 13, wd: 11, h: 3 },
+  { id: 'leggings', name: 'Leggings', cat: 'Workout Leggings', match: ['leggings', 'yoga pants', 'workout leggings', 'compression tights'], attrs: 'Spandex Blend, High Waist', w: 0.6, l: 9, wd: 7, h: 1.5 },
+  { id: 'baseball_caps', name: 'Baseball Caps', cat: 'Hats & Caps', match: ['baseball cap', 'snapback hat', 'dad hat', 'trucker cap', 'sun hat'], attrs: 'Cotton Twill, Adjustable', w: 0.3, l: 8, wd: 7, h: 4.5 },
+  { id: 'underwear', name: 'Underwear', cat: 'Undergarments', match: ['boxer briefs', 'boxers', 'briefs', 'panties', 'seamless underwear'], attrs: 'Modal Cotton, Breathable', w: 0.4, l: 7, wd: 5, h: 1.5 },
+  { id: 'charging_cables', name: 'Charging Cables', cat: 'USB Cables', match: ['charging cable', 'usb-c cable', 'lightning cable', 'fast charging cord'], attrs: 'Braided Nylon, 60W', w: 0.2, l: 6, wd: 3, h: 0.8 },
+  { id: 'wireless_earbuds', name: 'Wireless Earbuds', cat: 'Bluetooth Earphones', match: ['earbuds', 'wireless earphones', 'bluetooth earbuds', 'noise cancelling earbuds'], attrs: 'Bluetooth 5.3, Waterproof', w: 0.3, l: 4, wd: 4, h: 1.5 },
+  { id: 'smartwatch_bands', name: 'Smartwatch Bands', cat: 'Watch Straps', match: ['watch band', 'apple watch band', 'silicone strap', 'metal watch band'], attrs: 'Silicone / Stainless Steel', w: 0.15, l: 6, wd: 2, h: 0.5 },
+  { id: 'screen_protectors', name: 'Screen Protectors', cat: 'Tempered Glass', match: ['screen protector', 'tempered glass', 'privacy screen', 'camera protector'], attrs: '9H Tempered Glass', w: 0.2, l: 7, wd: 4, h: 0.5 },
+  { id: 'car_mounts', name: 'Car Phone Mounts', cat: 'Car Holders', match: ['car phone mount', 'car holder', 'dashboard mount', 'air vent holder', 'magnetic car mount'], attrs: 'Strong Magnetic, 360 Rotation', w: 0.4, l: 4.5, wd: 3.5, h: 2.5 },
+  { id: 'cable_organizers', name: 'Cable Organizers', cat: 'Cord Management', match: ['cable organizer', 'cable clips', 'cord holder', 'wire management'], attrs: 'Silicone, Adhesive Back', w: 0.2, l: 5, wd: 3, h: 1 },
+  { id: 'hangers', name: 'Velvet Hangers', cat: 'Clothes Hangers', match: ['velvet hangers', 'clothes hanger', 'coat hanger', 'suit hangers', 'non-slip hangers'], attrs: 'Velvet Non-slip, Swivel Hook', w: 2.2, l: 17.5, wd: 9, h: 3 },
+  { id: 'storage_bins', name: 'Storage Bins', cat: 'Storage Organizers', match: ['storage bin', 'closet organizer', 'fabric storage basket', 'folding organizer'], attrs: 'Reinforced Fabric, Handles', w: 1.5, l: 15, wd: 10, h: 9 },
+  { id: 'pet_brushes', name: 'Pet Grooming Brushes', cat: 'Pet Grooming', match: ['dog brush', 'cat brush', 'pet grooming comb', 'deshedding brush', 'slicker brush'], attrs: 'Self-cleaning, Stainless Pins', w: 0.5, l: 8, wd: 4, h: 2.5 },
+  { id: 'pet_leashes', name: 'Pet Leashes', cat: 'Dog Leashes', match: ['dog leash', 'retractable leash', 'training leash', 'dog lead'], attrs: 'Reflective Nylon, Heavy Duty', w: 0.7, l: 8, wd: 4, h: 2 },
+  { id: 'lip_balms', name: 'Lip Gloss & Balms', cat: 'Lip Care', match: ['lip balm', 'lip gloss', 'lip oil', 'tinted lip balm', 'chapstick'], attrs: 'Moisturizing, Shea Butter', w: 0.15, l: 3.5, wd: 1.5, h: 1 },
+  { id: 'makeup_sponges', name: 'Makeup Sponges', cat: 'Beauty Blenders', match: ['makeup sponge', 'beauty sponge', 'blending sponge', 'powder puff'], attrs: 'Latex-free Foam, Soft', w: 0.2, l: 4, wd: 3, h: 2.5 },
+  { id: 'nail_files', name: 'Nail Files & Buffers', cat: 'Manicure Tools', match: ['nail file', 'nail buffer', 'emery boards', 'glass nail file', 'manicure set'], attrs: 'Double Sided Grit, Washable', w: 0.2, l: 7, wd: 2, h: 0.5 },
+  { id: 'dental_floss', name: 'Dental Flossers', cat: 'Oral Hygiene', match: ['floss picks', 'dental floss', 'interdental brush', 'flosser picks'], attrs: 'Shred Resistant, Mint Flavor', w: 0.3, l: 6, wd: 4, h: 2 },
+  { id: 'dish_towels', name: 'Kitchen Dish Towels', cat: 'Tea Towels', match: ['dish towel', 'tea towel', 'kitchen cloth', 'bar mop towels'], attrs: '100% Ring Spun Cotton', w: 1.0, l: 10, wd: 8, h: 2.5 },
+  { id: 'silicone_spatulas', name: 'Silicone Spatulas', cat: 'Baking Utensils', match: ['silicone spatula', 'rubber spatula', 'cooking spatula', 'baking scraper'], attrs: 'Heat Resistant 600°F, Food Grade', w: 0.5, l: 11, wd: 2.5, h: 1 },
+  { id: 'ice_cube_trays', name: 'Ice Cube Trays', cat: 'Kitchen Moulds', match: ['ice cube tray', 'silicone ice mold', 'whiskey ice ball', 'large ice cube'], attrs: 'Food Grade Silicone, Easy Release', w: 0.6, l: 8, wd: 5, h: 2 },
+  { id: 'oven_mitts', name: 'Oven Mitts', cat: 'Heat Resistant Gloves', match: ['oven mitts', 'potholders', 'silicone oven gloves', 'heat resistant mitts'], attrs: 'Silicone Grip, Cotton Lined', w: 0.8, l: 12, wd: 7, h: 2 }
+];
+
 function temuRenderProfiles() {
   const box = $('temuProfileList'); if (!box) return;
   const cfg = temuGetCfg();
   box.innerHTML = '';
   const entries = Object.entries(cfg.category_profiles || {});
   const cnt = $('temuCatCount'); if (cnt) cnt.textContent = entries.length ? String(entries.length) : '';
-  entries.forEach(([name, p]) => {
-    const row = document.createElement('div');
-    row.className = 'temu-prof';
-    const dims = [p.length_in, p.width_in, p.height_in].every(v => v != null) ? `${p.length_in}×${p.width_in}×${p.height_in} in` : 'default size';
-    const wt = p.weight_lb != null ? `${p.weight_lb} lb` : 'weight: title/default';
-    row.innerHTML = `<div class="temu-prof-name">${esc(name)}</div>
-      <div class="temu-prof-actions">
-        <button class="btn btn-ghost btn-xs" data-edit="${esc(name)}" type="button">Edit</button>
-        <button class="btn btn-ghost btn-xs btn-danger" data-del="${esc(name)}" type="button">Delete</button>
+  
+  const search = ($('temuCatSearch')?.value || '').trim().toLowerCase();
+  
+  const filtered = entries.filter(([name, p]) => {
+    if (!search) return true;
+    if (name.toLowerCase().includes(search)) return true;
+    if ((p.category_keyword || '').toLowerCase().includes(search)) return true;
+    if ((p.match || []).some(m => m.toLowerCase().includes(search))) return true;
+    if ((p.keyword_attributes || '').toLowerCase().includes(search)) return true;
+    return false;
+  });
+
+  if (!filtered.length) {
+    if (search) {
+      box.innerHTML = `<div class="temu-hist-empty">Koi matching category nahi mili "${esc(search)}" ke liye</div>`;
+    }
+    return;
+  }
+
+  filtered.forEach(([name, p]) => {
+    const isExpanded = TemuExpandedProfiles.has(name);
+    const item = document.createElement('div');
+    item.className = 'temu-cat-item' + (isExpanded ? '' : ' collapsed');
+    
+    const displayName = name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const catBadge = p.category_keyword || 'Auto Category';
+    
+    const dims = [p.length_in, p.width_in, p.height_in].every(v => v != null) ? `${p.length_in}×${p.width_in}×${p.height_in} in` : null;
+    const wt = p.weight_lb != null ? `${p.weight_lb} lb` : null;
+
+    let chipsHtml = '';
+    (p.match || []).forEach(kw => {
+      chipsHtml += `<span class="temu-chip temu-chip-kw"><span class="temu-chip-ico">🔑</span> ${esc(kw)}</span>`;
+    });
+    (p.exclude || []).forEach(ex => {
+      chipsHtml += `<span class="temu-chip temu-chip-ex"><span class="temu-chip-ico">⛔</span> ${esc(ex)}</span>`;
+    });
+    if (p.keyword_attributes) {
+      chipsHtml += `<span class="temu-chip temu-chip-attr"><span class="temu-chip-ico">⚙️</span> ${esc(p.keyword_attributes)}</span>`;
+    }
+    if (wt) {
+      chipsHtml += `<span class="temu-chip temu-chip-dim"><span class="temu-chip-ico">⚖️</span> ${esc(wt)}</span>`;
+    }
+    if (dims) {
+      chipsHtml += `<span class="temu-chip temu-chip-dim"><span class="temu-chip-ico">📐</span> ${esc(dims)}</span>`;
+    }
+
+    item.innerHTML = `
+      <div class="temu-cat-head">
+        <div class="temu-cat-head-left">
+          <span class="temu-cat-arrow">▼</span>
+          <span class="temu-cat-title">${esc(displayName)}</span>
+          <span class="temu-cat-badge"><span class="temu-cat-badge-ico">🏷️</span> ${esc(catBadge)}</span>
+        </div>
+        <div class="temu-cat-actions">
+          <button class="temu-cat-btn" data-edit="${esc(name)}" type="button">Edit</button>
+          <button class="temu-cat-btn temu-cat-btn-del" data-del="${esc(name)}" type="button">Delete</button>
+        </div>
       </div>
-      <div class="temu-prof-meta"><b>Keywords:</b> ${esc((p.match||[]).join(', ')) || '—'}${(p.exclude||[]).length ? ` · <b>Exclude:</b> ${esc(p.exclude.join(', '))}` : ''}<br>
-      <b>Temu category:</b> ${esc(p.category_keyword || 'auto')} · ${esc(wt)} · ${esc(dims)}${p.keyword_attributes ? `<br><b>Attributes:</b> ${esc(p.keyword_attributes)}` : ''}</div>`;
-    row.querySelector('[data-edit]').addEventListener('click', () => {
+      <div class="temu-cat-body">
+        <div class="temu-cat-chips">${chipsHtml}</div>
+      </div>
+    `;
+
+    item.querySelector('.temu-cat-head').addEventListener('click', (e) => {
+      if (e.target.closest('.temu-cat-actions')) return;
+      if (TemuExpandedProfiles.has(name)) {
+        TemuExpandedProfiles.delete(name);
+        item.classList.add('collapsed');
+      } else {
+        TemuExpandedProfiles.add(name);
+        item.classList.remove('collapsed');
+      }
+    });
+
+    item.querySelector('[data-edit]').addEventListener('click', (e) => {
+      e.stopPropagation();
       $('tcName').value = name; $('tcCat').value = p.category_keyword || '';
       $('tcMatch').value = (p.match||[]).join(', '); $('tcExclude').value = (p.exclude||[]).join(', ');
       $('tcAttrs').value = p.keyword_attributes || '';
       $('tcW').value = p.weight_lb ?? ''; $('tcL').value = p.length_in ?? '';
       $('tcWd').value = p.width_in ?? ''; $('tcH').value = p.height_in ?? '';
-      const ft = $('tcFormTitle'); if (ft) ft.textContent = `Edit category: ${name}`;
-      $('temuCatForm')?.classList.add('editing');
+      const ft = $('tcFormTitle'); if (ft) ft.textContent = `Edit category: ${displayName}`;
+      const form = $('temuCatForm');
+      if (form) {
+        form.classList.remove('hidden');
+        form.classList.add('editing');
+      }
       temuCatMsg('');
       try { $('temuCatForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
     });
-    row.querySelector('[data-del]').addEventListener('click', async () => {
-      if (!confirm(`Category "${name}" delete karein?`)) return;
+
+    item.querySelector('[data-del]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Category "${displayName}" delete karein?`)) return;
       const cfg2 = temuGetCfg(); delete cfg2.category_profiles[name];
       const r = await temuSaveCfg(cfg2);
-      if (r === true) { temuRenderProfiles(); temuCatMsg(`Category "${name}" removed`, 'ok'); }
+      if (r === true) { temuRenderProfiles(); temuCatMsg(`Category "${displayName}" removed`, 'ok'); }
       else temuCatMsg('Delete fail: ' + (r || 'save error'), 'bad');
     });
-    box.appendChild(row);
+
+    box.appendChild(item);
   });
+}
+
+async function temuFetchFromTemuTab() {
+  toast('Temu tab se category detect ho rahi hai…', 'info');
+  try {
+    const tabs = await new Promise(r => chrome.tabs.query({}, r));
+    const temuTab = tabs.find(t => /seller\.temu\.com|temu\.com/i.test(t.url));
+    if (!temuTab) {
+      toast('Koi open Temu tab nahi mila! Pehle Temu tab open karein.', 'warn');
+      return;
+    }
+    chrome.tabs.sendMessage(temuTab.id, { action: 'TEMU_GET_PAGE_CATEGORY' }, (resp) => {
+      if (chrome.runtime.lastError || !resp || !resp.success) {
+        toast('Temu tab se category detect nahi hui. Product ya Seller Center page open karein.', 'warn');
+        return;
+      }
+      const cat = (resp.category || '').trim();
+      const title = (resp.title || '').trim();
+      if (!cat && !title) {
+        toast('Temu page par category nahi mili.', 'warn');
+        return;
+      }
+      const rawName = cat || title.split(/[-–—|:]/)[0].trim();
+      const safeName = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      
+      if ($('tcName')) $('tcName').value = safeName;
+      if ($('tcCat')) $('tcCat').value = cat || rawName;
+      if ($('tcMatch')) $('tcMatch').value = rawName.toLowerCase();
+      
+      const form = $('temuCatForm');
+      if (form) {
+        form.classList.remove('hidden');
+        form.classList.add('editing');
+        const ft = $('tcFormTitle'); if (ft) ft.textContent = `Add from Temu: ${rawName}`;
+        try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+      }
+      toast(`✓ Temu se category mil gayi: "${cat || rawName}"`, 'ok');
+    });
+  } catch (e) {
+    toast('Error: ' + e?.message, 'bad');
+  }
+}
+
+function temuOpenCatalogModal() {
+  const modal = $('temuCatalogModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  temuRenderCatalogGrid();
+}
+
+function temuRenderCatalogGrid() {
+  const grid = $('temuCatalogGrid');
+  if (!grid) return;
+  const q = ($('temuCatalogSearch')?.value || '').trim().toLowerCase();
+  const cfg = temuGetCfg();
+  const existing = cfg.category_profiles || {};
+
+  grid.innerHTML = '';
+  const filtered = TEMU_CATALOG_PRESETS.filter(p => {
+    if (!q) return true;
+    return p.name.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q) || p.match.some(m => m.toLowerCase().includes(q));
+  });
+
+  filtered.forEach(p => {
+    const isAdded = !!existing[p.id];
+    const card = document.createElement('div');
+    card.className = 'temu-catalog-card';
+    card.innerHTML = `
+      <div class="temu-cat-c-head">
+        <span class="temu-cat-c-name">${esc(p.name)}</span>
+        <span class="temu-cat-c-badge">${esc(p.cat)}</span>
+      </div>
+      <div class="temu-cat-c-desc">
+        <b>Keywords:</b> ${esc(p.match.slice(0, 4).join(', '))}${p.match.length > 4 ? '…' : ''}
+        ${p.attrs ? `<br><b>Attrs:</b> ${esc(p.attrs)}` : ''}
+      </div>
+      <div class="temu-cat-c-foot">
+        <span class="temu-cat-c-meta">${p.w} lb · ${p.l}×${p.wd}×${p.h} in</span>
+        <button class="btn ${isAdded ? 'btn-ghost' : 'btn-primary'} btn-xs temu-cat-c-add" type="button" ${isAdded ? 'disabled' : ''}>
+          ${isAdded ? '✓ Added' : '+ Add'}
+        </button>
+      </div>
+    `;
+
+    card.querySelector('.temu-cat-c-add').addEventListener('click', async () => {
+      const cfg2 = temuGetCfg();
+      cfg2.category_profiles = cfg2.category_profiles || {};
+      cfg2.category_profiles[p.id] = {
+        category_keyword: p.cat,
+        match: p.match,
+        exclude: p.exclude || [],
+        keyword_attributes: p.attrs || '',
+        weight_lb: p.w,
+        length_in: p.l,
+        width_in: p.wd,
+        height_in: p.h
+      };
+      await temuSaveCfg(cfg2);
+      temuRenderProfiles();
+      temuRenderCatalogGrid();
+      toast(`Category "${p.name}" add ho gayi!`, 'ok');
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+async function temuImportAllCatalog() {
+  if (!confirm('Catalog ke tamam 50+ categories import karein?')) return;
+  const cfg = temuGetCfg();
+  cfg.category_profiles = cfg.category_profiles || {};
+  let count = 0;
+  TEMU_CATALOG_PRESETS.forEach(p => {
+    if (!cfg.category_profiles[p.id]) {
+      cfg.category_profiles[p.id] = {
+        category_keyword: p.cat,
+        match: p.match,
+        exclude: p.exclude || [],
+        keyword_attributes: p.attrs || '',
+        weight_lb: p.w,
+        length_in: p.l,
+        width_in: p.wd,
+        height_in: p.h
+      };
+      count++;
+    }
+  });
+  await temuSaveCfg(cfg);
+  temuRenderProfiles();
+  temuRenderCatalogGrid();
+  toast(`${count} new categories catalog se add ho gayin!`, 'ok');
+}
+
+async function temuImportTemplateCategory(file) {
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets['Template'] || wb.Sheets[wb.SheetNames[0]];
+    if (!ws) { toast('Invalid Excel template file', 'bad'); return; }
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    let foundCat = '';
+    for (let r = 0; r < Math.min(5, aoa.length); r++) {
+      for (let c = 0; c < (aoa[r] || []).length; c++) {
+        const val = String(aoa[r][c] || '').trim();
+        if (/category/i.test(val) && val.length > 5) {
+          foundCat = val.replace(/.*category[:\s]*/i, '').trim();
+          break;
+        }
+      }
+      if (foundCat) break;
+    }
+    if (!foundCat) {
+      foundCat = file.name.replace(/\.xlsx$/i, '').replace(/temu[_-]?upload[_-]?/i, '').replace(/[_-]/g, ' ').trim() || 'Template Category';
+    }
+    const safeName = foundCat.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const cfg = temuGetCfg();
+    cfg.category_profiles = cfg.category_profiles || {};
+    cfg.category_profiles[safeName] = {
+      category_keyword: foundCat,
+      match: [foundCat.toLowerCase()],
+      weight_lb: 1.0, length_in: 8, width_in: 6, height_in: 2
+    };
+    await temuSaveCfg(cfg);
+    temuRenderProfiles();
+    toast(`✓ Category "${foundCat}" template se import ho gayi!`, 'ok');
+  } catch (err) {
+    toast('Template read error: ' + err?.message, 'bad');
+  }
 }
 
 function temuCatMsg(text, kind) {
@@ -9897,7 +10380,11 @@ function temuCatMsg(text, kind) {
 function temuCatFormReset() {
   ['tcName','tcCat','tcMatch','tcExclude','tcAttrs','tcW','tcL','tcWd','tcH'].forEach(id => { const el = $(id); if (el) el.value = ''; });
   const ft = $('tcFormTitle'); if (ft) ft.textContent = 'Add category';
-  $('temuCatForm')?.classList.remove('editing');
+  const form = $('temuCatForm');
+  if (form) {
+    form.classList.remove('editing');
+    form.classList.add('hidden');
+  }
 }
 
 async function temuSaveProfileFromForm() {
@@ -10239,8 +10726,14 @@ function initTemuExport() {
       temuRenderAiTitles(); 
     }
     if (e.target && e.target.id === 'temuSheetFile') { const f = e.target.files?.[0]; if (f) temuImportSheet(f); e.target.value = ''; }
+    if (e.target && e.target.id === 'temuCatTplFile') { const f = e.target.files?.[0]; if (f) temuImportTemplateCategory(f); e.target.value = ''; }
     if (e.target && e.target.id === 'tgPx') { const o = $('tgPx2'); if (o) o.value = e.target.value; }
     if (e.target && e.target.id === 'tgPx2') { const o = $('tgPx'); if (o) o.value = e.target.value; }
+    if (e.target && e.target.id === 'temuDailyTarget') {
+      const val = parseInt(e.target.value, 10) || 50;
+      chrome.storage.local.set({ temuDailyTarget: val }, () => temuRenderHistory());
+    }
+    if (e.target && e.target.id === 'temuHistStoreFilter') temuRenderHistory();
     if (e.target && e.target.id === 'temuStoreSel') (async () => {
       if ((await temuSaveStores(temuStores(), e.target.value)) === true) {
         TemuLast = null;
@@ -10249,6 +10742,15 @@ function initTemuExport() {
         toast(`Active store: ${e.target.value}`, 'ok');
       }
     })();
+  });
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'temuCatSearch') temuRenderProfiles();
+    if (e.target && e.target.id === 'temuCatalogSearch') temuRenderCatalogGrid();
+    if (e.target && e.target.id === 'temuHistSearch') temuRenderHistory();
+    if (e.target && e.target.id === 'temuDailyTarget') {
+      const val = parseInt(e.target.value, 10) || 50;
+      chrome.storage.local.set({ temuDailyTarget: val }, () => temuRenderHistory());
+    }
   });
   // Delegated clicks — survive any re-render and any modal stacking
   document.addEventListener('click', e => {
@@ -10293,6 +10795,33 @@ function initTemuExport() {
         toast('Reverted Temu titles', 'ok');
       })();
     }
+    // Categories & Catalog events
+    if (e.target.closest('#temuAddCategoryTopBtn')) {
+      const form = $('temuCatForm');
+      if (form) {
+        const isHidden = form.classList.toggle('hidden');
+        if (!isHidden) {
+          $('tcName')?.focus();
+          try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+        }
+      }
+    }
+    if (e.target.closest('#temuFetchFromTabBtn')) temuFetchFromTemuTab();
+    if (e.target.closest('#temuPickCatalogBtn')) temuOpenCatalogModal();
+    if (e.target.closest('#temuCatalogClose')) $('temuCatalogModal')?.classList.add('hidden');
+    if (e.target.closest('#temuCatalogImportAllBtn')) temuImportAllCatalog();
+    if (e.target.closest('#temuImportTplCatBtn')) $('temuCatTplFile')?.click();
+
+    // History filter buttons
+    const hfBtn = e.target.closest('.temu-hist-fbtn');
+    if (hfBtn) {
+      document.querySelectorAll('.temu-hist-fbtn').forEach(b => b.classList.remove('active'));
+      hfBtn.classList.add('active');
+      TemuHistFilter = hfBtn.dataset.hfilter || 'all';
+      temuRenderHistory();
+    }
+    if (e.target.closest('#temuHistExportAll')) temuExportAllHistoryCsv();
+
     if (e.target.closest('#temuModalClose')) $('temuModal')?.classList.add('hidden');
     if (e.target.closest('#temuExportBtn')) temuRunExport({ forUpload: false });
     if (e.target.closest('#temuMarkListedBtn')) (async () => {

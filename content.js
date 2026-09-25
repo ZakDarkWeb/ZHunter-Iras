@@ -3201,6 +3201,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       temuPageFixDrafts(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
       return true;
     }
+    if (message?.action === 'TEMU_GET_PAGE_CATEGORY') {
+      try {
+        let cat = '';
+        let title = document.title || '';
+        const bc = document.querySelector('[data-testid="breadcrumb"], .breadcrumb, [class*="breadcrumb"], [class*="Breadcrumb"]');
+        if (bc) {
+          const links = [...bc.querySelectorAll('a, span')].map(x => (x.textContent || '').trim()).filter(Boolean);
+          if (links.length) cat = links[links.length - 1];
+        }
+        if (!cat && /seller\.temu\.com/i.test(location.hostname)) {
+          const catEl = document.querySelector('[data-testid*="category"], [placeholder*="category"], [class*="category"], .beast-core-select');
+          if (catEl) cat = (catEl.innerText || catEl.value || '').trim();
+        }
+        if (!cat && title) {
+          cat = title.split(/[-–—|:]/)[0].trim();
+        }
+        sendResponse({ success: true, category: cat, title });
+      } catch (e) {
+        sendResponse({ success: false, error: e?.message });
+      }
+      return true;
+    }
   } catch (err) {
     sendResponse({
       success: false,

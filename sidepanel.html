@@ -969,20 +969,119 @@
           </div>
         </div>
 
-        <!-- ═══════════ TAB: CATEGORIES ═══════════ -->
+        <!-- ═══════════ TAB: HISTORY ═══════════ -->
         <div class="temu-pane" data-tpane="history">
-          <div class="temu-hint temu-hint-top">Har Temu upload ka record: kab, kis store par, kitne products, Upload ID aur Temu ka result. "List" se us upload ke products dekhein ya CSV download karein.</div>
-          <div id="temuHistList" class="temu-profile-list"></div>
-          <div class="temu-settings-foot">
-            <button id="temuHistClear" class="btn btn-ghost btn-xs btn-danger" type="button">Clear history</button>
+          <!-- Today's Progress Card -->
+          <div class="temu-card temu-prog-card">
+            <div class="temu-prog-head">
+              <div class="temu-prog-head-left">
+                <div class="temu-prog-ico">
+                  <svg viewBox="0 0 24 24" class="i"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+                <div>
+                  <div class="temu-prog-title">Today's Progress</div>
+                  <div id="temuTodayDate" class="temu-prog-sub">Fri, Sep 25</div>
+                </div>
+              </div>
+              <div class="temu-prog-target-wrap">
+                <span class="temu-lbl-inline">Daily Target</span>
+                <input id="temuDailyTarget" type="number" min="1" max="999" value="50" class="inp temu-target-inp" />
+                <span class="temu-lbl-inline">/ day</span>
+              </div>
+            </div>
+
+            <!-- 4 Metric Cards -->
+            <div class="temu-metrics-grid">
+              <div class="temu-metric-card temu-metric-ok">
+                <div class="temu-metric-badge">✓</div>
+                <div id="temuMetricListed" class="temu-metric-val">0</div>
+                <div class="temu-metric-lbl">LISTED</div>
+              </div>
+              <div class="temu-metric-card temu-metric-up">
+                <div class="temu-metric-badge">📥</div>
+                <div id="temuMetricUploads" class="temu-metric-val">0</div>
+                <div class="temu-metric-lbl">UPLOADS</div>
+              </div>
+              <div class="temu-metric-card temu-metric-err">
+                <div class="temu-metric-badge">⚠️</div>
+                <div id="temuMetricErrors" class="temu-metric-val">0</div>
+                <div class="temu-metric-lbl">ERRORS</div>
+              </div>
+              <div class="temu-metric-card temu-metric-rem">
+                <div class="temu-metric-badge">🎯</div>
+                <div id="temuMetricRemaining" class="temu-metric-val">50</div>
+                <div class="temu-metric-lbl">REMAINING</div>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="temu-bar-track">
+              <div id="temuProgressBar" class="temu-bar-fill" style="width: 0%"></div>
+            </div>
+            <div id="temuProgressStatus" class="temu-prog-status">Aaj abhi kuch listed nahi</div>
+
+            <!-- Last 7 Days -->
+            <div class="temu-week-section">
+              <div class="temu-week-title">LAST 7 DAYS</div>
+              <div id="temuWeekDays" class="temu-week-days"></div>
+            </div>
+          </div>
+
+          <!-- History Records Card -->
+          <div class="temu-card temu-hist-card">
+            <div class="temu-hint">A record of every Temu upload: when, which store, how many products, Upload ID and result. Click "List" to view products from that upload or download a CSV.</div>
+            
+            <div class="temu-hist-toolbar">
+              <div class="temu-hist-search-wrap">
+                <svg class="temu-hist-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input id="temuHistSearch" type="text" class="inp" placeholder="Search SKU, title, upload ID..." />
+              </div>
+            </div>
+
+            <div class="temu-hist-filter-row">
+              <div class="temu-hist-store-pill">
+                <select id="temuHistStoreFilter" class="sel temu-hist-store-sel">
+                  <option value="">All Stores</option>
+                </select>
+              </div>
+              <div class="temu-hist-filters">
+                <button type="button" class="temu-hist-fbtn active" data-hfilter="all">All</button>
+                <button type="button" class="temu-hist-fbtn" data-hfilter="success"><span class="temu-dot-ok"></span> Success</button>
+                <button type="button" class="temu-hist-fbtn" data-hfilter="errors"><span class="temu-dot-bad"></span> Errors</button>
+                <button type="button" class="temu-hist-fbtn" data-hfilter="file"><span class="temu-dot-file"></span> File</button>
+              </div>
+            </div>
+
+            <div id="temuHistList" class="temu-hist-records"></div>
+
+            <div class="temu-hist-foot">
+              <button id="temuHistExportAll" class="btn btn-ghost btn-xs" type="button">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export All CSV
+              </button>
+              <button id="temuHistClear" class="btn btn-ghost btn-xs btn-danger" type="button">Clear history</button>
+            </div>
           </div>
         </div>
-        <div class="temu-pane" data-tpane="categories">
-          <div class="temu-hint temu-hint-top">Category profile = title mein keywords milen to us product ko fixed Temu category, wazan/size aur attributes milte hain (e.g. golf balls → Rubber, 14 Years+). Baqi products Temu khud pehchanta hai.</div>
 
+        <!-- ═══════════ TAB: CATEGORIES ═══════════ -->
+        <div class="temu-pane" data-tpane="categories">
+          <div class="temu-hint temu-hint-top">Set keywords per product type to auto-assign the correct Temu category, weight and attributes. Products that don't match any profile are auto-categorized by Temu.</div>
+
+          <!-- Toolbar: Search + Add Category button -->
+          <div class="temu-cat-toolbar">
+            <div class="temu-cat-search-wrap">
+              <svg class="temu-cat-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input id="temuCatSearch" type="text" class="inp" placeholder="Search category profiles..." />
+            </div>
+            <button id="temuAddCategoryTopBtn" class="btn btn-primary temu-btn-add-cat" type="button">+ + Add Category</button>
+          </div>
+
+          <!-- Profiles list with Collapsible Items -->
           <div id="temuProfileList" class="temu-profile-list"></div>
 
-          <div class="temu-card temu-cat-form" id="temuCatForm">
+          <!-- Add / Edit Category Form (collapsible / toggleable) -->
+          <div class="temu-card temu-cat-form hidden" id="temuCatForm">
             <div class="temu-card-title" id="tcFormTitle">Add category</div>
             <div class="temu-row">
               <div class="temu-field temu-grow"><label class="temu-lbl">Name *</label><input id="tcName" class="inp" placeholder="e.g. cat_food" /></div>
@@ -1000,8 +1099,34 @@
             <div class="temu-hint">Wazan/size khali chhorein to title ka wazan ya default use hoga.</div>
             <div class="temu-cat-form-foot">
               <button id="tcSaveBtn" class="btn btn-primary btn-xs" type="button">Save category</button>
-              <button id="tcCancelBtn" class="btn btn-ghost btn-xs" type="button">Clear</button>
+              <button id="tcCancelBtn" class="btn btn-ghost btn-xs" type="button">Cancel</button>
               <span id="tcMsg" class="temu-inline-msg"></span>
+            </div>
+          </div>
+
+          <!-- Import Category from Temu Card -->
+          <div class="temu-card temu-import-card">
+            <div class="temu-import-head">
+              <div class="temu-import-title">
+                <span class="temu-import-ico">📥</span>
+                <b>Import Category from Temu</b>
+              </div>
+              <div class="temu-import-sub">Add from open Temu tab or pick from catalog</div>
+            </div>
+            <div class="temu-import-actions">
+              <button id="temuFetchFromTabBtn" class="btn btn-ghost temu-import-btn" type="button">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Fetch from Temu Tab
+              </button>
+              <button id="temuPickCatalogBtn" class="btn btn-ghost temu-import-btn" type="button">
+                <svg class="i" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                Pick from Catalog (50+ types)...
+              </button>
+              <button id="temuImportTplCatBtn" class="btn btn-ghost temu-import-btn" type="button">
+                <svg class="i" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Import Template (.xlsx)
+              </button>
+              <input type="file" id="temuCatTplFile" accept=".xlsx" style="display:none" />
             </div>
           </div>
         </div>
@@ -1010,6 +1135,28 @@
     </div>
   </div>
 
+  <!-- ═══ TEMU CATEGORY CATALOG PICKER MODAL ═══ -->
+  <div id="temuCatalogModal" class="modal-back hidden">
+    <div class="modal-box temu-catalog-box">
+      <div class="modal-head">
+        <div class="temu-cat-picker-title">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <b>Temu Category Catalog (50+ Types)</b>
+        </div>
+        <button id="temuCatalogClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="temu-cat-catalog-top">
+          <div class="temu-cat-search-wrap temu-grow">
+            <svg class="temu-cat-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input id="temuCatalogSearch" type="text" class="inp" placeholder="Search 50+ categories (e.g. yoga, dog, shirt)..." />
+          </div>
+          <button id="temuCatalogImportAllBtn" class="btn btn-primary btn-xs" type="button">Import All 50+</button>
+        </div>
+        <div id="temuCatalogGrid" class="temu-catalog-grid"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══ BULK PASTE MODAL ═══ -->
   <div id="bulkPasteModal" class="modal-back hidden">
