@@ -4465,6 +4465,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             <button class="zh-lb-nav zh-lb-next" id="zh-lb-next" type="button" title="Next (Right Arrow)">❯</button>
           </div>
           <div class="zh-lb-footer">
+            <button class="zh-lb-tool zh-lb-flow-btn" id="zh-lb-flow" type="button" style="background:linear-gradient(135deg,#00E5FF,#0077FF);color:#030712;font-weight:700;border:none;">✨ Edit with Flow</button>
             <button class="zh-lb-tool" id="zh-lb-dl" type="button">📥 Download HD</button>
             <button class="zh-lb-tool" id="zh-lb-source" type="button">🌐 Find Suppliers</button>
             <button class="zh-lb-tool" id="zh-lb-copy" type="button">📋 Copy URL</button>
@@ -4554,6 +4555,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           btn.textContent = '✓ Copied!';
           setTimeout(() => { btn.textContent = old; }, 1500);
         });
+      });
+
+      lb.querySelector('#zh-lb-flow')?.addEventListener('click', () => {
+        const pageTitle = (document.title || 'Product').replace(/\s*[-–|].*$/, '').trim();
+        const flowPrompt = `High-end commercial studio product photography of ${pageTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
+        navigator.clipboard.writeText(flowPrompt).catch(() => {});
+        window.open('https://flow.google.com', '_blank');
+        const btn = lb.querySelector('#zh-lb-flow');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = '✓ Prompt Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        }
       });
     }
 

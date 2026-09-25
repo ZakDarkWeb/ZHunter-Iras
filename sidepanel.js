@@ -2684,8 +2684,11 @@ async function startSaveAll() {
 
 // ── Lightbox Preview ──────────────────────────────────────────
 let currentLightboxSrc = '';
+let currentLightboxTitle = '';
+let currentLightboxList = [];
+let currentLightboxIdx = 0;
 
-function openLightbox(src, title = '') {
+function openLightbox(src, title = '', imagesList = [], currentIdx = 0) {
   const modal = $('lightboxModal');
   const img = $('lightboxImg');
   const titleEl = $('lightboxTitle');
@@ -2694,9 +2697,17 @@ function openLightbox(src, title = '') {
   if (!modal || !img || !src) return;
 
   currentLightboxSrc = src;
+  currentLightboxTitle = title;
+  currentLightboxList = Array.isArray(imagesList) && imagesList.length ? imagesList : [src];
+  currentLightboxIdx = currentIdx >= 0 ? currentIdx : currentLightboxList.indexOf(src);
+  if (currentLightboxIdx < 0) currentLightboxIdx = 0;
+
   img.src = src;
   if (imgArea) imgArea.classList.remove('zoomed');
-  if (titleEl) titleEl.textContent = title || 'Image Preview';
+  if (titleEl) {
+    const counter = currentLightboxList.length > 1 ? ` (${currentLightboxIdx + 1} / ${currentLightboxList.length})` : '';
+    titleEl.textContent = (title || 'Image Preview') + counter;
+  }
   if (link) link.href = src;
 
   modal.classList.remove('hidden');
@@ -2714,6 +2725,8 @@ function closeLightbox() {
   const img = $('lightboxImg');
   if (img) img.src = '';
   currentLightboxSrc = '';
+  currentLightboxTitle = '';
+  currentLightboxList = [];
 }
 
 function initLightbox() {
@@ -2739,10 +2752,34 @@ function initLightbox() {
     });
   });
 
+  // Edit with Flow button
+  $('lightboxFlowBtn')?.addEventListener('click', () => {
+    if (!currentLightboxSrc) return;
+    const cleanTitle = (currentLightboxTitle || 'Product')
+      .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
+      .replace(/\s*[-–|].*$/, '')
+      .trim();
+    const prompt = `High-end commercial studio product photography of ${cleanTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
+    navigator.clipboard.writeText(prompt).catch(() => {});
+    chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+    toast('✓ Flow prompt copied! Opening Google Flow...', 'ok');
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!$('lightboxModal')?.classList.contains('hidden')) closeLightbox();
       if (!$('shortcutsModal')?.classList.contains('hidden')) closeShortcutsModal();
+    }
+    if (!$('lightboxModal')?.classList.contains('hidden') && currentLightboxList.length > 1) {
+      if (e.key === 'ArrowLeft') {
+        currentLightboxIdx = (currentLightboxIdx - 1 + currentLightboxList.length) % currentLightboxList.length;
+        const nextSrc = currentLightboxList[currentLightboxIdx];
+        openLightbox(nextSrc, currentLightboxTitle.replace(/\s*\(\d+\s*\/\s*\d+\)/, ''), currentLightboxList, currentLightboxIdx);
+      } else if (e.key === 'ArrowRight') {
+        currentLightboxIdx = (currentLightboxIdx + 1) % currentLightboxList.length;
+        const nextSrc = currentLightboxList[currentLightboxIdx];
+        openLightbox(nextSrc, currentLightboxTitle.replace(/\s*\(\d+\s*\/\s*\d+\)/, ''), currentLightboxList, currentLightboxIdx);
+      }
     }
     if (e.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
       toggleShortcutsModal();
@@ -8347,7 +8384,8 @@ function renderImgGrid() {
     card.querySelector('.img-card-zoom')?.addEventListener('click', (e) => {
       e.stopPropagation();
       const label = card.querySelector('.img-card-label')?.textContent || '';
-      openLightbox(img.src, `Image ${idx + 1} of ${images.length} ${label ? `(${label})` : ''}`);
+      const allSrcs = images.map(x => x.src);
+      openLightbox(img.src, `Image ${idx + 1} of ${images.length} ${label ? `(${label})` : ''}`, allSrcs, idx);
     });
 
     card.addEventListener('click', (e) => {
@@ -10523,11 +10561,12 @@ async function temuRenderReview() {
     // Image gallery HTML (compact, fixed height, horizontal scroll)
     const imgHtml = allImgs.map((url, iIdx) => `
       <div class="temu-rv-img-item">
-        <img src="${esc(url)}" class="temu-rv-img-thumb${iIdx === 0 ? ' main-img' : ''}" loading="lazy" alt="img${iIdx+1}" />
+        <img src="${esc(url)}" class="temu-rv-img-thumb${iIdx === 0 ? ' main-img' : ''}" loading="lazy" alt="img${iIdx+1}" title="Click to Zoom & Inspect" />
         <div class="temu-rv-img-actions">
           ${iIdx !== 0 ? `<button class="temu-rv-img-btn" data-action="setmain" data-iidx="${iIdx}" title="Set as main image">★</button>` : '<span class="temu-rv-img-main-lbl">Main</span>'}
+          <button class="temu-rv-img-btn zoom-btn" data-action="zoom" data-iidx="${iIdx}" data-url="${esc(url)}" title="Zoom & Inspect">🔍</button>
           <button class="temu-rv-img-btn danger" data-action="delimg" data-iidx="${iIdx}" title="Delete image">🗑</button>
-          <button class="temu-rv-img-btn gemini" data-action="gemini" data-iidx="${iIdx}" data-url="${esc(url)}" title="Edit in Gemini">🤖</button>
+          <button class="temu-rv-img-btn gemini" data-action="gemini" data-iidx="${iIdx}" data-url="${esc(url)}" title="Edit in Flow / Gemini">✨</button>
         </div>
       </div>
     `).join('');
@@ -10630,7 +10669,15 @@ async function temuRenderReview() {
       aiBtn.textContent = '⚡ AI'; aiBtn.disabled = false;
     });
 
-    // Image action buttons (set main, delete, gemini)
+    // Thumbnail click to Zoom & Inspect
+    card.querySelectorAll('.temu-rv-img-thumb').forEach((thumbEl, iIdx) => {
+      thumbEl.addEventListener('click', e => {
+        e.stopPropagation();
+        openLightbox(allImgs[iIdx], r.title || 'Product', allImgs, iIdx);
+      });
+    });
+
+    // Image action buttons (set main, zoom, delete, gemini/flow)
     card.querySelectorAll('.temu-rv-img-btn').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -10646,6 +10693,9 @@ async function temuRenderReview() {
             await setMasterRows(MasterUIState.allRows);
           }
           await temuRenderReview();
+        } else if (action === 'zoom') {
+          const imgUrl = btn.dataset.url || '';
+          openLightbox(imgUrl, r.title || 'Product', allImgs, iIdx);
         } else if (action === 'delimg') {
           if (!Array.isArray(r.images) || r.images.length <= 1) { toast('Kam az kam ek image zaruri hai', 'warn'); return; }
           r.images.splice(iIdx, 1);
@@ -10874,6 +10924,12 @@ function initTemuExport() {
       navigator.clipboard.writeText(prompt).catch(() => {});
       chrome.tabs.create({ url: 'https://gemini.google.com/app', active: true });
       toast('Prompt copied + Gemini opened — image wahan attach karein!', 'ok');
+    }
+    if (e.target.closest('#temuFlowOpenBtn')) {
+      const prompt = $('temuGeminiPromptTxt')?.value || '';
+      navigator.clipboard.writeText(prompt).catch(() => {});
+      chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+      toast('✓ Flow prompt copied! Opening Google Flow...', 'ok');
     }
 
     // History filter buttons

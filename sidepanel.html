@@ -1155,7 +1155,7 @@
       <div class="modal-head">
         <div class="temu-cat-picker-title">
           <svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
-          <b>Edit Image in Gemini</b>
+          <b>Edit Image with AI (Flow / Gemini)</b>
         </div>
         <button id="temuGeminiClose" class="modal-close" aria-label="Close">✕</button>
       </div>
@@ -1163,13 +1163,15 @@
         <div class="temu-gemini-preview-wrap">
           <img id="temuGeminiPreviewImg" class="temu-gemini-preview" src="" alt="Product image" />
         </div>
-        <label class="temu-lbl" style="margin-top:12px;">Prompt (edit as needed before opening Gemini):</label>
+        <label class="temu-lbl" style="margin-top:12px;">Prompt (edit as needed before opening AI):</label>
         <textarea id="temuGeminiPromptTxt" class="inp temu-gemini-prompt" rows="4" placeholder="Describe the edit you want..."></textarea>
-        <div class="temu-gemini-hint">Prompt copy karein, Gemini me image attach karein aur prompt paste karein.</div>
+        <div class="temu-gemini-hint">Prompt copy karein, Flow ya Gemini me image attach karein aur prompt paste karein.</div>
         <div class="temu-gemini-actions">
           <button id="temuGeminiCopyPromptBtn" class="btn btn-ghost btn-xs" type="button">📋 Copy Prompt</button>
-          <button id="temuGeminiOpenBtn" class="btn btn-primary" type="button">
-            <svg class="i" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <button id="temuFlowOpenBtn" class="btn btn-primary btn-xs" type="button" style="background:linear-gradient(135deg,#00E5FF,#0077FF);color:#030712;font-weight:700;">
+            ✨ Open in Flow →
+          </button>
+          <button id="temuGeminiOpenBtn" class="btn btn-ghost btn-xs" type="button">
             Open in Gemini →
           </button>
         </div>
@@ -1229,8 +1231,9 @@
       <div class="lightbox-bar">
         <div id="lightboxTitle" class="lightbox-title"></div>
         <div class="lightbox-actions">
+          <button id="lightboxFlowBtn" class="btn btn-primary btn-xs flow-glow-btn" type="button" title="Copy professional prompt and edit in Google Flow">✨ Edit with Flow</button>
           <a id="lightboxOpenLink" class="btn btn-ghost btn-xs" target="_blank" rel="noopener">Open Original ↗</a>
-          <button id="lightboxDownloadBtn" class="btn btn-primary btn-xs" type="button">Download</button>
+          <button id="lightboxDownloadBtn" class="btn btn-ghost btn-xs" type="button">Download</button>
         </div>
       </div>
     </div>
