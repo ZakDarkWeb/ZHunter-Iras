@@ -10714,10 +10714,6 @@ function temuOpenGeminiModal(imgUrl, productTitle) {
   modal._currentImgUrl = imgUrl;
 }
 
-// ═════════════════════════════════════════════════════════════════
-// ═══ Temu AI Title Studio ═══
-// ═════════════════════════════════════════════════════════════════
-let TemuAiLastUndo = null;
 
 async function temuGetQueuedRows() {
   const source = $('temuSource')?.value || 'bulk';
@@ -10727,168 +10723,6 @@ async function temuGetQueuedRows() {
   return await getMasterRows();
 }
 
-async function temuRenderAiTitles() {
-  const list = $('temuAiTitleList');
-  const countEl = $('temuAiTitleCount');
-  const rows = await temuGetQueuedRows();
-  if (countEl) countEl.textContent = rows.length;
-  if (!list || list.classList.contains('hidden')) return;
-
-  if (!rows.length) {
-    list.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:8px;text-align:center;">Koi products nahi mile</div>';
-    return;
-  }
-
-  list.innerHTML = '';
-  rows.forEach((r, idx) => {
-    const thumbUrl = (Array.isArray(r.images) && r.images.length && typeof r.images[0] === 'string')
-      ? r.images[0]
-      : (r.images?.[0]?.url || '');
-    const title = r.title || '';
-    const len = title.length;
-    const badgeClass = len <= 60 ? 'ok' : (len <= 80 ? 'warn' : 'over');
-
-    const row = document.createElement('div');
-    row.className = 'temu-ai-row';
-    row.dataset.idx = idx;
-    row.dataset.id = r.id || '';
-
-    row.innerHTML = `
-      ${thumbUrl ? `<img class="temu-ai-row-thumb" src="${esc(thumbUrl)}" alt="" loading="lazy">` : `<span class="temu-ai-row-thumb" style="display:grid;place-items:center;font-size:10px;">📦</span>`}
-      <input type="text" class="temu-ai-row-inp" value="${esc(title)}" placeholder="Product title for Temu..." />
-      <span class="temu-ai-char-badge ${badgeClass}">${len}/60</span>
-    `;
-
-    const inp = row.querySelector('.temu-ai-row-inp');
-    const badge = row.querySelector('.temu-ai-char-badge');
-
-    inp?.addEventListener('input', e => {
-      const val = e.target.value;
-      r.title = val;
-      const l = val.length;
-      badge.textContent = `${l}/60`;
-      badge.className = 'temu-ai-char-badge ' + (l <= 60 ? 'ok' : (l <= 80 ? 'warn' : 'over'));
-    });
-
-    inp?.addEventListener('change', async e => {
-      r.title = e.target.value;
-      if (MasterUIState?.allRows) {
-        const m = MasterUIState.allRows.find(x => x.id === r.id);
-        if (m) m.title = r.title;
-        await setMasterRows(MasterUIState.allRows);
-      }
-    });
-
-    list.appendChild(row);
-  });
-}
-
-async function temuRunAiTitleOptimization(actionOrPrompt) {
-  const rows = await temuGetQueuedRows();
-  if (!rows || !rows.length) {
-    toast('No products to optimize. Pehle hunt karein!', 'warn');
-    return;
-  }
-
-  let instruction = actionOrPrompt;
-  if (actionOrPrompt === 'temu-polish') {
-    instruction = 'Optimize for Temu seller catalog: remove all brand names, trademark signs, manufacturer models, and promotional buzzwords (HOT, NEW, SALE). Make the title concise, descriptive, high-converting, and strictly under 60 characters.';
-  } else if (actionOrPrompt === 'clean-brand') {
-    instruction = 'Remove all brand names, seller codes, store names, and promotional filler words. Keep only clean descriptive product keywords.';
-  } else if (actionOrPrompt === 'title-case') {
-    instruction = 'Capitalize the first letter of each significant word (Title Case) and clean up punctuation.';
-  }
-
-  TemuAiLastUndo = rows.map(r => ({ id: r.id, title: r.title }));
-  $('temuAiUndoBtn')?.classList.remove('hidden');
-
-  const progressStrip = $('temuAiProgress');
-  const progressFill = $('temuAiProgressBarFill');
-  const progressText = $('temuAiProgressText');
-  if (progressStrip) progressStrip.classList.remove('hidden');
-
-  const total = rows.length;
-  let processed = 0;
-  const batchSize = 4;
-
-  toast(`⚡ Temu AI: ${total} titles rewrite ho rahe hain...`, 'run');
-
-  for (let i = 0; i < total; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize);
-    const batchInput = batch.map((b, bIdx) => ({ id: b.id || String(i + bIdx), title: b.title || '(untitled)' }));
-
-    const prompt = `Instruction: ${instruction}
-
-Input JSON list of products:
-${JSON.stringify(batchInput, null, 2)}
-
-Respond with ONLY a valid JSON array of objects with the exact structure:
-[
-  {"id": "...", "new_title": "..."}
-]
-Do not wrap in markdown quotes if possible, return raw JSON array only.`;
-
-    try {
-      const rawRes = await callGroqAPI({
-        prompt,
-        systemPrompt: 'You are an automated Temu e-commerce title optimization engine. You ONLY output valid JSON arrays. Never include explanations or pleasantries.'
-      });
-
-      const cleaned = rawRes.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const results = JSON.parse(cleaned);
-
-      if (Array.isArray(results)) {
-        results.forEach(item => {
-          if (item?.id && item?.new_title) {
-            const target = rows.find(r => (r.id && r.id === item.id) || (!r.id && item.id));
-            if (target) target.title = item.new_title.trim();
-          }
-        });
-      }
-    } catch (err) {
-      console.warn('Temu AI batch error:', err);
-      toast(`AI error: ${err.message}`, 'warn');
-    }
-
-    processed += batch.length;
-    const pct = Math.min(100, Math.round((processed / total) * 100));
-    if (progressFill) progressFill.style.width = `${pct}%`;
-    if (progressText) progressText.textContent = `Rewriting ${processed}/${total} (${pct}%)`;
-  }
-
-  // Lock scroll position of modal body so buttons never jump
-  const modalBody = $('temuModal')?.querySelector('.temu-modal-body');
-  const savedScroll = modalBody ? modalBody.scrollTop : null;
-
-  if (MasterUIState?.allRows) {
-    rows.forEach(r => {
-      const m = MasterUIState.allRows.find(x => x.id === r.id);
-      if (m) m.title = r.title;
-    });
-    await setMasterRows(MasterUIState.allRows);
-    filterAndRenderMasterRows();
-  }
-
-  // Only re-render titles if the list is currently visible
-  const titleList = $('temuAiTitleList');
-  if (titleList && !titleList.classList.contains('hidden')) {
-    await temuRenderAiTitles();
-  } else {
-    // Just update the count
-    const countEl = $('temuAiTitleCount');
-    if (countEl) countEl.textContent = rows.length;
-  }
-
-  if (modalBody && savedScroll !== null) {
-    modalBody.scrollTop = savedScroll;
-  }
-
-  if (progressText) progressText.textContent = `✓ Done! ${total} titles optimized for Temu.`;
-  setTimeout(() => {
-    if (progressStrip) progressStrip.classList.add('hidden');
-  }, 2500);
-  toast(`✓ Temu titles AI optimized!`, 'ok');
-}
 
 async function openTemuModal() {
   const m = $('temuModal'); if (!m) return;
@@ -10901,7 +10735,6 @@ async function openTemuModal() {
   temuCatFormReset();
   temuSwitchTab('upload');
   temuRenderHistory();
-  temuRenderAiTitles();
   temuInitReviewToggle();
   // Update review count on open
   temuGetQueuedRows().then(rows => temuUpdateReviewCount(rows)).catch(() => {});
@@ -11008,43 +10841,7 @@ function initTemuExport() {
     if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) {} }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
     if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
-    if (e.target.closest('#temuAiToggleListBtn')) {
-      const list = $('temuAiTitleList');
-      if (list) {
-        const isClosed = list.classList.toggle('hidden');
-        $('temuAiToggleListBtn').textContent = isClosed 
-          ? `Preview & Edit Titles (${$('temuAiTitleCount')?.textContent || '0'}) ▾`
-          : `Hide Titles List ▴`;
-        if (!isClosed) temuRenderAiTitles();
-      }
-    }
-    if (e.target.closest('#temuAiRunBtn')) {
-      const p = $('temuAiPromptInput')?.value?.trim();
-      if (!p) { toast('Prompt box mein instruction likhein', 'warn'); $('temuAiPromptInput')?.focus(); return; }
-      temuRunAiTitleOptimization(p);
-    }
-    {
-      const ab = e.target.closest('.temu-ai-quick-btns button[data-temu-ai]');
-      if (ab) temuRunAiTitleOptimization(ab.dataset.temuAi);
-    }
-    if (e.target.closest('#temuAiUndoBtn')) {
-      (async () => {
-        if (!TemuAiLastUndo || !TemuAiLastUndo.length) return;
-        const rows = await temuGetQueuedRows();
-        TemuAiLastUndo.forEach(snap => {
-          const target = rows.find(r => r.id === snap.id);
-          if (target) target.title = snap.title;
-          if (MasterUIState?.allRows) {
-            const m = MasterUIState.allRows.find(x => x.id === snap.id);
-            if (m) m.title = snap.title;
-          }
-        });
-        if (MasterUIState?.allRows) await setMasterRows(MasterUIState.allRows);
-        await temuRenderAiTitles();
-        $('temuAiUndoBtn')?.classList.add('hidden');
-        toast('Reverted Temu titles', 'ok');
-      })();
-    }
+
     // Categories & Catalog events
     if (e.target.closest('#temuAddCategoryTopBtn')) {
       const form = $('temuCatForm');

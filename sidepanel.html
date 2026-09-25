@@ -865,34 +865,6 @@
             <div id="temuReviewList" class="temu-review-list hidden"></div>
           </div>
 
-          <!-- ── Temu AI Title Studio ── -->
-          <div class="temu-card temu-ai-card">
-            <div class="temu-ai-head">
-              <div class="temu-ai-title">
-                <svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
-                <b>Temu AI Title Optimizer</b>
-                <span class="temu-ai-badge">Groq</span>
-              </div>
-              <button type="button" id="temuAiToggleListBtn" class="btn btn-ghost btn-xs">Preview & Edit Titles (<span id="temuAiTitleCount">0</span>) ▾</button>
-            </div>
-            <div class="temu-ai-prompt-row">
-              <input type="text" id="temuAiPromptInput" class="inp" placeholder="e.g. Strip brand, under 60 chars, capitalize keywords..." />
-              <button type="button" id="temuAiRunBtn" class="btn btn-primary btn-xs">⚡ AI Rewrite</button>
-            </div>
-            <div class="temu-ai-quick-btns">
-              <button type="button" class="ai-quick-btn" data-temu-ai="temu-polish" title="Clean brand, concise keywords, strictly <60 chars for Temu">📦 Temu Polish (<60 chars)</button>
-              <button type="button" class="ai-quick-btn" data-temu-ai="clean-brand" title="Remove brand names, seller codes, and buzzwords">🧹 Strip Brands</button>
-              <button type="button" class="ai-quick-btn" data-temu-ai="title-case" title="Capitalize words cleanly">✨ Title Case</button>
-              <button type="button" id="temuAiUndoBtn" class="ai-quick-btn undo-btn hidden" title="Revert titles to original">↺ Undo</button>
-            </div>
-            <div id="temuAiProgress" class="ai-progress-strip hidden">
-              <div class="ai-progress-bar"><div id="temuAiProgressBarFill" class="ai-progress-fill" style="width:0%"></div></div>
-              <span id="temuAiProgressText" class="ai-progress-text">Processing...</span>
-            </div>
-            <!-- Collapsible list for live per-product title editing -->
-            <div id="temuAiTitleList" class="temu-ai-list hidden"></div>
-          </div>
-
           <!-- Actions -->
           <div class="temu-actions">
             <button id="temuAutoBtn" class="btn btn-primary temu-btn-main" type="button">
