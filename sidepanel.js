@@ -10202,19 +10202,30 @@ function temuInitActivitySummary() {
 async function updateTopTemuStorePill() {
   const pill = $('topTemuStorePill');
   if (!pill) return;
-  const storeNameEl = $('topTemuStoreName');
-  const storeCountEl = $('topTemuStoreCount');
+  const store = temuActiveStoreName();
 
-  const store = temuActiveStoreName() || 'HQ TWO';
-  if (storeNameEl) storeNameEl.textContent = store;
+  if (!store) {
+    pill.innerHTML = `
+      <span class="temu-dot-live"></span>
+      <span class="temu-pill-dash">—</span>
+    `;
+    pill.title = 'Open Temu Export (No store added)';
+    return;
+  }
 
+  let readyCount = 0;
   try {
     const rows = await getMasterRows();
-    const readyCount = rows.length;
-    if (storeCountEl) storeCountEl.textContent = `${readyCount}/50`;
-  } catch (_) {
-    if (storeCountEl) storeCountEl.textContent = '0/50';
-  }
+    readyCount = rows.length;
+  } catch (_) {}
+
+  pill.innerHTML = `
+    <span class="temu-dot-live"></span>
+    <span class="temu-pill-name">${esc(store)}</span>
+    <span class="temu-pill-divider">|</span>
+    <span class="temu-pill-count">${readyCount}/50</span>
+  `;
+  pill.title = `Open Temu Export — Store: ${store} (${readyCount} ready)`;
 }
 
 function initTemuExport() {

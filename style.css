@@ -155,10 +155,10 @@ svg.i-xs { width: 11px; height: 11px; }
   gap: 7px;
   height: 24px;
   padding: 0 10px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.75);
-  border: 1px solid rgba(0, 229, 255, 0.28);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 10px rgba(0, 229, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   font: 600 11px var(--mono);
   color: #F0F9FF;
   position: relative;
@@ -168,9 +168,9 @@ svg.i-xs { width: 11px; height: 11px; }
   white-space: nowrap;
 }
 .temu-top-pill:hover {
-  background: rgba(15, 23, 42, 0.95);
-  border-color: rgba(0, 229, 255, 0.6);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 16px rgba(0, 229, 255, 0.28);
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(0, 229, 255, 0.5);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4), 0 0 12px rgba(0, 229, 255, 0.2);
   transform: translateY(-1px);
 }
 .temu-top-pill:active {
@@ -181,14 +181,22 @@ svg.i-xs { width: 11px; height: 11px; }
   height: 7px;
   border-radius: 50%;
   background: #10B981;
-  box-shadow: 0 0 8px #10B981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.8), 0 0 14px rgba(16, 185, 129, 0.35);
   display: inline-block;
   flex-shrink: 0;
   animation: temuDotPulse 2s infinite ease-in-out;
 }
 @keyframes temuDotPulse {
   0%, 100% { opacity: 0.85; transform: scale(1); box-shadow: 0 0 6px #10B981; }
-  50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 12px #10B981, 0 0 18px rgba(16, 185, 129, 0.5); }
+  50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 12px #10B981, 0 0 18px rgba(16, 185, 129, 0.5); }
+}
+.temu-pill-dash {
+  color: #94A3B8;
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  padding: 0 2px;
 }
 .temu-pill-name {
   font-weight: 700;
