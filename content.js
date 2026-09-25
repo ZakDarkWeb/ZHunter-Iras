@@ -4723,8 +4723,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 })();
 
-} // end __zhunterContentLoaded guard
-
 // ── In-page toast (feedback for the right-click menu) ─────────
 chrome.runtime.onMessage.addListener(message => {
   if (message?.action !== 'ZH_PAGE_TOAST') return;
@@ -5087,4 +5085,6 @@ function zhFrameIdle() {
     });
   } catch (_) {}
 })();
+
+} // end __zhunterContentLoaded guard
 
