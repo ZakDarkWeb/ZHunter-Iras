@@ -2750,6 +2750,156 @@ function closeLightbox() {
   currentLightboxList = [];
 }
 
+// Default AI Studio Commercial Prompt (1:1 Hero-Shot Listing Image)
+const DEFAULT_AI_COMMERCIAL_PROMPT = `Create a professional 1:1 e-commerce main listing image from the supplied product image(s).
+
+Think like a professional commercial product photographer and art director.
+
+The goal is to make the shopper stop scrolling and immediately understand what the product is, what it is used for, and why the product visually feels valuable.
+
+Do NOT use a fixed template or fixed composition.
+
+FIRST study the actual product.
+
+THEN design a realistic scene specifically around that product.
+
+The supplied product is the HERO and must remain completely recognizable.
+
+Preserve the product's:
+- exact appearance
+- shape
+- proportions
+- colors
+- materials
+- patterns
+- branding
+- labels
+- packaging
+- important printed details
+
+Do not redesign, simplify, replace, or invent the product.
+
+You may change its size, rotation, camera perspective, position, and placement if this creates a stronger composition.
+
+Build a believable real-world environment where the product naturally belongs.
+
+Use only the visual elements that make sense for THIS product.
+
+Think about what a shopper would naturally see around this product in real life.
+
+Use:
+- realistic lifestyle context
+- relevant ingredients or accessories when appropriate
+- foreground, middle-ground, and background depth
+- natural overlap
+- different object sizes
+- realistic perspective
+- natural shadows
+- believable lighting
+- subtle depth of field
+- controlled visual randomness
+
+Do not arrange objects in a straight line or in a perfectly symmetrical display.
+
+If the product represents a quantity, multipack, collection, or large supply, communicate that quantity visually.
+
+For example, for a large coffee-pod pack, do not show only two or three pods neatly beside the box.
+
+Instead, create a believable kitchen scene with many of the actual product pieces naturally distributed across the counter:
+some overlapping, some stacked casually, some partially hidden, some closer to the camera, some farther away, and some scattered naturally around the main package.
+
+The purpose is to create a strong visual impression of abundance WITHOUT making the scene look fake or cluttered.
+
+Use the same principle for other products, but adapt it to the product.
+
+For food products, show the food in a realistic serving/use situation when appropriate.
+
+For kitchen products, show the product naturally being used or surrounded by relevant kitchen context when appropriate.
+
+For grocery products, use realistic ingredients, serving context, or quantity cues when they genuinely help communicate the product.
+
+For tools or household products, show realistic usage or environment rather than adding unrelated decoration.
+
+The composition should have a clear visual hierarchy:
+
+1. HERO PRODUCT
+2. Supporting product/use-case elements
+3. Background environment
+
+The eye should naturally move toward the main product.
+
+Create depth.
+
+Allow some objects to enter the foreground and partially leave the frame when this improves the composition.
+
+Allow some objects to overlap each other naturally.
+
+Avoid making every object equally visible.
+
+Real photographs are not perfectly organized.
+
+Create controlled natural randomness:
+intentional composition with natural-looking imperfection.
+
+IMPORTANT:
+
+Do not simply place a few props around the product.
+
+Create a believable scene.
+
+The surrounding elements should make the viewer think:
+
+"This is what this product looks like in real life."
+
+The image should feel:
+professional
+commercial
+realistic
+useful
+interesting
+premium
+natural
+
+It should NOT feel:
+AI-generated
+CGI
+over-designed
+artificially staged
+perfectly symmetrical
+like a generic stock image
+
+Avoid:
+- unnecessary props
+- unrelated objects
+- excessive decoration
+- fake glowing effects
+- neon colors
+- excessive HDR
+- unrealistic reflections
+- floating objects
+- impossible shadows
+- plastic-looking materials
+- excessive blur
+- excessive bokeh
+- perfectly aligned repeated objects
+- straight rows of products
+- artificial-looking repetition
+
+Do not invent product features, accessories, quantities, specifications, claims, or benefits.
+
+Do not make unrelated objects appear to be included with the product.
+
+If text is visible on the original product, preserve it accurately.
+
+If the product itself is enough to create a strong composition, keep the scene simple.
+
+If the product benefits from quantity, scale, usage, ingredients, or environmental context, use those elements strongly.
+
+The final result should look like a real professional commercial photograph created specifically for an e-commerce listing.
+
+ONE final image.
+1:1 square composition.`;
+
 // Flow smart editor automation helper
 async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null }) {
   if (!src) return;
@@ -2757,7 +2907,7 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
     .replace(/\s*[-–|].*$/, '')
     .trim();
-  const flowPrompt = prompt || `High-end commercial studio product photography of ${cleanTitle || 'this product'}, seamless pure white background, soft natural studio lighting with realistic subtle contact drop shadow, 8k resolution, crisp ultra-sharp details, remove all artifacts, e-commerce catalog ready.`;
+  const flowPrompt = prompt || DEFAULT_AI_COMMERCIAL_PROMPT;
 
   toast('Preparing image & prompt for Flow…', 'info');
 
@@ -2888,23 +3038,62 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     try {
       const data = await chrome.storage.local.get(['activeFlowContext']);
       const ctx = data?.activeFlowContext;
-      if (ctx?.productId && MasterUIState?.allRows) {
-        const row = MasterUIState.allRows.find(x => x.id === ctx.productId);
+      const targetId = msg.productId || ctx?.productId;
+      const idx = msg.imageIndex ?? ctx?.imageIndex ?? 0;
+
+      let updated = false;
+
+      // 1. Update MasterUIState.allRows
+      if (targetId && MasterUIState?.allRows) {
+        const row = MasterUIState.allRows.find(x => x.id === targetId);
         if (row && Array.isArray(row.images)) {
-          const idx = ctx.imageIndex ?? 0;
           row.images[idx] = msg.newImgUrl;
+          updated = true;
           await setMasterRows(MasterUIState.allRows);
-          await temuRenderReview();
-          toast('✓ Image received from Flow! Uploading link for Temu...', 'info');
-          (async () => {
-            const pub = await uploadImageToPublicHost(msg.newImgUrl);
-            if (pub && pub.startsWith('http')) {
-              row.images[idx] = pub;
-              await setMasterRows(MasterUIState.allRows);
-              toast('✓ Temu image link ready!', 'ok');
-            }
-          })();
         }
+      }
+
+      // 2. Update BulkState.results if present
+      if (targetId && typeof BulkState !== 'undefined' && Array.isArray(BulkState?.results)) {
+        const bRow = BulkState.results.find(x => x.id === targetId);
+        if (bRow && Array.isArray(bRow.images)) {
+          bRow.images[idx] = msg.newImgUrl;
+          updated = true;
+        }
+      }
+
+      // 3. Update TemuSheetRows if present
+      if (targetId && typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) {
+        const sRow = TemuSheetRows.find(x => x.id === targetId);
+        if (sRow && Array.isArray(sRow.images)) {
+          sRow.images[idx] = msg.newImgUrl;
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        await temuRenderReview();
+        toast('✓ Image received from Flow! Uploading link for Temu...', 'info');
+        (async () => {
+          const pub = await uploadImageToPublicHost(msg.newImgUrl);
+          if (pub && pub.startsWith('http')) {
+            if (targetId && MasterUIState?.allRows) {
+              const row = MasterUIState.allRows.find(x => x.id === targetId);
+              if (row && Array.isArray(row.images)) row.images[idx] = pub;
+              await setMasterRows(MasterUIState.allRows);
+            }
+            if (targetId && typeof BulkState !== 'undefined' && Array.isArray(BulkState?.results)) {
+              const bRow = BulkState.results.find(x => x.id === targetId);
+              if (bRow && Array.isArray(bRow.images)) bRow.images[idx] = pub;
+            }
+            if (targetId && typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) {
+              const sRow = TemuSheetRows.find(x => x.id === targetId);
+              if (sRow && Array.isArray(sRow.images)) sRow.images[idx] = pub;
+            }
+            await temuRenderReview();
+            toast('✓ Temu image link ready!', 'ok');
+          }
+        })();
       }
     } catch (e) {
       console.warn('[ZHunter] Replace from Flow error:', e);
@@ -11712,14 +11901,29 @@ function temuInitReviewToggle() {
 }
 
 // Gemini image open modal
-function temuOpenGeminiModal(imgUrl, productTitle, productId = null, imageIndex = null) {
+async function temuOpenGeminiModal(imgUrl, productTitle, productId = null, imageIndex = null) {
   const modal = $('temuGeminiModal');
   const preview = $('temuGeminiPreviewImg');
   const promptTxt = $('temuGeminiPromptTxt');
   if (!modal) return;
   if (preview) preview.src = imgUrl;
-  const defaultPrompt = `Professional commercial studio product photo of this item: "${productTitle}". Clean pure white background, soft diffused lighting, sharp focus, high resolution. Remove any watermarks, text overlays, or cluttered backgrounds. Keep the product exactly as-is, no changes to shape or color.`;
-  if (promptTxt) promptTxt.value = defaultPrompt;
+
+  try {
+    const stored = await chrome.storage.local.get(['zhunterAiImagePrompt']);
+    const promptVal = stored?.zhunterAiImagePrompt || DEFAULT_AI_COMMERCIAL_PROMPT;
+    if (promptTxt) promptTxt.value = promptVal;
+  } catch (_) {
+    if (promptTxt) promptTxt.value = DEFAULT_AI_COMMERCIAL_PROMPT;
+  }
+
+  // Setup auto-save listener on prompt changes
+  if (promptTxt && !promptTxt._boundAutoSave) {
+    promptTxt._boundAutoSave = true;
+    promptTxt.addEventListener('input', () => {
+      chrome.storage.local.set({ zhunterAiImagePrompt: promptTxt.value });
+    });
+  }
+
   modal.style.zIndex = '2000';
   modal.classList.remove('hidden');
   // Store current img url & product title for Flow/Gemini actions

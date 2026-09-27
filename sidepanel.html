@@ -1461,7 +1461,7 @@
       <div class="modal-head">
         <div class="temu-cat-picker-title">
           <svg class="i" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
-          <b>Edit Image with AI (Flow / Gemini / GPT)</b>
+          <b>AI Studio · Image Enhancer</b>
         </div>
         <button id="temuGeminiClose" class="modal-close" aria-label="Close">✕</button>
       </div>
@@ -1469,11 +1469,20 @@
         <div class="temu-gemini-preview-wrap">
           <img id="temuGeminiPreviewImg" class="temu-gemini-preview" src="" alt="Product image" />
         </div>
+        <div style="padding: 10px 18px 0;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-size:11px; font-weight:700; color:#00E5FF; display:flex; align-items:center; gap:4px;">
+              <span>🍌 Default Model: Nano Banana 2</span>
+            </div>
+            <button id="temuGeminiCopyPromptBtn" class="btn btn-ghost btn-xs" type="button" style="font-size:10px; padding:2px 8px;" title="Copy prompt to clipboard">📋 Copy Prompt</button>
+          </div>
+          <textarea id="temuGeminiPromptTxt" class="inp inp-ta" style="width:100%; height:95px; font-size:10.5px; line-height:1.4; resize:vertical; padding:8px; border-radius:6px; box-sizing:border-box;" placeholder="Enter image generation prompt..."></textarea>
+        </div>
         <div class="temu-gemini-actions">
-          <button id="temuFlowOpenBtn" class="ai-tile-btn ai-tile-flow" type="button" title="Open in Google Flow">
+          <button id="temuFlowOpenBtn" class="ai-tile-btn ai-tile-flow" type="button" title="Open in Google Flow (🍌 Nano Banana 2)">
             <span class="ai-tile-icon">✨</span>
             <span class="ai-tile-name">Flow</span>
-            <span class="ai-tile-sub">Google</span>
+            <span class="ai-tile-sub">🍌 Nano Banana 2</span>
           </button>
           <button id="temuGeminiOpenBtn" class="ai-tile-btn ai-tile-gemini" type="button" title="Open in Google Gemini">
             <span class="ai-tile-icon">⚡</span>

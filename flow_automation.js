@@ -97,6 +97,51 @@
     try { el.click(); } catch (_) {}
   }
 
+  // Helper: Ensure Flow model is switched to 🍌 Nano Banana 2
+  async function ensureNanoBananaModel() {
+    try {
+      const modelTrigger = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
+      const labelEl = modelTrigger?.querySelector('.model-select-trigger-label') || modelTrigger;
+      const curText = (labelEl?.textContent || '').trim();
+      if (!curText.toLowerCase().includes('nano banana 2')) {
+        console.log('[ZHunter Flow] Current model is:', curText, 'Switching to 🍌 Nano Banana 2…');
+        if (modelTrigger) {
+          simulateRealClick(modelTrigger);
+          await new Promise(r => setTimeout(r, 450));
+          const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item, mat-dialog-container button'));
+          const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
+          if (targetItem) {
+            simulateRealClick(targetItem);
+            console.log('[ZHunter Flow] Successfully selected 🍌 Nano Banana 2');
+          } else {
+            document.body.click();
+          }
+        }
+      } else {
+        console.log('[ZHunter Flow] Model already verified: 🍌 Nano Banana 2');
+      }
+    } catch (e) {
+      console.warn('[ZHunter Flow] Model switch error:', e);
+    }
+  }
+
+  // Helper: Inject prompt text into Flow ProseMirror rich text editor
+  async function injectFlowPrompt(promptText) {
+    if (!promptText) return;
+    try {
+      const editor = await waitForEl('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror', 4000);
+      if (editor) {
+        editor.focus();
+        editor.innerHTML = `<p>${promptText.replace(/\n/g, '<br>')}</p>`;
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.dispatchEvent(new Event('change', { bubbles: true }));
+        console.log('[ZHunter Flow] Prompt injected into ProseMirror');
+      }
+    } catch (e) {
+      console.warn('[ZHunter Flow] Prompt injection error:', e);
+    }
+  }
+
   // Top HUD Status Banner on Flow Page
   function updateFlowHUD(msg, type = 'info', actionBtn = null) {
     let hud = document.getElementById('zh-flow-hud');
@@ -247,12 +292,15 @@
 
       // STEP 2: We are inside /project/...
       if (isInsideProject) {
-        updateFlowHUD('ZHunter: Project open! Adding image…', 'info');
+        updateFlowHUD('ZHunter: Project open! Verifying 🍌 Nano Banana 2 & adding image…', 'info');
 
         // Allow Angular view to mount
         await new Promise(r => setTimeout(r, 600));
 
-        // 1. Set Project Name
+        // 1. Ensure Model is 🍌 Nano Banana 2
+        await ensureNanoBananaModel();
+
+        // 2. Set Project Name
         try {
           const titleInput = await waitForEl('input.editable-text-input', 4000);
           if (titleInput) {
@@ -273,7 +321,7 @@
           console.warn('[ZHunter Flow] Rename error:', e);
         }
 
-        // 2. Inject Image — exactly once using a global dispatch lock
+        // 3. Inject Image — exactly once using a global dispatch lock
         if (act.imgBase64 && !window.__zhImgDropped) {
           window.__zhImgDropped = true;
           // Auto-release lock after 10s so future actions can run
@@ -307,14 +355,21 @@
           }
         }
 
+        // 4. Inject Prompt into ProseMirror
+        if (act.prompt) {
+          await injectFlowPrompt(act.prompt);
+        }
+
         // Mark action processed
         chrome?.storage?.local?.set({
           pendingFlowAction: { ...act, processed: true }
         });
 
         isRunningAction = false;
+        const pTitle = (act.productTitle || 'Product').slice(0, 30);
+        const imgNum = (act.imageIndex ?? 0) + 1;
         updateFlowHUD(
-          '✓ Image added to Flow! Edit it, then click to send back:',
+          `📦 ${pTitle} · Image #${imgNum}`,
           'info',
           {
             label: '📥 Send to ZHunter',
@@ -325,9 +380,11 @@
                 const latestImg = valid[valid.length - 1];
                 chrome.runtime?.sendMessage?.({
                   action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
-                  newImgUrl: latestImg.src
+                  newImgUrl: latestImg.src,
+                  productId: act.productId,
+                  imageIndex: act.imageIndex
                 });
-                updateFlowHUD('✓ Sent to ZHunter! Product image replaced.', 'ok');
+                updateFlowHUD(`✓ Sent Image #${imgNum} to ZHunter!`, 'ok');
               } else {
                 updateFlowHUD('Right-click edited image → "Copy Image", then click 📋 in ZHunter!', 'warn');
               }
