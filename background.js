@@ -39,7 +39,7 @@ const BG_PLATFORM_KEYS = [
   'alibaba.com', 'temu.', 'ebay.', 'etsy.com', 'shein.com', 'daraz.',
   'worldwidegolfballs.com', 'worldwidegolfshops.com', 'flipkart.com',
   'noon.com', 'lazada.', 'myshopify.com', 'target.com', 'costco.com',
-  'bestbuy.com', 'homedepot.com'
+  'bestbuy.com', 'homedepot.com', 'bjs.com'
 ];
 function bgDetectPlatform(url) {
   if (!url) return null;
@@ -102,13 +102,27 @@ function stopKeepAlive() {
   if (_keepAliveTimeout) { clearTimeout(_keepAliveTimeout); _keepAliveTimeout = null; }
 }
 
+// ── Persistent Port Keepalive ─────────────────────────────────
+try {
+  chrome.runtime.onConnect.addListener(port => {
+    if (port.name === 'zhunter-keepalive') {
+      startKeepAlive();
+      port.onDisconnect.addListener(() => {
+        stopKeepAlive();
+      });
+    }
+  });
+} catch (_) {}
+
 // ── Rate Limiter ─────────────────────────────────────────────
 // Prevents a malicious page from flooding the extension with messages.
 const _rateLimitMap = new Map();
 const RATE_LIMIT_MAX       = 30;    // max requests per window per sender
 const RATE_LIMIT_WINDOW_MS = 10000; // 10-second rolling window
 function isRateLimited(sender) {
-  const key  = sender.tab?.id ?? 'extension';
+  // Internal extension contexts (sidepanel, options) have sender.id === chrome.runtime.id and no sender.tab
+  if (!sender?.tab?.id && sender?.id === chrome.runtime.id) return false;
+  const key  = sender?.tab?.id ?? 'unknown';
   const now  = Date.now();
   let   entry = _rateLimitMap.get(key);
   if (!entry || now > entry.resetAt) entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
@@ -502,6 +516,7 @@ async function fetchOnce(url, settings) {
     let targetMime = contentType;
     if (fmt === 'png') targetMime = 'image/png';
     else if (fmt === 'jpg') targetMime = 'image/jpeg';
+    else if (fmt === 'webp') targetMime = 'image/webp';
     
     const needsFormatChange = !contentType.startsWith(targetMime);
     
@@ -522,9 +537,56 @@ async function fetchOnce(url, settings) {
         
         let targetW = bitmap.width;
         let targetH = bitmap.height;
+        let sx = 0, sy = 0, sw = bitmap.width, sh = bitmap.height;
         
-        if (ratio === '1:1') {
-          targetW = targetH = Math.max(targetW, targetH);
+        if (ratio === '1:1' || ratio === 'square') {
+          // Smart Auto-Trim: Detect and crop out excessive empty white margins on outer borders
+          try {
+            const probeCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const probeCtx = probeCanvas.getContext('2d');
+            probeCtx.drawImage(bitmap, 0, 0);
+            const imgData = probeCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+            const d = imgData.data;
+            const isWhite = (x, y) => {
+              const idx = (y * bitmap.width + x) * 4;
+              return d[idx] >= 248 && d[idx + 1] >= 248 && d[idx + 2] >= 248;
+            };
+            let left = 0, right = bitmap.width - 1, top = 0, bottom = bitmap.height - 1;
+            const stepY = Math.max(1, Math.floor(bitmap.height / 80));
+            const stepX = Math.max(1, Math.floor(bitmap.width / 80));
+            while (left < right) {
+              let colW = true;
+              for (let y = 0; y < bitmap.height; y += stepY) { if (!isWhite(left, y)) { colW = false; break; } }
+              if (!colW) break;
+              left += 2;
+            }
+            while (right > left) {
+              let colW = true;
+              for (let y = 0; y < bitmap.height; y += stepY) { if (!isWhite(right, y)) { colW = false; break; } }
+              if (!colW) break;
+              right -= 2;
+            }
+            while (top < bottom) {
+              let rowW = true;
+              for (let x = left; x <= right; x += stepX) { if (!isWhite(x, top)) { rowW = false; break; } }
+              if (!rowW) break;
+              top += 2;
+            }
+            while (bottom > top) {
+              let rowW = true;
+              for (let x = left; x <= right; x += stepX) { if (!isWhite(x, bottom)) { rowW = false; break; } }
+              if (!rowW) break;
+              bottom -= 2;
+            }
+            if (right - left >= 60 && bottom - top >= 60) {
+              const pad = Math.round(Math.max(right - left, bottom - top) * 0.02);
+              sx = Math.max(0, left - pad);
+              sy = Math.max(0, top - pad);
+              sw = Math.min(bitmap.width - sx, (right - left) + pad * 2);
+              sh = Math.min(bitmap.height - sy, (bottom - top) + pad * 2);
+            }
+          } catch (_) {}
+          targetW = targetH = Math.max(sw, sh, 800);
         } else if (ratio === '3:4') {
           if (targetW / targetH > 3/4) targetH = Math.round(targetW * (4/3));
           else targetW = Math.round(targetH * (3/4));
@@ -534,23 +596,27 @@ async function fetchOnce(url, settings) {
         }
         
         let scale = 1;
+        // For non-square ratios, scale image to fill canvas (avoid blank bars)
+        if (ratio === '3:4' || ratio === '4:3') {
+          scale = Math.min(targetW / sw, targetH / sh);
+        }
         
         const canvas = new OffscreenCanvas(targetW, targetH);
         const ctx = canvas.getContext('2d');
         
-        if (bg === 'white' || targetMime === 'image/jpeg') {
+        if (bg === 'white' || targetMime === 'image/jpeg' || ratio === '1:1' || ratio === 'square') {
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, targetW, targetH);
         }
         
-        const drawW = Math.round(bitmap.width * scale);
-        const drawH = Math.round(bitmap.height * scale);
+        const drawW = Math.round(sw * scale);
+        const drawH = Math.round(sh * scale);
         const drawX = Math.round((targetW - drawW) / 2);
         const drawY = Math.round((targetH - drawH) / 2);
         
-        ctx.drawImage(bitmap, drawX, drawY, drawW, drawH);
+        ctx.drawImage(bitmap, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
         
-        let quality = fmt === 'jpg' ? 0.96 : undefined;
+        let quality = (fmt === 'jpg' || fmt === 'webp') ? 0.96 : undefined;
         let convertedBlob = await canvas.convertToBlob({ type: targetMime, quality });
         
         // Enforce max 5MB limit by dropping quality or downscaling slightly
@@ -1187,6 +1253,19 @@ async function handleMessage(msg, sender) {
       }
       return { success: true };
     }
+    case 'OPEN_SIDEPANEL_FOR_TAB': {
+      try {
+        const windowId = sender?.tab?.windowId;
+        const tabId = sender?.tab?.id;
+        if (chrome.sidePanel?.open) {
+          if (windowId) await chrome.sidePanel.open({ windowId });
+          else if (tabId) await chrome.sidePanel.open({ tabId });
+        }
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e?.message };
+      }
+    }
     case 'STOP_KEEPALIVE':     stopKeepAlive();  return { success: true };
     case 'FETCH_BASE64': {
       const storedSettings = (await getData())?.settings || {};
@@ -1624,6 +1703,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (settings.bulkTabGroup !== false && (tab.groupId == null || tab.groupId === -1) && !/^https?:\/\/seller\.temu\.com/i.test(url)) {
     bgGroupTabs([tabId]).catch(() => {});
   }
+
+  // Exclude seller portals from auto-capture (they are not product pages to hunt)
+  if (/seller\.(temu|walmart|amazon|ebay|alibaba|etsy)\.|sellercentral\.|vendorcentral\./i.test(url)) return;
 
   // Check auto-capture enabled setting (default: true)
   if (settings.bulkQueueAutoCapture !== true) return; // v8: off unless the user turns it on

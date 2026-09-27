@@ -1,5 +1,5 @@
 // ============================================================
-// ZHunter PRO v9.7.5 — Content Script
+// ZHunter PRO v9.8.0 — Content Script
 // ============================================================
 // Fixes vs 7.6.0:
 //   • Issue 1: Correct price extraction — reads full price string
@@ -28,8 +28,28 @@ const VID_CAP = 12;
 
 // FIX: Cache the harvestInlineJson result per page load.
 // On complex pages (Next.js/Walmart/Amazon) the inline scripts can be 500 KB–2 MB.
-// Re-parsing them on every SCRAPE_PAGE message caused 200–500 ms freezes.
 let _harvestCache = null;
+let _lastHarvestHref = location.href;
+function checkFlushHarvestCache() {
+  if (location.href !== _lastHarvestHref) {
+    _lastHarvestHref = location.href;
+    _harvestCache = null;
+  }
+}
+try {
+  window.addEventListener('popstate', checkFlushHarvestCache);
+  window.addEventListener('hashchange', checkFlushHarvestCache);
+  const _origPush = history.pushState;
+  history.pushState = function() {
+    _harvestCache = null;
+    return _origPush.apply(this, arguments);
+  };
+  const _origReplace = history.replaceState;
+  history.replaceState = function() {
+    _harvestCache = null;
+    return _origReplace.apply(this, arguments);
+  };
+} catch (_) {}
 
 // ── Basics ──────────────────────────────────────────────────
 const absUrl = u => { try { return new URL(u, location.href).href; } catch (_) { return u || ''; } };
@@ -106,12 +126,9 @@ function normalizeImg(rawUrl) {
      'fmt', 'wid', 'hei', 'fit'].forEach(p => u.searchParams.delete(p));
 
     if (/(media-amazon\.com|ssl-images-amazon\.com|images-na\.|amazon\.[a-z.]+)/i.test(h)) {
-      // FIX: Replace ALL size tokens with SL1500 (highest standard CDN quality).
-      // Previously this stripped the token entirely, which can result in Amazon
-      // serving a low-res default. SL1500 guarantees 1500px longest side.
-      // Global flag handles chained tokens like ._AC_US40_._SX300_.
-      let path = u.pathname.replace(/\._[A-Z0-9_,]{2,}_\./gi, '._AC_SL1500_.');
-      u.pathname = path;
+      // Strip old sizing/crop tokens and apply Auto-Crop _AC_SL1500_ (trims excess white margins & guarantees 1500px HD)
+      let clean = u.pathname.replace(/\._[A-Za-z0-9_.,-]+(?:\.[a-z]+)?(?=\.[a-z]+$)/i, '');
+      u.pathname = clean.replace(/(\.[a-z0-9]+)$/i, '._AC_SL1500_$1');
       return u.href;
     }
     if (/walmartimages\.com|walmart\.com/i.test(h)) {
@@ -127,6 +144,15 @@ function normalizeImg(rawUrl) {
         u.searchParams.set('fmt', 'jpg');
       }
       return u.href;
+    }
+    if (/bjs\.scene7\.com|bjs\.com/i.test(h)) {
+      let href = u.href.replace(/\?\$bjs-[^$]+\$/i, '?$bjs-Zoom$');
+      return href;
+    }
+    if (/kwcdn\.com|temu/i.test(h)) {
+      let href = u.href.replace(/\?imageView2\/2\/w\/\d+.*$/i, '?imageView2/2/w/1600/q/90/format/jpg');
+      href = href.replace(/_\d+x\d+\.(jpeg|png|webp|jpg).*$/i, '.$1');
+      return href;
     }
     if (/faire-cdn\.com|cdn\.faire\.com|faire\.com/i.test(h)) {
       let path = u.pathname.replace(/\/(w|h|c|q|f)_[^/]+\/?/gi, '/');
@@ -158,9 +184,8 @@ function canonImageKey(url) {
     const u = new URL(absUrl(url));
     let p = u.pathname;
     // Amazon: strip ALL size/quality tokens (._AC_SL1500_., ._AC_US40_., etc.)
-    // Use a global replace so multiple tokens in one path are all removed.
-    p = p.replace(/\._[A-Z0-9_,]+_\./gi, '.'); // first pass (handles most)
-    p = p.replace(/\._[A-Z0-9_,]+_\./gi, '.'); // second pass (handles chained tokens)
+    p = p.replace(/\._[A-Za-z0-9_.,-]+(?:\.[a-z]+)?(?=\.[a-z]+$)/i, '');
+    p = p.replace(/\._[A-Z0-9_,]+_\./gi, '.');
     p = p.replace(/\/\d{2,4}x\d{2,4}\//g, '/');
     p = p.replace(/\/\d{2,4}x\d{2,4}(?=\.[a-z]+$)/gi, '/');
     p = p.replace(/[-_](thumb|small|medium|large|tiny|sml|lrg|hi|lo)\b/gi, '');
@@ -210,8 +235,7 @@ function isBadImage(url) {
   // Walmart & Sam's "dfw"/"dfwrs" = seller marketing badges & rich-content tiles (not product photos); richmedia = 360° spin frames
   if (/(walmartimages|samsclubimages)\.com\/(dfw|dfwrs)\//.test(s)) return true;
   if (/i5-richmedia\.walmartimages\.com|_360_store_merchant_/.test(s)) return true;
-  // Marketplaces (Temu) reject webp — drop it when a jpg/png source is the norm
-  if (/\.webp(\?|$)/.test(s) && /(walmartimages|samsclubimages|media-amazon)\.com/.test(s)) return true;
+  // Note: WebP rule removed in v9.8.0 — Amazon/Walmart increasingly serve valid product photos as WebP
 
   // Sam's Club non-product
   if (/samsclub\.com|samsclubimages\.com/i.test(s) && /\/category\/|\/banner\/|\/brand\/|\/circular\/|\/hero\/|\/nav\/|\/icon\/|\/logo\//.test(s)) return true;
@@ -1079,7 +1103,7 @@ function scrapeAmazon() {
   function toAmazonAutoCrop(url) {
     if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
     let clean = url.split('?')[0];
-    clean = clean.replace(/(?:\._[A-Za-z0-9_.,-]+_\.?)+/g, '.');
+    clean = clean.replace(/\._[A-Za-z0-9_.,-]+(?:\.[a-z]+)?(?=\.[a-z]+$)/i, '');
     return clean.replace(/(\.[a-zA-Z0-9]+)$/i, '._AC_SL1500_$1');
   }
 
@@ -1197,7 +1221,7 @@ function scrapeAmazon() {
   }
 
   // Pass 2: Raw Amazon CDN URL scan — only if targeted script extraction found nothing.
-  if (r.images.length === 0) for (const script of scripts) {
+  if (r.images.length === 0) for (const script of document.querySelectorAll('script')) {
     const t = script.textContent || '';
     const rawScan = /https:\/\/(?:m\.media-amazon\.com|images-amazon\.com)\/images\/I\/[A-Za-z0-9%+\-_.]+\.(?:jpg|jpeg|png|webp)/g;
     let match;
@@ -1405,7 +1429,7 @@ function scrapeWalmart() {
 
   // Extract videos from __NEXT_DATA__ JSON (Walmart: mediaAssets + Brightcove player)
   try {
-    const nd = JSON.parse(document.getElementById('__NEXT_DATA__')?.textContent || '{}');
+    const nd = JSON.parse(nextEl?.textContent || '{}'); // reuse already-queried element (avoids double parse)
     const _wmVidSeen = new Set();
     const addWmVid = (u) => {
       if (!u || typeof u !== 'string') return;
@@ -1829,101 +1853,87 @@ async function scrapeTemu() {
       .replace(/\/thumbnail\/\d+x\d+/gi, '/origin')           // /thumbnail/200x200 → /origin
       .replace(/\?x-oss-process=image\/resize[^&"]*/gi, '')   // strip Aliyun resize param
       .replace(/[?&]image_resize=\d+/gi, '')                   // strip ?image_resize=300
+      .replace(/\?imageView2\/2\/w\/\d+.*$/i, '?imageView2/2/w/1600/q/90/format/jpg') // kwcdn resize
+      .replace(/_\d+x\d+\.(jpeg|png|webp|jpg).*$/i, '.$1')     // kwcdn dimension suffix
       .replace(/\?$/, '');                                     // clean trailing ?
   };
 
-  // ── Price + Images + Videos: Strategy 1 — window.__init_data__ ──
-  // Content scripts run in an isolated world; __init_data__ is a page-world global.
-  // We inject a <script> to postMessage it back to the content script.
-  // v9.1.1: Seller Center (seller.temu.com) ki CSP inline script block karti hai aur wahan
-  // koi product data hota bhi nahi — is liye wahan ye strategy skip (console error khatam).
-  const temuIsSellerCenter = /^seller\./i.test(location.hostname) || !/-g-\d+|goods_id=\d+/.test(location.href);
+  // ── Price + Images + Videos: Strategy 1 — Existing script parsing (CSP-Safe) ──
   try {
-    const temuData = temuIsSellerCenter ? null : await new Promise((resolve) => {
-      const msgKey = '__zhunter_temu_' + Date.now();
-      const script = document.createElement('script');
-      script.textContent = '(function(){' +
-        'var d=window.__init_data__||null;' +
-        'window.postMessage({__zhunterKey:"' + msgKey + '",payload:d?JSON.stringify(d):null},"*");' +
-        '})();';
-      const handler = (e) => {
-        if (e.source === window && e.data && e.data.__zhunterKey === msgKey) {
-          window.removeEventListener('message', handler);
-          resolve(e.data.payload ? JSON.parse(e.data.payload) : null);
-        }
-      };
-      window.addEventListener('message', handler);
-      (document.head || document.documentElement).appendChild(script);
-      script.remove();
-      setTimeout(() => { window.removeEventListener('message', handler); resolve(null); }, 500);
-    });
+    const priceKeys = ['sale_price', 'salePrice', 'price', 'promotion_price',
+                       'promotionPrice', 'actual_price', 'actualPrice',
+                       'original_price', 'originalPrice', 'min_price', 'minPrice'];
+    const imgKeys   = ['origin_url', 'original_img_url', 'img_url', 'thumbnail_url',
+                       'goods_img_url', 'product_img_url'];
+    const vidKeys   = ['video_url', 'videoUrl', 'video_src', 'goods_video_url',
+                       'product_video', 'media_url', 'mp4_url'];
 
-    if (temuData) {
-      // FIX A1: Walk the FULL tree — never return early.
-      // Images are collected on every node. Price is captured on first match.
-      // Videos are also collected alongside images.
-      const priceKeys = ['sale_price', 'salePrice', 'price', 'promotion_price',
-                         'promotionPrice', 'actual_price', 'actualPrice',
-                         'original_price', 'originalPrice', 'min_price', 'minPrice'];
-      const imgKeys   = ['origin_url', 'original_img_url', 'img_url', 'thumbnail_url',
-                         'goods_img_url', 'product_img_url'];
-      const vidKeys   = ['video_url', 'videoUrl', 'video_src', 'goods_video_url',
-                         'product_video', 'media_url', 'mp4_url'];
+    const _imgSeen = new Set();
+    const _vidSeen = new Set();
 
-      const _imgSeen = new Set();
-      const _vidSeen = new Set();
+    function walkTemuInitData(obj, depth) {
+      if (!obj || typeof obj !== 'object' || depth > 18) return;
 
-      function walkTemuInitData(obj, depth) {
-        if (!obj || typeof obj !== 'object' || depth > 18) return;
-
-        // ── Collect images ───────────────────────────────────
-        for (const k of imgKeys) {
-          if (k in obj && typeof obj[k] === 'string' && obj[k]) {
-            const clean = temuOriginUrl(obj[k]);
-            if (clean && !isBadImage(clean) && !_imgSeen.has(clean)) {
-              _imgSeen.add(clean);
-              r.images.push(clean);
-            }
+      // ── Collect images ───────────────────────────────────
+      for (const k of imgKeys) {
+        if (k in obj && typeof obj[k] === 'string' && obj[k]) {
+          const clean = temuOriginUrl(obj[k]);
+          if (clean && !isBadImage(clean) && !_imgSeen.has(clean)) {
+            _imgSeen.add(clean);
+            r.images.push(clean);
           }
-        }
-
-        // ── Collect videos ───────────────────────────────────
-        for (const k of vidKeys) {
-          if (k in obj && typeof obj[k] === 'string' && obj[k]) {
-            const v = obj[k].replace(/\\\//g, '/');
-            if (/\.(mp4|webm|m3u8)/i.test(v) && !_vidSeen.has(v)) {
-              _vidSeen.add(v);
-              r.videos.push(v);
-            }
-          }
-        }
-
-        // ── Capture price (first found, non-returning) ───────
-        if (!r.price) {
-          for (const k of priceKeys) {
-            if (k in obj) {
-              if (typeof obj[k] === 'number' && obj[k] > 0) {
-                const dollars = obj[k] >= 100 ? (obj[k] / 100).toFixed(2) : obj[k].toFixed(2);
-                r.price = sym + dollars;
-                break;
-              }
-              if (typeof obj[k] === 'string' && /\d/.test(obj[k])) {
-                const c = cleanPriceText(obj[k]);
-                if (c) { r.price = ensureCurrency(c, sym); break; }
-              }
-            }
-          }
-        }
-
-        // ── Recurse into children (always, no early exit) ────
-        if (Array.isArray(obj)) {
-          obj.forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
-        } else {
-          Object.values(obj).forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
         }
       }
 
-      walkTemuInitData(temuData, 0);
+      // ── Collect videos ───────────────────────────────────
+      for (const k of vidKeys) {
+        if (k in obj && typeof obj[k] === 'string' && obj[k]) {
+          const v = obj[k].replace(/\\\//g, '/');
+          if (/\.(mp4|webm|m3u8)/i.test(v) && !_vidSeen.has(v)) {
+            _vidSeen.add(v);
+            r.videos.push(v);
+          }
+        }
+      }
+
+      // ── Capture price (first found, non-returning) ───────
+      if (!r.price) {
+        for (const k of priceKeys) {
+          if (k in obj) {
+            if (typeof obj[k] === 'number' && obj[k] > 0) {
+              const dollars = obj[k] >= 100 ? (obj[k] / 100).toFixed(2) : obj[k].toFixed(2);
+              r.price = sym + dollars;
+              break;
+            }
+            if (typeof obj[k] === 'string' && /\d/.test(obj[k])) {
+              const c = cleanPriceText(obj[k]);
+              if (c) { r.price = ensureCurrency(c, sym); break; }
+            }
+          }
+        }
+      }
+
+      // ── Recurse into children (always, no early exit) ────
+      if (Array.isArray(obj)) {
+        obj.forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
+      } else {
+        Object.values(obj).forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
+      }
+    }
+
+    // Safely scan existing inline script contents without DOM script injection (avoids CSP violation)
+    for (const s of document.querySelectorAll('script:not([src])')) {
+      const t = s.textContent || '';
+      if (!t.includes('__init_data__') && !t.includes('goods_gallery') && !t.includes('origin_url')) continue;
+      const m = t.match(/__init_data__\s*=\s*({[\s\S]+?});?\s*(?:<\/script>|window\.|var\s|let\s|const\s|$)/) ||
+                t.match(/rawData\s*=\s*({[\s\S]+?});?\s*(?:<\/script>|window\.|var\s|let\s|const\s|$)/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[1]);
+          if (parsed) walkTemuInitData(parsed, 0);
+          if (r.images.length > 0) break;
+        } catch (_) {}
+      }
     }
   } catch (_) {}
 
@@ -1931,6 +1941,7 @@ async function scrapeTemu() {
   if (!r.price) {
     r.price = priceFromSelectors([
       // Temu uses CSS modules — look for price-like classes avoiding strikethrough
+      '._14At0Pe5', '[class*="_14At0Pe5"]', '[data-type="0"]',
       '[data-testid="price"]', '[data-testid="selling-price"]',
       '[data-testid*="current-price"]', '[data-testid*="sale-price"]',
       '[class*="price-sale"]', '[class*="priceSale"]',
@@ -2031,6 +2042,7 @@ async function scrapeTemu() {
   // FIX A2: temuOriginUrl() already applied here (was the only working strategy before)
   if (r.images.length === 0) {
     const galleryScope = document.querySelector(
+      '._2AOclWz7, ._2xl9aIvl, [role="listbox"], ._1CQ4cRYC, ' +
       '[class*="goods-gallery"], [class*="GoodsGallery"], [class*="image-view"], ' +
       '[class*="swiper-wrapper"], [class*="gallery-container"], ' +
       '[data-testid*="gallery"], [data-testid*="image"]'
@@ -2038,8 +2050,10 @@ async function scrapeTemu() {
 
     galleryScope.querySelectorAll('img').forEach(img => {
       if (isBadImageElement(img)) return;
+      if (img.closest('#goodsRecommend, [id*="Recommend"], .js-goods-list, [class*="Recommend"]')) return;
       const src = pickImgSrc(img);
       if (!src || isBadImage(src)) return;
+      if (/seller-public|upload_aimg|material-put|goods-icon|openingemail/i.test(src)) return;
       const clean = temuOriginUrl(src);
       r.images.push(clean);
     });
@@ -2340,6 +2354,85 @@ function scrapeBestBuy() {
   return r;
 }
 
+// ── BJ's Wholesale Club Scraper (bjs.com) ────────────────────
+function scrapeBjs() {
+  const r = { title: '', price: '', images: [], videos: [], variants: [], bullets: [] };
+  const sym = detectPageCurrencySymbol() || '$';
+
+  // 1. Title
+  const titleEl = document.querySelector(
+    'h1[data-automation*="product-name"], h1.product-title, .product-title h1, ' +
+    'h1[class*="product-name"], h1[class*="productName"], h1'
+  );
+  if (titleEl) r.title = titleEl.innerText.trim();
+
+  // 2. Price
+  const cnstrcPrice = document.querySelector('[data-cnstrc-item-price]')?.getAttribute('data-cnstrc-item-price');
+  if (cnstrcPrice && !isNaN(parseFloat(cnstrcPrice))) {
+    r.price = `${sym}${parseFloat(cnstrcPrice).toFixed(2)}`;
+  } else {
+    r.price = priceFromSelectors([
+      '.price-wrapper .normal-price',
+      '[data-automation="product-price"]',
+      '.product-price',
+      '.normal-price',
+      '.price-wrapper',
+      '.price'
+    ]);
+  }
+  if (r.price) r.price = ensureCurrency(r.price, sym);
+
+  // 3. Images (BJ's Scene7 high-resolution gallery)
+  const bjsImgSeen = new Set();
+  const bjsItemId = 
+    document.querySelector('[data-cnstrc-item-id]:not([class*="rec"]):not([id*="carousel"])')?.getAttribute('data-cnstrc-item-id') ||
+    document.querySelector('.cls-item-number, .cls-item')?.textContent.match(/Item:\s*(\d+)/i)?.[1] ||
+    document.querySelector('#magic-scroll-id a[href*="scene7.com/is/image/bjs/"], a#prodGallery[href*="scene7.com/is/image/bjs/"]')?.href?.match(/\/bjs\/(\d+)/)?.[1] ||
+    document.querySelector('#magic-scroll-id img[src*="scene7.com/is/image/bjs/"]')?.src?.match(/\/bjs\/(\d+)/)?.[1] ||
+    (location.pathname.match(/\/product\/[^/]+\/(\d{5,8})(?:\/|$)/)?.[1] || '');
+
+  const galleryEls = document.querySelectorAll(
+    '#magic-scroll-id a[href*="scene7.com/is/image/bjs/"], ' +
+    '#magic-scroll-id img, ' +
+    '.product-gallery-wrapper a[data-zoom-id], ' +
+    '.product-gallery-wrapper img.main-image-pdp, ' +
+    'a#prodGallery, a#prodGallerym'
+  );
+
+  galleryEls.forEach(el => {
+    let url = (el.tagName === 'A' ? (el.getAttribute('href') || el.getAttribute('data-image')) : '') ||
+              el.getAttribute('data-src') || el.currentSrc || el.src || '';
+    if (!url || !url.includes('scene7.com/is/image/bjs/')) return;
+    if (/OnePlusCard|Footer_|ICONS_COLOR|logo|icon|badge|upArrow|Information/i.test(url)) return;
+    if (bjsItemId && !url.includes(`/bjs/${bjsItemId}`)) return;
+    let highRes = cleanImageUrl(url);
+    if (highRes && !bjsImgSeen.has(highRes) && !isBadImage(highRes)) {
+      bjsImgSeen.add(highRes);
+      r.images.push(highRes);
+    }
+  });
+
+  // Fallback to gallery selectors if no Scene7 images collected
+  if (r.images.length === 0) {
+    const fallbackScope = document.querySelector('.product-gallery-wrapper, #pg-inner-wrap, [class*="product-gallery"]') || findProductGalleryContainer();
+    if (fallbackScope) {
+      collectImagesBySelector('#magic-scroll-id img, .product-gallery-wrapper img, [class*="gallery"] img', fallbackScope).forEach(s => {
+        if (bjsItemId && !s.includes(`/bjs/${bjsItemId}`)) return;
+        let highRes = cleanImageUrl(s);
+        if (!isBadImage(highRes) && !r.images.includes(highRes)) r.images.push(highRes);
+      });
+    }
+  }
+
+  // 4. Bullets / Description
+  const bulletEls = document.querySelectorAll('.product-details-body li, .product-description li, [class*="product-details"] li');
+  if (bulletEls.length > 0) {
+    r.bullets = Array.from(bulletEls).map(el => el.innerText.trim()).filter(Boolean);
+  }
+
+  return r;
+}
+
 // ── ISSUE 3 FIX: Universal generic scraper ───────────────────
 // Works on any e-commerce site with JSON-LD or structured markup.
 function scrapeGeneric() {
@@ -2631,6 +2724,7 @@ function pickPlatform() {
   if (h.includes('costco.com'))                              return scrapeCostco;
   if (h.includes('homedepot.com'))                           return scrapeHomeDepot;
   if (h.includes('bestbuy.com'))                             return scrapeBestBuy;
+  if (h.includes('bjs.com'))                                 return scrapeBjs;
   // Detect Shopify and WooCommerce by DOM signals
   if (document.querySelector(
     '[data-product-form], form[action*="/cart/add"], ' +
@@ -3229,8 +3323,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       error: err?.message || 'scrape_failed',
       data: { title: document.title || '', url: location.href, price: '', images: [], videos: [], variants: [] }
     });
+    return true;
   }
-  return true;
+  return false;
 });
 
 // ── In-Page ZHunter Floating Button ──────────────────────────
@@ -3240,7 +3335,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     'alibaba.com', 'temu.', 'ebay.', 'etsy.com', 'shein.com', 'daraz.',
     'worldwidegolfballs.com', 'worldwidegolfshops.com', 'flipkart.com',
     'noon.com', 'lazada.', 'myshopify.com', 'target.com', 'costco.com',
-    'bestbuy.com', 'homedepot.com'
+    'bestbuy.com', 'homedepot.com', 'bjs.com'
   ];
 
   const currentHost = host();
@@ -3264,6 +3359,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     /\/listing\//,      // Etsy: /listing/12345
     /\/item\//,         // AliExpress, Lazada
     /\/goods[-_]?(detail)?/,  // Temu
+    /-g-\d+/,           // Temu modern URL: /...-g-610794997710089.html
+    /[?&]goods_id=/i,   // Temu alternate query param
     /\/p-/,             // Shein, Daraz: /p-1234
     /\/products?\//,    // Shopify stores
     /\/pd\//,           // BestBuy
@@ -3311,8 +3408,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   function initFloatingButton() {
     // Avoid double injection
     if (document.getElementById('zhunter-floating-root')) return;
-
-    console.log('[ZHunter] Initializing floating button on:', location.href);
 
     const root = document.createElement('div');
     root.id = 'zhunter-floating-root';
@@ -3452,7 +3547,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // before showing a non-blocking reconnect hint.
     sendRuntimeWithRetry({ action: 'CHECK_BULK_QUEUE', url: normUrl }).then(response => {
       if (response?.queued) {
-        console.log('[ZHunter] Product is already queued.');
         markAdded();
       }
     });
@@ -3474,11 +3568,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       e.preventDefault();
 
       if (btn.classList.contains('added')) {
-        console.log('[ZHunter] Product already queued. Ignoring click.');
         return;
       }
 
-      console.log('[ZHunter] Floating button clicked. Sending ADD_TO_BULK_QUEUE...');
 
       // Detect current platform name
       let platformName = null;
@@ -3496,7 +3588,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         title: document.title,
         platform: platformName
       }).then(res => {
-        console.log('[ZHunter] Queue add response:', res);
         if (res?.success || res?.reason === 'duplicate') {
           markAdded();
           showToast();
@@ -3518,11 +3609,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     'alibaba.com', 'temu.', 'ebay.', 'etsy.com', 'shein.com', 'daraz.',
     'worldwidegolfballs.com', 'worldwidegolfshops.com', 'flipkart.com',
     'noon.com', 'lazada.', 'myshopify.com', 'target.com', 'costco.com',
-    'bestbuy.com', 'homedepot.com'
+    'bestbuy.com', 'homedepot.com', 'bjs.com'
   ];
   const PRODUCT_PATH_PATTERNS = [
     /\/ip\//,/\/dp\//,/\/gp\/product\//,/\/product\//,/\/itm\//,
-    /\/listing\//,/\/item\//,/\/goods[-_]?(detail)?/,/\/p-/,
+    /\/listing\//,/\/item\//,/\/goods[-_]?(detail)?/,/-g-\d+/,/[?&]goods_id=/i,/\/p-/,
     /\/products?\//,/\/pd\//,/\/skuId=/,/[?&]sku[_-]?id=/i,
     /\/prd\//,/\/buy\//,/[?&]itemid=/,/\/asin\//
   ];
@@ -3535,6 +3626,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const h = host();
   const path = location.pathname.toLowerCase();
   const href = location.href.toLowerCase();
+
+  // Exclude all seller centers & portals (e.g. seller.temu.com, sellercentral.amazon.com, seller.walmart.com)
+  if (h.startsWith('seller.') || h.includes('sellercentral') || h.includes('vendorcentral') || h.includes('kuajingmaihuo')) return;
 
   if (!IMG_PLATFORM_KEYS.some(k => h.includes(k))) return;
   if (NON_PRODUCT_PATTERNS.some(p => p.test(path) || p.test(href))) return;
@@ -3549,6 +3643,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (normalizedHost.includes('amazon.')) return dedupeImages(scrapeAmazon().images || []);
       if (normalizedHost === 'walmart.com' || normalizedHost.endsWith('.walmart.com')) return dedupeImages(scrapeWalmart().images || []);
       if (normalizedHost === 'samsclub.com' || normalizedHost.endsWith('.samsclub.com')) return dedupeImages(scrapeSamsClub().images || []);
+      if (normalizedHost.includes('temu.') || normalizedHost.includes('temu.com')) {
+        const temuImgs = [];
+        document.querySelectorAll('._2AOclWz7 img, ._2xl9aIvl img, [class*="_22_BWn2A"] img, [role="listbox"] img').forEach(img => {
+          let s = img.getAttribute('data-src') || img.currentSrc || img.src || '';
+          if (s && s.includes('kwcdn.com/local-goods-image/')) {
+            s = s.replace(/\?imageView2\/2\/w\/\d+.*$/i, '?imageView2/2/w/1600/q/90/format/jpg');
+            s = s.replace(/_\d+x\d+\.(jpeg|png|webp|jpg).*$/i, '.$1');
+            temuImgs.push(s);
+          }
+        });
+        if (temuImgs.length) return dedupeImages(temuImgs);
+      }
+      if (normalizedHost.includes('bjs.com')) {
+        return dedupeImages(scrapeBjs().images || []);
+      }
     } catch (_) {}
     return [];
   }
@@ -3566,17 +3675,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const abs = new URL(url, location.href).href;
         if (/\.(svg|ico)(\?|$)/i.test(abs)) return;
         if (/logo|icon|badge|sprite|avatar|banner|placeholder|play[-_]?button/i.test(abs)) return;
-        raw.push(abs);
+        const norm = normalizeImg(abs);
+        if (norm) raw.push(norm);
       } catch (_) {}
     };
     const addElement = (el) => {
       if (!el || (el.tagName === 'IMG' && isBadImageElement(el))) return;
+      if (el.closest?.('.carousal-wrapper, .members-also-viewed, .fbt-wrap, .sponsored-products, [data-cnstrc-recommendations], .recommendations, [class*="recommend"], [class*="recommendation"]')) return;
       ['data-old-hires', 'data-zoom-image', 'data-image-url', 'data-image-src',
        'data-large-image', 'data-src', 'data-lazy-src', 'data-original', 'src']
         .forEach(attr => push(el.getAttribute?.(attr) || ''));
       const srcset = el.getAttribute?.('srcset') || el.getAttribute?.('data-srcset') || '';
       String(srcset).split(',').forEach(part => push(part.trim().split(/\s+/)[0] || ''));
-      if (el.tagName === 'IMG') push(el.currentSrc || el.src || '');
+      if (el.tagName === 'IMG') {
+        const dyn = pickAmazonDynamic(el);
+        if (dyn) push(dyn);
+        push(el.currentSrc || el.src || '');
+      }
     };
     const gallerySelectors = [
       '#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img',
@@ -3589,6 +3704,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       '[class*="product-gallery"] img, [class*="ProductGallery"] img',
       '[class*="product-image"] img, [class*="ProductImage"] img',
       '[class*="carousel"] img, [class*="gallery"] img',
+      '#magic-scroll-id img, .product-gallery-wrapper img',
+      '._2AOclWz7 img, ._2xl9aIvl img, [role="listbox"] img',
       'img[data-zoom-image], img[data-image-url], img[data-image-src], img[data-lazy-src]'
     ];
     const gallery = document.querySelectorAll(gallerySelectors.join(', '));
@@ -3795,23 +3912,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .mini-widget-wrap:hover .mini-tooltip {
         opacity: 1; transform: translateX(-50%) scale(1);
       }
-      /* Count badge — cyan brand color with ripple pulse */
+      /* Count badge hidden per user request */
       .mini-count {
-        position: absolute;
-        top: -5px; right: -5px;
-        min-width: 20px; height: 20px;
-        background: #00e5ff;
-        color: #020812; font-weight: 900; font-size: 10.5px;
-        padding: 0 5px; border-radius: 999px;
-        border: 2px solid #050d1c;
-        box-shadow: 0 0 10px rgba(0,229,255,0.8), 0 0 20px rgba(0,229,255,0.4);
-        pointer-events: none;
-        font-family: 'JetBrains Mono', ui-monospace, system-ui, sans-serif;
-        display: flex; align-items: center; justify-content: center;
-        z-index: 12;
-        letter-spacing: -0.3px;
+        display: none !important;
       }
-      .mini-count.pulse { animation: zh-badge-pulse 0.5s cubic-bezier(0.16,1,0.3,1); }
 
       .header { cursor: grab; touch-action: none; }
       .header:active { cursor: grabbing; }
@@ -3829,16 +3933,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .header-icon {
         width: 28px; height: 28px;
         background: transparent;
-        border-radius: 8px;
+        border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
         transition: transform 0.2s, box-shadow 0.2s;
         overflow: hidden;
       }
       .header-icon img {
-        width: 28px; height: 28px; object-fit: contain; display: block; pointer-events: none;
+        width: 28px; height: 28px; object-fit: cover; display: block; pointer-events: none;
         filter: drop-shadow(0 0 6px rgba(0,229,255,0.6));
-        border-radius: 7px;
+        border-radius: 50%;
       }
       .header:hover .header-icon { transform: rotate(-5deg) scale(1.08); box-shadow: 0 4px 18px rgba(0,229,255,0.7); }
       .header-title { color: #e0f7fa; font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-shadow: 0 0 12px rgba(0,229,255,0.4); }
@@ -3977,13 +4081,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .img-wrap:hover .img-main-badge { opacity: 0; }
       .img-btn-action {
         width: 20px; height: 20px; border-radius: 5px;
-        background: rgba(6, 9, 15, 0.9); border: 1px solid rgba(255, 184, 0, 0.45);
-        color: #FFB800; font-size: 10px; display: flex; align-items: center; justify-content: center;
+        background: rgba(6, 9, 15, 0.9); border: 1px solid rgba(0, 229, 255, 0.45);
+        color: #00E5FF; font-size: 10px; display: flex; align-items: center; justify-content: center;
         cursor: pointer; padding: 0; transition: all 0.15s cubic-bezier(0.16,1,0.3,1);
       }
       .img-btn-action:hover {
-        background: #FFB800; color: #000000;
-        transform: scale(1.15); box-shadow: 0 0 8px rgba(255, 184, 0, 0.6);
+        background: #00E5FF; color: #020812;
+        transform: scale(1.15); box-shadow: 0 0 10px rgba(0, 229, 255, 0.7);
       }
 
       .footer {
@@ -4081,11 +4185,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         <span class="header-title">ZHunter Images</span>
         <span class="header-count" id="zh-img-count">0</span>
       </div>
-      <button class="toggle-btn" id="zh-toggle-btn" title="Minimize" aria-label="Minimize panel">
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M7 2L3 5L7 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
+      <div class="header-actions" style="display:flex;align-items:center;gap:5px;">
+        <button class="toggle-btn" id="zh-open-panel-btn" title="Open in ZHunter Sidepanel" aria-label="Open in Sidepanel" style="padding:4px 6px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </button>
+        <button class="toggle-btn" id="zh-toggle-btn" title="Minimize" aria-label="Minimize panel">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 2L3 5L7 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
     `;
     panel.appendChild(header);
 
@@ -4124,8 +4237,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     let dragOrigin = { x: 0, y: 0 };
     const WIDGET_STATE_KEY = 'zhunterImageWidgetState';
 
-    const toggleBtn = shadow.getElementById('zh-toggle-btn');
-    const countEl   = shadow.getElementById('zh-img-count');
+    const toggleBtn    = shadow.getElementById('zh-toggle-btn');
+    const openPanelBtn = shadow.getElementById('zh-open-panel-btn');
+    const countEl      = shadow.getElementById('zh-img-count');
     const miniCount = miniCountEl; // from wrapper
     const dlBtn     = shadow.getElementById('zh-dl-btn');
     const status    = shadow.getElementById('zh-status');
@@ -4145,13 +4259,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     const saveWidgetState = () => {
-      chrome.storage.local.set({ [WIDGET_STATE_KEY]: {
-        collapsed,
-        top: widgetPosition.top,
-        bottom: widgetPosition.bottom,
-        left: widgetPosition.left,
-        right: widgetPosition.right
-      } }).catch(() => {});
+      try {
+        if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+          chrome.storage.local.set({ [WIDGET_STATE_KEY]: {
+            collapsed,
+            top: widgetPosition.top,
+            bottom: widgetPosition.bottom,
+            left: widgetPosition.left,
+            right: widgetPosition.right
+          } }).catch(() => {});
+        }
+      } catch (_) {}
     };
     const applyWidgetPosition = () => {
       const widgetHeight = collapsed ? 68 : 384;
@@ -4230,15 +4348,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       saveWidgetState();
     };
     header.addEventListener('pointerdown', event => {
-      if (event.target !== toggleBtn) beginDrag(event, header);
+      if (!event.target.closest('#zh-toggle-btn') && !event.target.closest('#zh-open-panel-btn')) beginDrag(event, header);
     });
     window.addEventListener('pointermove', moveDrag, { passive: false });
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
 
-    toggleBtn.addEventListener('click', event => {
+    toggleBtn?.addEventListener('click', event => {
       event.stopPropagation();
       setCollapsed(!collapsed);
+    });
+
+    openPanelBtn?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      chrome.runtime.sendMessage({ action: 'OPEN_SIDEPANEL_FOR_TAB' });
     });
 
     // Instant click to expand without drag interference
@@ -4331,17 +4455,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           max-width: 90vw; max-height: 92vh;
           display: flex; flex-direction: column;
           background: rgba(11, 15, 25, 0.98);
-          border: 1px solid rgba(255, 184, 0, 0.35);
+          border: 1px solid rgba(0, 229, 255, 0.35);
           border-radius: 18px; overflow: hidden;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(255,184,0,0.18);
+          box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(0, 229, 255, 0.22);
           animation: zh-scale-up 0.25s cubic-bezier(0.16,1,0.3,1);
         }
         .zh-lb-header {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 12px 18px; border-bottom: 1px solid rgba(255,184,0,0.15);
-          background: rgba(255,184,0,0.03); gap: 12px;
+          padding: 12px 18px; border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+          background: rgba(0, 229, 255, 0.03); gap: 12px;
         }
-        .zh-lb-counter { font-size: 13px; font-weight: 700; color: #FEF08A; }
+        .zh-lb-counter { font-size: 13px; font-weight: 700; color: #00E5FF; }
         .zh-lb-badge {
           font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 6px;
           background: rgba(255, 255, 255, 0.08); color: #94A3B8; border: 1px solid rgba(255, 255, 255, 0.15);
@@ -4357,8 +4481,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           background: rgba(255,255,255,0.08); color: #FFF;
         }
         .zh-lb-sel-btn.selected {
-          background: linear-gradient(135deg, #FFB800 0%, #FF2E54 100%);
-          border-color: #FFB800; color: #FFF; box-shadow: 0 2px 12px rgba(255,46,84,0.4);
+          background: linear-gradient(135deg, #00E5FF 0%, #0077FF 100%);
+          border-color: #00E5FF; color: #030712; box-shadow: 0 2px 14px rgba(0, 229, 255, 0.45);
         }
         .zh-lb-close {
           background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
@@ -4367,7 +4491,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           font-size: 14px; font-weight: bold; transition: all 0.2s;
         }
         .zh-lb-close:hover {
-          background: rgba(255,46,84,0.2); color: #FF2E54; border-color: #FF2E54; transform: scale(1.1);
+          background: rgba(0, 229, 255, 0.15); color: #00E5FF; border-color: #00E5FF; transform: scale(1.1);
         }
         .zh-lb-body {
           display: flex; align-items: center; justify-content: space-between;
@@ -4380,7 +4504,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           transition: all 0.2s; flex-shrink: 0;
         }
         .zh-lb-nav:hover {
-          background: rgba(255,184,0,0.2); border-color: #FFB800; color: #FFB800; transform: scale(1.12);
+          background: rgba(0, 229, 255, 0.2); border-color: #00E5FF; color: #00E5FF; transform: scale(1.12);
         }
         .zh-lb-stage {
           display: flex; align-items: center; justify-content: center;
@@ -4393,8 +4517,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         .zh-lb-footer {
           display: flex; align-items: center; justify-content: center; gap: 10px;
-          padding: 12px 18px; border-top: 1px solid rgba(255,184,0,0.15);
-          background: rgba(255,184,0,0.02);
+          padding: 12px 18px; border-top: 1px solid rgba(0, 229, 255, 0.15);
+          background: rgba(0, 229, 255, 0.02);
         }
         .zh-lb-tool {
           padding: 7px 14px; border-radius: 8px; font-size: 11.5px; font-weight: 700;
@@ -4402,21 +4526,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           color: #E2E8F0; cursor: pointer; transition: all 0.2s;
         }
         .zh-lb-tool:hover {
-          background: rgba(255,184,0,0.16); border-color: #FFB800; color: #FFB800; transform: translateY(-1px);
+          background: rgba(0, 229, 255, 0.16); border-color: #00E5FF; color: #00E5FF; transform: translateY(-1px);
         }
         .zh-sourcing-popover {
           position: fixed; z-index: 2147483647;
           background: rgba(6, 9, 15, 0.96);
-          border: 1px solid rgba(255, 184, 0, 0.4);
+          border: 1px solid rgba(0, 229, 255, 0.4);
           border-radius: 12px; padding: 10px 8px;
-          box-shadow: 0 12px 36px rgba(0,0,0,0.9), 0 0 20px rgba(255,184,0,0.18);
+          box-shadow: 0 12px 36px rgba(0,0,0,0.9), 0 0 20px rgba(0, 229, 255, 0.2);
           backdrop-filter: blur(16px);
           display: flex; flex-direction: column; gap: 5px;
           min-width: 175px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .zh-sourcing-title {
-          font-size: 10.5px; font-weight: 800; color: #FFB800; text-transform: uppercase;
-          letter-spacing: 0.5px; padding: 2px 8px 5px; border-bottom: 1px solid rgba(255,184,0,0.18);
+          font-size: 10.5px; font-weight: 800; color: #00E5FF; text-transform: uppercase;
+          letter-spacing: 0.5px; padding: 2px 8px 5px; border-bottom: 1px solid rgba(0, 229, 255, 0.18);
           display: flex; align-items: center; gap: 6px;
         }
         .zh-sourcing-item {
@@ -4426,8 +4550,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           background: rgba(255,255,255,0.03); border: 1px solid transparent;
         }
         .zh-sourcing-item:hover {
-          background: rgba(255,184,0,0.12); border-color: rgba(255,184,0,0.4);
-          color: #FFB800; transform: translateX(2px);
+          background: rgba(0, 229, 255, 0.12); border-color: rgba(0, 229, 255, 0.4);
+          color: #00E5FF; transform: translateX(2px);
         }
         @keyframes zh-fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes zh-scale-up { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
@@ -4569,18 +4693,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           if (resp?.success && resp.base64) base64 = resp.base64;
         } catch (_) {}
 
-        chrome.storage.local.set({
-          pendingFlowAction: {
-            productTitle: pageTitle,
-            prompt: flowPrompt,
-            imgUrl: u,
-            imgBase64: base64,
-            timestamp: Date.now(),
-            processed: false
+        try {
+          if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+            chrome.storage.local.set({
+              pendingFlowAction: {
+                productTitle: pageTitle,
+                prompt: flowPrompt,
+                imgUrl: u,
+                imgBase64: base64,
+                timestamp: Date.now(),
+                processed: false
+              }
+            }, () => {
+              try { chrome.runtime?.sendMessage?.({ action: 'OPEN_OR_FOCUS_FLOW' }); } catch (_) {}
+            });
           }
-        }, () => {
-          chrome.runtime.sendMessage({ action: 'OPEN_OR_FOCUS_FLOW' });
-        });
+        } catch (_) {}
 
         const btn = lb.querySelector('#zh-lb-flow');
         if (btn) {
@@ -4716,7 +4844,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       setTimeout(() => { status.textContent = ''; status.className = 'status-bar'; }, 4000);
     });
 
-    // ── Load images (with delay for SPAs)
+    // ── Load images (with delay for SPAs & Auto-Variant Sync)
     let knownImages = new Set();
     let refreshTimer = null;
     const refreshImages = () => {
@@ -4731,8 +4859,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }).filter(index => index >= 0));
       const changed = images.length !== knownImages.size || images.some(url => !knownImages.has(url));
       if (changed || !knownImages.size) {
+        const wasEmpty = !knownImages.size;
         knownImages = new Set(images);
         renderGrid();
+        pulseMiniCount(images.length);
+        if (!wasEmpty && status) {
+          status.className = 'status-bar ok';
+          status.textContent = `✓ Variant synced (${images.length} imgs)`;
+          setTimeout(() => {
+            if (status.textContent.includes('Variant synced')) {
+              status.textContent = '';
+              status.className = 'status-bar';
+            }
+          }, 3000);
+        }
       }
     };
     const scheduleRefresh = () => {
@@ -4741,12 +4881,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     };
     setTimeout(refreshImages, 900);
     [1800, 3200, 5200, 8000].forEach(delay => setTimeout(refreshImages, delay));
+
+    // ── Live Variant & Swatch Click Sync ──
+    const VARIANT_SELECTOR = [
+      '[data-defaultasin]', '[data-csa-c-item-id]', '[class*="swatch"]', '[class*="variant"]',
+      '[class*="skuItem"]', '[class*="specItem"]', '[role="radio"]', '[role="option"]',
+      '.a-button-thumbnail', 'button[data-testid*="variant"]', '[data-testid*="swatch"]',
+      '.swatchAvailable', '.swatchSelect', '#twister li'
+    ].join(', ');
+
+    document.addEventListener('click', e => {
+      const swatch = e.target?.closest?.(VARIANT_SELECTOR);
+      if (swatch) {
+        setTimeout(refreshImages, 300);
+        setTimeout(refreshImages, 700);
+        setTimeout(refreshImages, 1500);
+      }
+    }, true);
+
+    // Dynamic URL change on SPAs (e.g. Walmart, Temu, Amazon variant change)
+    window.addEventListener('popstate', scheduleRefresh);
+    window.addEventListener('hashchange', scheduleRefresh);
+
+    // Keep active gallery observer alive on product gallery container
+    const galleryTarget = document.querySelector('#landingImage, #imgTagWrapperId, #altImages, [data-testid="vertical-carousel-container"], [data-testid="hero-image-container"], ._2AOclWz7, [role="listbox"]') || document.body;
     const galleryObserver = new MutationObserver(scheduleRefresh);
-    galleryObserver.observe(document.body, {
+    galleryObserver.observe(galleryTarget, {
       subtree: true, childList: true, attributes: true,
       attributeFilter: ['src', 'srcset', 'data-src', 'data-lazy-src', 'data-image-url', 'data-image-src', 'data-zoom-image']
     });
-    setTimeout(() => galleryObserver.disconnect(), 10000);
   }
 
   // ── Kick off
@@ -5046,22 +5209,28 @@ function zhFrameIdle() {
       } catch (_) {}
     }, 4000);
 
-    chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
-      _zhFrameOn = x?.zhPageFrame !== false;
-      if (x?.zhFrameColor) _zhFrameCustomColor = x.zhFrameColor;
-      if (x?.zhFrameWidth != null) _zhFrameCustomWidth = x.zhFrameWidth;
-      if (x?.zhFrameBrightness != null) _zhFrameCustomBrightness = x.zhFrameBrightness;
-      if (x?.zhFrameCorners) _zhFrameCustomCorners = x.zhFrameCorners;
-      if (x?.zhFrameMoving != null) _zhFrameMoving = !!x.zhFrameMoving;
-      if (x?.zhFrameStyle) _zhFrameStyle = x.zhFrameStyle;
-      if (x?.zhFrameSpeed != null) _zhFrameSpeed = x.zhFrameSpeed;
-      if (_zhFrameOn) {
-        setTimeout(zhFrameIdle, 400);
-        setTimeout(zhFrameIdle, 2000);
+    try {
+      if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
+          _zhFrameOn = x?.zhPageFrame !== false;
+          if (x?.zhFrameColor) _zhFrameCustomColor = x.zhFrameColor;
+          if (x?.zhFrameWidth != null) _zhFrameCustomWidth = x.zhFrameWidth;
+          if (x?.zhFrameBrightness != null) _zhFrameCustomBrightness = x.zhFrameBrightness;
+          if (x?.zhFrameCorners) _zhFrameCustomCorners = x.zhFrameCorners;
+          if (x?.zhFrameMoving != null) _zhFrameMoving = !!x.zhFrameMoving;
+          if (x?.zhFrameStyle) _zhFrameStyle = x.zhFrameStyle;
+          if (x?.zhFrameSpeed != null) _zhFrameSpeed = x.zhFrameSpeed;
+          if (_zhFrameOn) {
+            setTimeout(zhFrameIdle, 400);
+            setTimeout(zhFrameIdle, 2000);
+          }
+        });
       }
-    });
+    } catch (_) {}
 
-    chrome.storage.onChanged.addListener((ch, area) => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.addListener((ch, area) => {
       if (area === 'local') {
         if (ch.zhPageFrame) {
           _zhFrameOn = ch.zhPageFrame.newValue !== false;
@@ -5089,6 +5258,8 @@ function zhFrameIdle() {
         }
       }
     });
+  }
+} catch (_) {}
 
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg && msg.action === 'zhUpdateFrame') {

@@ -13,6 +13,7 @@
     "activeTab",
     "scripting",
     "clipboardWrite",
+    "clipboardRead",
     "alarms",
     "downloads",
     "sidePanel",
@@ -86,6 +87,26 @@
         "flow_automation.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "gemini_automation.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "gpt_automation.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }
+
+
