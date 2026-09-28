@@ -62,19 +62,22 @@
     });
   }
 
-  // Trusted click through the background's chrome.debugger (Angular ignores synthetic clicks
-  // on several Flow controls). Falls back to el.click() if CDP isn't available.
+  // Realistic human mouse & pointer event sequence — safe from Google BotGuard / CDP detection
   async function trustedClick(el, label = '') {
     if (!el || !el.isConnected) return false;
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
-    await sleep(150);
+    await sleep(80);
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return false;
     const x = r.left + r.width / 2;
     const y = r.top + r.height / 2;
-    const res = await sendBg({ action: 'ZH_CDP_CLICK', x, y });
-    if (res?.ok) return true;
-    warn(`CDP click failed for ${label || el.tagName} (${res?.error || 'unknown'}) — falling back to el.click()`);
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1, composed: true };
+    try { el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}
+    try { el.focus(); } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointerup', { ...opts, buttons: 0, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 })); } catch (_) {}
     try { el.click(); } catch (_) {}
     return true;
   }
@@ -514,6 +517,20 @@
     let lastSnack = '';
     const result = await waitFor(() => {
       scrollGridTop();
+      // Check for failed generation tiles immediately (don't wait 3 minutes!)
+      const failed = Q.tiles().slice(0, 6).find(t => {
+        const txt = (t.textContent || '').toLowerCase();
+        return txt.includes('failed') && (txt.includes('unusual activity') || txt.includes('help center') || txt.includes('charged') || txt.includes('could not') || txt.includes('couldn'));
+      });
+      if (failed && Date.now() - t0 > 2000) {
+        const txt = (failed.textContent || '').replace(/\s+/g, ' ').trim();
+        log('Detected failed tile:', txt);
+        if (txt.toLowerCase().includes('unusual activity')) {
+          return { error: 'We noticed some unusual activity. Barahe karam Google Flow mein "+ New project" banayein.' };
+        }
+        return { error: txt.slice(0, 100) };
+      }
+
       // Only the first few tiles (grid is newest-first) — protects against old tiles
       // that the virtual scroller renders later.
       const fresh = allTiles().slice(0, 6).find(t =>

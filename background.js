@@ -1809,6 +1809,13 @@ try {
     if (source?.tabId) _cdpAttached.delete(source.tabId);
   });
   chrome.tabs.onRemoved.addListener((id) => { _cdpAttached.delete(id); });
+  // Clean up any stale debugger attachments from Flow tabs so no banner or bot flags remain
+  chrome.tabs.query({ url: '*://flow.google.com/*' }, (tabs) => {
+    (tabs || []).forEach(t => {
+      try { chrome.debugger.detach({ tabId: t.id }); } catch (_) {}
+    });
+    _cdpAttached.clear();
+  });
 } catch (_) {}
 
 async function cdpEnsureAttached(tabId) {
