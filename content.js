@@ -4697,6 +4697,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
             chrome.storage.local.set({
               pendingFlowAction: {
+                jobId: 'fj_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
                 productTitle: pageTitle,
                 prompt: flowPrompt,
                 imgUrl: u,

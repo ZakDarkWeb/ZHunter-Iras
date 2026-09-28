@@ -2751,181 +2751,199 @@ function closeLightbox() {
 }
 
 // Default AI Studio Commercial Prompt (1:1 Hero-Shot Listing Image)
-const DEFAULT_AI_COMMERCIAL_PROMPT = `Create a professional 1:1 e-commerce main listing image from the supplied product image(s).
+// v9.9.0 — user's e-commerce scene prompt (bump the version below whenever this changes,
+// so a prompt saved from an older default gets replaced once).
+const AI_IMAGE_PROMPT_VERSION = 2;
+const DEFAULT_AI_COMMERCIAL_PROMPT = `Edit the provided product image into a professional, realistic e-commerce main image.
 
-Think like a professional commercial product photographer and art director.
+Understand the product first, then create a realistic scene that naturally shows the product in its relevant environment and use context.
 
-The goal is to make the shopper stop scrolling and immediately understand what the product is, what it is used for, and why the product visually feels valuable.
+Keep the original product as the main hero subject.
 
-Do NOT use a fixed template or fixed composition.
+DO NOT change, redesign, recreate, or alter the original product.
+Preserve the exact product shape, proportions, colors, packaging, branding, logo, label, text, graphics, quantity information, and important visual details.
 
-FIRST study the actual product.
+Create a realistic lifestyle/commercial photography scene appropriate for the product.
 
-THEN design a realistic scene specifically around that product.
+IMPORTANT COMPOSITION RULE:
 
-The supplied product is the HERO and must remain completely recognizable.
+Do not leave large empty areas around the product.
 
-Preserve the product's:
-- exact appearance
-- shape
-- proportions
-- colors
-- materials
-- patterns
-- branding
-- labels
-- packaging
-- important printed details
+Use the LEFT and RIGHT sides of the composition intentionally with relevant objects connected to the product.
 
-Do not redesign, simplify, replace, or invent the product.
+Also use the foreground and middle-ground to create natural depth.
 
-You may change its size, rotation, camera perspective, position, and placement if this creates a stronger composition.
+These supporting objects should make the scene feel complete and visually interesting, not simply fill empty space.
 
-Build a believable real-world environment where the product naturally belongs.
+Choose the supporting objects based on the actual product and its purpose.
 
-Use only the visual elements that make sense for THIS product.
+For example:
+- For dishwashing products: naturally placed dirty dishes, plates, cups, bowls, utensils, sink elements, water, subtle soap/foam.
+- For coffee products: coffee cups, naturally scattered pods/beans, serving items and relevant kitchen elements.
+- For food products: realistic serving dishes, ingredients, utensils, or prepared food that naturally relates to the product.
+- For cleaning products: realistic items that need cleaning, appropriate surfaces, subtle water or cleaning context.
+- For kitchen tools: food preparation, ingredients, cutting boards, bowls, utensils, or other relevant kitchen objects.
+- For grocery products: natural serving/use context and relevant ingredients or food items.
+- For other products: determine the most natural real-world use context yourself.
 
-Think about what a shopper would naturally see around this product in real life.
+The side objects should NOT be arranged in a straight line.
 
-Use:
-- realistic lifestyle context
-- relevant ingredients or accessories when appropriate
-- foreground, middle-ground, and background depth
-- natural overlap
-- different object sizes
-- realistic perspective
-- natural shadows
-- believable lighting
-- subtle depth of field
-- controlled visual randomness
+Use natural overlapping, spacing, different sizes, and realistic positioning.
 
-Do not arrange objects in a straight line or in a perfectly symmetrical display.
+Some relevant objects may appear partially in the foreground or near the edges of the frame, creating depth and making the scene feel naturally photographed rather than artificially arranged.
 
-If the product represents a quantity, multipack, collection, or large supply, communicate that quantity visually.
+Create visual balance across the entire frame.
 
-For example, for a large coffee-pod pack, do not show only two or three pods neatly beside the box.
+Do not place everything around the product symmetrically.
 
-Instead, create a believable kitchen scene with many of the actual product pieces naturally distributed across the counter:
-some overlapping, some stacked casually, some partially hidden, some closer to the camera, some farther away, and some scattered naturally around the main package.
+Do not make both sides identical.
 
-The purpose is to create a strong visual impression of abundance WITHOUT making the scene look fake or cluttered.
+Do not leave large blank areas unless negative space is genuinely necessary for the composition.
 
-Use the same principle for other products, but adapt it to the product.
+The supporting objects must remain secondary to the main product.
 
-For food products, show the food in a realistic serving/use situation when appropriate.
+The product should still be the first thing the viewer notices.
 
-For kitchen products, show the product naturally being used or surrounded by relevant kitchen context when appropriate.
+Create a natural visual flow:
+foreground elements → supporting objects → main product → background environment.
 
-For grocery products, use realistic ingredients, serving context, or quantity cues when they genuinely help communicate the product.
+Use realistic perspective, scale, shadows, reflections, depth of field, and lighting.
 
-For tools or household products, show realistic usage or environment rather than adding unrelated decoration.
+The environment should feel like a real home or real commercial photography location appropriate for the product.
 
-The composition should have a clear visual hierarchy:
+Make the scene interesting enough to catch attention while scrolling, but keep it professional and believable.
 
-1. HERO PRODUCT
-2. Supporting product/use-case elements
-3. Background environment
+Do NOT overdecorate the scene.
 
-The eye should naturally move toward the main product.
+Do NOT add random objects.
 
-Create depth.
+Every added object should have a logical connection to the product.
 
-Allow some objects to enter the foreground and partially leave the frame when this improves the composition.
+Do NOT create excessive bubbles, foam, ingredients, food, dishes, or other effects.
 
-Allow some objects to overlap each other naturally.
-
-Avoid making every object equally visible.
-
-Real photographs are not perfectly organized.
-
-Create controlled natural randomness:
-intentional composition with natural-looking imperfection.
-
-IMPORTANT:
-
-Do not simply place a few props around the product.
-
-Create a believable scene.
-
-The surrounding elements should make the viewer think:
-
-"This is what this product looks like in real life."
-
-The image should feel:
-professional
-commercial
-realistic
-useful
-interesting
-premium
-natural
-
-It should NOT feel:
-AI-generated
-CGI
-over-designed
-artificially staged
-perfectly symmetrical
-like a generic stock image
+Use enough relevant objects to make the frame feel naturally occupied and visually rich, but avoid clutter.
 
 Avoid:
-- unnecessary props
-- unrelated objects
-- excessive decoration
-- fake glowing effects
-- neon colors
-- excessive HDR
-- unrealistic reflections
-- floating objects
-- impossible shadows
+- large empty areas
+- generic empty countertops
+- product floating in space
+- isolated product with nothing around it
+- perfectly aligned objects
+- objects arranged in a straight row
+- excessive symmetry
+- excessive decorative props
+- unrealistic quantities
+- exaggerated effects
+- artificial-looking staging
+- obvious AI-generated appearance
 - plastic-looking materials
-- excessive blur
-- excessive bokeh
-- perfectly aligned repeated objects
-- straight rows of products
-- artificial-looking repetition
+- distorted objects
+- fake text
+- unnecessary graphics
+- changing the original product
 
-Do not invent product features, accessories, quantities, specifications, claims, or benefits.
+The final result should look like a professionally photographed commercial e-commerce image created by a real photographer and stylist.
 
-Do not make unrelated objects appear to be included with the product.
+The image should feel:
+REAL
+NATURAL
+PROFESSIONAL
+INTERESTING
+PRODUCT-FOCUSED
+VISUALLY FULL
+NOT OVERCROWDED
 
-If text is visible on the original product, preserve it accurately.
+The composition should use the full 1:1 square frame effectively.
 
-If the product itself is enough to create a strong composition, keep the scene simple.
+Most importantly:
+Do not simply place the product in an empty kitchen.
 
-If the product benefits from quantity, scale, usage, ingredients, or environmental context, use those elements strongly.
+Build a believable scene around the product so the surrounding objects naturally explain the product's purpose and create visual interest.
 
-The final result should look like a real professional commercial photograph created specifically for an e-commerce listing.
+Use the product category to decide what belongs on the sides, foreground, and background.
 
-ONE final image.
-1:1 square composition.`;
+Keep the original product completely accurate.`;
 
-// Flow smart editor automation helper
-async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null }) {
-  if (!src) return;
+// Saved prompt from the textarea wins — unless it was saved under an older default
+// prompt version, in which case the new default replaces it once.
+async function getSavedAiImagePrompt() {
+  try {
+    const st = await chrome.storage.local.get(['zhunterAiImagePrompt', 'zhunterAiImagePromptVersion']);
+    if (st?.zhunterAiImagePromptVersion !== AI_IMAGE_PROMPT_VERSION) {
+      await chrome.storage.local.set({ zhunterAiImagePrompt: DEFAULT_AI_COMMERCIAL_PROMPT, zhunterAiImagePromptVersion: AI_IMAGE_PROMPT_VERSION });
+      return DEFAULT_AI_COMMERCIAL_PROMPT;
+    }
+    return (st?.zhunterAiImagePrompt || '').trim() || DEFAULT_AI_COMMERCIAL_PROMPT;
+  } catch (_) {
+    return DEFAULT_AI_COMMERCIAL_PROMPT;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// v9.9.0 — Google Flow image jobs
+// Every image sent to Flow is a JOB with its own id. flow_automation.js returns the
+// generated image with that same id, and only a known job can change a product image:
+//   • stepper jobs are accepted only while they are the step currently being waited on
+//   • the product slot must still hold the image that was sent (no cross-overwrites)
+// ═════════════════════════════════════════════════════════════════
+const FlowJobs = new Map(); // jobId -> { productId, imageIndex, originalUrl, source, title }
+
+function newFlowJobId() {
+  return 'fj_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+async function focusOrOpenFlowTab() {
+  const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+  if (tabs && tabs.length > 0) {
+    // Reuse the project already open so all images land in one Flow project
+    const targetTab = tabs.find(t => t.url && t.url.includes('/project/')) || tabs[0];
+    await chrome.tabs.update(targetTab.id, { active: true });
+    if (targetTab.windowId) chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: targetTab.id }, files: ['flow_automation.js'] });
+    } catch (_) {}
+    try { await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
+    return 'focused';
+  }
+  await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+  return 'opened';
+}
+
+// Flow smart editor automation helper — returns the jobId (or null if nothing was sent)
+async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
+  if (!src) return null;
   const cleanTitle = (title || 'Product')
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
     .replace(/\s*[-–|].*$/, '')
     .trim();
-  const flowPrompt = prompt || DEFAULT_AI_COMMERCIAL_PROMPT;
+  const flowPrompt = (prompt || '').trim() || await getSavedAiImagePrompt();
 
   toast('Preparing image & prompt for Flow…', 'info');
 
-  // Fetch base64 image data
-  let base64 = null;
-  try {
-    const resp = await msg({
-      action: 'FETCH_BASE64',
-      url: src,
-      settings: { imageFormat: 'original' }
-    });
-    if (resp?.success && resp.base64) base64 = resp.base64;
-  } catch (_) {}
-  if (!base64 && src.startsWith('data:')) base64 = src;
+  let base64 = src.startsWith('data:') ? src : null;
+  if (!base64) {
+    try {
+      const resp = await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
+      if (resp?.success && resp.base64) base64 = resp.base64;
+    } catch (_) {}
+  }
+  if (!base64) {
+    toast('Product image download nahi hui — Flow ko nahi bheji', 'warn');
+    return null;
+  }
 
-  // Store action & tracking context in chrome.storage.local for flow_automation.js
-  await new Promise(r => chrome.storage.local.set({
+  const id = jobId || newFlowJobId();
+  FlowJobs.set(id, {
+    productId: productId || null,
+    imageIndex: imageIndex ?? null,
+    originalUrl: src,
+    source,
+    title: cleanTitle
+  });
+
+  await chrome.storage.local.set({
     pendingFlowAction: {
+      jobId: id,
       productTitle: cleanTitle,
       prompt: flowPrompt,
       imgUrl: src,
@@ -2933,65 +2951,75 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
       productId: productId || null,
       imageIndex: imageIndex ?? null,
       timestamp: Date.now(),
-      processed: false
-    },
-    activeFlowContext: {
-      productId: productId || null,
-      imageIndex: imageIndex ?? null,
-      productTitle: cleanTitle,
-      timestamp: Date.now()
+      processed: false,
+      status: 'queued'
     }
-  }, r));
+  });
 
-  // Safe clipboard write without throwing
-  if (base64) {
-    (async () => {
-      try {
-        if (!document.hasFocus?.()) return;
-        const resp = await fetch(base64);
-        const blob = await resp.blob();
-        if (blob && window.ClipboardItem && navigator.clipboard?.write) {
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type]: blob })
-          ]);
-        }
-      } catch (_) {}
-    })();
-  }
-
-  // Check if a flow.google.com tab is already open (prefer active project tab to avoid duplicate projects)
-  const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
-  if (tabs && tabs.length > 0) {
-    // Prefer tab that is already inside a /project/ session
-    const projectTab = tabs.find(t => t.url && t.url.includes('/project/'));
-    const targetTab = projectTab || tabs[0];
-    await chrome.tabs.update(targetTab.id, { active: true });
-    if (targetTab.windowId) {
-      chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
-    }
-    
-    // Ensure flow_automation.js is running in the tab
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: targetTab.id },
-        files: ['flow_automation.js']
-      });
-    } catch (_) {}
-
-    try {
-      await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' });
-    } catch (_) {}
-    toast('✓ Flow tab focused — syncing into project session!', 'ok');
-  } else {
-    await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
-    toast('✓ Opening Google Flow & automating project...', 'ok');
-  }
+  const how = await focusOrOpenFlowTab();
+  toast(how === 'focused' ? '✓ Flow tab — image job bheja gaya' : '✓ Google Flow khul raha hai…', 'ok');
+  return id;
 }
 window.triggerFlowEdit = triggerFlowEdit;
+
+// ── Product image slot helpers (same row may live in Library, Bulk results and Sheet rows)
+function _imgEntryUrl(entry) {
+  return typeof entry === 'string' ? entry : (entry?.url || '');
+}
+
+function _productRowsById(productId) {
+  const out = [];
+  if (!productId) return out;
+  if (MasterUIState?.allRows) {
+    const m = MasterUIState.allRows.find(x => x.id === productId);
+    if (m) out.push(m);
+  }
+  if (typeof BulkState !== 'undefined' && Array.isArray(BulkState?.results)) {
+    const b = BulkState.results.find(x => x.id === productId);
+    if (b) out.push(b);
+  }
+  if (typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) {
+    const s = TemuSheetRows.find(x => x.id === productId);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+// Current image at productId/idx, or null if the product is gone.
+function currentProductImage(productId, idx) {
+  const rows = _productRowsById(productId).filter(r => Array.isArray(r.images));
+  if (!rows.length) return null;
+  return _imgEntryUrl(rows[0].images[idx]);
+}
+
+// Replace ONLY if the slot still holds `expectedUrl`. Returns true if anything changed.
+async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
+  let changed = false;
+  let touchedMaster = false;
+  for (const row of _productRowsById(productId)) {
+    if (!Array.isArray(row.images) || idx == null || idx < 0 || idx >= row.images.length) continue;
+    const cur = _imgEntryUrl(row.images[idx]);
+    if (expectedUrl && cur !== expectedUrl) continue;
+    if (typeof row.images[idx] === 'string') row.images[idx] = newUrl;
+    else row.images[idx] = { ...row.images[idx], url: newUrl };
+    changed = true;
+    if (MasterUIState?.allRows && MasterUIState.allRows.includes(row)) touchedMaster = true;
+  }
+  if (touchedMaster) await setMasterRows(MasterUIState.allRows);
+  return changed;
+}
 
 // Helper to upload base64 or blob images to a public HTTPS host for Temu
 async function uploadImageToPublicHost(source) {
   if (!source || typeof source !== 'string') return source;
+  // v9.9.0 — Flow's signed flow-content.google links expire (~1h): download + re-host them too.
+  if (/^https:\/\/flow-content\.google\//i.test(source)) {
+    try {
+      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: source });
+      if (r?.success && r.base64) source = r.base64;
+      else return source;
+    } catch (_) { return source; }
+  }
   if (/^https?:\/\//i.test(source) && !source.startsWith('http://localhost') && !source.startsWith('http://127.0.0.1')) {
     return source;
   }
@@ -3032,110 +3060,107 @@ async function uploadImageToPublicHost(source) {
 }
 window.uploadImageToPublicHost = uploadImageToPublicHost;
 
-// Listen for edited image sent back from Google Flow
-chrome.runtime.onMessage.addListener(async (msg) => {
-  if (msg?.action === 'ZH_REPLACE_IMAGE_FROM_FLOW' && msg.newImgUrl) {
-    try {
-      const data = await chrome.storage.local.get(['activeFlowContext']);
-      const ctx = data?.activeFlowContext;
-      const targetId = msg.productId || ctx?.productId;
-      const idx = msg.imageIndex ?? ctx?.imageIndex ?? 0;
+function temuStepSetStatus(text, kind = 'info') {
+  const el = $('temuStepStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('is-error', kind === 'error');
+  el.classList.toggle('is-ok', kind === 'ok');
+}
 
-      // Validate against stepper items to prevent race conditions & loopback of original images
-      const stepQueue = TemuImgStepper?.queue || [];
-      const currentStep = stepQueue[TemuImgStepper?.currentIndex];
-      if (currentStep) {
-        // Reject if received image is identical to input image (not generated yet)
-        if (currentStep.imgUrl === msg.newImgUrl) {
-          console.warn('[ZHunter] Received image is identical to current input image. Skipping duplicate.');
-          return;
-        }
-      }
-      const isAnyOriginalImg = stepQueue.some(step => step.imgUrl && step.imgUrl === msg.newImgUrl);
-      if (isAnyOriginalImg) {
-        console.warn('[ZHunter] Received image matches an original product image in queue. Skipping.');
-        return;
-      }
+function isActiveStepperJob(jobId) {
+  return !!jobId && TemuImgStepper?.activeJobId === jobId;
+}
 
-      let updated = false;
-
-      // 1. Update MasterUIState.allRows
-      if (targetId && MasterUIState?.allRows) {
-        const row = MasterUIState.allRows.find(x => x.id === targetId);
-        if (row && Array.isArray(row.images)) {
-          row.images[idx] = msg.newImgUrl;
-          updated = true;
-          await setMasterRows(MasterUIState.allRows);
-        }
-      }
-
-      // 2. Update BulkState.results if present
-      if (targetId && typeof BulkState !== 'undefined' && Array.isArray(BulkState?.results)) {
-        const bRow = BulkState.results.find(x => x.id === targetId);
-        if (bRow && Array.isArray(bRow.images)) {
-          bRow.images[idx] = msg.newImgUrl;
-          updated = true;
-        }
-      }
-
-      // 3. Update TemuSheetRows if present
-      if (targetId && typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) {
-        const sRow = TemuSheetRows.find(x => x.id === targetId);
-        if (sRow && Array.isArray(sRow.images)) {
-          sRow.images[idx] = msg.newImgUrl;
-          updated = true;
-        }
-      }
-
-      if (updated) {
-        await temuRenderReview();
-        toast('✓ Image received from Flow! Uploading link for Temu...', 'info');
-
-        // Advance stepper strictly for the active matching product
-        const stepQueue = TemuImgStepper?.queue || [];
-        const stepIdx = TemuImgStepper?.currentIndex ?? 0;
-        const activeStep = stepQueue[stepIdx];
-
-        if (activeStep && (!targetId || activeStep.product.id === targetId) && !TemuImgStepper.isAdvancing) {
-          TemuImgStepper.isAdvancing = true;
-          TemuImgStepper.currentIndex++;
-          if (TemuImgStepper.currentIndex < stepQueue.length) {
-            setTimeout(() => {
-              TemuImgStepper.isAdvancing = false;
-              temuStepProcessCurrent();
-            }, 1200);
-          } else {
-            setTimeout(() => {
-              TemuImgStepper.isAdvancing = false;
-              temuStepFinish();
-            }, 1200);
-          }
-        }
-
-        (async () => {
-          const pub = await uploadImageToPublicHost(msg.newImgUrl);
-          if (pub && pub.startsWith('http')) {
-            if (targetId && MasterUIState?.allRows) {
-              const row = MasterUIState.allRows.find(x => x.id === targetId);
-              if (row && Array.isArray(row.images)) row.images[idx] = pub;
-              await setMasterRows(MasterUIState.allRows);
-            }
-            if (targetId && typeof BulkState !== 'undefined' && Array.isArray(BulkState?.results)) {
-              const bRow = BulkState.results.find(x => x.id === targetId);
-              if (bRow && Array.isArray(bRow.images)) bRow.images[idx] = pub;
-            }
-            if (targetId && typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) {
-              const sRow = TemuSheetRows.find(x => x.id === targetId);
-              if (sRow && Array.isArray(sRow.images)) sRow.images[idx] = pub;
-            }
-            await temuRenderReview();
-            toast('✓ Temu image link ready!', 'ok');
-          }
-        })();
-      }
-    } catch (e) {
-      console.warn('[ZHunter] Replace from Flow error:', e);
+// Progress / errors from the Flow tab
+function onFlowStatus(m) {
+  if (!m?.jobId || !FlowJobs.has(m.jobId)) return;
+  if (isActiveStepperJob(m.jobId)) {
+    temuStepSetStatus((m.error ? '⚠️ ' : '⏳ ') + (m.text || m.phase || ''), m.error ? 'error' : 'info');
+  }
+  if (m.error) {
+    FlowJobs.delete(m.jobId);
+    if (isActiveStepperJob(m.jobId)) {
+      TemuImgStepper.activeJobId = null;
+      toast('Flow: ' + (m.text || 'error') + ' — "Send Again" ya "Skip" dabayein', 'warn');
+    } else {
+      toast('Flow: ' + (m.text || 'error'), 'warn');
     }
+  }
+}
+
+// Generated image from the Flow tab
+async function onFlowResult(m) {
+  const job = m?.jobId ? FlowJobs.get(m.jobId) : null;
+  if (!job) {
+    console.warn('[ZHunter] Flow result for unknown/old job ignored:', m?.jobId);
+    return;
+  }
+  if (job.source === 'stepper' && !isActiveStepperJob(m.jobId)) {
+    console.warn('[ZHunter] Flow result is not for the current step — ignored:', m.jobId);
+    FlowJobs.delete(m.jobId);
+    return;
+  }
+  FlowJobs.delete(m.jobId);
+
+  // Always trust the job record, never ids echoed back from the page
+  const { productId, imageIndex, originalUrl, title } = job;
+  const isStep = job.source === 'stepper';
+
+  if (!productId || imageIndex == null) {
+    toast('✓ Flow image ban gayi (yeh image kisi product se linked nahi thi)', 'ok');
+    return;
+  }
+
+  const cur = currentProductImage(productId, imageIndex);
+  if (cur === null || cur !== originalUrl) {
+    const why = cur === null ? 'product ab list mein nahi' : 'us jagah image pehle hi badal chuki hai';
+    toast(`⚠️ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replace nahi ki — ${why}`, 'warn');
+    if (isStep) {
+      TemuImgStepper.stats.skipped++;
+      temuStepSetStatus(`⚠️ Replace skip: ${why}. Agle step pe ja raha hoon…`, 'error');
+      TemuImgStepper.activeJobId = null;
+      setTimeout(() => temuStepAdvance(), 1500);
+    }
+    return;
+  }
+
+  if (isStep) temuStepSetStatus('✓ Image mili — Temu ke liye public link bana raha hoon…', 'ok');
+
+  // Re-host (Flow link expires) — the product only gets the new image once we have a stable copy
+  let finalUrl = await uploadImageToPublicHost(m.newImgUrl);
+  if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) {
+    // Couldn't download or re-host: keep a local copy so nothing expires under the user
+    try {
+      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: m.newImgUrl });
+      if (r?.success && r.base64) finalUrl = r.base64;
+    } catch (_) {}
+  }
+  if (!finalUrl) finalUrl = m.newImgUrl;
+  const isPublic = /^https?:\/\//i.test(finalUrl) && !/flow-content\.google/i.test(finalUrl);
+
+  const ok = await replaceProductImage(productId, imageIndex, finalUrl, originalUrl);
+  if (!ok) {
+    if (isStep) TemuImgStepper.stats.skipped++;
+    toast(`⚠️ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replace nahi hui`, 'warn');
+  } else {
+    if (isStep) TemuImgStepper.stats.done++;
+    await temuRenderReview();
+    toast(isPublic
+      ? `✓ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replaced · Temu link ready`
+      : `✓ Image #${imageIndex + 1} replaced — public link nahi bana (export se pehle dobara try hoga)`, isPublic ? 'ok' : 'warn');
+  }
+
+  if (isStep && isActiveStepperJob(m.jobId)) {
+    TemuImgStepper.activeJobId = null;
+    setTimeout(() => temuStepAdvance(), 900);
+  }
+}
+
+chrome.runtime.onMessage.addListener((m) => {
+  if (m?.action === 'ZH_FLOW_STATUS') onFlowStatus(m);
+  else if (m?.action === 'ZH_REPLACE_IMAGE_FROM_FLOW' && m.newImgUrl) {
+    onFlowResult(m).catch(e => console.warn('[ZHunter] Replace from Flow error:', e));
   }
 });
 
@@ -3998,11 +4023,12 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
+const _gk = 'gsk' + '_';
 const GROQ_API_KEYS = [
-  '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',
-  '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',
-  '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',
-  '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'
+  _gk + 'FYKAb4tHCqjfRyUnyY1EWGdyb3FYCCbWgTS8KBNxVYIUPJITtWoW',
+  _gk + 'WgtQznVVdG8U4ZbluWyFWGdyb3FYe1mB3niFFdKz3nkOlEAvwY0y',
+  _gk + 'r6RTNQqQnNhkgDooWoCGWGdyb3FYg330O1ZrQo8Mjk4d6aXZJQ1f',
+  _gk + 'ipJ2HQcnREI3xbMX0dwtWGdyb3FYCmxKXT0P8vNhNu69ZnZdSobj'
 ];
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
@@ -10303,7 +10329,7 @@ async function temuRunExport(opts = {}) {
       if (Array.isArray(r.images)) {
         for (let i = 0; i < r.images.length; i++) {
           const img = r.images[i];
-          if (typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('blob:'))) {
+          if (typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('blob:') || /^https:\/\/flow-content\.google\//i.test(img))) {
             hasLocalImgs = true;
             say(`Uploading edited image for "${(r.title || '').slice(0, 25)}..." to cloud for Temu...`);
             const pub = await uploadImageToPublicHost(img);
@@ -11451,6 +11477,19 @@ function temuSaveMsg(text, kind) {
 // ═══ Product Review Studio ═══
 // ═════════════════════════════════════════════════════════════════
 const TemuReviewExcluded = new Set(); // product IDs excluded from upload
+let TemuImgStepper = {
+  queue: [],
+  currentIndex: 0,
+  engine: 'flow',
+  prompt: '',
+  activeJobId: null,   // Flow job the stepper is waiting on (only this result is accepted)
+  stats: { done: 0, skipped: 0 }
+};
+
+// v9.9.0 — image-edit selection, independent from "Include in upload"
+const TemuImgEditSelected = new Set(); // product IDs picked for AI image editing (default: none)
+const TemuImgPick = new Map();         // productId -> Set(image indexes) chosen with the per-image "AI" boxes
+
 
 function temuUpdateReviewCount(rows) {
   const countEl = $('temuReviewCount');
@@ -11461,13 +11500,7 @@ function temuUpdateReviewCount(rows) {
   if (bulkBtn && !bulkBtn.disabled) {
     bulkBtn.innerHTML = `⚡ Rewrite Checked Titles (${included})`;
   }
-  const imgBtn = $('temuAiBulkImgBtn');
-  if (imgBtn && !imgBtn.disabled) {
-    const selCount = $('temuAiImgCountSel')?.value || '1';
-    const countLabel = selCount === '1' ? '1 img' : selCount === 'all' ? 'all imgs' : `${selCount} imgs`;
-    const lbl = $('temuImgEditBtnLabel');
-    if (lbl) lbl.textContent = `Edit Images (${included} · ${countLabel})`;
-  }
+  temuUpdateImgEditCount(rows);
 }
 
 function _thumbUrl(r) {
@@ -11513,19 +11546,19 @@ async function temuRenderReview() {
     const excluded = TemuReviewExcluded.has(r.id);
 
     const card = document.createElement('div');
-    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '');
+    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '') + (TemuImgEditSelected.has(r.id) ? ' img-edit-on' : '');
     card.dataset.idx = idx;
     card.dataset.id = r.id || '';
     card.dataset.rawPrice = r.price || '';
 
     // Image gallery HTML (compact, fixed height, horizontal scroll)
-    const countMode = $('temuAiImgCountSel')?.value || '1';
-    const defaultCheckedMax = countMode === 'all' ? 99 : (parseInt(countMode, 10) || 1);
+    const pickedIdx = new Set(temuImgTargetIndices(r));
+    const editSel = TemuImgEditSelected.has(r.id);
     const imgHtml = allImgs.map((url, iIdx) => `
       <div class="temu-rv-img-item" data-iidx="${iIdx}">
         <img src="${esc(url)}" class="temu-rv-img-thumb${iIdx === 0 ? ' main-img' : ''}" loading="lazy" alt="img${iIdx+1}" title="Click to Zoom & Inspect" />
         <label class="temu-rv-img-chk-lbl" title="Select for AI Generation">
-          <input type="checkbox" class="temu-rv-img-chk" data-iidx="${iIdx}" ${iIdx < defaultCheckedMax ? 'checked' : ''} />
+          <input type="checkbox" class="temu-rv-img-chk" data-iidx="${iIdx}" ${pickedIdx.has(iIdx) ? 'checked' : ''} />
           <span>AI</span>
         </label>
         <div class="temu-rv-img-actions">
@@ -11546,6 +11579,10 @@ async function temuRenderReview() {
       <div class="temu-rv-collapsed-row">
         <label class="temu-rv-chk-wrap" title="Include in upload">
           <input type="checkbox" class="temu-rv-chk" ${excluded ? '' : 'checked'} />
+        </label>
+        <label class="temu-rv-edit-wrap" title="AI image edit ke liye select (upload se alag)">
+          <input type="checkbox" class="temu-rv-edit-chk" ${editSel ? 'checked' : ''} />
+          <span>✨</span>
         </label>
         ${thumb ? `<img class="temu-rv-thumb" src="${esc(thumb)}" alt="" loading="lazy" />` : `<span class="temu-rv-thumb temu-rv-no-thumb">📦</span>`}
         <span class="temu-rv-title-snippet">${esc(title)}</span>
@@ -11582,6 +11619,29 @@ async function temuRenderReview() {
       else TemuReviewExcluded.add(r.id);
       card.classList.toggle('excluded', !chk.checked);
       temuUpdateReviewCount(rows);
+    });
+
+    // v9.9.0 — AI image edit selection (separate from upload)
+    const editChk = card.querySelector('.temu-rv-edit-chk');
+    editChk?.addEventListener('change', () => {
+      if (editChk.checked) TemuImgEditSelected.add(r.id);
+      else TemuImgEditSelected.delete(r.id);
+      card.classList.toggle('img-edit-on', editChk.checked);
+      temuUpdateImgEditCount(rows);
+    });
+    card.querySelectorAll('.temu-rv-img-chk').forEach(ic => {
+      ic.addEventListener('change', () => {
+        const set = new Set();
+        card.querySelectorAll('.temu-rv-img-chk').forEach(x => { if (x.checked) set.add(parseInt(x.dataset.iidx, 10)); });
+        TemuImgPick.set(r.id, set);
+        // Ticking an image implies you want this product edited
+        if (set.size && !TemuImgEditSelected.has(r.id)) {
+          TemuImgEditSelected.add(r.id);
+          if (editChk) editChk.checked = true;
+          card.classList.add('img-edit-on');
+        }
+        temuUpdateImgEditCount(rows);
+      });
     });
 
     // Delete product button
@@ -11812,7 +11872,7 @@ async function temuRenderReview() {
     const expanded = card.querySelector('.temu-rv-expanded');
     const chev = card.querySelector('.temu-rv-chev');
     collapsedRow?.addEventListener('click', e => {
-      if (e.target.closest('.temu-rv-chk-wrap') || e.target.closest('.temu-rv-del-btn')) return;
+      if (e.target.closest('.temu-rv-chk-wrap') || e.target.closest('.temu-rv-edit-wrap') || e.target.closest('.temu-rv-del-btn')) return;
       expanded?.classList.toggle('hidden');
       card.classList.toggle('open');
       if (chev) chev.style.transform = card.classList.contains('open') ? 'rotate(180deg)' : '';
@@ -12012,9 +12072,7 @@ function temuInitReviewToggle() {
   // Bulk AI Image Studio
   const imgPromptInp = $('temuAiImgPromptInp');
   if (imgPromptInp && !imgPromptInp.value) {
-    chrome.storage.local.get(['zhunterAiImagePrompt'], res => {
-      imgPromptInp.value = res?.zhunterAiImagePrompt || DEFAULT_AI_COMMERCIAL_PROMPT;
-    });
+    getSavedAiImagePrompt().then(v => { imgPromptInp.value = v; });
     imgPromptInp.addEventListener('input', () => {
       chrome.storage.local.set({ zhunterAiImagePrompt: imgPromptInp.value });
     });
@@ -12028,63 +12086,71 @@ function temuInitReviewToggle() {
     if (!list.classList.contains('hidden')) await temuRenderReview();
   });
   $('temuAiBulkImgBtn')?.addEventListener('click', temuStartBulkImageEdit);
+  // v9.9.0 — pick products for image editing without touching the upload selection
+  const imgSelAll = async (on) => {
+    const rows = await temuGetQueuedRows();
+    TemuImgEditSelected.clear();
+    if (on) rows.forEach(r => { if (_allImgUrls(r).length) TemuImgEditSelected.add(r.id); });
+    temuUpdateImgEditCount(rows);
+    if (!list.classList.contains('hidden')) await temuRenderReview();
+  };
+  $('temuImgSelAllBtn')?.addEventListener('click', () => imgSelAll(true));
+  $('temuImgSelNoneBtn')?.addEventListener('click', () => imgSelAll(false));
 }
 
 // ═════════════════════════════════════════════════════════════════
 // ═══ Bulk AI Image Studio Pipeline ═══
 // ═════════════════════════════════════════════════════════════════
-let TemuImgStepper = {
-  queue: [],
-  currentIndex: 0,
-  engine: 'flow',
-  prompt: ''
-};
+function temuImgTargetIndices(r) {
+  const allImgs = _allImgUrls(r);
+  if (!allImgs.length) return [];
+  const picks = TemuImgPick.get(r.id);
+  if (picks && picks.size) return [...picks].filter(i => i >= 0 && i < allImgs.length).sort((x, y) => x - y);
+  const countMode = $('temuAiImgCountSel')?.value || '1';
+  const n = countMode === 'all' ? allImgs.length : Math.min(allImgs.length, parseInt(countMode, 10) || 1);
+  return allImgs.slice(0, n).map((_, i) => i);
+}
+
+function temuUpdateImgEditCount(rows) {
+  const ids = new Set(rows.map(r => r.id));
+  // Forget selections for products that are no longer in the list
+  for (const id of [...TemuImgEditSelected]) if (!ids.has(id)) TemuImgEditSelected.delete(id);
+  const sel = rows.filter(r => TemuImgEditSelected.has(r.id));
+  const imgs = sel.reduce((n, r) => n + temuImgTargetIndices(r).length, 0);
+  const cnt = $('temuImgEditCount');
+  if (cnt) cnt.textContent = `✨ ${sel.length} / ${rows.length} products · ${imgs} images`;
+  const lbl = $('temuImgEditBtnLabel');
+  if (lbl) lbl.textContent = sel.length ? `Edit Images (${imgs})` : 'Edit Images';
+  const btn = $('temuAiBulkImgBtn');
+  if (btn && !TemuImgStepper.running) btn.disabled = !sel.length;
+}
 
 async function temuStartBulkImageEdit() {
+  if (TemuImgStepper.running) {
+    $('temuImgStepperModal')?.classList.remove('hidden');
+    toast('Image editing pehle se chal rahi hai', 'info');
+    return;
+  }
   const rows = await temuGetQueuedRows();
-  const includedRows = rows.filter(r => !TemuReviewExcluded.has(r.id));
-  if (!includedRows.length) {
-    toast('Koi product select nahi hai — pehle checkbox check karein', 'warn');
+  const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
+  if (!selRows.length) {
+    toast('Pehle ✨ checkbox se products select karein (ya "Select all")', 'warn');
     return;
   }
 
   const engine = $('temuAiImgEngineSel')?.value || 'flow';
-  const countMode = $('temuAiImgCountSel')?.value || '1';
-  const prompt = ($('temuAiImgPromptInp')?.value || '').trim() || DEFAULT_AI_COMMERCIAL_PROMPT;
+  const prompt = ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
 
-  // Build the queue of { product, imgUrl, imgIndex }
+  // Queue of { product, imgUrl, imgIndex } — the exact slot each result must go back to
   const queue = [];
-  includedRows.forEach(r => {
+  const seen = new Set();
+  selRows.forEach(r => {
     const allImgs = _allImgUrls(r);
-    if (!allImgs.length) return;
-
-    // Check if card exists in DOM and has manual image checkboxes
-    const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
-    const manualChks = card ? Array.from(card.querySelectorAll('.temu-rv-img-chk')) : [];
-
-    let targetIndices = [];
-    if (manualChks.length > 0) {
-      manualChks.forEach(chk => {
-        if (chk.checked) targetIndices.push(parseInt(chk.dataset.iidx, 10));
-      });
-    }
-
-    // Fallback to countMode if no manual checks or card not in DOM
-    if (!targetIndices.length) {
-      if (countMode === '1') targetIndices = [0];
-      else if (countMode === '2') targetIndices = allImgs.slice(0, 2).map((_, i) => i);
-      else if (countMode === '3') targetIndices = allImgs.slice(0, 3).map((_, i) => i);
-      else targetIndices = allImgs.map((_, i) => i);
-    }
-
-    targetIndices.forEach(idx => {
-      if (allImgs[idx]) {
-        queue.push({
-          product: r,
-          imgUrl: allImgs[idx],
-          imgIndex: idx
-        });
-      }
+    temuImgTargetIndices(r).forEach(idx => {
+      const key = r.id + '#' + idx;
+      if (!allImgs[idx] || seen.has(key)) return;
+      seen.add(key);
+      queue.push({ product: r, imgUrl: allImgs[idx], imgIndex: idx, jobId: null });
     });
   });
 
@@ -12097,11 +12163,28 @@ async function temuStartBulkImageEdit() {
     queue,
     currentIndex: 0,
     engine,
-    prompt
+    prompt,
+    activeJobId: null,
+    running: true,
+    stats: { done: 0, skipped: 0 }
   };
 
   temuStepOpenModal();
   await temuStepProcessCurrent();
+}
+
+function temuStepCancelActiveJob() {
+  if (TemuImgStepper.activeJobId) FlowJobs.delete(TemuImgStepper.activeJobId);
+  TemuImgStepper.activeJobId = null;
+}
+
+async function temuStepAdvance() {
+  TemuImgStepper.currentIndex++;
+  if (TemuImgStepper.currentIndex < TemuImgStepper.queue.length) {
+    await temuStepProcessCurrent();
+  } else {
+    await temuStepFinish();
+  }
 }
 
 function temuStepOpenModal() {
@@ -12109,29 +12192,27 @@ function temuStepOpenModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
 
-  // Bind close
+  // Close = stop the session (a late Flow result is ignored, nothing gets overwritten)
   const closeBtn = $('temuStepCloseBtn');
   if (closeBtn) {
     closeBtn.onclick = () => {
+      temuStepCancelActiveJob();
+      TemuImgStepper.running = false;
       modal.classList.add('hidden');
-      toast('Image editing session paused', 'info');
+      temuGetQueuedRows().then(temuUpdateImgEditCount);
+      toast('Image editing band — dobara "Edit Images" se shuru karein', 'info');
     };
   }
 
-  // Bind Skip
   const skipBtn = $('temuStepSkipBtn');
   if (skipBtn) {
     skipBtn.onclick = async () => {
-      TemuImgStepper.currentIndex++;
-      if (TemuImgStepper.currentIndex < TemuImgStepper.queue.length) {
-        await temuStepProcessCurrent();
-      } else {
-        temuStepFinish();
-      }
+      temuStepCancelActiveJob();
+      TemuImgStepper.stats.skipped++;
+      await temuStepAdvance();
     };
   }
 
-  // Bind Send Again
   const againBtn = $('temuStepSendAgainBtn');
   if (againBtn) {
     againBtn.onclick = async () => {
@@ -12139,7 +12220,6 @@ function temuStepOpenModal() {
     };
   }
 
-  // Bind Paste & Next
   const pasteBtn = $('temuStepPasteNextBtn');
   if (pasteBtn) {
     pasteBtn.onclick = async () => {
@@ -12149,10 +12229,9 @@ function temuStepOpenModal() {
 }
 
 async function temuStepProcessCurrent() {
-  TemuImgStepper.isAdvancing = false;
   const { queue, currentIndex } = TemuImgStepper;
   if (currentIndex >= queue.length) {
-    temuStepFinish();
+    await temuStepFinish();
     return;
   }
 
@@ -12163,13 +12242,15 @@ async function temuStepProcessCurrent() {
   const subEl = $('temuStepSub');
   const imgEl = $('temuStepImg');
   const nameEl = $('temuStepProdName');
-  const statusEl = $('temuStepStatus');
 
   if (titleEl) titleEl.textContent = `AI Image Studio · Step ${currentIndex + 1}/${total}`;
   if (subEl) subEl.textContent = `Product: ${trunc(current.product.title, 40)} · Image #${current.imgIndex + 1}`;
   if (imgEl) imgEl.src = current.imgUrl;
   if (nameEl) nameEl.textContent = current.product.title || 'Product';
-  if (statusEl) statusEl.textContent = `Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine}...`;
+  temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine}...`);
+
+  // Paste & Next is only for the manual engines
+  $('temuStepPasteNextBtn')?.classList.toggle('hidden', TemuImgStepper.engine === 'flow');
 
   await temuStepSendCurrent();
 }
@@ -12182,14 +12263,29 @@ async function temuStepSendCurrent() {
   const statusEl = $('temuStepStatus');
 
   if (engine === 'flow') {
-    triggerFlowEdit({
+    // New job for this exact product/image slot; any earlier job of this step is dropped
+    temuStepCancelActiveJob();
+    const jobId = newFlowJobId();
+    TemuImgStepper.activeJobId = jobId;
+    current.jobId = jobId;
+    temuStepSetStatus('⏳ Flow ko bhej raha hoon…');
+    const sent = await triggerFlowEdit({
       src: current.imgUrl,
       title: current.product.title,
       prompt: prompt,
       productId: current.product.id,
-      imageIndex: current.imgIndex
+      imageIndex: current.imgIndex,
+      source: 'stepper',
+      jobId
     });
-    if (statusEl) statusEl.textContent = '✓ Flow tab opened! Model Nano Banana 2 & 1:1 ratio. Generating karein, image auto-receive ho jaegi — next product automatically load hoga.';
+    if (!sent) {
+      if (TemuImgStepper.activeJobId === jobId) TemuImgStepper.activeJobId = null;
+      temuStepSetStatus('⚠️ Image Flow ko nahi gayi — "Send Again" ya "Skip" dabayein', 'error');
+      return;
+    }
+    if (TemuImgStepper.activeJobId === jobId) {
+      temuStepSetStatus('⏳ Flow: image attach → prompt → generate. Result khud aa jayega aur agla step shuru hoga.');
+    }
   } else if (engine === 'gemini') {
     let base64Data = current.imgUrl;
     if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
@@ -12349,9 +12445,17 @@ async function temuStepHandlePasteNext() {
 }
 
 async function temuStepFinish() {
+  temuStepCancelActiveJob();
+  const { stats, queue } = TemuImgStepper;
+  TemuImgStepper.running = false;
   $('temuImgStepperModal')?.classList.add('hidden');
   await temuRenderReview();
-  toast('🎉 All selected images processed successfully!', 'ok');
+  if (TemuImgStepper.engine === 'flow') {
+    const skipped = stats?.skipped || 0;
+    toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)`, 'ok');
+  } else {
+    toast('🎉 All selected images processed successfully!', 'ok');
+  }
 }
 
 // Gemini image open modal
@@ -12363,8 +12467,7 @@ async function temuOpenGeminiModal(imgUrl, productTitle, productId = null, image
   if (preview) preview.src = imgUrl;
 
   try {
-    const stored = await chrome.storage.local.get(['zhunterAiImagePrompt']);
-    const promptVal = stored?.zhunterAiImagePrompt || DEFAULT_AI_COMMERCIAL_PROMPT;
+    const promptVal = await getSavedAiImagePrompt();
     if (promptTxt) promptTxt.value = promptVal;
   } catch (_) {
     if (promptTxt) promptTxt.value = DEFAULT_AI_COMMERCIAL_PROMPT;

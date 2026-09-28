@@ -1,697 +1,612 @@
 // ═════════════════════════════════════════════════════════════════
-// ZHunter PRO — Google Flow (flow.google.com) Automation Engine
+// ZHunter PRO — Google Flow (flow.google.com) Automation Engine  v9.9.0
 // ═════════════════════════════════════════════════════════════════
+// One job = one product image. Strict order, every step verified:
+//   1. prepare  → Agent OFF, settings = Image · 1:1 · x1, prompt box cleared
+//   2. image    → product image attached as a prompt INGREDIENT (chip ready)
+//   3. prompt   → prompt text pasted
+//   4. generate → trusted (CDP) click on "Start generation", start confirmed
+//   5. result   → the NEW tile that has a "Reuse prompt" button (= generated,
+//                 never an upload) is sent back with the same jobId
+// The side panel only accepts a result whose jobId matches its current step.
 
 (() => {
   'use strict';
 
   if (window.__zhunterFlowLoaded) {
-    // Already loaded, just check for pending actions
     window.__zhunterFlowExecute?.();
     return;
   }
   window.__zhunterFlowLoaded = true;
 
-  console.log('[ZHunter Flow] Automation script initialized on', location.href);
+  const TAG = '[ZHunter Flow]';
+  const log = (...a) => console.log(TAG, ...a);
+  const warn = (...a) => console.warn(TAG, ...a);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // Helper: wait for element safely without locking DOM / browser thread
-  function waitForEl(selector, timeoutMs = 8000) {
+  const ATTACH_TIMEOUT_MS = 60000;   // image upload into the chip
+  const START_TIMEOUT_MS = 20000;    // generation must visibly start within this
+  const RESULT_TIMEOUT_MS = 180000;  // generated image must arrive within this
+  const STALE_JOB_MS = 10 * 60000;   // ignore jobs older than this that never started
+
+  log('Automation script initialized on', location.href);
+
+  // ── Generic helpers ──────────────────────────────────────────────
+  function isShown(el) {
+    if (!el || !el.isConnected) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
+  async function waitFor(fn, timeoutMs = 8000, intervalMs = 250) {
+    const end = Date.now() + timeoutMs;
+    for (;;) {
+      let v = null;
+      try { v = fn(); } catch (_) { v = null; }
+      if (v) return v;
+      if (Date.now() >= end) return null;
+      await sleep(intervalMs);
+    }
+  }
+
+  function sendBg(message) {
     return new Promise((resolve) => {
-      const el = document.querySelector(selector);
-      if (el) return resolve(el);
-
-      const startTime = Date.now();
-      const interval = setInterval(() => {
-        const found = document.querySelector(selector);
-        if (found) {
-          clearInterval(interval);
-          resolve(found);
-        } else if (Date.now() - startTime >= timeoutMs) {
-          clearInterval(interval);
-          resolve(null);
-        }
-      }, 250);
+      try {
+        chrome.runtime.sendMessage(message, (res) => {
+          if (chrome.runtime.lastError) return resolve({ ok: false, error: chrome.runtime.lastError.message });
+          resolve(res || {});
+        });
+      } catch (e) {
+        resolve({ ok: false, error: e?.message || String(e) });
+      }
     });
   }
 
-  // Helper: convert base64 dataUrl to File
+  // Trusted click through the background's chrome.debugger (Angular ignores synthetic clicks
+  // on several Flow controls). Falls back to el.click() if CDP isn't available.
+  async function trustedClick(el, label = '') {
+    if (!el || !el.isConnected) return false;
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    await sleep(150);
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const res = await sendBg({ action: 'ZH_CDP_CLICK', x, y });
+    if (res?.ok) return true;
+    warn(`CDP click failed for ${label || el.tagName} (${res?.error || 'unknown'}) — falling back to el.click()`);
+    try { el.click(); } catch (_) {}
+    return true;
+  }
+
   function dataUrlToFile(dataUrl, filename = 'zhunter_product.png') {
     try {
-      const arr = dataUrl.split(',');
-      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
-      const bstr = atob(arr[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while (n--) u8arr[n] = bstr.charCodeAt(n);
-      return new File([u8arr], filename, { type: mime });
+      const [head, body] = dataUrl.split(',');
+      const mime = head.match(/:(.*?);/)?.[1] || 'image/png';
+      const bin = atob(body);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      return new File([u8], filename.replace(/\.\w+$/, '') + '.' + ext, { type: mime });
     } catch (e) {
-      console.warn('[ZHunter Flow] dataUrlToFile error:', e);
+      warn('dataUrlToFile error:', e);
       return null;
     }
   }
 
-  // Helper: Robust multi-event clicker for Angular Material & modern SPAs
-  function simulateRealClick(el) {
-    if (!el) return;
-    try {
-      el.focus();
-    } catch (_) {}
+  // ── Flow DOM (from real DOM harvests, Sep 2026) ─────────────────
+  const Q = {
+    promptRoot: () =>
+      document.querySelector('flow-prompt-box flow-base-prompt-box') ||
+      document.querySelector('flow-base-prompt-box'),
+    editor: (root) => root?.querySelector('.ProseMirror'),
+    agentChip: () => document.querySelector('flow-agent-mode-toggle-chip button.agent-mode-chip'),
+    clearBtn: (root) => root?.querySelector('button[aria-label="Clear prompt"]'),
+    chips: (root) => Array.from(root?.querySelectorAll('flow-image-ingredient-chip button.chip-container') || []),
+    genBtn: (root) => root?.querySelector('flow-generate-icon-button button[aria-label="Start generation"]'),
+    settingsBtn: (root) => root?.querySelector('button.settings-trigger-button'),
+    addMenuBtn: (root) => root?.querySelector('button.add-menu-trigger'),
+    tiles: () => Array.from(document.querySelectorAll('flow-grid-tile-container')),
+    scroller: () => document.querySelector('.cdk-virtual-scrollable.page-container'),
+    newProjectBtn: () =>
+      document.querySelector('button.new-project-button') ||
+      Array.from(document.querySelectorAll('button')).find(b => /new project/i.test(b.textContent || ''))
+  };
 
-    const rect = el.getBoundingClientRect();
-    const clientX = rect.left + rect.width / 2;
-    const clientY = rect.top + rect.height / 2;
+  const isDisabled = (btn) =>
+    !btn || btn.disabled || btn.getAttribute('disabled') === 'true' || btn.classList.contains('mat-mdc-button-disabled');
 
-    const optsDown = { bubbles: true, cancelable: true, view: window, composed: true, buttons: 1, button: 0, clientX, clientY };
-    const optsUp = { bubbles: true, cancelable: true, view: window, composed: true, buttons: 0, button: 0, clientX, clientY };
+  const editorText = (root) => (Q.editor(root)?.textContent || '').trim();
 
-    try { el.dispatchEvent(new PointerEvent('pointerdown', optsDown)); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('mousedown', optsDown)); } catch (_) {}
-    try { el.dispatchEvent(new PointerEvent('pointerup', optsUp)); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('mouseup', optsUp)); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('click', optsUp)); } catch (_) {}
-    try { el.click(); } catch (_) {}
+  function tileInfo(tile) {
+    const img = tile.querySelector('img[data-media-id]');
+    return {
+      tile,
+      mediaId: img?.getAttribute('data-media-id') || '',
+      src: img?.currentSrc || img?.src || '',
+      pending: !!tile.querySelector('flow-pending-tile'),
+      // Generated media carries a "Reuse prompt" action; uploads never do.
+      generated: !!tile.querySelector('button[aria-label="Reuse prompt"]'),
+      title: (tile.getAttribute('aria-label') || '').trim()
+    };
   }
 
+  const allTiles = () => Q.tiles().map(tileInfo);
+  const pendingCount = () => allTiles().filter(t => t.pending).length;
+  const mediaIdSet = () => new Set(allTiles().map(t => t.mediaId).filter(Boolean));
 
-
-  // Helper: If Agent Settings panel is open, close it & unhide prompt box
-  function ensurePromptBoxVisible() {
-    try {
-      // 1. Remove hidden CSS class from prompt box container (KEY FIX from DOM analysis)
-      const promptBoxWrapper = document.querySelector('.agent-panel-prompt-box');
-      if (promptBoxWrapper) {
-        promptBoxWrapper.classList.remove('agent-panel-prompt-box-hidden');
-      }
-
-      // 2. Also close settings panel if open (clicks Back button)
-      const backBtn = document.querySelector('flow-agent-panel button[aria-label="Back"], flow-settings-view button[aria-label="Back"]');
-      if (backBtn && backBtn.offsetParent) {
-        simulateRealClick(backBtn);
-      }
-
-      // 3. Force agent panel wrapper visible
-      const agentPanelWrapper = document.querySelector('.agent-panel-wrapper');
-      if (agentPanelWrapper) {
-        agentPanelWrapper.style.display = '';
-        agentPanelWrapper.style.visibility = 'visible';
-        agentPanelWrapper.style.opacity = '1';
-      }
-    } catch (_) {}
+  function scrollGridTop() {
+    const sc = Q.scroller();
+    if (sc) sc.scrollTop = 0;
   }
 
-  // Generator trigger — uses CDP (chrome.debugger) via background for truly trusted clicks
-  async function triggerFlowGeneration(genBtn) {
-    ensurePromptBoxVisible();
-
-    const BTN_SELECTOR = 'button[aria-label="Start generation"], flow-generate-icon-button button[type="submit"], flow-generate-icon-button button.generate-icon-button';
-
-    // 1. Try CDP click via background (most reliable — trusted event)
-    try {
-      const cdpTabId = await new Promise(resolve => {
-        chrome.tabs.getCurrent(tab => resolve(tab?.id));
-      });
-      if (cdpTabId) {
-        const result = await new Promise(resolve => {
-          chrome.runtime.sendMessage({ action: 'ZH_CDP_CLICK', tabId: cdpTabId, selector: BTN_SELECTOR }, res => resolve(res || {}));
-        });
-        if (result?.ok) {
-          console.log('[ZHunter Flow] CDP click succeeded');
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('[ZHunter Flow] CDP click failed, falling back:', e);
-    }
-
-    // 2. Fallback: native .click() on button
-    const nativeBtn = document.querySelector(BTN_SELECTOR);
-    const targetBtn = (nativeBtn && !nativeBtn.disabled && !nativeBtn.classList.contains('mat-mdc-button-disabled')) ? nativeBtn : genBtn;
-    if (targetBtn) {
-      try { targetBtn.focus(); targetBtn.click(); } catch (_) {}
-      simulateRealClick(targetBtn);
-      const angularHost = document.querySelector('flow-generate-icon-button');
-      if (angularHost) { try { angularHost.click(); } catch (_) {} }
-    }
+  function snackText() {
+    const s = document.querySelector('.mat-mdc-snack-bar-label, simple-snack-bar, mat-snack-bar-container');
+    return (s?.textContent || '').trim();
   }
 
-
-  // Safe checks to ensure we never click ingredients or settings buttons by mistake
-  function isIngredientsOrSettings(btn) {
-    if (!btn) return true;
-    if (btn.classList.contains('add-menu-trigger')) return true;
-    if (btn.classList.contains('agent-action-button')) return true;
-    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-    if (label.includes('ingredient') || label.includes('reference') || label.includes('agent') || label.includes('setting') || label.includes('menu')) {
-      return true;
-    }
-    return false;
-  }
-
-  // Robust finder for Flow's circular Generate/Run button based on real DOM
-  function findFlowGenerateButton() {
-    // 1. Exact DOM selector from Google Flow HTML files
-    const exactBtn = document.querySelector('flow-generate-icon-button button.generate-icon-button, flow-generate-icon-button button[type="submit"], button[aria-label="Start generation"]');
-    if (exactBtn) {
-      const isDisabled = exactBtn.disabled || exactBtn.getAttribute('disabled') === 'true' || exactBtn.classList.contains('mat-mdc-button-disabled');
-      if (!isDisabled && !isIngredientsOrSettings(exactBtn)) {
-        return exactBtn;
-      }
-    }
-
-    // 2. Search inside prompt container for button containing arrow icon
-    const editorBox = document.querySelector('flow-prompt-box, flow-creative-agent-prompt-box, flow-rich-text-editor, .prompt-box') || document;
-    const allBtns = Array.from(editorBox.querySelectorAll('button'));
-    const arrowBtn = allBtns.find(b => {
-      if (isIngredientsOrSettings(b)) return false;
-      const isDisabled = b.disabled || b.getAttribute('disabled') === 'true' || b.classList.contains('mat-mdc-button-disabled');
-      if (isDisabled) return false;
-      const icon = b.querySelector('mat-icon')?.textContent?.trim() || '';
-      return ['arrow_forward', 'east', 'send', 'play_arrow', 'arrow_right_alt'].includes(icon);
-    });
-    if (arrowBtn) return arrowBtn;
-
-    return null;
-  }
-
-  // Helper: Ensure Flow model is switched to 🍌 Nano Banana 2 AND Aspect Ratio is 1:1 (Square)
-  async function ensureFlowModelAndRatio() {
-    try {
-      if (window.__zhFlowSettingsConfigured) {
-        return;
-      }
-
-      // Check if inline model trigger says nano banana 2
-      const inlineModelBtn = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
-      const curText = (inlineModelBtn?.textContent || '').trim().toLowerCase();
-      if (curText.includes('nano banana 2')) {
-        console.log('[ZHunter Flow] Model verified: 🍌 Nano Banana 2');
-        window.__zhFlowSettingsConfigured = true;
-        return;
-      }
-
-      window.__zhFlowSettingsConfigured = true;
-    } catch (e) {
-      console.warn('[ZHunter Flow] ensureFlowModelAndRatio error:', e);
-    }
-  }
-
-  // Helper: Open and inject prompt text into Flow ProseMirror rich text editor
-  async function injectFlowPrompt(promptText) {
-    if (!promptText) return;
-    try {
-      // 1. If prompt box is collapsed or hidden, click it to expand
-      let editor = document.querySelector('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror');
-      if (!editor || !editor.offsetParent) {
-        const trigger = document.querySelector('flow-prompt-box, .base-prompt-box, .prosemirror-placeholder, .prompt-input');
-        if (trigger) {
-          simulateRealClick(trigger);
-          await new Promise(r => setTimeout(r, 400));
-        }
-      }
-
-      editor = await waitForEl('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror', 5000);
-      if (!editor) return;
-
-      // If already contains this prompt, don't duplicate
-      if (editor.textContent && editor.textContent.includes(promptText.slice(0, 40))) {
-        console.log('[ZHunter Flow] Prompt already present in editor, skipping duplicate paste');
-        return;
-      }
-
-      // If clear prompt button exists, click it first to avoid duplicate concatenations
-      const clearBtn = document.querySelector('button[aria-label="Clear prompt"]');
-      if (clearBtn && clearBtn.offsetParent) {
-        simulateRealClick(clearBtn);
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      editor.focus();
-
-      // Clear existing content
-      document.execCommand('selectAll', false, null);
-      document.execCommand('delete', false, null);
-
-      // 1. Try ClipboardEvent paste (best for ProseMirror transaction handling)
-      try {
-        const dt = new DataTransfer();
-        dt.setData('text/plain', promptText);
-        editor.dispatchEvent(new ClipboardEvent('paste', {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: dt
-        }));
-      } catch (_) {}
-
-      // 2. InputEvent + insertText fallback
-      if (!editor.textContent?.trim()) {
-        try {
-          editor.dispatchEvent(new InputEvent('beforeinput', {
-            inputType: 'insertText',
-            data: promptText,
-            bubbles: true,
-            cancelable: true,
-            composed: true
-          }));
-        } catch (_) {}
-        document.execCommand('insertText', false, promptText);
-      }
-
-      // 3. Direct HTML fallback
-      if (!editor.textContent?.trim()) {
-        editor.innerHTML = `<p>${promptText.replace(/\n/g, '<br>')}</p>`;
-      }
-
-      // Fire all change detection events so Angular enables the generate button
-      ['input', 'change', 'keyup'].forEach(evName => {
-        editor.dispatchEvent(new Event(evName, { bubbles: true, composed: true }));
-      });
-
-      console.log('[ZHunter Flow] Prompt injected. Length:', editor.textContent?.length);
-    } catch (e) {
-      console.warn('[ZHunter Flow] Prompt injection error:', e);
-    }
-  }
-
-  // Top HUD Status Banner on Flow Page
+  // ── HUD on the Flow page ─────────────────────────────────────────
   function updateFlowHUD(msg, type = 'info', actionBtn = null) {
     let hud = document.getElementById('zh-flow-hud');
     if (!hud) {
       hud = document.createElement('div');
       hud.id = 'zh-flow-hud';
       hud.style.cssText = `
-        position: fixed;
-        top: 14px;
-        right: 18px;
-        z-index: 2147483647;
+        position: fixed; top: 14px; right: 18px; z-index: 2147483647;
         background: linear-gradient(135deg, rgba(2, 6, 23, 0.96), rgba(11, 25, 44, 0.94));
         border: 1px solid #00E5FF;
         box-shadow: 0 10px 30px rgba(0,0,0,0.85), 0 0 20px rgba(0,229,255,0.35);
-        border-radius: 12px;
-        padding: 10px 16px;
-        color: #F8FAFC;
+        border-radius: 12px; padding: 10px 16px; color: #F8FAFC;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 13px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        backdrop-filter: blur(8px);
-        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 12px;
+        max-width: 460px; pointer-events: auto; backdrop-filter: blur(8px);
+        transition: opacity 0.3s, transform 0.3s;
       `;
       document.body.appendChild(hud);
     }
-
+    hud.style.opacity = '1';
+    hud.style.transform = 'none';
     const icon = type === 'ok' ? '✓' : type === 'warn' ? '⚠️' : '⚡';
     const iconColor = type === 'ok' ? '#10B981' : type === 'warn' ? '#F59E0B' : '#00E5FF';
-
-    hud.innerHTML = `
-      <span style="color:${iconColor}; font-size:15px; display:inline-flex; align-items:center;">${icon}</span>
-      <span style="letter-spacing: 0.2px;">${msg}</span>
-    `;
-
+    hud.textContent = '';
+    const i = document.createElement('span');
+    i.style.cssText = `color:${iconColor};font-size:15px;display:inline-flex;align-items:center;`;
+    i.textContent = icon;
+    const t = document.createElement('span');
+    t.style.letterSpacing = '0.2px';
+    t.textContent = msg;
+    hud.append(i, t);
     if (actionBtn) {
-      const btn = document.createElement('button');
-      btn.innerText = actionBtn.label;
-      btn.style.cssText = `
-        background: #00E5FF;
-        color: #020617;
-        border: none;
-        border-radius: 6px;
-        padding: 4px 10px;
-        font-size: 12px;
-        font-weight: 700;
-        cursor: pointer;
-        margin-left: 6px;
-      `;
-      btn.onclick = actionBtn.onClick;
-      hud.appendChild(btn);
+      const b = document.createElement('button');
+      b.textContent = actionBtn.label;
+      b.style.cssText = 'background:#00E5FF;color:#020617;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;';
+      b.onclick = actionBtn.onClick;
+      hud.appendChild(b);
     }
-
+    clearTimeout(hud._hideT);
     if (type === 'ok') {
-      setTimeout(() => {
-        hud.style.opacity = '0';
-        hud.style.transform = 'translateY(-10px)';
-        setTimeout(() => hud.remove(), 400);
-      }, 5000);
+      hud._hideT = setTimeout(() => { hud.style.opacity = '0'; hud.style.transform = 'translateY(-10px)'; }, 5000);
     }
   }
 
-  let isRunningAction = false;
+  // ── Job reporting ────────────────────────────────────────────────
+  function reportStatus(job, phase, text, isError = false) {
+    updateFlowHUD(text, isError ? 'warn' : 'info');
+    sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, phase, text, error: isError });
+  }
 
-  // Main flow executor
-  async function handlePendingFlowAction() {
-    if (isRunningAction) return;
-    if (!chrome?.storage?.local) return;
+  async function finishJob(job, status, extra = {}) {
+    try {
+      const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
+      if (cur && cur.jobId === job.jobId) {
+        await chrome.storage.local.set({ pendingFlowAction: { ...cur, processed: true, status, finishedAt: Date.now(), ...extra } });
+      }
+    } catch (_) {}
+  }
+
+  class JobError extends Error {}
+
+  // ── Step 1: prepare the prompt box ──────────────────────────────
+  async function ensureAgentOff() {
+    const chip = Q.agentChip();
+    if (chip && chip.getAttribute('aria-pressed') === 'true') {
+      log('Agent mode is ON — turning it off');
+      await trustedClick(chip, 'agent chip');
+      const off = await waitFor(() => Q.agentChip()?.getAttribute('aria-pressed') === 'false', 5000);
+      if (!off) throw new JobError('Agent mode band nahi hua — Flow mein "Agent" chip khud off kar dein');
+      await sleep(600);
+    }
+  }
+
+  function settingsSummary(root) {
+    return (Q.settingsBtn(root)?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  async function pickToggle(groupLabel, text) {
+    const group = document.querySelector(`flow-prompt-box-settings flow-toggles[aria-label="${groupLabel}"]`);
+    if (!group) return false;
+    const btn = Array.from(group.querySelectorAll('button.mat-button-toggle-button'))
+      .find(b => (b.textContent || '').replace(/\s+/g, ' ').includes(text));
+    if (!btn) return false;
+    if (btn.getAttribute('aria-checked') === 'true') return true;
+    await trustedClick(btn, `${groupLabel} ${text}`);
+    return !!(await waitFor(() => btn.getAttribute('aria-checked') === 'true', 3000));
+  }
+
+  async function ensureSettings() {
+    const root = Q.promptRoot();
+    const sum = settingsSummary(root);
+    const okModel = /nano banana 2/i.test(sum);
+    const okRatio = /crop_square/.test(sum);
+    const okCount = /\bx1\b/.test(sum);
+    if (okModel && okRatio && okCount) return;
+
+    log('Adjusting settings. Current summary:', sum);
+    const btn = Q.settingsBtn(root);
+    if (!btn) return;
+    await trustedClick(btn, 'settings');
+    const panel = await waitFor(() => document.querySelector('flow-prompt-box-settings'), 4000);
+    if (!panel) { warn('Settings panel did not open'); return; }
+    await pickToggle('Mode', 'Image');
+    await pickToggle('Aspect ratio', '1:1');
+    await pickToggle('Output count', 'x1');
+
+    if (!okModel) {
+      const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Select model family"]');
+      if (modelBtn) {
+        await trustedClick(modelBtn, 'model menu');
+        const item = await waitFor(() => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
+          .find(el => /nano banana 2/i.test(el.textContent || '')), 3000);
+        if (item) await trustedClick(item, 'Nano Banana 2');
+        else warn('Nano Banana 2 option not found in model menu');
+        await sleep(400);
+      }
+    }
+    // Close the settings popover
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    await sleep(300);
+    if (document.querySelector('flow-prompt-box-settings')) {
+      const again = Q.settingsBtn(Q.promptRoot());
+      if (again) await trustedClick(again, 'settings (close)');
+      await sleep(300);
+    }
+    const after = settingsSummary(Q.promptRoot());
+    if (!/nano banana 2/i.test(after) || !/crop_square/.test(after) || !/\bx1\b/.test(after)) {
+      warn('Settings still not Nano Banana 2 · 1:1 · x1 →', after);
+    }
+  }
+
+  async function clearPromptBox() {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const root = Q.promptRoot();
+      if (!root) throw new JobError('Flow ka prompt box nahi mila');
+      if (!Q.chips(root).length && !editorText(root)) return;
+      const clear = Q.clearBtn(root);
+      if (clear) {
+        await trustedClick(clear, 'clear prompt');
+      } else {
+        // No clear button: remove chips one by one (click shows the cancel overlay → removes)
+        for (const chip of Q.chips(root)) await trustedClick(chip, 'remove chip');
+      }
+      const done = await waitFor(() => {
+        const r = Q.promptRoot();
+        return r && !Q.chips(r).length && !editorText(r);
+      }, 4000);
+      if (done) return;
+    }
+    // Last resort for text only
+    const ed = Q.editor(Q.promptRoot());
+    if (ed && editorText(Q.promptRoot())) {
+      ed.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      sel.removeAllRanges(); sel.addRange(range);
+      document.execCommand('delete', false, null);
+    }
+    const r = Q.promptRoot();
+    if (Q.chips(r).length) throw new JobError('Pichhli image prompt box se nahi hati — "Clear prompt" khud daba dein');
+  }
+
+  // ── Step 2: attach image as ingredient ──────────────────────────
+  function chipReady(root) {
+    const chips = Q.chips(root);
+    if (chips.length !== 1) return null;
+    const c = chips[0];
+    return c.getAttribute('aria-busy') === 'false' && c.querySelector('img.chip-image') ? c : null;
+  }
+
+  async function tryPaste(file) {
+    const root = Q.promptRoot();
+    const ed = Q.editor(root);
+    if (!ed) return false;
+    ed.focus();
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    ed.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0, 4000));
+  }
+
+  async function tryDrop(file) {
+    const target = Q.promptRoot()?.querySelector('.base-prompt-box') || Q.promptRoot();
+    if (!target) return false;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const r = target.getBoundingClientRect();
+    const opts = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    target.dispatchEvent(new DragEvent('dragenter', opts));
+    target.dispatchEvent(new DragEvent('dragover', opts));
+    await sleep(80);
+    target.dispatchEvent(new DragEvent('drop', opts));
+    target.dispatchEvent(new DragEvent('dragleave', opts));
+    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0, 4000));
+  }
+
+  // Fallback: upload to the project, then "+" menu → the uploaded asset → "Add to prompt".
+  async function tryUploadThenAddMenu(file, idsBefore) {
+    // Reuse an upload that the paste/drop attempts may already have started.
+    let up = allTiles().find(t => t.mediaId && !idsBefore.has(t.mediaId) && !t.generated);
+    if (!up) {
+      const input = document.querySelector('flow-media-upload input[type="file"]') || document.querySelector('input[type="file"]');
+      if (input) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        const opts = { bubbles: true, cancelable: true, dataTransfer: dt };
+        document.body.dispatchEvent(new DragEvent('dragenter', opts));
+        document.body.dispatchEvent(new DragEvent('dragover', opts));
+        document.body.dispatchEvent(new DragEvent('drop', opts));
+        document.body.dispatchEvent(new DragEvent('dragleave', opts));
+      }
+    }
+    scrollGridTop();
+    up = await waitFor(() => allTiles().find(t => t.mediaId && !idsBefore.has(t.mediaId) && !t.generated && !t.pending), ATTACH_TIMEOUT_MS, 500);
+    if (!up) return false;
+    log('Upload finished, media id:', up.mediaId);
+
+    const addBtn = Q.addMenuBtn(Q.promptRoot());
+    if (!addBtn) return false;
+    await trustedClick(addBtn, 'add ingredients');
+    const item = await waitFor(() => Array.from(document.querySelectorAll('flow-add-menu-popover-content button.asset-item'))
+      .find(b => (b.querySelector('img')?.src || '').includes(up.mediaId)), 6000);
+    if (!item) {
+      warn('Uploaded asset not found in add menu');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      return false;
+    }
+    await trustedClick(item, 'asset item');
+    const addToPrompt = await waitFor(() => {
+      const b = document.querySelector('flow-add-menu-popover-content .detail-add-to-prompt-btn');
+      const pv = document.querySelector('flow-add-menu-popover-content .detail-preview-image');
+      return b && (!pv || (pv.src || '').includes(up.mediaId)) ? b : null;
+    }, 4000);
+    if (!addToPrompt) return false;
+    await trustedClick(addToPrompt, 'add to prompt');
+    await sleep(500);
+    if (document.querySelector('flow-add-menu-popover-content')) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    }
+    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0, 5000));
+  }
+
+  async function attachImage(job) {
+    const file = dataUrlToFile(job.imgBase64, `zhunter_${job.productId || 'product'}_${(job.imageIndex ?? 0) + 1}.png`);
+    if (!file) throw new JobError('Product image load nahi hui (base64 kharab)');
+    const idsBefore = mediaIdSet();
+
+    let attached = await tryPaste(file);
+    if (!attached) { log('Paste did not create a chip — trying drop'); attached = await tryDrop(file); }
+    if (!attached) { log('Drop did not create a chip — upload + Add to prompt'); attached = await tryUploadThenAddMenu(file, idsBefore); }
+    if (!attached) throw new JobError('Image prompt box mein attach nahi hui');
+
+    const root = Q.promptRoot();
+    if (Q.chips(root).length > 1) {
+      // Two methods both fired — keep exactly one chip so only THIS product is the reference.
+      const extras = Q.chips(root).slice(1);
+      for (const c of extras) await trustedClick(c, 'remove extra chip');
+      await waitFor(() => Q.chips(Q.promptRoot()).length === 1, 4000);
+    }
+    const ready = await waitFor(() => chipReady(Q.promptRoot()), ATTACH_TIMEOUT_MS, 500);
+    if (!ready) throw new JobError('Image upload poora nahi hua (chip ready nahi)');
+  }
+
+  // ── Step 3: prompt text ─────────────────────────────────────────
+  async function injectPrompt(text) {
+    // ProseMirror renders line breaks as <br>/<p>, so compare with all whitespace removed
+    const squash = (v) => String(v || '').replace(/\s+/g, '');
+    const probe = squash(text).slice(0, 40);
+    const has = () => squash(editorText(Q.promptRoot())).includes(probe);
+    const ed = Q.editor(Q.promptRoot());
+    if (!ed) throw new JobError('Prompt editor nahi mila');
+    ed.focus();
 
     try {
-      if (!chrome?.storage?.local) return;
-      chrome.storage.local.get(['pendingFlowAction'], async (data) => {
-        if (chrome.runtime?.lastError) return;
-        const act = data?.pendingFlowAction;
-        if (!act || act.processed) return;
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      ed.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+    } catch (_) {}
+    if (await waitFor(has, 1500)) return;
 
-        // Ignore actions older than 5 minutes
-        if (Date.now() - (act.timestamp || 0) > 300000) {
-          try { chrome?.storage?.local?.remove('pendingFlowAction'); } catch (_) {}
-          return;
-        }
+    ed.focus();
+    try { document.execCommand('insertText', false, text); } catch (_) {}
+    if (await waitFor(has, 1500)) return;
 
-      isRunningAction = true;
-      console.log('[ZHunter Flow] Processing action for:', act.productTitle);
-
-      const isInsideProject = /\/project\/[a-zA-Z0-9_-]+/i.test(location.pathname);
-
-      // STEP 1: If on home / projects list page, trigger "New project"
-      if (!isInsideProject) {
-        updateFlowHUD(`ZHunter: Creating new project for ${act.productTitle || 'Product'}…`, 'info');
-
-        // Look for the New Project button
-        const findButton = () => {
-          return document.querySelector('button.new-project-button') ||
-                 document.querySelector('button[aria-label*="New project"]') ||
-                 Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('New project'));
-        };
-
-        let newProjBtn = findButton();
-        if (!newProjBtn) {
-          newProjBtn = await waitForEl('button.new-project-button, button[aria-label*="New project"]', 6000);
-        }
-
-        if (newProjBtn) {
-          console.log('[ZHunter Flow] Found New Project button, dispatching click…');
-          simulateRealClick(newProjBtn);
-
-          // Retry loop in case Angular Material delayed click
-          let attempts = 0;
-          const retryTimer = setInterval(() => {
-            attempts++;
-            if (/\/project\/[a-zA-Z0-9_-]+/i.test(location.pathname)) {
-              clearInterval(retryTimer);
-              isRunningAction = false;
-              handlePendingFlowAction();
-              return;
-            }
-
-            if (attempts > 4) {
-              clearInterval(retryTimer);
-              isRunningAction = false;
-              updateFlowHUD(`Click '+ New project' to continue`, 'warn', {
-                label: '+ Create Project',
-                onClick: () => {
-                  const b = findButton();
-                  if (b) simulateRealClick(b);
-                }
-              });
-              return;
-            }
-
-            const btn = findButton();
-            if (btn) {
-              console.log(`[ZHunter Flow] Re-attempting click (${attempts}/4)…`);
-              simulateRealClick(btn);
-            }
-          }, 1200);
-          return;
-        } else {
-          console.warn('[ZHunter Flow] New project button not found yet');
-          isRunningAction = false;
-          updateFlowHUD(`Click '+ New project' button below`, 'warn');
-          return;
-        }
-      }
-
-      // STEP 2: We are inside /project/...
-      if (isInsideProject) {
-        updateFlowHUD('ZHunter: Verifying 🍌 Nano Banana 2 & 1:1 Ratio…', 'info');
-
-        // Allow Angular view to mount
-        await new Promise(r => setTimeout(r, 600));
-
-        // 1. Ensure Model is 🍌 Nano Banana 2 AND Aspect Ratio is 1:1
-        await ensureFlowModelAndRatio();
-
-        // 2. Set Project Name
-        try {
-          const titleInput = await waitForEl('input.editable-text-input', 4000);
-          if (titleInput) {
-            const cur = (titleInput.value || '').trim();
-            // Only rename if it's default date format
-            const isDefault = !cur || /^[A-Z][a-z]{2}\s+\d+/i.test(cur) || cur.includes('Sep') || cur.includes('Oct') || cur.includes('Nov') || cur.includes('Dec');
-            if (isDefault) {
-              const dStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
-              const cleanPTitle = (act.productTitle || 'Product').slice(0, 36);
-              const newTitle = `ZHunter · ${cleanPTitle} · ${dStr}`;
-              titleInput.value = newTitle;
-              titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-              titleInput.dispatchEvent(new Event('change', { bubbles: true }));
-              titleInput.blur();
-            }
-          }
-        } catch (e) {
-          console.warn('[ZHunter Flow] Rename error:', e);
-        }
-
-        // 3. Attach Product Image FIRST into Prompt Box (image before prompt)
-        if (act.imgBase64 && !window.__zhImgDropped) {
-          window.__zhImgDropped = true;
-          setTimeout(() => { window.__zhImgDropped = false; }, 15000);
-
-          try {
-            const file = dataUrlToFile(act.imgBase64, 'zhunter_product.png');
-            if (file) {
-              const dt = new DataTransfer();
-              dt.items.add(file);
-
-              // Target the ingredient bar / prompt box
-              const promptBox = document.querySelector('flow-creative-agent-prompt-box, flow-prompt-box, .base-prompt-box, flow-rich-text-editor') || document.body;
-              const rect = promptBox.getBoundingClientRect();
-              const dropOpts = {
-                bubbles: true, cancelable: true, dataTransfer: dt,
-                clientX: rect.left + rect.width / 2,
-                clientY: rect.top + rect.height / 2
-              };
-
-              promptBox.dispatchEvent(new DragEvent('dragenter', dropOpts));
-              promptBox.dispatchEvent(new DragEvent('dragover', dropOpts));
-              await new Promise(r => setTimeout(r, 100));
-              promptBox.dispatchEvent(new DragEvent('drop', dropOpts));
-
-              // Also clipboard paste fallback
-              const editor = document.querySelector('flow-rich-text-editor .ProseMirror, .ProseMirror');
-              if (editor) {
-                editor.focus();
-                editor.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
-              }
-
-              console.log('[ZHunter Flow] Product image injected into prompt box');
-            }
-          } catch (e) {
-            console.warn('[ZHunter Flow] Image injection error:', e);
-            window.__zhImgDropped = false;
-          }
-
-          // ★ CRITICAL: Wait 4 seconds for Flow to upload image to tiles grid
-          // Without this wait, the scanner sees the uploaded image as "generated" and sends it back immediately
-          updateFlowHUD('Uploading image to Flow…', 'info');
-          await new Promise(r => setTimeout(r, 4000));
-        }
-
-        // 4. Inject Prompt text AFTER image is uploaded
-        if (act.prompt) {
-          await injectFlowPrompt(act.prompt);
-          await new Promise(r => setTimeout(r, 500));
-        }
-
-        const pTitle = (act.productTitle || 'Product').slice(0, 30);
-        const imgNum = (act.imageIndex ?? 0) + 1;
-
-        // ★ CRITICAL Snapshot: Taken AFTER image upload so uploaded image is included
-        // Any image appearing AFTER this snapshot = genuinely generated by Flow
-        const existingImgSrcs = new Set(
-          Array.from(document.querySelectorAll('img')).map(img => img.src).filter(Boolean)
-        );
-        // Also add the original product imgUrl to block list regardless
-        if (act.imgUrl) existingImgSrcs.add(act.imgUrl);
-        console.log('[ZHunter Flow] Snapshot taken after upload. Existing count:', existingImgSrcs.size);
-
-        // Wait for Angular to settle, then CDP-click the generate button directly
-        ensurePromptBoxVisible();
-        await new Promise(r => setTimeout(r, 3000)); // give Angular time to enable button
-
-        ensurePromptBoxVisible();
-        console.log('[ZHunter Flow] Triggering Flow Generation via CDP');
-        updateFlowHUD(`🎨 Generating · ${pTitle} · Image #${imgNum}`, 'info');
-        await triggerFlowGeneration(null); // CDP handles finding the button internally
-
-        // Mark as clicked (CDP either worked or fell back)
-        const genClicked = true;
-
-
-        const genStartTime = Date.now();
-        const MIN_WAIT_MS = 12000; // Flow generation takes at least 12 seconds — no early exit
-
-        // Track all images that exist at generation start (include any blob/data URLs too)
-        const uploadedSrcs = new Set(existingImgSrcs);
-
-        const isInsideInputOrReference = (imgEl) => {
-          if (!imgEl) return false;
-          return !!imgEl.closest?.(
-            'flow-ingredient-chip, flow-reference-chip, flow-rich-text-editor, flow-prompt-box, ' +
-            'flow-creative-agent-prompt-box, .base-prompt-box, .ingredient-chip, .reference-chip, ' +
-            'flow-media-view, flow-asset-picker, .media-grid, .asset-item, .uploads, [role="navigation"], .sidebar'
-          );
-        };
-
-        const isValidGeneratedSrc = (src, imgEl) => {
-          if (!src || src.startsWith('data:') || src.startsWith('blob:')) return false;
-
-          // Reject avatar/icons
-          const blocked = ['avatar', 'favicon', 'flow_icon', 'logo', 'ogw', 'gb_X', 'googleusercontent.com/ogw'];
-          if (blocked.some(b => src.includes(b))) return false;
-
-          // Reject if inside input / prompt / reference ingredients
-          if (isInsideInputOrReference(imgEl)) return false;
-
-          // Reject if this matches original input image
-          if (act.imgUrl && src === act.imgUrl) return false;
-
-          return true;
-        };
-
-        let autoSent = false;
-        const sendGeneratedImage = (imgSrc) => {
-          if (autoSent) return;
-          autoSent = true;
-          if (window.__zhActivePollInterval) {
-            clearInterval(window.__zhActivePollInterval);
-            window.__zhActivePollInterval = null;
-          }
-          chrome.runtime?.sendMessage?.({
-            action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
-            newImgUrl: imgSrc,
-            productId: act.productId,
-            imageIndex: act.imageIndex
-          });
-          updateFlowHUD(`✓ Image #${imgNum} → ZHunter! (${pTitle})`, 'ok');
-          console.log('[ZHunter Flow] Sent generated image to ZHunter. productId:', act.productId, 'imgIndex:', act.imageIndex);
-        };
-
-        const scanForGeneratedImage = () => {
-          // Only scan AFTER minimum wait — never before
-          if (Date.now() - genStartTime < MIN_WAIT_MS) return [];
-
-          // ONLY accept Flow's generated media URL (getMediaUrlRedirect)
-          // Raw uploaded/reference images NEVER have this pattern
-          const allFlowImgs = Array.from(document.querySelectorAll(
-            'flow-image-tile img, .tiles-container img, .virtual-scroll-container img, .cdk-virtual-scroll-viewport img'
-          ));
-
-          return allFlowImgs.filter(img => {
-            const src = img.src || img.getAttribute('src') || '';
-            if (!src || uploadedSrcs.has(src)) return false;
-            // Accept both URL patterns Flow uses for generated images
-            return src.includes('flow-content.google/image/') ||
-                   src.includes('getMediaUrlRedirect');
-          });
-        };
-
-        // Clear any previous polling loop
-        if (window.__zhActivePollInterval) {
-          clearInterval(window.__zhActivePollInterval);
-          window.__zhActivePollInterval = null;
-        }
-
-        // Lightweight 1.5s interval polling — 100% immune to RESULT_CODE_HUNG
-        let pollCount = 0;
-        const maxPollCount = 80; // 120 seconds maximum
-        const pollInterval = setInterval(() => {
-          if (autoSent) {
-            clearInterval(pollInterval);
-            window.__zhActivePollInterval = null;
-            return;
-          }
-
-          // MIN_WAIT_MS is now enforced inside scanForGeneratedImage itself
-
-          pollCount++;
-          const candidates = scanForGeneratedImage();
-          if (candidates.length > 0) {
-            console.log('[ZHunter Flow] New generated image detected via lightweight polling');
-            clearInterval(pollInterval);
-            window.__zhActivePollInterval = null;
-            sendGeneratedImage(candidates[candidates.length - 1].src);
-            return;
-          }
-
-          if (pollCount >= maxPollCount) {
-            clearInterval(pollInterval);
-            window.__zhActivePollInterval = null;
-            updateFlowHUD(`Image nahi mili — Right click > Copy Image karein`, 'warn', {
-              label: '📥 Send to ZHunter',
-              onClick: () => {
-                const imgs = Array.from(document.querySelectorAll(
-                  '.tiles-container img, .virtual-scroll-container img, .cdk-virtual-scroll-viewport img, flow-project-page img'
-                )).filter(img => isValidGeneratedSrc(img.src, img) && img.naturalWidth >= 200);
-                if (imgs.length > 0) sendGeneratedImage(imgs[imgs.length - 1].src);
-                else updateFlowHUD('Abhi generate nahi hui — thoda ruko', 'warn');
-              }
-            });
-          }
-        }, 1500);
-
-        window.__zhActivePollInterval = pollInterval;
-
-        // Mark action processed NOW
-        chrome?.storage?.local?.set({
-          pendingFlowAction: { ...act, processed: true }
-        });
-
-        isRunningAction = false;
-      }
-    });
-  } catch (err) {
-    isRunningAction = false;
-    console.warn('[ZHunter Flow] Action error:', err);
+    throw new JobError('Prompt editor mein text nahi gaya');
   }
-}
+
+  // ── Step 4 + 5: generate and capture the result ─────────────────
+  async function generateAndCapture(job) {
+    const root = Q.promptRoot();
+    const gen = await waitFor(() => { const b = Q.genBtn(Q.promptRoot()); return b && !isDisabled(b) ? b : null; }, 10000);
+    if (!gen) throw new JobError('Generate button enable nahi hua');
+
+    scrollGridTop();
+    const before = mediaIdSet();
+    const pendingBefore = pendingCount();
+    const tilesBefore = Q.tiles().length;
+    const started = () => pendingCount() > pendingBefore || Q.tiles().length > tilesBefore ||
+      allTiles().some(t => t.mediaId && !before.has(t.mediaId));
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation');
+      if (await waitFor(started, START_TIMEOUT_MS / 2, 400)) break;
+      if (attempt === 2) throw new JobError('Generate click ke baad generation shuru nahi hui');
+      const b = Q.genBtn(Q.promptRoot());
+      if (!b || isDisabled(b)) {
+        // Button went disabled = Flow accepted the submit; give it the rest of the window.
+        if (await waitFor(started, START_TIMEOUT_MS / 2, 400)) break;
+        throw new JobError('Generate click ke baad generation shuru nahi hui');
+      }
+      warn('Generation did not start — clicking again');
+    }
+
+    reportStatus(job, 'generating', `🎨 Generating · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`);
+    const t0 = Date.now();
+    let lastSnack = '';
+    const result = await waitFor(() => {
+      scrollGridTop();
+      // Only the first few tiles (grid is newest-first) — protects against old tiles
+      // that the virtual scroller renders later.
+      const fresh = allTiles().slice(0, 6).find(t =>
+        t.mediaId && !before.has(t.mediaId) && t.generated && !t.pending &&
+        /^https:\/\/flow-content\.google\//i.test(t.src));
+      if (fresh) return fresh;
+      const s = snackText();
+      if (s && s !== lastSnack) { lastSnack = s; log('Flow says:', s); }
+      if (s && /(couldn.?t|could not|failed|unable|violat|policy|try again|error)/i.test(s) && Date.now() - t0 > 3000) {
+        return { error: s };
+      }
+      return null;
+    }, RESULT_TIMEOUT_MS, 1500);
+
+    if (!result) throw new JobError('Image 3 minute mein nahi bani');
+    if (result.error) throw new JobError('Flow error: ' + result.error);
+    return result;
+  }
+
+  // ── Job runner ──────────────────────────────────────────────────
+  let runningJobId = null;
+
+  async function runJob(job) {
+    runningJobId = job.jobId;
+    job.shortTitle = (job.productTitle || 'Product').slice(0, 30);
+    log('Job start', job.jobId, job.productTitle, 'img#', job.imageIndex);
+    try {
+      await chrome.storage.local.set({ pendingFlowAction: { ...job, status: 'running', startedAt: Date.now() } });
+
+      reportStatus(job, 'prepare', `ZHunter: prompt box tayyar · ${job.shortTitle}`);
+      await waitFor(() => Q.promptRoot(), 15000);
+      if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
+      await ensureAgentOff();
+      await ensureSettings();
+      await clearPromptBox();
+
+      reportStatus(job, 'image', `ZHunter: image attach · ${job.shortTitle}`);
+      await attachImage(job);
+
+      reportStatus(job, 'prompt', 'ZHunter: prompt paste');
+      await injectPrompt(job.prompt);
+
+      const res = await generateAndCapture(job);
+      log('Generated media', res.mediaId, res.src);
+
+      await sendBg({
+        action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
+        jobId: job.jobId,
+        productId: job.productId,
+        imageIndex: job.imageIndex,
+        originalUrl: job.imgUrl,
+        mediaId: res.mediaId,
+        newImgUrl: res.src
+      });
+      await finishJob(job, 'done', { mediaId: res.mediaId });
+      updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
+    } catch (e) {
+      const msg = e instanceof JobError ? e.message : `Unexpected error: ${e?.message || e}`;
+      warn('Job failed:', msg, e);
+      reportStatus(job, 'error', msg, true);
+      await finishJob(job, 'error', { error: msg });
+    } finally {
+      runningJobId = null;
+      // A newer job (e.g. "Send Again") may have arrived while this one was running.
+      setTimeout(handlePendingFlowAction, 800);
+    }
+  }
+
+  // ── Entry: pick up the pending job ──────────────────────────────
+  // Synchronous gate: several triggers (load, storage change, message, URL change) can fire
+  // together — only one may read the job and start it.
+  let checking = false;
+
+  async function handlePendingFlowAction() {
+    if (runningJobId || checking) return;
+    if (!chrome?.storage?.local) return;
+    checking = true;
+    try {
+      await checkAndRun();
+    } finally {
+      checking = false;
+    }
+  }
+
+  async function checkAndRun() {
+    let job;
+    try {
+      job = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
+    } catch (_) { return; }
+    if (!job || job.processed || job.status === 'running' && job.startedAt && Date.now() - job.startedAt < RESULT_TIMEOUT_MS + 60000) return;
+    if (!job.jobId || !job.imgBase64) return;
+    if (Date.now() - (job.timestamp || 0) > STALE_JOB_MS) {
+      await finishJob(job, 'stale');
+      return;
+    }
+
+    const insideProject = /\/project\/[\w-]+/i.test(location.pathname);
+    if (!insideProject) {
+      updateFlowHUD(`ZHunter: naya project bana raha hoon · ${(job.productTitle || '').slice(0, 30)}`, 'info');
+      const btn = await waitFor(() => Q.newProjectBtn(), 8000);
+      if (!btn) {
+        updateFlowHUD(`"+ New project" dabayein — phir automation khud chalegi`, 'warn');
+        return;
+      }
+      await trustedClick(btn, 'new project');
+      // URL watcher below resumes the job once we're inside /project/...
+      return;
+    }
+    runningJobId = job.jobId; // claim before any await so no second runner can start
+    await runJob(job);
+  }
 
   window.__zhunterFlowExecute = handlePendingFlowAction;
 
-  // Run on page load
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', handlePendingFlowAction);
   } else {
     handlePendingFlowAction();
   }
 
-  // SPA URL navigation watcher
+  // SPA navigation (e.g. home → new project)
   let lastUrl = location.href;
   setInterval(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      isRunningAction = false;
-      handlePendingFlowAction();
+      setTimeout(handlePendingFlowAction, 800);
     }
   }, 800);
 
-  // Storage listener — ONLY fires for unprocessed actions
-  // processed=true actions are ignored, preventing re-trigger while observer is active
+  // New job written by the side panel
   try {
-    chrome?.storage?.onChanged?.addListener((changes, area) => {
-      if (area === 'local' && changes.pendingFlowAction?.newValue) {
-        if (!changes.pendingFlowAction.newValue.processed) {
-          isRunningAction = false;
-          handlePendingFlowAction();
-        }
-      }
+    chrome.storage.onChanged.addListener((changes, area) => {
+      const nv = area === 'local' ? changes.pendingFlowAction?.newValue : null;
+      if (nv && !nv.processed && nv.status !== 'running' && nv.jobId !== runningJobId) handlePendingFlowAction();
     });
   } catch (_) {}
 
-  // Listen for runtime messages
   chrome.runtime.onMessage?.addListener((msg) => {
-    if (msg?.action === 'ZH_FLOW_EXECUTE') {
-      isRunningAction = false;
-      handlePendingFlowAction();
-    }
+    if (msg?.action === 'ZH_FLOW_EXECUTE') handlePendingFlowAction();
   });
 })();

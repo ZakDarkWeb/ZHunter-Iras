@@ -671,6 +671,41 @@ async function fetchImageAsBase64(imageUrl, settings) {
   return primary;
 }
 
+// v9.9.0 — Google Flow generated images: signed CDN URLs (no cookies needed) that expire
+// in about an hour, often 2K PNGs larger than FETCH_MAX_BYTES. Fetch up to 30 MB and
+// re-encode to JPEG (max 2048px) so the public re-host and Temu get a small, stable file.
+async function fetchFlowImageAsJpeg(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || !/(^|\.)flow-content\.google$/i.test(u.hostname)) {
+      return { success: false, error: 'not_flow_url' };
+    }
+    const res = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(45000) });
+    if (!res.ok) return { success: false, error: 'http_' + res.status };
+    const type = res.headers.get('content-type') || '';
+    if (!type.startsWith('image/')) return { success: false, error: 'not_image' };
+    const blob = await res.blob();
+    if (blob.size > 30 * 1024 * 1024) return { success: false, error: 'too_large' };
+
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    try { bmp.close(); } catch (_) {}
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+    const buf = new Uint8Array(await out.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return { success: true, base64: `data:image/jpeg;base64,${btoa(bin)}`, width: w, height: h, byteLength: out.size };
+  } catch (e) {
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
 async function mapPool(items, limit, fn) {
   const out = new Array(items.length);
   let cursor = 0;
@@ -1114,7 +1149,9 @@ const CONTENT_SCRIPT_ACTIONS = new Set([
   'TEMU_NEED_VISIBLE', 'TEMU_UPLOAD_PROGRESS',
   'DOWNLOAD_PAGE_IMAGES', 'FETCH_BASE64',
   'FETCH_BASE64_BATCH', 'GET_PENDING_IMAGE_HUNT', 'CHECK_BULK_QUEUE',
-  'ADD_TO_BULK_QUEUE'
+  'ADD_TO_BULK_QUEUE',
+  // v9.9.0 — Google Flow image studio (flow_automation.js / content.js lightbox)
+  'ZH_CDP_CLICK', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS'
 ]);
 
 function isAuthorizedMessage(msg, sender) {
@@ -1243,11 +1280,39 @@ async function handleMessage(msg, sender) {
       if (msg.all) return await bgGroupAllProductTabs(msg.windowId);
       return await bgGroupTabs(msg.tabIds || []);
     }
+    case 'ZH_CDP_CLICK': {
+      // v9.9.0 — trusted click inside the SENDER's own tab (Flow). The content script
+      // sends viewport coordinates (x, y); a selector is still accepted as fallback.
+      const tabId = sender?.tab?.id || msg.tabId;
+      if (!tabId) return { ok: false, error: 'no_tab' };
+      if (sender?.tab?.id && !/^https:\/\/flow\.google\.com\//i.test(String(sender.tab.url || ''))) {
+        return { ok: false, error: 'flow_only' };
+      }
+      try {
+        const ok = (typeof msg.x === 'number' && typeof msg.y === 'number')
+          ? await cdpClickAt(tabId, msg.x, msg.y)
+          : await cdpClickSelector(tabId, String(msg.selector || ''));
+        return { ok };
+      } catch (e) {
+        return { ok: false, error: e?.message || String(e) };
+      }
+    }
+    case 'ZH_REPLACE_IMAGE_FROM_FLOW':
+    case 'ZH_FLOW_STATUS':
+      // Handled by the side panel's own listener; acknowledge so the sender isn't left hanging.
+      return { success: true };
+    case 'FETCH_FLOW_IMAGE': {
+      // v9.9.0 — side panel only: download a generated Flow image (signed, expiring
+      // flow-content.google URL) and return it as a JPEG data URL for re-hosting.
+      if (sender?.tab) return { success: false, error: 'not_allowed' };
+      return await fetchFlowImageAsJpeg(String(msg.url || ''));
+    }
     case 'OPEN_OR_FOCUS_FLOW': {
       const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
       if (tabs && tabs.length > 0) {
-        await chrome.tabs.update(tabs[0].id, { active: true });
-        try { await chrome.tabs.sendMessage(tabs[0].id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
+        const t = tabs.find(x => x.url && x.url.includes('/project/')) || tabs[0];
+        await chrome.tabs.update(t.id, { active: true });
+        try { await chrome.tabs.sendMessage(t.id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
       } else {
         await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
       }
@@ -1737,73 +1802,77 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const _cdpAttached = new Set(); // track attached tabs
 
+// v9.9.0 — keep the set honest when Chrome (or the user) detaches the debugger,
+// and forget closed tabs. Registered once, not per attach.
+try {
+  chrome.debugger.onDetach.addListener((source) => {
+    if (source?.tabId) _cdpAttached.delete(source.tabId);
+  });
+  chrome.tabs.onRemoved.addListener((id) => { _cdpAttached.delete(id); });
+} catch (_) {}
+
 async function cdpEnsureAttached(tabId) {
-  if (_cdpAttached.has(tabId)) return;
+  if (_cdpAttached.has(tabId)) return true;
   try {
     await chrome.debugger.attach({ tabId }, '1.3');
     _cdpAttached.add(tabId);
-    // Clean up when tab closes
-    chrome.tabs.onRemoved.addListener(function onRemove(id) {
-      if (id === tabId) {
-        _cdpAttached.delete(tabId);
-        try { chrome.debugger.detach({ tabId }); } catch (_) {}
-        chrome.tabs.onRemoved.removeListener(onRemove);
-      }
-    });
-  } catch (e) {
-    console.warn('[ZHunter CDP] Attach failed:', e.message);
-  }
-}
-
-async function cdpClickSelector(tabId, selector) {
-  await cdpEnsureAttached(tabId);
-  try {
-    // Get element center coordinates via JS evaluation
-    const evalResult = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
-      expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return null;
-        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-      })()`,
-      returnByValue: true
-    });
-
-    const coords = evalResult?.result?.value;
-    if (!coords) {
-      console.warn('[ZHunter CDP] Element not found or zero-size:', selector);
-      return false;
-    }
-
-    const { x, y } = coords;
-    // Dispatch full mouse event sequence — these ARE isTrusted in page context
-    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-        type, x, y,
-        button: 'left',
-        buttons: type === 'mousePressed' ? 1 : 0,
-        clickCount: type === 'mouseReleased' ? 1 : 0,
-        modifiers: 0,
-        pointerType: 'mouse'
-      });
-    }
-    console.log('[ZHunter CDP] Clicked:', selector, 'at', x, y);
     return true;
   } catch (e) {
-    console.warn('[ZHunter CDP] Click error:', e.message);
+    const m = String(e?.message || e);
+    // After a service-worker restart the set is empty but we may still be attached.
+    if (/already attached/i.test(m)) { _cdpAttached.add(tabId); return true; }
+    console.warn('[ZHunter CDP] Attach failed:', m);
     return false;
   }
 }
 
-// Handle CDP click requests from content scripts / flow_automation
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.action === 'ZH_CDP_CLICK') {
-    const tabId = msg.tabId || sender?.tab?.id;
-    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return true; }
-    cdpClickSelector(tabId, msg.selector)
-      .then(ok => sendResponse({ ok }))
-      .catch(e => sendResponse({ ok: false, error: e.message }));
-    return true; // keep channel open for async response
+async function cdpMouseClick(tabId, x, y) {
+  const base = { x: Math.round(x), y: Math.round(y), modifiers: 0, pointerType: 'mouse' };
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', button: 'none', buttons: 0 });
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1 });
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1 });
+}
+
+// Trusted click at viewport CSS-pixel coordinates (computed by the content script).
+async function cdpClickAt(tabId, x, y) {
+  if (!(await cdpEnsureAttached(tabId))) return false;
+  try {
+    await cdpMouseClick(tabId, x, y);
+    return true;
+  } catch (e) {
+    const m = String(e?.message || e);
+    // Stale attachment (e.g. user closed the debugging bar) — re-attach once and retry.
+    if (/not attached|detached/i.test(m)) {
+      _cdpAttached.delete(tabId);
+      if (await cdpEnsureAttached(tabId)) {
+        try { await cdpMouseClick(tabId, x, y); return true; } catch (_) {}
+      }
+    }
+    console.warn('[ZHunter CDP] Click error:', m);
+    return false;
   }
-});
+}
+
+async function cdpClickSelector(tabId, selector) {
+  if (!selector) return false;
+  if (!(await cdpEnsureAttached(tabId))) return false;
+  try {
+    const evalResult = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return null;
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`,
+      returnByValue: true
+    });
+    const coords = evalResult?.result?.value;
+    if (!coords) return false;
+    return await cdpClickAt(tabId, coords.x, coords.y);
+  } catch (e) {
+    console.warn('[ZHunter CDP] Selector click error:', e?.message || e);
+    return false;
+  }
+}

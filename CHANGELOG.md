@@ -1,5 +1,16 @@
 # ZHunter PRO — CHANGELOG
 
+## v9.9.0 (2026-09-29) — Google Flow image studio: sahi order, sahi product
+- **Flow automation dobara likhi (flow_automation.js):** har image ek "job" hai aur steps is order mein, har step verify ho kar: Agent mode OFF → settings Nano Banana 2 · 1:1 · x1 → pichhla prompt/image clear → product image prompt box mein **ingredient** ke taur par attach (chip ready hone tak intezaar; paste → drop → upload + "Add to prompt" fallback) → prompt paste → Generate (trusted CDP click, start confirm) → sirf woh **naya** tile jiske paas "Reuse prompt" ho (generated; upload kabhi nahi) wapas ZHunter ko.
+- Fix: upload hoti hui product image ko "generated" samajh kar wapas bhej dena aur agla product shuru kar dena (asal bug).
+- Fix: Generate kabhi click nahi hota tha — `chrome.tabs.getCurrent` content script mein nahi chalta, `ZH_CDP_CLICK` whitelist mein nahi tha, CDP `mousePressed` ka `clickCount` 0 tha.
+- **Job ID + slot guard:** result sirf usi product aur usi image number (1st/2nd/3rd) mein lagta hai jahan se bheja gaya; purana/late result ignore; agar us jagah image pehle hi badal chuki ho to overwrite nahi.
+- **Temu link:** Flow ki image (link ~1 ghante mein expire) download → JPEG → freeimage.host; export bhi bache hue Flow links re-host karta hai.
+- **Alag "✨ Edit images" selection:** har product card pe ✨ checkbox (upload checkbox se alag), "Select all" / "None", live counter "✨ N products · M images". Default: koi product select nahi.
+- Stepper: error par ruk kar "Send Again" / "Skip"; Close = session band (late result kuch overwrite nahi karta); aakhir mein summary (replaced / skipped).
+- Naya default AI image prompt (e-commerce lifestyle scene); purana saved prompt ek dafa naye se replace.
+- Lightbox "Flow" button (product page) ab background se reject nahi hota.
+
 ## v9.8.0 (2026-09-15) — Compact UI, Groq AI Engine & Temu Resilience
 - **Option A (Compact Mode & Problems Filter):** Library tab mein naya "🗜️ Compact" toggle (card height ~50% kam, narrow sidepanel ke mutabiq) aur "⚠️ Problems (N)" filter chip (sirf warning, missing price/image ya error wale items filter karne ke liye).
 - **Option B (Groq AI Studio):** Direct Groq API integration (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`). Inline AI Prompt Bar: custom prompt likhein ya 1-click quick actions dabayein (🧹 Clean Brand, 🎯 SEO Title, ✨ Title Case, 📦 Temu Polish) with live progress bar aur ↺ Undo support. Settings tab mein Groq Key save karne ka option.
