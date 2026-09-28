@@ -14,29 +14,23 @@
 
   console.log('[ZHunter Flow] Automation script initialized on', location.href);
 
-  // Helper: wait for element
-  function waitForEl(selector, timeoutMs = 10000) {
+  // Helper: wait for element safely without locking DOM / browser thread
+  function waitForEl(selector, timeoutMs = 8000) {
     return new Promise((resolve) => {
       const el = document.querySelector(selector);
       if (el) return resolve(el);
 
-      const observer = new MutationObserver(() => {
+      const startTime = Date.now();
+      const interval = setInterval(() => {
         const found = document.querySelector(selector);
         if (found) {
-          observer.disconnect();
+          clearInterval(interval);
           resolve(found);
+        } else if (Date.now() - startTime >= timeoutMs) {
+          clearInterval(interval);
+          resolve(null);
         }
-      });
-
-      observer.observe(document.body || document.documentElement, {
-        childList: true,
-        subtree: true
-      });
-
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(document.querySelector(selector));
-      }, timeoutMs);
+      }, 250);
     });
   }
 
@@ -60,169 +54,219 @@
   function simulateRealClick(el) {
     if (!el) return;
     try {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.focus();
     } catch (_) {}
 
-    const evNames = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-    evNames.forEach((name) => {
-      try {
-        const ev = new MouseEvent(name, {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          composed: true,
-          buttons: 1
-        });
-        el.dispatchEvent(ev);
-      } catch (_) {}
-    });
+    const rect = el.getBoundingClientRect();
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
 
-    // Also trigger on inner touch targets or labels if present
-    const inner = el.querySelector?.('.mat-mdc-button-touch-target, .mdc-button__label, mat-icon');
-    if (inner) {
-      evNames.forEach((name) => {
-        try {
-          inner.dispatchEvent(new MouseEvent(name, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            composed: true,
-            buttons: 1
-          }));
-        } catch (_) {}
+    const optsDown = { bubbles: true, cancelable: true, view: window, composed: true, buttons: 1, button: 0, clientX, clientY };
+    const optsUp = { bubbles: true, cancelable: true, view: window, composed: true, buttons: 0, button: 0, clientX, clientY };
+
+    try { el.dispatchEvent(new PointerEvent('pointerdown', optsDown)); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', optsDown)); } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointerup', optsUp)); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', optsUp)); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('click', optsUp)); } catch (_) {}
+    try { el.click(); } catch (_) {}
+  }
+
+
+
+  // Helper: If Agent Settings panel is open, close it & unhide prompt box
+  function ensurePromptBoxVisible() {
+    try {
+      // 1. Remove hidden CSS class from prompt box container (KEY FIX from DOM analysis)
+      const promptBoxWrapper = document.querySelector('.agent-panel-prompt-box');
+      if (promptBoxWrapper) {
+        promptBoxWrapper.classList.remove('agent-panel-prompt-box-hidden');
+      }
+
+      // 2. Also close settings panel if open (clicks Back button)
+      const backBtn = document.querySelector('flow-agent-panel button[aria-label="Back"], flow-settings-view button[aria-label="Back"]');
+      if (backBtn && backBtn.offsetParent) {
+        simulateRealClick(backBtn);
+      }
+
+      // 3. Force agent panel wrapper visible
+      const agentPanelWrapper = document.querySelector('.agent-panel-wrapper');
+      if (agentPanelWrapper) {
+        agentPanelWrapper.style.display = '';
+        agentPanelWrapper.style.visibility = 'visible';
+        agentPanelWrapper.style.opacity = '1';
+      }
+    } catch (_) {}
+  }
+
+  // Generator trigger — uses CDP (chrome.debugger) via background for truly trusted clicks
+  async function triggerFlowGeneration(genBtn) {
+    ensurePromptBoxVisible();
+
+    const BTN_SELECTOR = 'button[aria-label="Start generation"], flow-generate-icon-button button[type="submit"], flow-generate-icon-button button.generate-icon-button';
+
+    // 1. Try CDP click via background (most reliable — trusted event)
+    try {
+      const cdpTabId = await new Promise(resolve => {
+        chrome.tabs.getCurrent(tab => resolve(tab?.id));
       });
+      if (cdpTabId) {
+        const result = await new Promise(resolve => {
+          chrome.runtime.sendMessage({ action: 'ZH_CDP_CLICK', tabId: cdpTabId, selector: BTN_SELECTOR }, res => resolve(res || {}));
+        });
+        if (result?.ok) {
+          console.log('[ZHunter Flow] CDP click succeeded');
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[ZHunter Flow] CDP click failed, falling back:', e);
     }
 
-    try { el.click(); } catch (_) {}
+    // 2. Fallback: native .click() on button
+    const nativeBtn = document.querySelector(BTN_SELECTOR);
+    const targetBtn = (nativeBtn && !nativeBtn.disabled && !nativeBtn.classList.contains('mat-mdc-button-disabled')) ? nativeBtn : genBtn;
+    if (targetBtn) {
+      try { targetBtn.focus(); targetBtn.click(); } catch (_) {}
+      simulateRealClick(targetBtn);
+      const angularHost = document.querySelector('flow-generate-icon-button');
+      if (angularHost) { try { angularHost.click(); } catch (_) {} }
+    }
+  }
+
+
+  // Safe checks to ensure we never click ingredients or settings buttons by mistake
+  function isIngredientsOrSettings(btn) {
+    if (!btn) return true;
+    if (btn.classList.contains('add-menu-trigger')) return true;
+    if (btn.classList.contains('agent-action-button')) return true;
+    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+    if (label.includes('ingredient') || label.includes('reference') || label.includes('agent') || label.includes('setting') || label.includes('menu')) {
+      return true;
+    }
+    return false;
+  }
+
+  // Robust finder for Flow's circular Generate/Run button based on real DOM
+  function findFlowGenerateButton() {
+    // 1. Exact DOM selector from Google Flow HTML files
+    const exactBtn = document.querySelector('flow-generate-icon-button button.generate-icon-button, flow-generate-icon-button button[type="submit"], button[aria-label="Start generation"]');
+    if (exactBtn) {
+      const isDisabled = exactBtn.disabled || exactBtn.getAttribute('disabled') === 'true' || exactBtn.classList.contains('mat-mdc-button-disabled');
+      if (!isDisabled && !isIngredientsOrSettings(exactBtn)) {
+        return exactBtn;
+      }
+    }
+
+    // 2. Search inside prompt container for button containing arrow icon
+    const editorBox = document.querySelector('flow-prompt-box, flow-creative-agent-prompt-box, flow-rich-text-editor, .prompt-box') || document;
+    const allBtns = Array.from(editorBox.querySelectorAll('button'));
+    const arrowBtn = allBtns.find(b => {
+      if (isIngredientsOrSettings(b)) return false;
+      const isDisabled = b.disabled || b.getAttribute('disabled') === 'true' || b.classList.contains('mat-mdc-button-disabled');
+      if (isDisabled) return false;
+      const icon = b.querySelector('mat-icon')?.textContent?.trim() || '';
+      return ['arrow_forward', 'east', 'send', 'play_arrow', 'arrow_right_alt'].includes(icon);
+    });
+    if (arrowBtn) return arrowBtn;
+
+    return null;
   }
 
   // Helper: Ensure Flow model is switched to 🍌 Nano Banana 2 AND Aspect Ratio is 1:1 (Square)
   async function ensureFlowModelAndRatio() {
     try {
-      // If already verified in this session/page load, skip opening settings repeatedly
       if (window.__zhFlowSettingsConfigured) {
         return;
       }
 
-      let settingsView = document.querySelector('flow-settings-view');
-
-      // 1. Open settings panel if not currently open
-      if (!settingsView) {
-        const settingsBtn = document.querySelector('button.agent-action-button[aria-label="Settings"], button[aria-label="Settings"], button.settings-trigger-button');
-        if (settingsBtn) {
-          console.log('[ZHunter Flow] Opening Agent settings to configure 🍌 Nano Banana 2 & 1:1 Ratio…');
-          simulateRealClick(settingsBtn);
-          settingsView = await waitForEl('flow-settings-view', 4000);
-        }
-      }
-
-      if (settingsView) {
-        await new Promise(r => setTimeout(r, 450));
-
-        // A. Ensure Aspect Ratio is 1:1 (Square)
-        try {
-          const ratioGroup = settingsView.querySelector('flow-toggles[aria-label*="Image"][aria-label*="aspect ratio"], flow-toggles[aria-label*="aspect ratio"]');
-          if (ratioGroup) {
-            const toggles = Array.from(ratioGroup.querySelectorAll('mat-button-toggle'));
-            const squareToggle = toggles.find(t => t.textContent?.includes('1:1') || t.querySelector('mat-icon')?.textContent?.includes('crop_square'));
-            if (squareToggle) {
-              const isChecked = squareToggle.classList.contains('mat-button-toggle-checked') || squareToggle.querySelector('button[aria-checked="true"]');
-              if (!isChecked) {
-                console.log('[ZHunter Flow] Setting aspect ratio to 1:1…');
-                const btn = squareToggle.querySelector('button') || squareToggle;
-                simulateRealClick(btn);
-                await new Promise(r => setTimeout(r, 250));
-              } else {
-                console.log('[ZHunter Flow] Aspect ratio verified: 1:1');
-              }
-            }
-          }
-        } catch (errRatio) {
-          console.warn('[ZHunter Flow] Ratio check error:', errRatio);
-        }
-
-        // B. Ensure Model is 🍌 Nano Banana 2
-        try {
-          const modelBtn = settingsView.querySelector('button.image-model-picker-button, button[aria-label*="Image"][aria-label*="default model"]');
-          const labelEl = modelBtn?.querySelector('.model-select-trigger-label') || modelBtn;
-          const curText = (labelEl?.textContent || '').trim();
-          if (!curText.toLowerCase().includes('nano banana 2')) {
-            console.log('[ZHunter Flow] Model is:', curText, 'Switching to 🍌 Nano Banana 2…');
-            if (modelBtn) {
-              simulateRealClick(modelBtn);
-              await new Promise(r => setTimeout(r, 450));
-              const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item, mat-dialog-container button'));
-              const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
-              if (targetItem) {
-                simulateRealClick(targetItem);
-                console.log('[ZHunter Flow] Selected 🍌 Nano Banana 2');
-                await new Promise(r => setTimeout(r, 300));
-              } else {
-                document.body.click();
-              }
-            }
-          } else {
-            console.log('[ZHunter Flow] Model verified: 🍌 Nano Banana 2');
-          }
-        } catch (errModel) {
-          console.warn('[ZHunter Flow] Model check error in settings:', errModel);
-        }
-
-        // C. Save settings
-        try {
-          const saveBtn = settingsView.querySelector('button.settings-save-button, .save-container button');
-          if (saveBtn) {
-            simulateRealClick(saveBtn);
-            console.log('[ZHunter Flow] Settings saved');
-            await new Promise(r => setTimeout(r, 350));
-          }
-        } catch (_) {}
-
-        // D. Close settings panel and return to editor
-        try {
-          const backBtn = document.querySelector('button[aria-label="Back"]') ||
-                          Array.from(document.querySelectorAll('button mat-icon')).find(i => i.textContent?.trim() === 'arrow_back')?.closest('button');
-          if (backBtn) {
-            simulateRealClick(backBtn);
-            await new Promise(r => setTimeout(r, 300));
-          }
-        } catch (_) {}
-
+      // Check if inline model trigger says nano banana 2
+      const inlineModelBtn = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
+      const curText = (inlineModelBtn?.textContent || '').trim().toLowerCase();
+      if (curText.includes('nano banana 2')) {
+        console.log('[ZHunter Flow] Model verified: 🍌 Nano Banana 2');
         window.__zhFlowSettingsConfigured = true;
-      } else {
-        // Direct inline model picker fallback if settings panel could not be opened
-        try {
-          const modelTrigger = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
-          const labelEl = modelTrigger?.querySelector('.model-select-trigger-label') || modelTrigger;
-          const curText = (labelEl?.textContent || '').trim();
-          if (!curText.toLowerCase().includes('nano banana 2') && modelTrigger) {
-            simulateRealClick(modelTrigger);
-            await new Promise(r => setTimeout(r, 450));
-            const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item'));
-            const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
-            if (targetItem) simulateRealClick(targetItem);
-            else document.body.click();
-          }
-        } catch (_) {}
+        return;
       }
+
+      window.__zhFlowSettingsConfigured = true;
     } catch (e) {
       console.warn('[ZHunter Flow] ensureFlowModelAndRatio error:', e);
     }
   }
 
-  // Helper: Inject prompt text into Flow ProseMirror rich text editor
+  // Helper: Open and inject prompt text into Flow ProseMirror rich text editor
   async function injectFlowPrompt(promptText) {
     if (!promptText) return;
     try {
-      const editor = await waitForEl('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror', 4000);
-      if (editor) {
-        editor.focus();
-        editor.innerHTML = `<p>${promptText.replace(/\n/g, '<br>')}</p>`;
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-        editor.dispatchEvent(new Event('change', { bubbles: true }));
-        console.log('[ZHunter Flow] Prompt injected into ProseMirror');
+      // 1. If prompt box is collapsed or hidden, click it to expand
+      let editor = document.querySelector('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror');
+      if (!editor || !editor.offsetParent) {
+        const trigger = document.querySelector('flow-prompt-box, .base-prompt-box, .prosemirror-placeholder, .prompt-input');
+        if (trigger) {
+          simulateRealClick(trigger);
+          await new Promise(r => setTimeout(r, 400));
+        }
       }
+
+      editor = await waitForEl('flow-rich-text-editor .ProseMirror, .prompt-input .ProseMirror, .ProseMirror', 5000);
+      if (!editor) return;
+
+      // If already contains this prompt, don't duplicate
+      if (editor.textContent && editor.textContent.includes(promptText.slice(0, 40))) {
+        console.log('[ZHunter Flow] Prompt already present in editor, skipping duplicate paste');
+        return;
+      }
+
+      // If clear prompt button exists, click it first to avoid duplicate concatenations
+      const clearBtn = document.querySelector('button[aria-label="Clear prompt"]');
+      if (clearBtn && clearBtn.offsetParent) {
+        simulateRealClick(clearBtn);
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      editor.focus();
+
+      // Clear existing content
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+
+      // 1. Try ClipboardEvent paste (best for ProseMirror transaction handling)
+      try {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', promptText);
+        editor.dispatchEvent(new ClipboardEvent('paste', {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: dt
+        }));
+      } catch (_) {}
+
+      // 2. InputEvent + insertText fallback
+      if (!editor.textContent?.trim()) {
+        try {
+          editor.dispatchEvent(new InputEvent('beforeinput', {
+            inputType: 'insertText',
+            data: promptText,
+            bubbles: true,
+            cancelable: true,
+            composed: true
+          }));
+        } catch (_) {}
+        document.execCommand('insertText', false, promptText);
+      }
+
+      // 3. Direct HTML fallback
+      if (!editor.textContent?.trim()) {
+        editor.innerHTML = `<p>${promptText.replace(/\n/g, '<br>')}</p>`;
+      }
+
+      // Fire all change detection events so Angular enables the generate button
+      ['input', 'change', 'keyup'].forEach(evName => {
+        editor.dispatchEvent(new Event(evName, { bubbles: true, composed: true }));
+      });
+
+      console.log('[ZHunter Flow] Prompt injected. Length:', editor.textContent?.length);
     } catch (e) {
       console.warn('[ZHunter Flow] Prompt injection error:', e);
     }
@@ -407,11 +451,10 @@
           console.warn('[ZHunter Flow] Rename error:', e);
         }
 
-        // 3. Inject Image — exactly once using a global dispatch lock
+        // 3. Attach Product Image FIRST into Prompt Box (image before prompt)
         if (act.imgBase64 && !window.__zhImgDropped) {
           window.__zhImgDropped = true;
-          // Auto-release lock after 10s so future actions can run
-          setTimeout(() => { window.__zhImgDropped = false; }, 10000);
+          setTimeout(() => { window.__zhImgDropped = false; }, 15000);
 
           try {
             const file = dataUrlToFile(act.imgBase64, 'zhunter_product.png');
@@ -419,64 +462,191 @@
               const dt = new DataTransfer();
               dt.items.add(file);
 
-              const dropTarget = document.querySelector('.content-container') || document.body;
+              // Target the ingredient bar / prompt box
+              const promptBox = document.querySelector('flow-creative-agent-prompt-box, flow-prompt-box, .base-prompt-box, flow-rich-text-editor') || document.body;
+              const rect = promptBox.getBoundingClientRect();
               const dropOpts = {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer: dt,
-                clientX: Math.floor(window.innerWidth / 3),
-                clientY: Math.floor(window.innerHeight / 2)
+                bubbles: true, cancelable: true, dataTransfer: dt,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2
               };
 
-              dropTarget.dispatchEvent(new DragEvent('dragenter', dropOpts));
-              dropTarget.dispatchEvent(new DragEvent('dragover', dropOpts));
-              await new Promise(r => setTimeout(r, 60));
-              dropTarget.dispatchEvent(new DragEvent('drop', dropOpts));
+              promptBox.dispatchEvent(new DragEvent('dragenter', dropOpts));
+              promptBox.dispatchEvent(new DragEvent('dragover', dropOpts));
+              await new Promise(r => setTimeout(r, 100));
+              promptBox.dispatchEvent(new DragEvent('drop', dropOpts));
 
-              console.log('[ZHunter Flow] Image drop dispatched (once) to:', dropTarget.tagName);
+              // Also clipboard paste fallback
+              const editor = document.querySelector('flow-rich-text-editor .ProseMirror, .ProseMirror');
+              if (editor) {
+                editor.focus();
+                editor.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+              }
+
+              console.log('[ZHunter Flow] Product image injected into prompt box');
             }
           } catch (e) {
             console.warn('[ZHunter Flow] Image injection error:', e);
             window.__zhImgDropped = false;
           }
+
+          // ★ CRITICAL: Wait 4 seconds for Flow to upload image to tiles grid
+          // Without this wait, the scanner sees the uploaded image as "generated" and sends it back immediately
+          updateFlowHUD('Uploading image to Flow…', 'info');
+          await new Promise(r => setTimeout(r, 4000));
         }
 
-        // 4. Inject Prompt into ProseMirror
+        // 4. Inject Prompt text AFTER image is uploaded
         if (act.prompt) {
           await injectFlowPrompt(act.prompt);
+          await new Promise(r => setTimeout(r, 500));
         }
 
-        // Mark action processed
+        const pTitle = (act.productTitle || 'Product').slice(0, 30);
+        const imgNum = (act.imageIndex ?? 0) + 1;
+
+        // ★ CRITICAL Snapshot: Taken AFTER image upload so uploaded image is included
+        // Any image appearing AFTER this snapshot = genuinely generated by Flow
+        const existingImgSrcs = new Set(
+          Array.from(document.querySelectorAll('img')).map(img => img.src).filter(Boolean)
+        );
+        // Also add the original product imgUrl to block list regardless
+        if (act.imgUrl) existingImgSrcs.add(act.imgUrl);
+        console.log('[ZHunter Flow] Snapshot taken after upload. Existing count:', existingImgSrcs.size);
+
+        // Wait for Angular to settle, then CDP-click the generate button directly
+        ensurePromptBoxVisible();
+        await new Promise(r => setTimeout(r, 3000)); // give Angular time to enable button
+
+        ensurePromptBoxVisible();
+        console.log('[ZHunter Flow] Triggering Flow Generation via CDP');
+        updateFlowHUD(`🎨 Generating · ${pTitle} · Image #${imgNum}`, 'info');
+        await triggerFlowGeneration(null); // CDP handles finding the button internally
+
+        // Mark as clicked (CDP either worked or fell back)
+        const genClicked = true;
+
+
+        const genStartTime = Date.now();
+        const MIN_WAIT_MS = 12000; // Flow generation takes at least 12 seconds — no early exit
+
+        // Track all images that exist at generation start (include any blob/data URLs too)
+        const uploadedSrcs = new Set(existingImgSrcs);
+
+        const isInsideInputOrReference = (imgEl) => {
+          if (!imgEl) return false;
+          return !!imgEl.closest?.(
+            'flow-ingredient-chip, flow-reference-chip, flow-rich-text-editor, flow-prompt-box, ' +
+            'flow-creative-agent-prompt-box, .base-prompt-box, .ingredient-chip, .reference-chip, ' +
+            'flow-media-view, flow-asset-picker, .media-grid, .asset-item, .uploads, [role="navigation"], .sidebar'
+          );
+        };
+
+        const isValidGeneratedSrc = (src, imgEl) => {
+          if (!src || src.startsWith('data:') || src.startsWith('blob:')) return false;
+
+          // Reject avatar/icons
+          const blocked = ['avatar', 'favicon', 'flow_icon', 'logo', 'ogw', 'gb_X', 'googleusercontent.com/ogw'];
+          if (blocked.some(b => src.includes(b))) return false;
+
+          // Reject if inside input / prompt / reference ingredients
+          if (isInsideInputOrReference(imgEl)) return false;
+
+          // Reject if this matches original input image
+          if (act.imgUrl && src === act.imgUrl) return false;
+
+          return true;
+        };
+
+        let autoSent = false;
+        const sendGeneratedImage = (imgSrc) => {
+          if (autoSent) return;
+          autoSent = true;
+          if (window.__zhActivePollInterval) {
+            clearInterval(window.__zhActivePollInterval);
+            window.__zhActivePollInterval = null;
+          }
+          chrome.runtime?.sendMessage?.({
+            action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
+            newImgUrl: imgSrc,
+            productId: act.productId,
+            imageIndex: act.imageIndex
+          });
+          updateFlowHUD(`✓ Image #${imgNum} → ZHunter! (${pTitle})`, 'ok');
+          console.log('[ZHunter Flow] Sent generated image to ZHunter. productId:', act.productId, 'imgIndex:', act.imageIndex);
+        };
+
+        const scanForGeneratedImage = () => {
+          // Only scan AFTER minimum wait — never before
+          if (Date.now() - genStartTime < MIN_WAIT_MS) return [];
+
+          // ONLY accept Flow's generated media URL (getMediaUrlRedirect)
+          // Raw uploaded/reference images NEVER have this pattern
+          const allFlowImgs = Array.from(document.querySelectorAll(
+            'flow-image-tile img, .tiles-container img, .virtual-scroll-container img, .cdk-virtual-scroll-viewport img'
+          ));
+
+          return allFlowImgs.filter(img => {
+            const src = img.src || img.getAttribute('src') || '';
+            if (!src || uploadedSrcs.has(src)) return false;
+            // Accept both URL patterns Flow uses for generated images
+            return src.includes('flow-content.google/image/') ||
+                   src.includes('getMediaUrlRedirect');
+          });
+        };
+
+        // Clear any previous polling loop
+        if (window.__zhActivePollInterval) {
+          clearInterval(window.__zhActivePollInterval);
+          window.__zhActivePollInterval = null;
+        }
+
+        // Lightweight 1.5s interval polling — 100% immune to RESULT_CODE_HUNG
+        let pollCount = 0;
+        const maxPollCount = 80; // 120 seconds maximum
+        const pollInterval = setInterval(() => {
+          if (autoSent) {
+            clearInterval(pollInterval);
+            window.__zhActivePollInterval = null;
+            return;
+          }
+
+          // MIN_WAIT_MS is now enforced inside scanForGeneratedImage itself
+
+          pollCount++;
+          const candidates = scanForGeneratedImage();
+          if (candidates.length > 0) {
+            console.log('[ZHunter Flow] New generated image detected via lightweight polling');
+            clearInterval(pollInterval);
+            window.__zhActivePollInterval = null;
+            sendGeneratedImage(candidates[candidates.length - 1].src);
+            return;
+          }
+
+          if (pollCount >= maxPollCount) {
+            clearInterval(pollInterval);
+            window.__zhActivePollInterval = null;
+            updateFlowHUD(`Image nahi mili — Right click > Copy Image karein`, 'warn', {
+              label: '📥 Send to ZHunter',
+              onClick: () => {
+                const imgs = Array.from(document.querySelectorAll(
+                  '.tiles-container img, .virtual-scroll-container img, .cdk-virtual-scroll-viewport img, flow-project-page img'
+                )).filter(img => isValidGeneratedSrc(img.src, img) && img.naturalWidth >= 200);
+                if (imgs.length > 0) sendGeneratedImage(imgs[imgs.length - 1].src);
+                else updateFlowHUD('Abhi generate nahi hui — thoda ruko', 'warn');
+              }
+            });
+          }
+        }, 1500);
+
+        window.__zhActivePollInterval = pollInterval;
+
+        // Mark action processed NOW
         chrome?.storage?.local?.set({
           pendingFlowAction: { ...act, processed: true }
         });
 
         isRunningAction = false;
-        const pTitle = (act.productTitle || 'Product').slice(0, 30);
-        const imgNum = (act.imageIndex ?? 0) + 1;
-        updateFlowHUD(
-          `📦 ${pTitle} · Image #${imgNum}`,
-          'info',
-          {
-            label: '📥 Send to ZHunter',
-            onClick: () => {
-              const imgs = Array.from(document.querySelectorAll('flow-project-page img, .tiles-container img, .cdk-virtual-scroll-viewport img'));
-              const valid = imgs.filter(img => img.src && !img.src.includes('avatar') && !img.src.includes('favicon') && !img.src.includes('flow_icon') && !img.src.includes('logo') && !img.src.includes('ogw') && !img.src.includes('gstatic'));
-              if (valid.length > 0) {
-                const latestImg = valid[valid.length - 1];
-                chrome.runtime?.sendMessage?.({
-                  action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
-                  newImgUrl: latestImg.src,
-                  productId: act.productId,
-                  imageIndex: act.imageIndex
-                });
-                updateFlowHUD(`✓ Sent Image #${imgNum} to ZHunter!`, 'ok');
-              } else {
-                updateFlowHUD('Right-click edited image → "Copy Image", then click 📋 in ZHunter!', 'warn');
-              }
-            }
-          }
-        );
       }
     });
   } catch (err) {
@@ -494,7 +664,7 @@
     handlePendingFlowAction();
   }
 
-  // Also listen for SPA URL navigation inside Flow (e.g. / -> /project/...)
+  // SPA URL navigation watcher
   let lastUrl = location.href;
   setInterval(() => {
     if (location.href !== lastUrl) {
@@ -504,7 +674,8 @@
     }
   }, 800);
 
-  // Listen for storage changes from ZHunter sidepanel
+  // Storage listener — ONLY fires for unprocessed actions
+  // processed=true actions are ignored, preventing re-trigger while observer is active
   try {
     chrome?.storage?.onChanged?.addListener((changes, area) => {
       if (area === 'local' && changes.pendingFlowAction?.newValue) {

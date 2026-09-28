@@ -1730,3 +1730,80 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Notify open popup / sidepanel to refresh their queue list
   chrome.runtime.sendMessage({ action: 'BULK_QUEUE_UPDATED', item: newItem }).catch(() => {});
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CDP (Chrome DevTools Protocol) Click Helper — for Google Flow automation
+// Uses chrome.debugger to send truly trusted mouse events that Angular responds to
+// ─────────────────────────────────────────────────────────────────────────────
+const _cdpAttached = new Set(); // track attached tabs
+
+async function cdpEnsureAttached(tabId) {
+  if (_cdpAttached.has(tabId)) return;
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    _cdpAttached.add(tabId);
+    // Clean up when tab closes
+    chrome.tabs.onRemoved.addListener(function onRemove(id) {
+      if (id === tabId) {
+        _cdpAttached.delete(tabId);
+        try { chrome.debugger.detach({ tabId }); } catch (_) {}
+        chrome.tabs.onRemoved.removeListener(onRemove);
+      }
+    });
+  } catch (e) {
+    console.warn('[ZHunter CDP] Attach failed:', e.message);
+  }
+}
+
+async function cdpClickSelector(tabId, selector) {
+  await cdpEnsureAttached(tabId);
+  try {
+    // Get element center coordinates via JS evaluation
+    const evalResult = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return null;
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      })()`,
+      returnByValue: true
+    });
+
+    const coords = evalResult?.result?.value;
+    if (!coords) {
+      console.warn('[ZHunter CDP] Element not found or zero-size:', selector);
+      return false;
+    }
+
+    const { x, y } = coords;
+    // Dispatch full mouse event sequence — these ARE isTrusted in page context
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+        type, x, y,
+        button: 'left',
+        buttons: type === 'mousePressed' ? 1 : 0,
+        clickCount: type === 'mouseReleased' ? 1 : 0,
+        modifiers: 0,
+        pointerType: 'mouse'
+      });
+    }
+    console.log('[ZHunter CDP] Clicked:', selector, 'at', x, y);
+    return true;
+  } catch (e) {
+    console.warn('[ZHunter CDP] Click error:', e.message);
+    return false;
+  }
+}
+
+// Handle CDP click requests from content scripts / flow_automation
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.action === 'ZH_CDP_CLICK') {
+    const tabId = msg.tabId || sender?.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return true; }
+    cdpClickSelector(tabId, msg.selector)
+      .then(ok => sendResponse({ ok }))
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true; // keep channel open for async response
+  }
+});

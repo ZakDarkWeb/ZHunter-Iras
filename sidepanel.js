@@ -3041,6 +3041,22 @@ chrome.runtime.onMessage.addListener(async (msg) => {
       const targetId = msg.productId || ctx?.productId;
       const idx = msg.imageIndex ?? ctx?.imageIndex ?? 0;
 
+      // Validate against stepper items to prevent race conditions & loopback of original images
+      const stepQueue = TemuImgStepper?.queue || [];
+      const currentStep = stepQueue[TemuImgStepper?.currentIndex];
+      if (currentStep) {
+        // Reject if received image is identical to input image (not generated yet)
+        if (currentStep.imgUrl === msg.newImgUrl) {
+          console.warn('[ZHunter] Received image is identical to current input image. Skipping duplicate.');
+          return;
+        }
+      }
+      const isAnyOriginalImg = stepQueue.some(step => step.imgUrl && step.imgUrl === msg.newImgUrl);
+      if (isAnyOriginalImg) {
+        console.warn('[ZHunter] Received image matches an original product image in queue. Skipping.');
+        return;
+      }
+
       let updated = false;
 
       // 1. Update MasterUIState.allRows
@@ -3074,6 +3090,28 @@ chrome.runtime.onMessage.addListener(async (msg) => {
       if (updated) {
         await temuRenderReview();
         toast('✓ Image received from Flow! Uploading link for Temu...', 'info');
+
+        // Advance stepper strictly for the active matching product
+        const stepQueue = TemuImgStepper?.queue || [];
+        const stepIdx = TemuImgStepper?.currentIndex ?? 0;
+        const activeStep = stepQueue[stepIdx];
+
+        if (activeStep && (!targetId || activeStep.product.id === targetId) && !TemuImgStepper.isAdvancing) {
+          TemuImgStepper.isAdvancing = true;
+          TemuImgStepper.currentIndex++;
+          if (TemuImgStepper.currentIndex < stepQueue.length) {
+            setTimeout(() => {
+              TemuImgStepper.isAdvancing = false;
+              temuStepProcessCurrent();
+            }, 1200);
+          } else {
+            setTimeout(() => {
+              TemuImgStepper.isAdvancing = false;
+              temuStepFinish();
+            }, 1200);
+          }
+        }
+
         (async () => {
           const pub = await uploadImageToPublicHost(msg.newImgUrl);
           if (pub && pub.startsWith('http')) {
@@ -11426,8 +11464,9 @@ function temuUpdateReviewCount(rows) {
   const imgBtn = $('temuAiBulkImgBtn');
   if (imgBtn && !imgBtn.disabled) {
     const selCount = $('temuAiImgCountSel')?.value || '1';
-    const countLabel = selCount === '1' ? '1 img' : selCount === 'all' ? 'All imgs' : `${selCount} imgs`;
-    imgBtn.innerHTML = `✨ Edit Images (${included} prods · ${countLabel})`;
+    const countLabel = selCount === '1' ? '1 img' : selCount === 'all' ? 'all imgs' : `${selCount} imgs`;
+    const lbl = $('temuImgEditBtnLabel');
+    if (lbl) lbl.textContent = `Edit Images (${included} · ${countLabel})`;
   }
 }
 
@@ -12110,6 +12149,7 @@ function temuStepOpenModal() {
 }
 
 async function temuStepProcessCurrent() {
+  TemuImgStepper.isAdvancing = false;
   const { queue, currentIndex } = TemuImgStepper;
   if (currentIndex >= queue.length) {
     temuStepFinish();
@@ -12149,7 +12189,7 @@ async function temuStepSendCurrent() {
       productId: current.product.id,
       imageIndex: current.imgIndex
     });
-    if (statusEl) statusEl.textContent = '✓ Flow tab opened! Model Nano Banana 2 & 1:1 ratio. Generate karke copy karein, phir "Paste & Next" click karein.';
+    if (statusEl) statusEl.textContent = '✓ Flow tab opened! Model Nano Banana 2 & 1:1 ratio. Generating karein, image auto-receive ho jaegi — next product automatically load hoga.';
   } else if (engine === 'gemini') {
     let base64Data = current.imgUrl;
     if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
