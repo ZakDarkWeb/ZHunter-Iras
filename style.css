@@ -2092,6 +2092,112 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 }
 @keyframes bpspin { to { transform: rotate(360deg); } }
 
+/* ═══ v9.10 — hunt popup motion ═══ */
+#bulkProgressModal { --bp-c: #00E5FF; --bp-c2: #0099FF; --bp-glow: rgba(0, 229, 255, 0.35); }
+#bulkProgressModal[data-phase="recover"]   { --bp-c: #F59E0B; --bp-c2: #F97316; --bp-glow: rgba(245, 158, 11, 0.35); }
+#bulkProgressModal[data-phase="download"]  { --bp-c: #A78BFA; --bp-c2: #7C3AED; --bp-glow: rgba(167, 139, 250, 0.35); }
+#bulkProgressModal[data-phase="done"]      { --bp-c: #10B981; --bp-c2: #059669; --bp-glow: rgba(16, 185, 129, 0.35); }
+#bulkProgressModal[data-phase="attention"] { --bp-c: #F59E0B; --bp-c2: #F97316; --bp-glow: rgba(245, 158, 11, 0.3); }
+
+#bulkProgressModal .bulk-progress-box { animation: bpBoxIn .42s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes bpBoxIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+
+#bulkProgressModal .bp-hero { border-color: color-mix(in srgb, var(--bp-c) 30%, transparent); transition: border-color .5s ease, box-shadow .5s ease; }
+#bulkProgressModal .bp-ring-wrap { filter: drop-shadow(0 0 14px var(--bp-glow)); transition: filter .5s ease; }
+#bulkProgressModal .bp-ring-fill:not(.done):not(.warn) { stroke: var(--bp-c); filter: drop-shadow(0 0 8px var(--bp-glow)); }
+#bulkProgressModal .bp-ring-pct { text-shadow: 0 0 12px var(--bp-glow); }
+#bulkProgressModal .bp-eta, #bulkProgressModal .bps-current .bpc-k { color: var(--bp-c); transition: color .5s ease; }
+#bulkProgressModal .bp-chip .bp-dot { background: var(--bp-c); box-shadow: 0 0 6px var(--bp-c); animation: bpDot 1.6s ease-in-out infinite; }
+@keyframes bpDot { 50% { opacity: .35; transform: scale(.7); } }
+#bulkProgressModal .bulk-prog-fill:not(.complete) { background: linear-gradient(90deg, var(--bp-c2), var(--bp-c), #E0F2FE, var(--bp-c)); background-size: 200% 100%; box-shadow: 0 0 10px var(--bp-glow); }
+#bulkProgressModal .bp-ring-wrap::after {
+  content: ""; position: absolute; inset: 6px; border-radius: 50%;
+  border: 2px solid var(--bp-c); opacity: 0; pointer-events: none;
+}
+#bulkProgressModal:not([data-phase="done"]):not([data-phase="attention"]) .bp-ring-wrap::after { animation: bpRipple 2.4s ease-out infinite; }
+@keyframes bpRipple { 0% { transform: scale(.85); opacity: .5; } 100% { transform: scale(1.25); opacity: 0; } }
+
+.bp-bump { display: inline-block; animation: bpBump .35s ease; }
+@keyframes bpBump { 40% { transform: translateY(-2px) scale(1.12); color: var(--bp-c, #00E5FF); } }
+
+/* rows */
+.bulk-prog-row.bp-row-in { animation: bpRowIn .38s cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(var(--i, 0) * 35ms); }
+@keyframes bpRowIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.bulk-prog-row.active {
+  position: relative; overflow: hidden;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bp-c, #00E5FF) 16%, transparent), transparent 70%);
+  border-left-color: var(--bp-c, #00E5FF);
+}
+.bulk-prog-row.active::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bp-c, #00E5FF) 18%, transparent), transparent);
+  transform: translateX(-100%); animation: bpScan 1.6s ease-in-out infinite;
+}
+@keyframes bpScan { to { transform: translateX(100%); } }
+.bulk-prog-row.active .bulk-prog-status::before { border-color: var(--bp-c, #00E5FF); border-right-color: transparent; }
+.bulk-prog-row.bp-pop .bulk-prog-status { animation: bpPop .45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes bpPop { 0% { transform: scale(.3); opacity: 0; } 60% { transform: scale(1.35); opacity: 1; } 100% { transform: scale(1); } }
+.bulk-prog-row.ok.bp-pop { animation: bpFlashOk .7s ease; }
+@keyframes bpFlashOk { 0% { background: rgba(16, 185, 129, 0.22); } 100% { background: transparent; } }
+.bulk-prog-row.partial .bulk-prog-meta { color: #F59E0B; }
+.bulk-prog-row.retrying { box-shadow: inset 2px 0 0 #F59E0B; }
+.bulk-prog-row.retrying.waiting .bulk-prog-status { color: #F59E0B; animation: bpDot 1.2s ease-in-out infinite; }
+.bulk-prog-row.retrying.waiting .bulk-prog-meta { color: #F59E0B; }
+
+/* completion */
+#bulkProgressModal.bp-celebrate .bulk-result-stats .bulk-rs-item.ok { animation: bpWin .8s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes bpWin { 0% { transform: scale(.9); box-shadow: 0 0 0 0 rgba(16,185,129,.6); } 60% { transform: scale(1.04); box-shadow: 0 0 0 10px rgba(16,185,129,0); } 100% { transform: none; } }
+.bulk-result-summary:not(.hidden) .bulk-rs-item { animation: bpRowIn .4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.bulk-result-summary:not(.hidden) .bulk-rs-item:nth-child(2) { animation-delay: .06s; }
+.bulk-result-summary:not(.hidden) .bulk-rs-item:nth-child(3) { animation-delay: .12s; }
+
+/* pending links */
+.bp-pending {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.10), rgba(15, 23, 42, 0.6));
+  animation: bpRowIn .4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.bp-pending-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bp-pending-title { display: inline-flex; align-items: center; gap: 6px; font: 700 12px var(--font); color: #FDE68A; }
+.bp-pending-ico { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: #F59E0B; color: #1C1917; font: 800 11px var(--font); font-style: normal; animation: bpDot 1.6s ease-in-out infinite; }
+.bp-pending-sub { font-size: 10.5px; color: #CBD5E1; line-height: 1.4; }
+.bp-pend-all {
+  font: 700 11px var(--font); padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  color: #1C1917; background: linear-gradient(135deg, #FCD34D, #F59E0B); border: 0;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.35); transition: transform .15s ease, filter .15s ease;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.bp-pend-all:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.bp-pend-all:disabled { opacity: .7; cursor: default; transform: none; }
+.bp-pending-list { display: flex; flex-direction: column; gap: 5px; max-height: 190px; overflow-y: auto; }
+.bp-pend-item {
+  display: grid; grid-template-columns: 8px 1fr auto 24px; gap: 8px; align-items: center;
+  padding: 7px 8px; border-radius: 8px; background: rgba(11, 18, 33, 0.9); border: 1px solid rgba(255, 255, 255, 0.06);
+  animation: bpRowIn .35s cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(var(--i, 0) * 40ms);
+}
+.bp-pend-item.busy { border-color: rgba(245, 158, 11, 0.45); }
+.bp-pend-dot { width: 8px; height: 8px; border-radius: 50%; background: #EF4444; box-shadow: 0 0 6px #EF4444; }
+.bp-pend-dot.partial { background: #F59E0B; box-shadow: 0 0 6px #F59E0B; }
+.bp-pend-txt { min-width: 0; }
+.bp-pend-title { font: 600 11.5px var(--font); color: #F1F5F9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bp-pend-reason { font: 500 10px var(--mono); color: #FBBF24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.bp-pend-retry {
+  font: 700 10.5px var(--font); padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  color: #FDE68A; background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.45);
+  display: inline-flex; align-items: center; gap: 4px; transition: all .15s ease; white-space: nowrap;
+}
+.bp-pend-retry:hover { background: #F59E0B; color: #1C1917; }
+.bp-pend-retry:disabled { opacity: .75; cursor: default; }
+.bp-spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; display: inline-block; animation: bpspin .8s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  #bulkProgressModal *, #bulkProgressModal *::before, #bulkProgressModal *::after { animation: none !important; transition: none !important; }
+  /* keep the tiny spinners — they tell you something is still working */
+  #bulkProgressModal .bp-spin, #bulkProgressModal .bulk-prog-row.active .bulk-prog-status::before { animation: bpspin 1.6s linear infinite !important; }
+}
+
 /* result */
 .bulk-result-summary { display: flex; flex-direction: column; gap: 12px; }
 .bulk-result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

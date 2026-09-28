@@ -94,6 +94,41 @@
     }
   }
 
+  // Flow accepts PNG/JPEG/WEBP/GIF/HEIF only — Walmart & co. often serve AVIF.
+  // Re-encode anything else to PNG before it ever reaches Flow.
+  async function ensureSupportedImage(file) {
+    if (!file) return null;
+    if (/^image\/(png|jpe?g|webp)$/i.test(file.type)) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      try { bmp.close(); } catch (_) {}
+      const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+      if (!blob) return null;
+      log(`Converted ${file.type || 'unknown'} → image/png`);
+      return new File([blob], file.name.replace(/\.\w+$/, '') + '.png', { type: 'image/png' });
+    } catch (e) {
+      warn('Image conversion failed:', e);
+      return null;
+    }
+  }
+
+  // Flow shows upload problems in a small card with a "Dismiss" button.
+  const FLOW_ERR_RE = /(unsupported file type|upload failed|couldn.?t upload|could not upload|file is too large|too large to upload)/i;
+  function flowErrorEl() {
+    const btn = Array.from(document.querySelectorAll('button')).find(b =>
+      /^\s*dismiss\s*$/i.test(b.textContent || '') && FLOW_ERR_RE.test(b.parentElement?.parentElement?.textContent || b.parentElement?.textContent || ''));
+    if (btn) return { btn, text: (btn.parentElement?.parentElement?.textContent || '').replace(/\s*dismiss\s*$/i, '').replace(/\s+/g, ' ').trim() };
+    const s = snackText();
+    return s && FLOW_ERR_RE.test(s) ? { btn: null, text: s } : null;
+  }
+  async function dismissFlowError() {
+    const e = flowErrorEl();
+    if (e?.btn) await trustedClick(e.btn, 'dismiss error');
+  }
+
   // ── Flow DOM (from real DOM harvests, Sep 2026) ─────────────────
   const Q = {
     promptRoot: () =>
@@ -324,7 +359,7 @@
     const dt = new DataTransfer();
     dt.items.add(file);
     ed.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
-    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0, 4000));
+    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0 || !!flowErrorEl(), 4000)) && !flowErrorEl();
   }
 
   async function tryDrop(file) {
@@ -339,7 +374,7 @@
     await sleep(80);
     target.dispatchEvent(new DragEvent('drop', opts));
     target.dispatchEvent(new DragEvent('dragleave', opts));
-    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0, 4000));
+    return !!(await waitFor(() => Q.chips(Q.promptRoot()).length > 0 || !!flowErrorEl(), 4000)) && !flowErrorEl();
   }
 
   // Fallback: upload to the project, then "+" menu → the uploaded asset → "Add to prompt".
@@ -364,8 +399,8 @@
       }
     }
     scrollGridTop();
-    up = await waitFor(() => allTiles().find(t => t.mediaId && !idsBefore.has(t.mediaId) && !t.generated && !t.pending), ATTACH_TIMEOUT_MS, 500);
-    if (!up) return false;
+    up = await waitFor(() => flowErrorEl() ? { err: true } : allTiles().find(t => t.mediaId && !idsBefore.has(t.mediaId) && !t.generated && !t.pending), ATTACH_TIMEOUT_MS, 500);
+    if (!up || up.err) return false;
     log('Upload finished, media id:', up.mediaId);
 
     const addBtn = Q.addMenuBtn(Q.promptRoot());
@@ -394,13 +429,22 @@
   }
 
   async function attachImage(job) {
-    const file = dataUrlToFile(job.imgBase64, `zhunter_${job.productId || 'product'}_${(job.imageIndex ?? 0) + 1}.png`);
-    if (!file) throw new JobError('Product image load nahi hui (base64 kharab)');
+    const raw = dataUrlToFile(job.imgBase64, `zhunter_${job.productId || 'product'}_${(job.imageIndex ?? 0) + 1}.png`);
+    if (!raw) throw new JobError('Product image load nahi hui (base64 kharab)');
+    const file = await ensureSupportedImage(raw);
+    if (!file) throw new JobError(`Image format (${raw.type || 'unknown'}) Flow ke liye convert nahi ho saka`);
+    await dismissFlowError(); // clear a leftover error card from an earlier attempt
     const idsBefore = mediaIdSet();
 
+    const failIfFlowError = async () => {
+      const e = flowErrorEl();
+      if (e) { await dismissFlowError(); throw new JobError('Flow ne image qubool nahi ki: ' + (e.text || 'upload error')); }
+    };
+
     let attached = await tryPaste(file);
-    if (!attached) { log('Paste did not create a chip — trying drop'); attached = await tryDrop(file); }
-    if (!attached) { log('Drop did not create a chip — upload + Add to prompt'); attached = await tryUploadThenAddMenu(file, idsBefore); }
+    await failIfFlowError();
+    if (!attached) { log('Paste did not create a chip — trying drop'); attached = await tryDrop(file); await failIfFlowError(); }
+    if (!attached) { log('Drop did not create a chip — upload + Add to prompt'); attached = await tryUploadThenAddMenu(file, idsBefore); await failIfFlowError(); }
     if (!attached) throw new JobError('Image prompt box mein attach nahi hui');
 
     const root = Q.promptRoot();
@@ -410,7 +454,8 @@
       for (const c of extras) await trustedClick(c, 'remove extra chip');
       await waitFor(() => Q.chips(Q.promptRoot()).length === 1, 4000);
     }
-    const ready = await waitFor(() => chipReady(Q.promptRoot()), ATTACH_TIMEOUT_MS, 500);
+    const ready = await waitFor(() => chipReady(Q.promptRoot()) || (flowErrorEl() ? 'err' : null), ATTACH_TIMEOUT_MS, 500);
+    if (ready === 'err') await failIfFlowError();
     if (!ready) throw new JobError('Image upload poora nahi hua (chip ready nahi)');
   }
 

@@ -730,9 +730,14 @@
             <div class="bulk-rs-item fail"><div class="bulk-rs-num" id="bulkRsFail">0</div><div class="bulk-rs-lbl">Failed</div></div>
           </div>
           <div class="bulk-result-meta" id="bulkResultMeta"></div>
-          <div id="bulkFailedDetail" class="bulk-failed-detail hidden">
-            <button class="bulk-failed-toggle" id="bulkFailedToggle" type="button">Show failed tabs</button>
-            <div id="bulkFailedList" class="bulk-failed-list hidden"></div>
+          <!-- v9.10 — links that are still not complete: never skipped, retry here -->
+          <div id="bulkPendingBox" class="bp-pending hidden">
+            <div class="bp-pending-head">
+              <span class="bp-pending-title"><i class="bp-pending-ico">!</i><b id="bulkPendingCount">0</b> links abhi complete nahi</span>
+              <button id="bulkRetryAllBtn" class="bp-pend-all" type="button">↻ Retry all</button>
+            </div>
+            <div class="bp-pending-sub">Skip nahi kiye gaye — 3 auto rounds ke baad bhi title/price nahi mili. Retry karein ya ↗ se page khol kar dekhein.</div>
+            <div id="bulkPendingList" class="bp-pending-list"></div>
           </div>
 
           <div class="bulk-result-actions">

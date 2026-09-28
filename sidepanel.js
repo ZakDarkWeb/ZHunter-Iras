@@ -2909,6 +2909,26 @@ async function focusOrOpenFlowTab() {
   return 'opened';
 }
 
+// Flow only accepts PNG/JPEG/WEBP/GIF/HEIF — AVIF (Walmart) and others are re-encoded to JPEG.
+async function toFlowSafeDataUrl(dataUrl) {
+  if (/^data:image\/(png|jpe?g|webp);/i.test(dataUrl)) return dataUrl;
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(bmp, 0, 0);
+    try { bmp.close(); } catch (_) {}
+    return c.toDataURL('image/jpeg', 0.95);
+  } catch (e) {
+    console.warn('[ZHunter] Image convert for Flow failed:', e);
+    return null;
+  }
+}
+
 // Flow smart editor automation helper — returns the jobId (or null if nothing was sent)
 async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
   if (!src) return null;
@@ -2929,6 +2949,11 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
   }
   if (!base64) {
     toast('Product image download nahi hui — Flow ko nahi bheji', 'warn');
+    return null;
+  }
+  base64 = await toFlowSafeDataUrl(base64);
+  if (!base64) {
+    toast('Image format Flow ke liye convert nahi ho saka', 'warn');
     return null;
   }
 
@@ -4546,6 +4571,14 @@ function initBulkTab() {
   $('bulkResumeBtn')?.addEventListener('click', resumePendingHunt);
   $('bulkDiscardBtn')?.addEventListener('click', discardPendingHunt);
   $('bulkFailedToggle')?.addEventListener('click', toggleFailedList);
+  // v9.10 — pending links: per-link Retry + Retry all
+  $('bulkPendingList')?.addEventListener('click', (e) => {
+    const b = e.target.closest('.bp-pend-retry');
+    if (!b) return;
+    const id = b.closest('.bp-pend-item')?.dataset.id;
+    if (id) huntManualRetry(id);
+  });
+  $('bulkRetryAllBtn')?.addEventListener('click', huntRetryAll);
   $('bulkColumnsToggleBtn')?.addEventListener('click', toggleBulkColumnsPanel);
   $('bulkAddAllTabsToQueueBtn')?.addEventListener('click', async () => {
     await loadBulkTabs();
@@ -5219,7 +5252,204 @@ function getMaxHuntImages() {
 }
 window.getMaxHuntImages = getMaxHuntImages;
 
-async function scrapeQueueItem(queueItem, workerTabId) {
+// ═════════════════════════════════════════════════════════════════
+// v9.10 — "No link skipped" hunt recovery
+// complete = title + price. Anything less is retried: first pass continues with the
+// rest of the links, then up to 3 recovery rounds (each stronger), then the link stays
+// in the result popup with ↻ Retry / ↗ Open until the user resolves it.
+// ═════════════════════════════════════════════════════════════════
+const HUNT_RECOVERY_ROUNDS = 3;
+const HUNT_ERR_LABELS = {
+  missing_price: 'price nahi mili',
+  missing_title: 'title nahi mila',
+  missing_title_price: 'title + price nahi mile',
+  page_timeout: 'page load nahi hua',
+  no_response: 'page ne jawab nahi diya',
+  tab_closed: 'tab band ho gaya',
+  queue_worker_error: 'worker error'
+};
+
+function huntMissingCode(title, price) {
+  if (!title && !price) return 'missing_title_price';
+  if (!title) return 'missing_title';
+  if (!price) return 'missing_price';
+  return '';
+}
+
+function huntErrLabel(code) {
+  return HUNT_ERR_LABELS[code] || (code ? String(code).replace(/_/g, ' ') : 'failed');
+}
+
+// Higher = more useful data. Used to keep the best of several attempts and for Library upserts.
+function huntResultScore(r) {
+  if (!r) return -1;
+  const imgs = Array.isArray(r.images) ? r.images.length : (Number(r.imageCount) || 0);
+  let sc = 0;
+  if (r.title && !/^https?:\/\//i.test(r.title)) sc += 2;
+  if (r.price) sc += 2;
+  if (imgs > 0) sc += 1 + Math.min(imgs, 10) / 100;
+  if (r.status === 'ok') sc += 10;
+  return sc;
+}
+
+function latestHuntResult(id) {
+  for (let j = BulkState.results.length - 1; j >= 0; j--) if (BulkState.results[j].tabId === id) return BulkState.results[j];
+  return null;
+}
+
+function huntNeedsRetry(id) {
+  const r = latestHuntResult(id);
+  return !r || r.status !== 'ok';
+}
+
+// After a retry: if the new attempt is worse than what we had, put the better one back.
+function huntKeepBest(id, prev) {
+  const cur = latestHuntResult(id);
+  if (!prev) return cur;
+  if (!cur || huntResultScore(prev) > huntResultScore(cur)) {
+    for (let j = BulkState.results.length - 1; j >= 0; j--) if (BulkState.results[j].tabId === id) BulkState.results.splice(j, 1);
+    BulkState.results.push(prev);
+    setBulkRowStatus(id, prev.status, { images: (prev.images || []).length, error: prev.error });
+    updateBulkProgressBar();
+    return prev;
+  }
+  return cur;
+}
+
+// Wait until a navigation we just started has really begun, then until it finishes.
+// (Checking only status==='complete' right after tabs.update can still see the OLD page.)
+async function huntWaitTabLoaded(tabId, prevUrl, timeoutMs = 60000) {
+  const getTab = () => new Promise(res => chrome.tabs.get(tabId, t => res(chrome.runtime.lastError ? null : t)));
+  const startBy = Date.now() + 5000;
+  while (Date.now() < startBy && !BulkState.isCancelled) {
+    const t = await getTab();
+    if (!t) return false;
+    if (t.status === 'loading' || (t.pendingUrl && t.pendingUrl !== prevUrl) || (prevUrl && t.url && t.url !== prevUrl)) break;
+    await sleep(120);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !BulkState.isCancelled) {
+    const t = await getTab();
+    if (!t) return false;
+    if (t.status === 'complete') return true;
+    await sleep(250);
+  }
+  return false;
+}
+
+// ── Queue mode: one recovery attempt at a given strength (1..3; manual retry uses 3)
+async function huntRetryQueueItem(item, level) {
+  const prev = latestHuntResult(item.id);
+  setBulkRowStatus(item.id, 'active');
+  const label = level >= 3 ? 'Visible tab mein dobara' : level === 2 ? 'Fresh tab, lamba intezaar' : 'Dobara load';
+  setBulkRowMeta(item.id, `${label}…`);
+  try {
+    if (level >= 3) {
+      // Some sites only render prices when the page is actually visible
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const vis = await chrome.tabs.create({ url: 'about:blank', active: true });
+      try {
+        await scrapeQueueItem(item, vis.id, { readyTimeout: 90000, settleMs: 4500, noImmediateRetry: true });
+      } finally {
+        try { await chrome.tabs.remove(vis.id); } catch (_) {}
+        if (active?.id) { try { await chrome.tabs.update(active.id, { active: true }); } catch (_) {} }
+      }
+    } else {
+      if (level === 2) await closeQueueWorkerTab();
+      const worker = await ensureQueueWorkerTab();
+      await scrapeQueueItem(item, worker.id, {
+        readyTimeout: level === 2 ? 90000 : 60000,
+        settleMs: level === 2 ? 3000 : 1500,
+        noImmediateRetry: true
+      });
+    }
+  } catch (e) {
+    console.warn('[ZHunter] queue recovery error', e);
+  }
+  return huntKeepBest(item.id, prev);
+}
+
+// ── Open-tabs mode: one recovery attempt at a given strength
+async function huntEnsureTab(t) {
+  const alive = await new Promise(res => chrome.tabs.get(t.tabId, x => res(chrome.runtime.lastError ? null : x)));
+  if (alive) return alive;
+  // Tab was closed — reopen the link and move the row + results to the new tab id
+  const created = await chrome.tabs.create({ url: t.url, active: false });
+  const oldId = t.tabId;
+  const row = document.querySelector(`.bulk-prog-row[data-tab-id="${oldId}"]`);
+  if (row) row.dataset.tabId = created.id;
+  BulkState.results.forEach(r => { if (r.tabId === oldId) r.tabId = created.id; });
+  t.tabId = created.id;
+  await huntWaitTabLoaded(created.id, 'about:blank', 60000);
+  return created;
+}
+
+async function huntRetryTabItem(t, level) {
+  const prev = latestHuntResult(t.tabId);
+  setBulkRowStatus(t.tabId, 'active');
+  setBulkRowMeta(t.tabId, level >= 3 ? 'Tab saamne la kar dobara…' : level === 2 ? 'Hard reload, lamba intezaar…' : 'Reload…');
+  let restoreTo = null;
+  try {
+    const tab = await huntEnsureTab(t);
+    const prevUrl = tab.url;
+    if (level >= 3) {
+      const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+      restoreTo = active?.id && active.id !== t.tabId ? active.id : null;
+      await chrome.tabs.update(t.tabId, { active: true });
+    }
+    await new Promise(res => chrome.tabs.reload(t.tabId, { bypassCache: level >= 2 }, () => { void chrome.runtime.lastError; res(); }));
+    await huntWaitTabLoaded(t.tabId, prevUrl, level >= 2 ? 90000 : 45000);
+    await sleep(level >= 3 ? 4500 : level === 2 ? 3000 : 1500);
+    try { await chrome.scripting.executeScript({ target: { tabId: t.tabId }, files: ['content.js'] }); } catch (_) {}
+    await sleep(300);
+    t._retried = true; // no extra inner auto-retry — the rounds handle that
+    await scrapeOneTab(t);
+  } catch (e) {
+    console.warn('[ZHunter] tab recovery error', e);
+  } finally {
+    if (restoreTo) { try { await chrome.tabs.update(restoreTo, { active: true }); } catch (_) {} }
+  }
+  return huntKeepBest(t.tabId, prev);
+}
+
+// Automatic rounds after the first pass. items: queue items or tab infos.
+async function huntRecoveryRounds(mode, items) {
+  const idOf = it => (mode === 'queue' ? it.id : it.tabId);
+  for (let round = 1; round <= HUNT_RECOVERY_ROUNDS; round++) {
+    const pending = items.filter(it => huntNeedsRetry(idOf(it)));
+    if (!pending.length || BulkState.isCancelled) return;
+    bpSetPhase('recover');
+    updateBulkProgressTitle('Auto-recovering', `Round ${round}/${HUNT_RECOVERY_ROUNDS} · ${pending.length} link${pending.length > 1 ? 's' : ''} dobara hunt ho rahe hain`);
+    pending.forEach(it => { setBulkRowStatus(idOf(it), 'waiting'); setBulkRowMeta(idOf(it), `round ${round} queue`); markBulkRowRetry(idOf(it), true); });
+    for (const it of pending) {
+      while (BulkState.isPaused && !BulkState.isCancelled) await sleep(300);
+      if (BulkState.isCancelled) break;
+      if (mode === 'queue') await huntRetryQueueItem(it, round);
+      else await huntRetryTabItem(it, round);
+      markBulkRowRetry(idOf(it), huntNeedsRetry(idOf(it)));
+      await sleep(round * 400);
+    }
+  }
+  if (mode === 'queue') await closeQueueWorkerTab();
+}
+
+// Download images for one result (used after a manual retry; the bulk phase already ran)
+async function huntDownloadImagesFor(r) {
+  if (!r || !r.images?.length || r.status === 'fail' || isBulkFastMode()) return;
+  try {
+    const batchRes = await msg({ action: 'FETCH_BASE64_BATCH', urls: r.images.slice(0, getMaxHuntImages()) });
+    r.imagesBase64 = (batchRes?.success && Array.isArray(batchRes.results))
+      ? batchRes.results.filter(x => x?.success && x.base64).map(x => x.base64) : [];
+  } catch (_) { r.imagesBase64 = []; }
+}
+
+// Flush rows collected outside the hunt loop (manual retries)
+async function huntFlushNow() {
+  const rows = BulkState.pendingFlush.splice(0);
+  if (rows.length) await appendToMasterSheet(rows);
+}
+
+async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   const fakeId = queueItem.id;
   setBulkRowStatus(fakeId, 'active');
   if (BulkState.isCancelled) { setBulkRowStatus(fakeId, 'fail'); return; }
@@ -5227,10 +5457,13 @@ async function scrapeQueueItem(queueItem, workerTabId) {
   let scraped = null;
   let errorCode = '';
   try {
-    await chrome.tabs.update(workerTabId, { url: queueItem.url, active: false });
-    setBulkRowMeta(fakeId, 'Loading in background…');
-    const ready = await waitForQueueTabReady(workerTabId, 60000);
+    const before = await new Promise(res => chrome.tabs.get(workerTabId, t => res(chrome.runtime.lastError ? null : t)));
+    if (!before) throw new Error('tab_closed');
+    await chrome.tabs.update(workerTabId, { url: queueItem.url });
+    setBulkRowMeta(fakeId, opts.readyTimeout > 60000 ? 'Loading (lamba intezaar)…' : 'Loading in background…');
+    const ready = await huntWaitTabLoaded(workerTabId, before.url, opts.readyTimeout || 60000);
     if (!ready) throw new Error(BulkState.isCancelled ? 'cancelled' : 'page_timeout');
+    await sleep(opts.settleMs ?? 800); // let late scripts render price / gallery
 
     setBulkRowMeta(fakeId, 'Injecting…');
     try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, files: ['content.js'] }); }
@@ -5244,19 +5477,15 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     errorCode = error?.message || 'queue_worker_error';
   }
 
-  const status = !scraped
-    ? 'fail'
-    : (!scraped.title && (!scraped.images || !scraped.images.length) && !scraped.price) ? 'partial' : 'ok';
-
-  // Progressive auto-retry on failure (up to 3 attempts with progressive delay)
+  // One quick retry here; slower strategies run later in the recovery rounds
   const shouldRetryQueue = State?.data?.settings?.bulkAutoRetry !== false;
   const currentAttempts = Number(queueItem._retryCount || 0);
-  const MAX_ITEM_RETRIES = 3;
-  if (shouldRetryQueue && status === 'fail' && currentAttempts < MAX_ITEM_RETRIES && !BulkState.isCancelled && errorCode !== 'cancelled') {
+  const MAX_ITEM_RETRIES = opts.noImmediateRetry ? 0 : 1;
+  if (shouldRetryQueue && !scraped && currentAttempts < MAX_ITEM_RETRIES && !BulkState.isCancelled && errorCode !== 'cancelled') {
     queueItem._retryCount = currentAttempts + 1;
     setBulkRowMeta(fakeId, `Retrying (${queueItem._retryCount}/${MAX_ITEM_RETRIES})…`);
-    await sleep(1500 * queueItem._retryCount);
-    return await scrapeQueueItem(queueItem, workerTabId);
+    await sleep(1500);
+    return await scrapeQueueItem(queueItem, workerTabId, opts);
   }
 
   const sMeta = await sheetMetaFor(queueItem.url);
@@ -5271,8 +5500,8 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     videos: [], variants: scraped?.variants || [],
     description: scraped?.description || '',
     brand: scraped?.brand || '', color: scraped?.color || '', weight: scraped?.weight || '', dimL: scraped?.dimL || '', dimW: scraped?.dimW || '', dimH: scraped?.dimH || '', bullets: Array.isArray(scraped?.bullets) ? scraped.bullets : [],
-    status,
-    error: status === 'fail' ? (errorCode || 'no_response') : '',
+    status: 'fail',
+    error: '',
     scrapedAt: new Date().toISOString()
   };
   if (resultItem.copy) {
@@ -5284,16 +5513,29 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     if (cp.color) resultItem.copyColor = cp.color;
     if (cp.cat) resultItem.copyCat = cp.cat;
     resultItem.copyGoodsId = cp.goodsId || '';
-    if (status === 'fail' && resultItem.title) { resultItem.status = 'partial'; resultItem.error = ''; }
   }
+
+  // v9.10 — complete = real title + price (the queued URL is not a title)
+  const realTitle = scraped?.title || (resultItem.copy ? resultItem.title : '');
+  const realPrice = resultItem.price || resultItem.temuBase || '';
+  let status;
+  if (scraped || realTitle) status = (realTitle && realPrice) ? 'ok' : 'partial';
+  else status = 'fail';
+  resultItem.status = status;
+  resultItem.error = status === 'ok' ? '' : (status === 'partial' ? huntMissingCode(realTitle, realPrice) : (errorCode || 'no_response'));
+
+  if (BulkState.isCancelled && !scraped) { setBulkRowStatus(fakeId, 'fail', { error: 'cancelled' }); return; }
+
+  // Same link's older attempt is replaced (the recovery keeps the best one)
+  for (let j = BulkState.results.length - 1; j >= 0; j--) if (BulkState.results[j].tabId === fakeId) BulkState.results.splice(j, 1);
   BulkState.results.push(resultItem);
   if (status !== 'fail') BulkState.pendingFlush.push(resultItem);
 
   const qi = QueueState.items.find(i => i.id === fakeId);
   if (qi) {
-    qi.hunted = status !== 'fail';
-    qi.status = status === 'fail' ? 'needs_retry' : 'complete';
-    qi.error = resultItem.error;
+    qi.hunted = status === 'ok';
+    qi.status = status === 'ok' ? 'complete' : 'needs_retry';
+    qi.error = status === 'ok' ? '' : huntErrLabel(resultItem.error);
     qi.attempts = Number(qi.attempts || 0) + 1;
   }
   setBulkRowStatus(fakeId, status, { images: Array.isArray(resultItem.images) ? resultItem.images.length : 0, error: resultItem.error });
@@ -5369,33 +5611,15 @@ async function startQueueHunt() {
   };
   flushLoop();
   try {
+    bpSetPhase('hunt');
     updateBulkProgressTitle('Hunting products', `Processing ${toHunt.length} queued links…`);
     await processQueueSequential(toHunt);
 
-    // Auto-Recovery Phase: Re-attempt any items that failed so 0 links are skipped
-    if (!BulkState.isCancelled) {
-      for (let recoveryPass = 1; recoveryPass <= 2; recoveryPass++) {
-        const failedItems = toHunt.filter(i => {
-          const res = BulkState.results.find(r => r.tabId === i.id);
-          return !res || res.status === 'fail' || !res.title;
-        });
-        if (!failedItems.length || BulkState.isCancelled) break;
+    // v9.10 — recovery rounds: nothing is skipped (complete = title + price)
+    BulkState.lastHunt = { mode: 'queue', items: toHunt };
+    if (!BulkState.isCancelled) await huntRecoveryRounds('queue', toHunt);
 
-        updateBulkProgressTitle('Auto-recovering', `Pass ${recoveryPass}: Retrying ${failedItems.length} failed link${failedItems.length > 1 ? 's' : ''}…`);
-        for (const item of failedItems) {
-          if (BulkState.isCancelled) break;
-          const prevIdx = BulkState.results.findIndex(r => r.tabId === item.id);
-          if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
-          item._retryCount = 0;
-          setBulkRowMeta(item.id, `Recovery pass ${recoveryPass}…`);
-          const worker = await ensureQueueWorkerTab();
-          await scrapeQueueItem(item, worker.id);
-          await sleep(800);
-        }
-      }
-    }
-
-    if (!BulkState.isCancelled && !isBulkFastMode()) await imageDownloadPhase();
+    if (!BulkState.isCancelled && !isBulkFastMode()) { bpSetPhase('download'); await imageDownloadPhase(); }
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
   const flushDeadline = Date.now() + 10000;
@@ -5629,34 +5853,17 @@ async function startBulkHunt(tabsOverride) {
   flushLoop();
 
   try {
+    bpSetPhase('hunt');
     updateBulkProgressTitle('Hunting products', `Processing ${selectedTabs.length} tabs…`);
     await processSmartQueue(selectedTabs); // Phase 1: scrape all tabs
 
-    // Auto-Recovery Phase: Re-attempt any failed tabs
-    if (!BulkState.isCancelled) {
-      const failedTabs = selectedTabs.filter(t => {
-        const res = BulkState.results.find(r => r.tabId === t.tabId);
-        return !res || res.status === 'fail';
-      });
-      if (failedTabs.length > 0) {
-        updateBulkProgressTitle('Auto-recovering', `Retrying ${failedTabs.length} failed tab${failedTabs.length > 1 ? 's' : ''}…`);
-        for (const t of failedTabs) {
-          if (BulkState.isCancelled) break;
-          const prevIdx = BulkState.results.findIndex(r => r.tabId === t.tabId);
-          if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
-          t._retried = false;
-          setBulkRowMeta(t.tabId, 'Recovery retry…');
-          try {
-            chrome.tabs.reload(t.tabId, {}, () => { void chrome.runtime.lastError; });
-            await sleep(2000);
-            await scrapeOneTab(t);
-          } catch (_) {}
-        }
-      }
-    }
+    // v9.10 — recovery rounds: nothing is skipped (complete = title + price)
+    BulkState.lastHunt = { mode: 'tabs', items: selectedTabs };
+    if (!BulkState.isCancelled) await huntRecoveryRounds('tabs', selectedTabs);
 
     // Phase 2: download images after all tabs scraped
     if (!BulkState.isCancelled && !isBulkFastMode()) {
+      bpSetPhase('download');
       await imageDownloadPhase();
     }
   } catch (e) {
@@ -6369,12 +6576,13 @@ async function scrapeOneTab(tabInfo) {
     error = e?.message || 'scrape_error';
   }
 
-  // Determine final status
+  // Determine final status — v9.10: complete = title + price (user rule)
   let status;
   if (!scraped) {
     status = 'fail';
-  } else if (!scraped.title || (!scraped.price && (!scraped.images || !scraped.images.length))) {
+  } else if (!scraped.title || !scraped.price) {
     status = 'partial';
+    if (!error) error = huntMissingCode(scraped.title, scraped.price);
   } else {
     status = 'ok';
   }
@@ -6551,9 +6759,10 @@ function openBulkProgressModal(tabs) {
   const list = $('bulkProgList');
   if (list) {
     list.innerHTML = '';
-    tabs.forEach(t => {
+    tabs.forEach((t, i) => {
       const row = document.createElement('div');
-      row.className = 'bulk-prog-row waiting';
+      row.className = 'bulk-prog-row waiting bp-row-in';
+      row.style.setProperty('--i', String(Math.min(i, 14)));
       row.dataset.tabId = t.tabId;
       const platName = t.platform?.name || 'Other';
       const platTag  = t.platform?.tag ? t.platform.tag.toLowerCase() : 'oth';
@@ -6569,7 +6778,11 @@ function openBulkProgressModal(tabs) {
   }
 
   $('bulkResultSummary')?.classList.add('hidden');
+  $('bulkPendingBox')?.classList.add('hidden');
   $('bpHero')?.classList.remove('hidden');
+  bpSetPhase('hunt');
+  $('bulkProgressModal')?.classList.remove('bp-celebrate');
+  bpCountState.clear();
   $('bpListWrap')?.classList.remove('hidden');
   $('bpsCurrent')?.classList.remove('hidden');
   $('bulkProgressFoot')?.classList.remove('hidden');
@@ -6596,6 +6809,41 @@ function bpSetRing(pct, state) {
   if (p) p.textContent = Math.round(pct) + '%';
 }
 
+// v9.10 — popup motion helpers
+function bpSetPhase(phase) {
+  const m = $('bulkProgressModal');
+  if (m) m.dataset.phase = phase;
+}
+
+const bpCountState = new Map();
+// Smoothly count a number element up/down to `to` (respects reduced motion)
+function bpAnimateNumber(el, to) {
+  if (!el) return;
+  to = Number(to) || 0;
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const from = bpCountState.has(el) ? bpCountState.get(el).value : (parseFloat(el.textContent) || 0);
+  const prev = bpCountState.get(el);
+  if (prev?.raf) cancelAnimationFrame(prev.raf);
+  if (reduce || from === to) { el.textContent = String(to); bpCountState.set(el, { value: to }); return; }
+  const t0 = performance.now(), dur = 450;
+  const st = { value: from, raf: 0 };
+  bpCountState.set(el, st);
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    st.value = Math.round(from + (to - from) * e);
+    el.textContent = String(st.value);
+    if (k < 1) st.raf = requestAnimationFrame(step); else { st.value = to; st.raf = 0; }
+  };
+  st.raf = requestAnimationFrame(step);
+  if (to > from) { el.classList.remove('bp-bump'); void el.offsetWidth; el.classList.add('bp-bump'); }
+}
+
+function markBulkRowRetry(tabId, on) {
+  const row = document.querySelector(`.bulk-prog-row[data-tab-id="${tabId}"]`);
+  if (row) row.classList.toggle('retrying', !!on);
+}
+
 function closeBulkProgressModal() {
   $('bulkProgressModal')?.classList.add('hidden');
 }
@@ -6609,8 +6857,20 @@ function updateBulkProgressTitle(text, sub) {
 function setBulkRowStatus(tabId, status, opts = {}) {
   const row = document.querySelector(`.bulk-prog-row[data-tab-id="${tabId}"]`);
   if (!row) return;
-  row.classList.remove('waiting', 'active', 'ok', 'partial', 'fail');
+  const prevStatus = ['waiting', 'active', 'ok', 'partial', 'fail'].find(c => row.classList.contains(c));
+  row.classList.remove('waiting', 'active', 'ok', 'partial', 'fail', 'bp-pop');
   row.classList.add(status);
+  if (prevStatus !== status && (status === 'ok' || status === 'partial' || status === 'fail')) {
+    void row.offsetWidth; row.classList.add('bp-pop');
+  }
+  if (status === 'active') {
+    const list = $('bulkProgList');
+    // follow the active row unless the user is reading the list
+    if (list && !list.matches(':hover') && $('bpListWrap')?.open) {
+      const top = row.offsetTop - list.offsetTop - list.clientHeight / 2 + row.clientHeight / 2;
+      list.scrollTo({ top: Math.max(0, top), behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
+  }
   const statusEl = row.querySelector('.bulk-prog-status');
   const metaEl   = row.querySelector('.bulk-prog-meta');
   if (statusEl) {
@@ -6624,9 +6884,10 @@ function setBulkRowStatus(tabId, status, opts = {}) {
   }
   if (metaEl) {
     if (status === 'ok')      metaEl.textContent = `${opts.images || 0} imgs`;
-    else if (status === 'partial') metaEl.textContent = 'partial';
+    else if (status === 'partial') metaEl.textContent = HUNT_ERR_LABELS[opts.error] || 'partial';
     else if (status === 'fail') {
       const errMap = {
+        ...HUNT_ERR_LABELS,
         'cancelled':       'cancelled',
         'no_response':     'timeout',
         'timeout':         'timeout',
@@ -6662,7 +6923,7 @@ function updateBulkProgressBar(currentItemTitle) {
   const fill    = $('bulkProgFill');
   if (fill) { fill.style.width = pct + '%'; fill.style.background = ''; }
   bpSetRing(pct, (failed > 0 && done === total) ? 'warn' : '');
-  { const d = $('bpDone'), t = $('bpTotal'); if (d) d.textContent = String(done); if (t) t.textContent = String(total); }
+  { const d = $('bpDone'), t = $('bpTotal'); bpAnimateNumber(d, done); if (t) t.textContent = String(total); }
   { const pt = $('bulkProgText'); if (pt) pt.textContent = failed ? `products done · ${failed} failed` : 'products done'; }
 
   // Live stats
@@ -6676,7 +6937,7 @@ function updateBulkProgressBar(currentItemTitle) {
     const m = Math.floor(secLeft / 60), sN = secLeft % 60;
     etaStr = m > 0 ? `${m}m ${sN}s` : `${sN}s`;
   }
-  const chip = (id, n) => { const e = $(id); if (!e) return; const sp = e.querySelector('span'); if (sp) sp.textContent = String(n); else e.textContent = String(n); };
+  const chip = (id, n) => { const e = $(id); if (!e) return; const sp = e.querySelector('span'); const tgt = sp || e; if (typeof n === 'number') bpAnimateNumber(tgt, n); else tgt.textContent = String(n); };
   chip('bpsImages', totalImgs); chip('bpsFailed', failed); chip('bpsSpeed', speed);
   { const ff = $('bpsFailed'); if (ff) ff.classList.toggle('on', failed > 0); }
   { const eta = $('bpsEta'); if (eta) eta.textContent = remaining <= 0 && total > 0 ? 'Finishing up…' : (etaStr ? `About ${etaStr} left` : 'Calculating time left…'); }
@@ -6728,50 +6989,14 @@ function cancelBulkHunt() {
 async function finishBulkHunt() {
   msg({ action: 'STOP_KEEPALIVE' }).catch(() => {});
 
-  const ok      = BulkState.results.filter(r => r.status === 'ok').length;
-  const partial = BulkState.results.filter(r => r.status === 'partial').length;
-  const fail    = BulkState.results.filter(r => r.status === 'fail').length;
-  // Results carry images/videos arrays (imageCount is only on Library rows).
-  const totalImgs = BulkState.results.reduce((s, r) => s + (r.imagesBase64?.length || r.images?.length || r.imageCount || 0), 0);
-
   // Compute hunt duration for summary
   const durMs  = BulkState.huntStartTime ? Date.now() - BulkState.huntStartTime : 0;
   const durSec = Math.round(durMs / 1000);
-  const durStr = durSec >= 60 ? `${Math.floor(durSec/60)}m ${durSec%60}s` : `${durSec}s`;
-
-  $('bulkRsOk').textContent      = ok;
-  $('bulkRsPartial').textContent = partial;
-  $('bulkRsFail').textContent    = fail;
-  $('bulkResultMeta').textContent = `${totalImgs} images · ${durStr} total`;
+  BulkState.huntDurStr = durSec >= 60 ? `${Math.floor(durSec/60)}m ${durSec%60}s` : `${durSec}s`;
 
   // Mark progress complete
   const fill = $('bulkProgFill');
   if (fill) { fill.style.width = '100%'; fill.classList.add('complete'); }
-  bpSetRing(100, fail > 0 ? 'warn' : 'done');
-
-  // Show failed tabs detail
-  const failedRows = BulkState.results.filter(r => r.status === 'fail');
-  const detailEl = $('bulkFailedDetail');
-  const listEl   = $('bulkFailedList');
-  if (detailEl && listEl && failedRows.length > 0) {
-    detailEl.classList.remove('hidden');
-    const errMap = {
-      'cancelled':'cancelled','no_response':'timeout','timeout':'timeout',
-      'no_product':'not a product page','img_fetch_failed':'images failed',
-      'url_mismatch':'wrong page','tab_navigated':'tab navigated','product_mismatch':'data mismatch',
-      'scrape_error':'scrape error','tab_closed':'tab closed','no_script':'no script access','network_error':'network error'
-    };
-    listEl.innerHTML = failedRows.map(r => {
-      const raw    = r.error || '';
-      const reason = errMap[raw] || (raw ? raw.replace(/_/g,' ') : 'failed');
-      const host = (() => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return r.url; } })();
-      return `<div class="bulk-failed-item"><span class="bfi-url" title="${esc(r.url)}">✗ ${esc(host)}</span><span class="bfi-reason">→ ${esc(reason)}</span></div>`;
-    }).join('');
-  } else if (detailEl) {
-    detailEl.classList.add('hidden');
-  }
-
-  // Results are already saved to master sheet via continuous flush loop
 
   // Show result summary
   $('bulkResultSummary')?.classList.remove('hidden');
@@ -6780,15 +7005,135 @@ async function finishBulkHunt() {
   $('bpsCurrent')?.classList.add('hidden');
   $('bulkProgressFoot')?.classList.add('hidden');
   $('bulkProgressCloseBtn')?.classList.remove('hidden');
-  const total = BulkState.results.length;
-  updateBulkProgressTitle(BulkState.isCancelled ? 'Hunt cancelled' : 'Hunt complete',
-    `${total} product${total === 1 ? '' : 's'} · ${totalImgs} images · ${durStr}`);
 
-    updateMasterStats();
+  const pending = huntRefreshSummary();
+  if (!pending && !BulkState.isCancelled) {
+    const m = $('bulkProgressModal');
+    if (m) { m.classList.remove('bp-celebrate'); void m.offsetWidth; m.classList.add('bp-celebrate'); }
+  }
+
+  updateMasterStats();
   updateBulkSummary();
   updateQueueExportButtons();
 
   // v8.3.2: no automatic download — the result modal is where the user picks what to save.
+}
+
+// v9.10 — result numbers + the "pending" list (links that are still not complete).
+// Returns how many links are pending.
+function huntRefreshSummary() {
+  const ok      = BulkState.results.filter(r => r.status === 'ok').length;
+  const partial = BulkState.results.filter(r => r.status === 'partial').length;
+  const fail    = BulkState.results.filter(r => r.status === 'fail').length;
+  const totalImgs = BulkState.results.reduce((s, r) => s + (r.imagesBase64?.length || r.images?.length || r.imageCount || 0), 0);
+
+  bpAnimateNumber($('bulkRsOk'), ok);
+  bpAnimateNumber($('bulkRsPartial'), partial);
+  bpAnimateNumber($('bulkRsFail'), fail);
+  const metaEl = $('bulkResultMeta');
+  if (metaEl) metaEl.textContent = `${totalImgs} images · ${BulkState.huntDurStr || ''} total`;
+
+  const pending = renderHuntPending();
+  bpSetRing(100, pending ? 'warn' : 'done');
+  bpSetPhase(pending ? 'attention' : 'done');
+
+  const total = BulkState.results.length;
+  const title = BulkState.isCancelled ? 'Hunt cancelled' : pending ? 'Hunt complete — kuch links baqi' : 'Hunt complete';
+  updateBulkProgressTitle(title,
+    `${total} product${total === 1 ? '' : 's'} · ${totalImgs} images · ${BulkState.huntDurStr || ''}` + (pending ? ` · ${pending} pending` : ''));
+  const doneBtn = $('bulkResultDoneBtn');
+  if (doneBtn) doneBtn.textContent = pending ? `Close (${pending} pending)` : 'Done';
+  return pending;
+}
+
+function huntItemId(item) {
+  return BulkState.lastHunt?.mode === 'queue' ? item.id : item.tabId;
+}
+
+function renderHuntPending() {
+  const box = $('bulkPendingBox'), list = $('bulkPendingList'), cnt = $('bulkPendingCount');
+  const lh = BulkState.lastHunt;
+  if (!box || !list || !lh) { box?.classList.add('hidden'); return 0; }
+  const pend = lh.items.filter(it => huntNeedsRetry(huntItemId(it)));
+  box.classList.toggle('hidden', !pend.length);
+  if (cnt) cnt.textContent = String(pend.length);
+  const isUrl = v => /^https?:\/\//i.test(v || '');
+  list.innerHTML = pend.map((it, i) => {
+    const id = huntItemId(it);
+    const r = latestHuntResult(id);
+    const name = (r?.title && !isUrl(r.title)) ? r.title : ((it.title && !isUrl(it.title)) ? it.title : it.url);
+    const host = safeHost(it.url) || it.url;
+    const reason = r ? huntErrLabel(r.error) : 'abhi hunt nahi hua';
+    const st = r?.status || 'fail';
+    return `<div class="bp-pend-item ${it._busy ? 'busy' : ''}" data-id="${esc(String(id))}" style="--i:${Math.min(i, 12)}">
+      <span class="bp-pend-dot ${esc(st)}"></span>
+      <div class="bp-pend-txt">
+        <div class="bp-pend-title" title="${esc(it.url)}">${esc(trunc(name, 64))}</div>
+        <div class="bp-pend-reason">${esc(host)} · ${esc(reason)}</div>
+      </div>
+      <button class="bp-pend-retry" type="button" title="Isi link ko dobara hunt karein" ${it._busy ? 'disabled' : ''}>${it._busy ? '<i class="bp-spin"></i>' : '↻'} Retry</button>
+      <a class="bp-open-btn" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" title="Page kholein">↗</a>
+    </div>`;
+  }).join('');
+  return pend.length;
+}
+
+async function huntManualRetry(id) {
+  const lh = BulkState.lastHunt;
+  const it = lh?.items.find(x => String(huntItemId(x)) === String(id));
+  if (!it || it._busy) return null;
+  if (BulkState._retryBusy) { toast('Ek retry pehle se chal raha hai — thora intezaar karein', 'info'); return null; }
+  if (BulkState.isHunting) { toast('Hunt abhi chal raha hai — khatam hone dein', 'warn'); return null; }
+  BulkState._retryBusy = true;
+  it._busy = true;
+  renderHuntPending();
+  BulkState.isCancelled = false;
+  BulkState.isPaused = false;
+  const wasHunting = BulkState.isHunting;
+  BulkState.isHunting = true; // blocks a new hunt from starting meanwhile
+  let r = null;
+  try {
+    r = lh.mode === 'queue' ? await huntRetryQueueItem(it, 3) : await huntRetryTabItem(it, 3);
+    await huntDownloadImagesFor(r);
+    await huntFlushNow();
+    if (lh.mode === 'queue') { saveBulkQueue(); try { loadBulkQueue(); } catch (_) {} }
+  } catch (e) {
+    console.warn('[ZHunter] manual retry error', e);
+  } finally {
+    it._busy = false;
+    BulkState._retryBusy = false;
+    BulkState.isHunting = wasHunting;
+    if (lh.mode === 'queue') await closeQueueWorkerTab();
+  }
+  const name = trunc((r?.title && !/^https?:/i.test(r.title)) ? r.title : safeHost(it.url), 40);
+  if (r?.status === 'ok') toast(`✓ ${name} — ab complete, Library mein update`, 'ok');
+  else toast(`${name} — abhi bhi: ${huntErrLabel(r?.error)}. Page khol kar check karein ya phir Retry.`, 'warn');
+  const pending = huntRefreshSummary();
+  updateMasterStats();
+  if (!pending) {
+    const m = $('bulkProgressModal');
+    if (m) { m.classList.remove('bp-celebrate'); void m.offsetWidth; m.classList.add('bp-celebrate'); }
+  }
+  return r;
+}
+
+async function huntRetryAll() {
+  const lh = BulkState.lastHunt;
+  if (!lh) return;
+  const btn = $('bulkRetryAllBtn');
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bp-spin"></i> Retrying…'; }
+  BulkState._manualRetry = true;
+  try {
+    const ids = lh.items.filter(it => huntNeedsRetry(huntItemId(it))).map(huntItemId);
+    for (const id of ids) {
+      if (!BulkState._manualRetry) break;
+      await huntManualRetry(id);
+    }
+  } finally {
+    BulkState._manualRetry = false;
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Retry all'; }
+  }
 }
 
 // ── Master Sheet storage ─────────────────────────────────────
@@ -6819,10 +7164,39 @@ async function setMasterBatches(batches) {
 async function appendToMasterSheet(rows) {
   // Strip base64 images from master storage (would explode storage)
   const existing = await getMasterRows();
-  const existingUrls = new Set(existing.map(r => (r.url || '').toLowerCase()));
-  const newRows = rows.filter(r => !existingUrls.has((r.url || '').toLowerCase()));
+  const byUrl = new Map(existing.map(r => [(r.url || '').toLowerCase(), r]));
+  // v9.10 — upsert: a better result for a URL we already have (e.g. partial → complete)
+  // updates that row in place; user-filled fields (labelCost, listPrice, id) are kept.
+  let upgraded = 0;
+  const newRows = [];
+  const seenNew = new Set();
+  for (const r of rows) {
+    const key = (r.url || '').toLowerCase();
+    const ex = byUrl.get(key);
+    if (!ex) { if (!seenNew.has(key)) { seenNew.add(key); newRows.push(r); } continue; }
+    if (huntResultScore(r) > huntResultScore(ex)) {
+      Object.assign(ex, {
+        title: r.title || ex.title,
+        price: r.price || ex.price,
+        platform: r.platform || ex.platform,
+        description: r.description || ex.description,
+        variants: (r.variants || []).length ? r.variants.join(', ') : ex.variants,
+        imageCount: Array.isArray(r.images) && r.images.length ? r.images.length : ex.imageCount,
+        images: Array.isArray(r.images) && r.images.length ? r.images.slice(0, 10) : ex.images,
+        brand: r.brand || ex.brand, color: r.color || ex.color, weight: r.weight || ex.weight,
+        dimL: r.dimL || ex.dimL, dimW: r.dimW || ex.dimW, dimH: r.dimH || ex.dimH,
+        bullets: Array.isArray(r.bullets) && r.bullets.length ? r.bullets.slice(0, 6) : ex.bullets,
+        status: r.status,
+        lastRehunted: new Date().toISOString()
+      });
+      upgraded++;
+    }
+  }
 
-  if (newRows.length === 0) return;
+  if (newRows.length === 0) {
+    if (upgraded) await setMasterRows(existing);
+    return;
+  }
 
   const lean = newRows.map(r => ({
     id:           `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,

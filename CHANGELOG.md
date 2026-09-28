@@ -1,5 +1,15 @@
 # ZHunter PRO — CHANGELOG
 
+## v9.10.0 (2026-09-29) — Bulk hunt: koi link skip nahi + naya popup motion
+- **Complete = title + price.** Is se kam data wala link "partial" hai aur dobara hunt hota hai (dono modes: open tabs + background queue).
+- **Koi link skip nahi:** pehle pass mein jo link jawab na de ya adhoora aaye woh baqi hunt nahi rokta; sab ke baad **3 auto-recovery rounds** (1: reload · 2: hard reload / fresh tab, lamba intezaar · 3: tab saamne la kar, content script dobara). Har round ke baad sab se behtar data rakha jata hai — retry ka kharab jawab achhe data ko nahi mitata.
+- **Pending links + Retry:** rounds ke baad bhi adhoore links result popup mein "N links abhi complete nahi" list mein — har link pe **↻ Retry** aur **↗ Open**, upar **Retry all**. Retry ke baad Library khud update.
+- **Library upsert (bug fix):** pehle partial row save hone ke baad isi URL ka poora data ignore ho jata tha; ab behtar data aane par wahi row update hota hai (aapke labelCost/listPrice waisay hi).
+- **Queue fix:** naya link kholte waqt pichhle page ke "complete" status pe scrape ho jata tha (ghalat/adhoora data); ab asal navigation shuru → khatam hone ka intezaar + thora settle time.
+- Queue items: partial ab "Needs retry" (wajah ke saath), complete sirf jab title + price mile.
+- **Popup animations:** phase rang (Hunting cyan → Recovering amber → Downloading purple → Done green), count-up numbers, ring ripple, active row scan + auto-scroll, status icon pop, rows stagger, completion burst; "reduce motion" par animations band.
+- **Flow fix:** Walmart ki AVIF images Flow reject karta tha ("Unsupported file type") aur automation atak jati thi — ab image pehle JPEG/PNG mein convert hoti hai, aur Flow ka upload error foran pakad kar saaf wajah dikhati hai.
+
 ## v9.9.0 (2026-09-29) — Google Flow image studio: sahi order, sahi product
 - **Flow automation dobara likhi (flow_automation.js):** har image ek "job" hai aur steps is order mein, har step verify ho kar: Agent mode OFF → settings Nano Banana 2 · 1:1 · x1 → pichhla prompt/image clear → product image prompt box mein **ingredient** ke taur par attach (chip ready hone tak intezaar; paste → drop → upload + "Add to prompt" fallback) → prompt paste → Generate (trusted CDP click, start confirm) → sirf woh **naya** tile jiske paas "Reuse prompt" ho (generated; upload kabhi nahi) wapas ZHunter ko.
 - Fix: upload hoti hui product image ko "generated" samajh kar wapas bhej dena aur agla product shuru kar dena (asal bug).
