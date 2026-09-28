@@ -461,6 +461,7 @@
         <div class="it"><div class="l"><b>Ratio</b><span>1:1 Square (800x800 min) for Temu & Marketplaces</span></div><select class="sel" style="width:120px" data-setting="imageRatio"><option value="original">Original</option><option value="1:1">1:1 square (Temu)</option><option value="3:4">3:4</option><option value="4:3">4:3</option></select></div>
         <div class="it"><div class="l"><b>Padding colour</b><span>Used when an image is padded</span></div><select class="sel" style="width:120px" data-setting="imageBg"><option value="original">Transparent</option><option value="white">White</option></select></div>
         <div class="it"><div class="l"><b>Keep files under 5 MB</b><span>Recompress oversized images</span></div><label class="sw-wrap"><input type="checkbox" data-setting="imageMax5MB" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Max images to hunt (Temu upload)</b><span>Maximum images to scrape &amp; upload per product (Temu recommends 7)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="1" max="30" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="maxHuntImages" placeholder="7" value="7"><span class="hint">imgs</span></div></div>
         <div class="it"><div class="l"><b>Minimum size</b><span>Skip images smaller than (0 = all)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="0" max="4000" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="imageMinSize" placeholder="0"><span class="hint">px</span></div></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg> Data</span>
@@ -703,7 +704,6 @@
             <div class="bp-count-lbl" id="bulkProgText">products done</div>
             <div class="bp-chips">
               <span class="bp-chip" id="bpsImages"><i class="bp-dot"></i><span>0</span> images</span>
-              <span class="bp-chip" id="bpsVideos"><i class="bp-dot"></i><span>0</span> videos</span>
               <span class="bp-chip bp-chip-fail" id="bpsFailed"><i class="bp-dot"></i><span>0</span> failed</span>
               <span class="bp-chip" id="bpsSpeed"><span>—</span>/s</span>
             </div>

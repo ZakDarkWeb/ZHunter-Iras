@@ -5149,6 +5149,12 @@ async function sendQueueScrape(tabId) {
   });
 }
 
+function getMaxHuntImages() {
+  const custom = parseInt(State?.data?.settings?.maxHuntImages, 10);
+  return (Number.isFinite(custom) && custom > 0) ? custom : 7;
+}
+window.getMaxHuntImages = getMaxHuntImages;
+
 async function scrapeQueueItem(queueItem, workerTabId) {
   const fakeId = queueItem.id;
   setBulkRowStatus(fakeId, 'active');
@@ -5178,12 +5184,14 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     ? 'fail'
     : (!scraped.title && (!scraped.images || !scraped.images.length) && !scraped.price) ? 'partial' : 'ok';
 
-  // Smart auto-retry on failure (1 attempt)
+  // Progressive auto-retry on failure (up to 3 attempts with progressive delay)
   const shouldRetryQueue = State?.data?.settings?.bulkAutoRetry !== false;
-  if (shouldRetryQueue && status === 'fail' && !queueItem._retried && !BulkState.isCancelled && errorCode !== 'cancelled') {
-    queueItem._retried = true;
-    setBulkRowMeta(fakeId, 'Retrying (1/1)…');
-    await sleep(1500);
+  const currentAttempts = Number(queueItem._retryCount || 0);
+  const MAX_ITEM_RETRIES = 3;
+  if (shouldRetryQueue && status === 'fail' && currentAttempts < MAX_ITEM_RETRIES && !BulkState.isCancelled && errorCode !== 'cancelled') {
+    queueItem._retryCount = currentAttempts + 1;
+    setBulkRowMeta(fakeId, `Retrying (${queueItem._retryCount}/${MAX_ITEM_RETRIES})…`);
+    await sleep(1500 * queueItem._retryCount);
     return await scrapeQueueItem(queueItem, workerTabId);
   }
 
@@ -5195,8 +5203,8 @@ async function scrapeQueueItem(queueItem, workerTabId) {
     price: scraped?.price || sMeta?.price || '',
     copy: sMeta?.copy ? sMeta : null,
     platform: typeof queueItem.platform === 'string' ? queueItem.platform : (queueItem.platform?.name || 'Other'),
-    images: scraped?.images || [], imagesBase64: [],
-    videos: scraped?.videos || [], variants: scraped?.variants || [],
+    images: (Array.isArray(scraped?.images) ? scraped.images : []).slice(0, getMaxHuntImages()), imagesBase64: [],
+    videos: [], variants: scraped?.variants || [],
     description: scraped?.description || '',
     brand: scraped?.brand || '', color: scraped?.color || '', weight: scraped?.weight || '', dimL: scraped?.dimL || '', dimW: scraped?.dimW || '', dimH: scraped?.dimH || '', bullets: Array.isArray(scraped?.bullets) ? scraped.bullets : [],
     status,
@@ -5299,6 +5307,30 @@ async function startQueueHunt() {
   try {
     updateBulkProgressTitle('Hunting products', `Processing ${toHunt.length} queued links…`);
     await processQueueSequential(toHunt);
+
+    // Auto-Recovery Phase: Re-attempt any items that failed so 0 links are skipped
+    if (!BulkState.isCancelled) {
+      for (let recoveryPass = 1; recoveryPass <= 2; recoveryPass++) {
+        const failedItems = toHunt.filter(i => {
+          const res = BulkState.results.find(r => r.tabId === i.id);
+          return !res || res.status === 'fail' || !res.title;
+        });
+        if (!failedItems.length || BulkState.isCancelled) break;
+
+        updateBulkProgressTitle('Auto-recovering', `Pass ${recoveryPass}: Retrying ${failedItems.length} failed link${failedItems.length > 1 ? 's' : ''}…`);
+        for (const item of failedItems) {
+          if (BulkState.isCancelled) break;
+          const prevIdx = BulkState.results.findIndex(r => r.tabId === item.id);
+          if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
+          item._retryCount = 0;
+          setBulkRowMeta(item.id, `Recovery pass ${recoveryPass}…`);
+          const worker = await ensureQueueWorkerTab();
+          await scrapeQueueItem(item, worker.id);
+          await sleep(800);
+        }
+      }
+    }
+
     if (!BulkState.isCancelled && !isBulkFastMode()) await imageDownloadPhase();
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
@@ -5535,6 +5567,29 @@ async function startBulkHunt(tabsOverride) {
   try {
     updateBulkProgressTitle('Hunting products', `Processing ${selectedTabs.length} tabs…`);
     await processSmartQueue(selectedTabs); // Phase 1: scrape all tabs
+
+    // Auto-Recovery Phase: Re-attempt any failed tabs
+    if (!BulkState.isCancelled) {
+      const failedTabs = selectedTabs.filter(t => {
+        const res = BulkState.results.find(r => r.tabId === t.tabId);
+        return !res || res.status === 'fail';
+      });
+      if (failedTabs.length > 0) {
+        updateBulkProgressTitle('Auto-recovering', `Retrying ${failedTabs.length} failed tab${failedTabs.length > 1 ? 's' : ''}…`);
+        for (const t of failedTabs) {
+          if (BulkState.isCancelled) break;
+          const prevIdx = BulkState.results.findIndex(r => r.tabId === t.tabId);
+          if (prevIdx !== -1) BulkState.results.splice(prevIdx, 1);
+          t._retried = false;
+          setBulkRowMeta(t.tabId, 'Recovery retry…');
+          try {
+            chrome.tabs.reload(t.tabId, {}, () => { void chrome.runtime.lastError; });
+            await sleep(2000);
+            await scrapeOneTab(t);
+          } catch (_) {}
+        }
+      }
+    }
 
     // Phase 2: download images after all tabs scraped
     if (!BulkState.isCancelled && !isBulkFastMode()) {
@@ -6276,15 +6331,17 @@ async function scrapeOneTab(tabInfo) {
   // PERF: Image download deferred to imageDownloadPhase() after all tabs scraped.
   const imagesBase64 = [];
 
+  const cappedImages = (Array.isArray(scraped?.images) ? scraped.images : []).slice(0, getMaxHuntImages());
+
   const result = {
     tabId:    tabInfo.tabId,
     url:      tabInfo.url,
     title:    scraped?.title || '',
     price:    scraped?.price || '',
     platform: tabInfo.platform?.name || 'Other',
-    images:   scraped?.images || [],
+    images:   cappedImages,
     imagesBase64,
-    videos:   scraped?.videos || [],
+    videos:   [],
     variants: scraped?.variants || [],
     description: scraped?.description || '',
     brand: scraped?.brand || '', color: scraped?.color || '', weight: scraped?.weight || '', dimL: scraped?.dimL || '', dimW: scraped?.dimW || '', dimH: scraped?.dimH || '', bullets: Array.isArray(scraped?.bullets) ? scraped.bullets : [],
@@ -6312,7 +6369,7 @@ async function scrapeOneTab(tabInfo) {
     error:       result.error,
     images:      result.images || [],
     imagesBase64: [],
-    videos:      result.videos || [],
+    videos:      [],
     variants:    result.variants || [],
     description: result.description || '',
     brand: result.brand || '', color: result.color || '', weight: result.weight || '', dimL: result.dimL || '', dimW: result.dimW || '', dimH: result.dimH || '', bullets: result.bullets || [],
@@ -6363,7 +6420,7 @@ async function imageDownloadPhase() {
       const r = pending[cursor++];
       if (!r) break;
       try {
-        const urls = (r.images || []).slice(0, 7);
+        const urls = (r.images || []).slice(0, getMaxHuntImages());
         const batchRes = await msg({ action: 'FETCH_BASE64_BATCH', urls });
         if (batchRes?.success && Array.isArray(batchRes.results)) {
           r.imagesBase64 = batchRes.results.filter(x => x?.success && x.base64).map(x => x.base64);
@@ -6436,11 +6493,13 @@ function openBulkProgressModal(tabs) {
       row.dataset.tabId = t.tabId;
       const platName = t.platform?.name || 'Other';
       const platTag  = t.platform?.tag ? t.platform.tag.toLowerCase() : 'oth';
+      const itemUrl = t.url || '';
       row.innerHTML = `
         <span class="bulk-prog-status">⌛</span>
         <span class="plat-pill plat-pill-sm" data-plat="${esc(platTag)}">${esc(platName)}</span>
-        <span class="bulk-prog-name">${esc(trunc(t.title, 55))}</span>
-        <span class="bulk-prog-meta"></span>`;
+        <span class="bulk-prog-name" title="${esc(t.title || itemUrl)}">${esc(trunc(t.title, 55))}</span>
+        <span class="bulk-prog-meta"></span>
+        ${itemUrl ? `<a href="${esc(itemUrl)}" target="_blank" rel="noopener noreferrer" class="bp-open-btn" title="Open product page in new tab" onclick="event.stopPropagation()">↗</a>` : ''}`;
       list.appendChild(row);
     });
   }
@@ -6546,7 +6605,6 @@ function updateBulkProgressBar(currentItemTitle) {
   const elapsedSec = BulkState.huntStartTime ? (Date.now() - BulkState.huntStartTime) / 1000 : 0;
   const speed      = elapsedSec > 1 ? (done / elapsedSec).toFixed(1) : '—';
   const totalImgs  = BulkState.results.reduce((s, r) => s + (Array.isArray(r.images) ? r.images.length : (r.imageCount || 0)), 0);
-  const totalVids  = BulkState.results.reduce((s, r) => s + (Array.isArray(r.videos) ? r.videos.length : (r.videoCount || 0)), 0);
   const remaining  = total - done;
   let etaStr = '';
   if (elapsedSec > 2 && done > 0 && remaining > 0) {
@@ -6555,7 +6613,7 @@ function updateBulkProgressBar(currentItemTitle) {
     etaStr = m > 0 ? `${m}m ${sN}s` : `${sN}s`;
   }
   const chip = (id, n) => { const e = $(id); if (!e) return; const sp = e.querySelector('span'); if (sp) sp.textContent = String(n); else e.textContent = String(n); };
-  chip('bpsImages', totalImgs); chip('bpsVideos', totalVids); chip('bpsFailed', failed); chip('bpsSpeed', speed);
+  chip('bpsImages', totalImgs); chip('bpsFailed', failed); chip('bpsSpeed', speed);
   { const ff = $('bpsFailed'); if (ff) ff.classList.toggle('on', failed > 0); }
   { const eta = $('bpsEta'); if (eta) eta.textContent = remaining <= 0 && total > 0 ? 'Finishing up…' : (etaStr ? `About ${etaStr} left` : 'Calculating time left…'); }
 
@@ -6611,7 +6669,6 @@ async function finishBulkHunt() {
   const fail    = BulkState.results.filter(r => r.status === 'fail').length;
   // Results carry images/videos arrays (imageCount is only on Library rows).
   const totalImgs = BulkState.results.reduce((s, r) => s + (r.imagesBase64?.length || r.images?.length || r.imageCount || 0), 0);
-  const totalVids = BulkState.results.reduce((s, r) => s + (r.videos?.length || r.videoCount || 0), 0);
 
   // Compute hunt duration for summary
   const durMs  = BulkState.huntStartTime ? Date.now() - BulkState.huntStartTime : 0;
@@ -6621,7 +6678,7 @@ async function finishBulkHunt() {
   $('bulkRsOk').textContent      = ok;
   $('bulkRsPartial').textContent = partial;
   $('bulkRsFail').textContent    = fail;
-  $('bulkResultMeta').textContent = `${totalImgs} images · ${totalVids} videos · ${durStr} total`;
+  $('bulkResultMeta').textContent = `${totalImgs} images · ${durStr} total`;
 
   // Mark progress complete
   const fill = $('bulkProgFill');
@@ -9729,7 +9786,7 @@ const TEMU_DEFAULT_CONFIG = {
   price_max: 999.0,
   quantity_min: 250,
   quantity_max: 500,
-  max_sku_images: 10,
+  max_sku_images: 7,
   defaults: {
     shipping_template: 'Main Shipping Template',
     handling_time: '2 Days',
@@ -10136,7 +10193,7 @@ function temuFillTemplate(wb, items, cfg) {
     put(r, 'Variation_type_1', it.vtype || d.variation_theme); put(r, 'Variation_Variants_1', it.color);
     if (it.images.length) {
       put(r, 'main_image_url', it.images[0]);
-      it.images.slice(1, 10).forEach((u, i) => put(r, 'other_image_url', u, i));
+      it.images.slice(1, getMaxHuntImages()).forEach((u, i) => put(r, 'other_image_url', u, i));
     }
     put(r, 'map_price', it.base); put(r, 'list_price', it.list);
     put(r, 'quantity', it.qty);
