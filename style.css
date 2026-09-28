@@ -2508,6 +2508,37 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
   box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.15) !important;
 }
 
+.temu-review-img-bar {
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.08) 0%, rgba(16, 24, 39, 0.7) 100%) !important;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.3) !important;
+}
+.temu-rv-img-chk-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #38bdf8;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  margin-top: 2px;
+}
+.temu-rv-img-chk-lbl input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: #00E5FF;
+}
+.temu-stepper-box {
+  background: #0b1120 !important;
+  border: 1px solid rgba(0, 229, 255, 0.35) !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(0, 229, 255, 0.2) !important;
+  border-radius: 12px !important;
+}
+
 /* ── Gemini / Flow Modal ─────────────────────────────────── */
 .temu-gemini-box { max-width: 400px; width: 94%; }
 .temu-gemini-body {

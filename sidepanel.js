@@ -11423,6 +11423,12 @@ function temuUpdateReviewCount(rows) {
   if (bulkBtn && !bulkBtn.disabled) {
     bulkBtn.innerHTML = `⚡ Rewrite Checked Titles (${included})`;
   }
+  const imgBtn = $('temuAiBulkImgBtn');
+  if (imgBtn && !imgBtn.disabled) {
+    const selCount = $('temuAiImgCountSel')?.value || '1';
+    const countLabel = selCount === '1' ? '1 img' : selCount === 'all' ? 'All imgs' : `${selCount} imgs`;
+    imgBtn.innerHTML = `✨ Edit Images (${included} prods · ${countLabel})`;
+  }
 }
 
 function _thumbUrl(r) {
@@ -11474,9 +11480,15 @@ async function temuRenderReview() {
     card.dataset.rawPrice = r.price || '';
 
     // Image gallery HTML (compact, fixed height, horizontal scroll)
+    const countMode = $('temuAiImgCountSel')?.value || '1';
+    const defaultCheckedMax = countMode === 'all' ? 99 : (parseInt(countMode, 10) || 1);
     const imgHtml = allImgs.map((url, iIdx) => `
-      <div class="temu-rv-img-item">
+      <div class="temu-rv-img-item" data-iidx="${iIdx}">
         <img src="${esc(url)}" class="temu-rv-img-thumb${iIdx === 0 ? ' main-img' : ''}" loading="lazy" alt="img${iIdx+1}" title="Click to Zoom & Inspect" />
+        <label class="temu-rv-img-chk-lbl" title="Select for AI Generation">
+          <input type="checkbox" class="temu-rv-img-chk" data-iidx="${iIdx}" ${iIdx < defaultCheckedMax ? 'checked' : ''} />
+          <span>AI</span>
+        </label>
         <div class="temu-rv-img-actions">
           ${iIdx !== 0 ? `<button class="temu-rv-img-btn" data-action="setmain" data-iidx="${iIdx}" title="Set as main image">★</button>` : '<span class="temu-rv-img-main-lbl">Main</span>'}
           <button class="temu-rv-img-btn zoom-btn" data-action="zoom" data-iidx="${iIdx}" data-url="${esc(url)}" title="Zoom & Inspect">🔍</button>
@@ -11934,12 +11946,14 @@ function temuInitReviewToggle() {
   const btn = $('temuReviewToggleBtn');
   const list = $('temuReviewList');
   const aiBar = $('temuReviewAiBar');
+  const imgBar = $('temuReviewImgBar');
   const chev = btn?.querySelector('.temu-review-chev');
   if (!btn || !list) return;
   btn.addEventListener('click', async e => {
     if (e.target.closest('.temu-sel-all-wrap')) return;
     const isHidden = list.classList.toggle('hidden');
     if (aiBar) aiBar.classList.toggle('hidden', isHidden);
+    if (imgBar) imgBar.classList.toggle('hidden', isHidden);
     if (chev) chev.style.transform = isHidden ? '' : 'rotate(180deg)';
     if (!isHidden) await temuRenderReview();
   });
@@ -11955,6 +11969,349 @@ function temuInitReviewToggle() {
   // Bulk AI Rewrite Button
   const bulkBtn = $('temuAiBulkRewriteBtn');
   bulkBtn?.addEventListener('click', temuAiBulkRewrite);
+
+  // Bulk AI Image Studio
+  const imgPromptInp = $('temuAiImgPromptInp');
+  if (imgPromptInp && !imgPromptInp.value) {
+    chrome.storage.local.get(['zhunterAiImagePrompt'], res => {
+      imgPromptInp.value = res?.zhunterAiImagePrompt || DEFAULT_AI_COMMERCIAL_PROMPT;
+    });
+    imgPromptInp.addEventListener('input', () => {
+      chrome.storage.local.set({ zhunterAiImagePrompt: imgPromptInp.value });
+    });
+  }
+  $('temuAiImgPromptToggleBtn')?.addEventListener('click', () => {
+    $('temuAiImgPromptWrap')?.classList.toggle('hidden');
+  });
+  $('temuAiImgCountSel')?.addEventListener('change', async () => {
+    const rows = await temuGetQueuedRows();
+    temuUpdateReviewCount(rows);
+    if (!list.classList.contains('hidden')) await temuRenderReview();
+  });
+  $('temuAiBulkImgBtn')?.addEventListener('click', temuStartBulkImageEdit);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// ═══ Bulk AI Image Studio Pipeline ═══
+// ═════════════════════════════════════════════════════════════════
+let TemuImgStepper = {
+  queue: [],
+  currentIndex: 0,
+  engine: 'flow',
+  prompt: ''
+};
+
+async function temuStartBulkImageEdit() {
+  const rows = await temuGetQueuedRows();
+  const includedRows = rows.filter(r => !TemuReviewExcluded.has(r.id));
+  if (!includedRows.length) {
+    toast('Koi product select nahi hai — pehle checkbox check karein', 'warn');
+    return;
+  }
+
+  const engine = $('temuAiImgEngineSel')?.value || 'flow';
+  const countMode = $('temuAiImgCountSel')?.value || '1';
+  const prompt = ($('temuAiImgPromptInp')?.value || '').trim() || DEFAULT_AI_COMMERCIAL_PROMPT;
+
+  // Build the queue of { product, imgUrl, imgIndex }
+  const queue = [];
+  includedRows.forEach(r => {
+    const allImgs = _allImgUrls(r);
+    if (!allImgs.length) return;
+
+    // Check if card exists in DOM and has manual image checkboxes
+    const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
+    const manualChks = card ? Array.from(card.querySelectorAll('.temu-rv-img-chk')) : [];
+
+    let targetIndices = [];
+    if (manualChks.length > 0) {
+      manualChks.forEach(chk => {
+        if (chk.checked) targetIndices.push(parseInt(chk.dataset.iidx, 10));
+      });
+    }
+
+    // Fallback to countMode if no manual checks or card not in DOM
+    if (!targetIndices.length) {
+      if (countMode === '1') targetIndices = [0];
+      else if (countMode === '2') targetIndices = allImgs.slice(0, 2).map((_, i) => i);
+      else if (countMode === '3') targetIndices = allImgs.slice(0, 3).map((_, i) => i);
+      else targetIndices = allImgs.map((_, i) => i);
+    }
+
+    targetIndices.forEach(idx => {
+      if (allImgs[idx]) {
+        queue.push({
+          product: r,
+          imgUrl: allImgs[idx],
+          imgIndex: idx
+        });
+      }
+    });
+  });
+
+  if (!queue.length) {
+    toast('Selected products me koi images nahi mili', 'warn');
+    return;
+  }
+
+  TemuImgStepper = {
+    queue,
+    currentIndex: 0,
+    engine,
+    prompt
+  };
+
+  temuStepOpenModal();
+  await temuStepProcessCurrent();
+}
+
+function temuStepOpenModal() {
+  const modal = $('temuImgStepperModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+
+  // Bind close
+  const closeBtn = $('temuStepCloseBtn');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      modal.classList.add('hidden');
+      toast('Image editing session paused', 'info');
+    };
+  }
+
+  // Bind Skip
+  const skipBtn = $('temuStepSkipBtn');
+  if (skipBtn) {
+    skipBtn.onclick = async () => {
+      TemuImgStepper.currentIndex++;
+      if (TemuImgStepper.currentIndex < TemuImgStepper.queue.length) {
+        await temuStepProcessCurrent();
+      } else {
+        temuStepFinish();
+      }
+    };
+  }
+
+  // Bind Send Again
+  const againBtn = $('temuStepSendAgainBtn');
+  if (againBtn) {
+    againBtn.onclick = async () => {
+      await temuStepSendCurrent();
+    };
+  }
+
+  // Bind Paste & Next
+  const pasteBtn = $('temuStepPasteNextBtn');
+  if (pasteBtn) {
+    pasteBtn.onclick = async () => {
+      await temuStepHandlePasteNext();
+    };
+  }
+}
+
+async function temuStepProcessCurrent() {
+  const { queue, currentIndex } = TemuImgStepper;
+  if (currentIndex >= queue.length) {
+    temuStepFinish();
+    return;
+  }
+
+  const current = queue[currentIndex];
+  const total = queue.length;
+
+  const titleEl = $('temuStepTitle');
+  const subEl = $('temuStepSub');
+  const imgEl = $('temuStepImg');
+  const nameEl = $('temuStepProdName');
+  const statusEl = $('temuStepStatus');
+
+  if (titleEl) titleEl.textContent = `AI Image Studio · Step ${currentIndex + 1}/${total}`;
+  if (subEl) subEl.textContent = `Product: ${trunc(current.product.title, 40)} · Image #${current.imgIndex + 1}`;
+  if (imgEl) imgEl.src = current.imgUrl;
+  if (nameEl) nameEl.textContent = current.product.title || 'Product';
+  if (statusEl) statusEl.textContent = `Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine}...`;
+
+  await temuStepSendCurrent();
+}
+
+async function temuStepSendCurrent() {
+  const { queue, currentIndex, engine, prompt } = TemuImgStepper;
+  const current = queue[currentIndex];
+  if (!current) return;
+
+  const statusEl = $('temuStepStatus');
+
+  if (engine === 'flow') {
+    triggerFlowEdit({
+      src: current.imgUrl,
+      title: current.product.title,
+      prompt: prompt,
+      productId: current.product.id,
+      imageIndex: current.imgIndex
+    });
+    if (statusEl) statusEl.textContent = '✓ Flow tab opened! Model Nano Banana 2 & 1:1 ratio. Generate karke copy karein, phir "Paste & Next" click karein.';
+  } else if (engine === 'gemini') {
+    let base64Data = current.imgUrl;
+    if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
+      try {
+        const resp = await fetch(current.imgUrl);
+        const blob = await resp.blob();
+        base64Data = await new Promise(res => {
+          const rd = new FileReader();
+          rd.onload = () => res(rd.result);
+          rd.readAsDataURL(blob);
+        });
+      } catch (_) {}
+    }
+    await chrome.storage.local.set({
+      pendingGeminiAction: {
+        imgBase64: base64Data,
+        prompt: prompt,
+        timestamp: Date.now(),
+        processed: false
+      }
+    });
+    chrome.tabs.query({ url: '*://gemini.google.com/*' }, (existingTabs) => {
+      if (existingTabs && existingTabs.length > 0) {
+        chrome.tabs.update(existingTabs[0].id, { active: true });
+        chrome.scripting.executeScript({ target: { tabId: existingTabs[0].id }, files: ['gemini_automation.js'] }).catch(() => {});
+        chrome.tabs.sendMessage(existingTabs[0].id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(() => {});
+      } else {
+        chrome.tabs.create({ url: 'https://gemini.google.com/app', active: true });
+      }
+    });
+    if (statusEl) statusEl.textContent = '✓ Gemini opened with image & prompt! Generate karke copy karein, phir "Paste & Next" click karein.';
+  } else if (engine === 'chatgpt') {
+    let base64Data = current.imgUrl;
+    if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
+      try {
+        const resp = await fetch(current.imgUrl);
+        const blob = await resp.blob();
+        base64Data = await new Promise(res => {
+          const rd = new FileReader();
+          rd.onload = () => res(rd.result);
+          rd.readAsDataURL(blob);
+        });
+      } catch (_) {}
+    }
+    await chrome.storage.local.set({
+      pendingGptAction: {
+        imgBase64: base64Data,
+        prompt: prompt,
+        timestamp: Date.now(),
+        processed: false
+      }
+    });
+    chrome.tabs.query({ url: '*://chatgpt.com/*' }, (existingTabs) => {
+      if (existingTabs && existingTabs.length > 0) {
+        chrome.tabs.update(existingTabs[0].id, { active: true });
+        chrome.scripting.executeScript({ target: { tabId: existingTabs[0].id }, files: ['gpt_automation.js'] }).catch(() => {});
+        chrome.tabs.sendMessage(existingTabs[0].id, { action: 'TRIGGER_GPT_IMAGE' }).catch(() => {});
+      } else {
+        chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });
+      }
+    });
+    if (statusEl) statusEl.textContent = '✓ ChatGPT opened with image & prompt! Generate karke copy karein, phir "Paste & Next" click karein.';
+  }
+}
+
+async function temuStepHandlePasteNext() {
+  const { queue, currentIndex } = TemuImgStepper;
+  const current = queue[currentIndex];
+  if (!current) return;
+
+  const btn = $('temuStepPasteNextBtn');
+  if (btn) btn.disabled = true;
+
+  // Try direct clipboard first
+  let base64FromClipboard = null;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) {
+        const blob = await item.getType(type);
+        base64FromClipboard = await new Promise(res => {
+          const rd = new FileReader();
+          rd.onload = () => res(rd.result);
+          rd.readAsDataURL(blob);
+        });
+        break;
+      }
+    }
+  } catch (_) {}
+
+  // Fallback: read clipboard via Flow tab
+  if (!base64FromClipboard) {
+    try {
+      const tabs = await chrome.tabs.query({});
+      const flowTab = tabs.find(t => t.url && t.url.includes('flow.google.com'));
+      if (flowTab) {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: flowTab.id },
+          func: async () => {
+            try {
+              const items = await navigator.clipboard.read();
+              for (const item of items) {
+                const type = item.types.find(t => t.startsWith('image/'));
+                if (type) {
+                  const blob = await item.getType(type);
+                  return await new Promise(res => {
+                    const rd = new FileReader();
+                    rd.onload = () => res(rd.result);
+                    rd.readAsDataURL(blob);
+                  });
+                }
+              }
+            } catch (e) { return null; }
+            return null;
+          }
+        });
+        base64FromClipboard = results?.[0]?.result || null;
+      }
+    } catch (_) {}
+  }
+
+  if (base64FromClipboard) {
+    // Replace image in product
+    current.product.images[current.imgIndex] = base64FromClipboard;
+    if (MasterUIState?.allRows) {
+      const m = MasterUIState.allRows.find(x => x.id === current.product.id);
+      if (m) m.images = current.product.images;
+      await setMasterRows(MasterUIState.allRows);
+    }
+    toast(`✓ Image #${current.imgIndex + 1} updated!`, 'ok');
+
+    // Async upload to public host for Temu template
+    (async () => {
+      const pub = await uploadImageToPublicHost(base64FromClipboard);
+      if (pub && pub.startsWith('http')) {
+        current.product.images[current.imgIndex] = pub;
+        if (MasterUIState?.allRows) {
+          const m = MasterUIState.allRows.find(x => x.id === current.product.id);
+          if (m) m.images = current.product.images;
+          await setMasterRows(MasterUIState.allRows);
+        }
+      }
+    })();
+
+    TemuImgStepper.currentIndex++;
+    if (btn) btn.disabled = false;
+    if (TemuImgStepper.currentIndex < queue.length) {
+      await temuStepProcessCurrent();
+    } else {
+      temuStepFinish();
+    }
+  } else {
+    if (btn) btn.disabled = false;
+    toast('Clipboard me image nahi mili! Generated image par Right Click > Copy Image karein, phir Paste & Next click karein.', 'warn');
+  }
+}
+
+async function temuStepFinish() {
+  $('temuImgStepperModal')?.classList.add('hidden');
+  await temuRenderReview();
+  toast('🎉 All selected images processed successfully!', 'ok');
 }
 
 // Gemini image open modal
