@@ -97,31 +97,117 @@
     try { el.click(); } catch (_) {}
   }
 
-  // Helper: Ensure Flow model is switched to 🍌 Nano Banana 2
-  async function ensureNanoBananaModel() {
+  // Helper: Ensure Flow model is switched to 🍌 Nano Banana 2 AND Aspect Ratio is 1:1 (Square)
+  async function ensureFlowModelAndRatio() {
     try {
-      const modelTrigger = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
-      const labelEl = modelTrigger?.querySelector('.model-select-trigger-label') || modelTrigger;
-      const curText = (labelEl?.textContent || '').trim();
-      if (!curText.toLowerCase().includes('nano banana 2')) {
-        console.log('[ZHunter Flow] Current model is:', curText, 'Switching to 🍌 Nano Banana 2…');
-        if (modelTrigger) {
-          simulateRealClick(modelTrigger);
-          await new Promise(r => setTimeout(r, 450));
-          const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item, mat-dialog-container button'));
-          const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
-          if (targetItem) {
-            simulateRealClick(targetItem);
-            console.log('[ZHunter Flow] Successfully selected 🍌 Nano Banana 2');
-          } else {
-            document.body.click();
-          }
+      // If already verified in this session/page load, skip opening settings repeatedly
+      if (window.__zhFlowSettingsConfigured) {
+        return;
+      }
+
+      let settingsView = document.querySelector('flow-settings-view');
+
+      // 1. Open settings panel if not currently open
+      if (!settingsView) {
+        const settingsBtn = document.querySelector('button.agent-action-button[aria-label="Settings"], button[aria-label="Settings"], button.settings-trigger-button');
+        if (settingsBtn) {
+          console.log('[ZHunter Flow] Opening Agent settings to configure 🍌 Nano Banana 2 & 1:1 Ratio…');
+          simulateRealClick(settingsBtn);
+          settingsView = await waitForEl('flow-settings-view', 4000);
         }
+      }
+
+      if (settingsView) {
+        await new Promise(r => setTimeout(r, 450));
+
+        // A. Ensure Aspect Ratio is 1:1 (Square)
+        try {
+          const ratioGroup = settingsView.querySelector('flow-toggles[aria-label*="Image"][aria-label*="aspect ratio"], flow-toggles[aria-label*="aspect ratio"]');
+          if (ratioGroup) {
+            const toggles = Array.from(ratioGroup.querySelectorAll('mat-button-toggle'));
+            const squareToggle = toggles.find(t => t.textContent?.includes('1:1') || t.querySelector('mat-icon')?.textContent?.includes('crop_square'));
+            if (squareToggle) {
+              const isChecked = squareToggle.classList.contains('mat-button-toggle-checked') || squareToggle.querySelector('button[aria-checked="true"]');
+              if (!isChecked) {
+                console.log('[ZHunter Flow] Setting aspect ratio to 1:1…');
+                const btn = squareToggle.querySelector('button') || squareToggle;
+                simulateRealClick(btn);
+                await new Promise(r => setTimeout(r, 250));
+              } else {
+                console.log('[ZHunter Flow] Aspect ratio verified: 1:1');
+              }
+            }
+          }
+        } catch (errRatio) {
+          console.warn('[ZHunter Flow] Ratio check error:', errRatio);
+        }
+
+        // B. Ensure Model is 🍌 Nano Banana 2
+        try {
+          const modelBtn = settingsView.querySelector('button.image-model-picker-button, button[aria-label*="Image"][aria-label*="default model"]');
+          const labelEl = modelBtn?.querySelector('.model-select-trigger-label') || modelBtn;
+          const curText = (labelEl?.textContent || '').trim();
+          if (!curText.toLowerCase().includes('nano banana 2')) {
+            console.log('[ZHunter Flow] Model is:', curText, 'Switching to 🍌 Nano Banana 2…');
+            if (modelBtn) {
+              simulateRealClick(modelBtn);
+              await new Promise(r => setTimeout(r, 450));
+              const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item, mat-dialog-container button'));
+              const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
+              if (targetItem) {
+                simulateRealClick(targetItem);
+                console.log('[ZHunter Flow] Selected 🍌 Nano Banana 2');
+                await new Promise(r => setTimeout(r, 300));
+              } else {
+                document.body.click();
+              }
+            }
+          } else {
+            console.log('[ZHunter Flow] Model verified: 🍌 Nano Banana 2');
+          }
+        } catch (errModel) {
+          console.warn('[ZHunter Flow] Model check error in settings:', errModel);
+        }
+
+        // C. Save settings
+        try {
+          const saveBtn = settingsView.querySelector('button.settings-save-button, .save-container button');
+          if (saveBtn) {
+            simulateRealClick(saveBtn);
+            console.log('[ZHunter Flow] Settings saved');
+            await new Promise(r => setTimeout(r, 350));
+          }
+        } catch (_) {}
+
+        // D. Close settings panel and return to editor
+        try {
+          const backBtn = document.querySelector('button[aria-label="Back"]') ||
+                          Array.from(document.querySelectorAll('button mat-icon')).find(i => i.textContent?.trim() === 'arrow_back')?.closest('button');
+          if (backBtn) {
+            simulateRealClick(backBtn);
+            await new Promise(r => setTimeout(r, 300));
+          }
+        } catch (_) {}
+
+        window.__zhFlowSettingsConfigured = true;
       } else {
-        console.log('[ZHunter Flow] Model already verified: 🍌 Nano Banana 2');
+        // Direct inline model picker fallback if settings panel could not be opened
+        try {
+          const modelTrigger = document.querySelector('button.image-model-picker-button, button[aria-label*="default model"]');
+          const labelEl = modelTrigger?.querySelector('.model-select-trigger-label') || modelTrigger;
+          const curText = (labelEl?.textContent || '').trim();
+          if (!curText.toLowerCase().includes('nano banana 2') && modelTrigger) {
+            simulateRealClick(modelTrigger);
+            await new Promise(r => setTimeout(r, 450));
+            const menuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .cdk-overlay-pane [role="menuitem"], button.mat-mdc-menu-item'));
+            const targetItem = menuItems.find(el => el.textContent?.toLowerCase().includes('nano banana 2'));
+            if (targetItem) simulateRealClick(targetItem);
+            else document.body.click();
+          }
+        } catch (_) {}
       }
     } catch (e) {
-      console.warn('[ZHunter Flow] Model switch error:', e);
+      console.warn('[ZHunter Flow] ensureFlowModelAndRatio error:', e);
     }
   }
 
@@ -292,13 +378,13 @@
 
       // STEP 2: We are inside /project/...
       if (isInsideProject) {
-        updateFlowHUD('ZHunter: Project open! Verifying 🍌 Nano Banana 2 & adding image…', 'info');
+        updateFlowHUD('ZHunter: Verifying 🍌 Nano Banana 2 & 1:1 Ratio…', 'info');
 
         // Allow Angular view to mount
         await new Promise(r => setTimeout(r, 600));
 
-        // 1. Ensure Model is 🍌 Nano Banana 2
-        await ensureNanoBananaModel();
+        // 1. Ensure Model is 🍌 Nano Banana 2 AND Aspect Ratio is 1:1
+        await ensureFlowModelAndRatio();
 
         // 2. Set Project Name
         try {
