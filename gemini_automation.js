@@ -209,3 +209,4 @@
     document.addEventListener('DOMContentLoaded', checkPendingAction);
   }
 })();
+

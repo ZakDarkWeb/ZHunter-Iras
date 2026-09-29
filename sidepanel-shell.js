@@ -221,3 +221,4 @@
   syncStatus();
   setInterval(syncStatus, 30000);
 })();
+

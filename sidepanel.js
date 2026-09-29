@@ -3007,6 +3007,12 @@ function _productRowsById(productId) {
     const s = TemuSheetRows.find(x => x.id === productId);
     if (s) out.push(s);
   }
+  // v9.10.1 — the stepper's own product objects (e.g. Library rows loaded straight from storage)
+  try {
+    for (const q of (TemuImgStepper?.queue || [])) {
+      if (q?.product?.id === productId && !out.includes(q.product)) out.push(q.product);
+    }
+  } catch (_) {}
   return out;
 }
 
@@ -3031,6 +3037,20 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
     if (MasterUIState?.allRows && MasterUIState.allRows.includes(row)) touchedMaster = true;
   }
   if (touchedMaster) await setMasterRows(MasterUIState.allRows);
+  else if (changed && productId) {
+    // v9.10.1 — Library not loaded in memory: write the new image into the saved Library too
+    try {
+      const saved = await getMasterRows();
+      const row = saved.find(x => x.id === productId);
+      if (row && Array.isArray(row.images) && idx >= 0 && idx < row.images.length) {
+        const cur = _imgEntryUrl(row.images[idx]);
+        if (!expectedUrl || cur === expectedUrl) {
+          row.images[idx] = typeof row.images[idx] === 'string' ? newUrl : { ...row.images[idx], url: newUrl };
+          await setMasterRows(saved);
+        }
+      }
+    } catch (e) { console.warn('[ZHunter] Library save after replace failed:', e); }
+  }
   return changed;
 }
 
@@ -3098,8 +3118,13 @@ function isActiveStepperJob(jobId) {
 }
 
 // Progress / errors from the Flow tab
+const FlowGenInfo = new Map();
+const FlowSendSnap = new Map(); // jobId -> { ids:Set, at } grid snapshot taken right before sending // jobId -> { before:Set, ref:Set, at } (ids present when generation started)
 function onFlowStatus(m) {
   if (!m?.jobId || !FlowJobs.has(m.jobId)) return;
+  if (m.phase === 'generating' && Array.isArray(m.beforeIds)) {
+    FlowGenInfo.set(m.jobId, { before: new Set(m.beforeIds), ref: new Set(m.refIds || []), at: Date.now() });
+  }
   if (isActiveStepperJob(m.jobId)) {
     temuStepSetStatus((m.error ? '⚠️ ' : '⏳ ') + (m.text || m.phase || ''), m.error ? 'error' : 'info');
   }
@@ -3115,12 +3140,37 @@ function onFlowStatus(m) {
 }
 
 // Generated image from the Flow tab
+const FlowHandledResults = new Set();
+// Let the Flow tab stop waiting (it would otherwise hold the next job up to 3 min)
+async function _markFlowJobDone(jobId, newImgUrl) {
+  try {
+    const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
+    if (cur && cur.jobId === jobId && !(cur.processed && cur.status === 'done')) {
+      await chrome.storage.local.set({ pendingFlowAction: { ...cur, processed: true, status: 'done', newImgUrl: newImgUrl || cur.newImgUrl, finishedAt: Date.now(), by: 'panel' } });
+    }
+  } catch (_) {}
+} // jobIds already applied (message + storage both deliver)
 async function onFlowResult(m) {
-  const job = m?.jobId ? FlowJobs.get(m.jobId) : null;
+  if (!m?.jobId || FlowHandledResults.has(m.jobId)) return;
+  let job = FlowJobs.get(m.jobId) || null;
+  // v9.10.1 — the current stepper job is always known to the stepper itself, even if
+  // FlowJobs lost it (e.g. the result arrived twice or the map was reset).
+  if (!job && m?.jobId && isActiveStepperJob(m.jobId)) {
+    const cur = TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
+    if (cur && cur.jobId === m.jobId) {
+      job = { productId: cur.product?.id, imageIndex: cur.imgIndex, originalUrl: cur.imgUrl, source: 'stepper', title: cur.product?.title };
+      FlowJobs.set(m.jobId, job);
+    }
+  }
   if (!job) {
     console.warn('[ZHunter] Flow result for unknown/old job ignored:', m?.jobId);
     return;
   }
+  if (job.source === 'stepper') return; // stepper results: handled only by the auto poller
+  FlowHandledResults.add(m.jobId);
+  FlowGenInfo.delete(m.jobId);
+  console.log('[ZHunter] Flow result received', m.jobId, m.newImgUrl);
+  _markFlowJobDone(m.jobId, m.newImgUrl);
   if (job.source === 'stepper' && !isActiveStepperJob(m.jobId)) {
     console.warn('[ZHunter] Flow result is not for the current step — ignored:', m.jobId);
     FlowJobs.delete(m.jobId);
@@ -3129,15 +3179,24 @@ async function onFlowResult(m) {
   FlowJobs.delete(m.jobId);
 
   // Always trust the job record, never ids echoed back from the page
-  const { productId, imageIndex, originalUrl, title } = job;
+  let { productId, imageIndex, originalUrl, title } = job;
   const isStep = job.source === 'stepper';
+  if (isStep && !productId) {
+    const sc = (TemuImgStepper.queue || []).find(q => q.jobId === m.jobId);
+    if (sc?.product) productId = _ensureRowIds([sc.product])[0].id;
+  }
 
   if (!productId || imageIndex == null) {
     toast('✓ Flow image ban gayi (yeh image kisi product se linked nahi thi)', 'ok');
     return;
   }
 
-  const cur = currentProductImage(productId, imageIndex);
+  // v9.10.1 — the same product can exist twice (Library copy + Bulk/Sheet copy) with different
+  // image links. Check the stepper's own product object first, then any copy.
+  let cur = currentProductImage(productId, imageIndex);
+  const stepCur = isStep ? (TemuImgStepper.queue || []).find(q => q.jobId === m.jobId) : null;
+  if (stepCur) cur = _imgEntryUrl(stepCur.product?.images?.[imageIndex]);
+  else if (cur !== originalUrl && _productRowsById(productId).some(r => _imgEntryUrl(r.images?.[imageIndex]) === originalUrl)) cur = originalUrl;
   if (cur === null || cur !== originalUrl) {
     const why = cur === null ? 'product ab list mein nahi' : 'us jagah image pehle hi badal chuki hai';
     toast(`⚠️ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replace nahi ki — ${why}`, 'warn');
@@ -3178,11 +3237,230 @@ async function onFlowResult(m) {
 
   if (isStep && isActiveStepperJob(m.jobId)) {
     TemuImgStepper.activeJobId = null;
-    setTimeout(() => temuStepAdvance(), 900);
+    temuStepScheduleNext();
   }
 }
 
+// v9.10.1 — human-like pacing between Flow jobs (random 4–9 s) so the account doesn't
+// fire generations back-to-back like a bot.
+function temuStepScheduleNext() {
+  if (!TemuImgStepper.running) return;
+  const more = TemuImgStepper.currentIndex + 1 < TemuImgStepper.queue.length;
+  if (!more) { setTimeout(() => temuStepAdvance(), 800); return; }
+  const wait = 4000 + Math.floor(Math.random() * 5000);
+  temuStepSetStatus(`✓ Replaced — agla image ${Math.round(wait / 1000)}s mein…`, 'ok');
+  const idx = TemuImgStepper.currentIndex;
+  setTimeout(() => {
+    if (TemuImgStepper.running && TemuImgStepper.currentIndex === idx && !TemuImgStepper.activeJobId) temuStepAdvance();
+  }, wait);
+}
+
+// v9.10.1 — watchdog: while a step waits on Flow, read the job record from storage.
+// Works even if the runtime message from the Flow tab never reached the side panel.
+setInterval(async () => {
+  try {
+    const id = TemuImgStepper?.running ? TemuImgStepper.activeJobId : null;
+    if (!id) return;
+    const pfa = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
+    if (!pfa || pfa.jobId !== id) return;
+    if (pfa.status === 'done' && pfa.newImgUrl && !FlowHandledResults.has(id)) {
+      console.log('[ZHunter] Watchdog picked up Flow result from storage', id);
+      await onFlowResult({ action: 'ZH_REPLACE_IMAGE_FROM_FLOW', jobId: id, newImgUrl: pfa.newImgUrl, mediaId: pfa.mediaId });
+    } else if (pfa.status === 'error' && pfa.error && FlowJobs.has(id)) {
+      onFlowStatus({ jobId: id, error: true, text: pfa.error });
+    }
+  } catch (e) { console.warn('[ZHunter] Flow watchdog error:', e); }
+}, 2500);
+
+// v9.10.1 — manual image for the current step (paste / drop / "Flow se latest")
+async function temuStepApplyManualImage(src, how = 'manual') {
+  if (!TemuImgStepper?.running) return false;
+  const current = TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
+  if (!current || !src) return false;
+  current.done = true;
+  // A late automatic result for this step must not overwrite the manual one
+  if (TemuImgStepper.activeJobId) {
+    FlowHandledResults.add(TemuImgStepper.activeJobId);
+    _markFlowJobDone(TemuImgStepper.activeJobId, /^https?:/i.test(src) ? src : null);
+  }
+  temuStepCancelActiveJob();
+  temuStepSetStatus(`⏳ ${how}: image laga raha hoon…`);
+
+  let finalUrl = src;
+  if (/^https:\/\/flow-content\.google\//i.test(src)) {
+    finalUrl = await uploadImageToPublicHost(src);
+    if (!finalUrl || /flow-content\.google/i.test(finalUrl)) {
+      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src });
+      finalUrl = r?.success && r.base64 ? r.base64 : src;
+    }
+  }
+  const pid = current.product?.id, idx = current.imgIndex;
+  let ok = await replaceProductImage(pid, idx, finalUrl, null);
+  if (Array.isArray(current.product?.images)) {
+    const e = current.product.images[idx];
+    current.product.images[idx] = typeof e === 'string' || e == null ? finalUrl : { ...e, url: finalUrl };
+    ok = true;
+  }
+  if (!ok) { temuStepSetStatus('⚠️ Image nahi lagi — product list mein nahi mila', 'error'); return false; }
+  TemuImgStepper.stats.done++;
+  try { await temuRenderReview(); } catch (_) {}
+  toast(`✓ ${trunc(current.product?.title || 'Product', 30)} · Image #${idx + 1} replaced (${how})`, 'ok');
+
+  // data: image → public link in the background (Temu needs a URL)
+  if (/^data:image\//i.test(finalUrl)) {
+    (async () => {
+      const pub = await uploadImageToPublicHost(finalUrl);
+      if (pub && /^https?:\/\//i.test(pub)) {
+        await replaceProductImage(pid, idx, pub, finalUrl);
+        const e = current.product?.images?.[idx];
+        if (e === finalUrl) current.product.images[idx] = pub;
+        else if (e && e.url === finalUrl) current.product.images[idx] = { ...e, url: pub };
+      }
+    })();
+  }
+  temuStepScheduleNext();
+  return true;
+}
+
+function _fileToDataUrl(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+}
+
+function temuStepModalOpen() {
+  const m = $('temuImgStepperModal');
+  return !!(m && !m.classList.contains('hidden') && TemuImgStepper?.running);
+}
+
+document.addEventListener('paste', async (e) => {
+  if (!temuStepModalOpen()) return;
+  const item = Array.from(e.clipboardData?.items || []).find(i => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  const f = item.getAsFile();
+  if (f) await temuStepApplyManualImage(await _fileToDataUrl(f), 'Paste');
+});
+
+(function initTemuStepPasteZone() {
+  const z = $('temuStepPasteZone');
+  if (!z) return;
+  z.addEventListener('click', () => z.focus());
+  z.addEventListener('dragover', (e) => { e.preventDefault(); z.style.borderColor = '#00E5FF'; });
+  z.addEventListener('dragleave', () => { z.style.borderColor = ''; });
+  z.addEventListener('drop', async (e) => {
+    e.preventDefault(); z.style.borderColor = '';
+    const f = Array.from(e.dataTransfer?.files || []).find(x => x.type.startsWith('image/'));
+    if (f) return temuStepApplyManualImage(await _fileToDataUrl(f), 'Drop');
+    const url = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain') || '';
+    if (/^https?:\/\//i.test(url.trim())) temuStepApplyManualImage(url.trim(), 'Drop');
+  });
+})();
+
+// v9.10.1 — list every Flow media image in the project grid (DOM order = newest first)
+async function flowScanImages() {
+  const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+  const tab = tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
+  if (!tab) return null;
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const re = /^https:\/\/flow-content\.google\/image\/([\w-]+)/i;
+        const out = [];
+        for (const img of document.querySelectorAll('img')) {
+          const s = img.currentSrc || img.src || '';
+          const m = s.match(re);
+          if (!m) continue;
+          if (img.closest('flow-base-prompt-box, flow-add-menu-popover-content, flow-agent-panel, .cdk-overlay-container')) continue;
+          const t = (img.closest('flow-grid-tile-container, [aria-label]')?.getAttribute('aria-label') || '').trim();
+          out.push({ id: img.getAttribute('data-media-id') || m[1], src: s, title: t, loaded: img.complete && img.naturalWidth > 0 });
+        }
+        return out;
+      }
+    });
+    return r?.result || [];
+  } catch (e) { console.warn('[ZHunter] Flow scan failed:', e); return null; }
+}
+const _flowUploadTitle = (t) => /\.(png|jpe?g|webp|gif|avif|heic)$/i.test(t || '') || /^zhunter_/i.test(t || '');
+
+// Auto: while the active step is generating, look for the new image ourselves (same method
+// as "Flow se latest", which works on every Flow build).
+// v9.10.1 — ONE auto path, identical to the working "Flow se latest" button:
+// per step, remember which Flow images existed when the step was sent; the first new
+// (non-upload) image in the grid is this step's result → temuStepApplyManualImage.
+let _flowPollBusy = false;
+setInterval(async () => {
+  if (_flowPollBusy) return;
+  const S = TemuImgStepper;
+  if (!S?.running || S.engine !== 'flow') return;
+  const cur = S.queue?.[S.currentIndex];
+  if (!cur || cur.done || !cur.sentAt) return;
+  _flowPollBusy = true;
+  try {
+    const list = await flowScanImages();
+    if (!Array.isArray(list)) { temuStepSetStatus('⚠️ Flow tab nahi mila / scan nahi hua — Flow tab khula rakhein', 'error'); return; }
+    if (!cur.snap) { cur.snap = new Set(list.map(g => g.id)); return; }
+    const hit = list.find(g => !cur.snap.has(g.id) && !_flowUploadTitle(g.title));
+    if (hit && !cur.done && S.queue[S.currentIndex] === cur) {
+      cur.done = true;
+      console.log('[ZHunter] Auto: new Flow image', hit.id, hit.title);
+      await temuStepApplyManualImage(hit.src, 'Auto');
+    } else if (!hit) {
+      const secs = Math.round((Date.now() - cur.sentAt) / 1000);
+      const el = $('temuStepStatus');
+      if (el && !/⚠️|✓|✅/.test(el.textContent)) el.textContent = `⏳ Generating… ${secs}s (Flow mein ${list.length} images, nayi abhi nahi)`;
+    }
+  } catch (e) { console.warn('[ZHunter] Auto poll error:', e); }
+  finally { _flowPollBusy = false; }
+}, 4000);
+
+// Newest generated image in the open Flow project (skips uploads and prompt-box chips)
+async function temuStepGrabLatestFromFlow() {
+  const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+  const tab = tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
+  if (!tab) { toast('Flow tab khula nahi', 'warn'); return; }
+  let src = null;
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const re = /^https:\/\/flow-content\.google\/image\/([\w-]+)/i;
+        const chipIds = new Set(Array.from(document.querySelectorAll('flow-base-prompt-box img'))
+          .map(i => ((i.currentSrc || i.src || '').match(re) || [])[1]).filter(Boolean));
+        for (const img of document.querySelectorAll('img')) {
+          const s = img.currentSrc || img.src || '';
+          const m = s.match(re);
+          if (!m || chipIds.has(m[1])) continue;
+          if (img.closest('flow-base-prompt-box, flow-add-menu-popover-content, flow-agent-panel, .cdk-overlay-container')) continue;
+          const t = (img.closest('flow-grid-tile-container, [aria-label]')?.getAttribute('aria-label') || '').trim();
+          if (/\.(png|jpe?g|webp|gif|avif|heic)$/i.test(t) || /^zhunter_/i.test(t)) continue;
+          return s;
+        }
+        return null;
+      }
+    });
+    src = r?.result || null;
+  } catch (e) { console.warn('[ZHunter] Grab from Flow failed:', e); }
+  if (!src) { toast('Flow mein koi generated image nahi mili', 'warn'); return; }
+  await temuStepApplyManualImage(src, 'Flow latest');
+}
+$('temuStepGrabFlowBtn')?.addEventListener('click', () => temuStepGrabLatestFromFlow());
+
+// v9.10.1 — backup delivery: the Flow tab also writes the result into storage.
+// onFlowResult removes the job synchronously, so a result is never applied twice.
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const nv = area === 'local' ? changes.pendingFlowAction?.newValue : null;
+    if (nv?.status === 'done' && nv.newImgUrl && nv.jobId && FlowJobs.has(nv.jobId)) {
+      onFlowResult({ action: 'ZH_REPLACE_IMAGE_FROM_FLOW', jobId: nv.jobId, newImgUrl: nv.newImgUrl, mediaId: nv.mediaId })
+        .catch(e => console.warn('[ZHunter] Replace from Flow (storage) error:', e));
+    }
+  });
+} catch (_) {}
+
 chrome.runtime.onMessage.addListener((m) => {
+  if (m?.action === 'ZH_FLOW_STATUS' || m?.action === 'ZH_REPLACE_IMAGE_FROM_FLOW') {
+    console.log('[ZHunter] Flow msg', m.action, m.jobId, m.phase || '', '| active:', TemuImgStepper?.activeJobId, '| known:', FlowJobs.has(m.jobId));
+  }
   if (m?.action === 'ZH_FLOW_STATUS') onFlowStatus(m);
   else if (m?.action === 'ZH_REPLACE_IMAGE_FROM_FLOW' && m.newImgUrl) {
     onFlowResult(m).catch(e => console.warn('[ZHunter] Replace from Flow error:', e));
@@ -5593,6 +5871,7 @@ async function startQueueHunt() {
   BulkState.isHunting = true; BulkState.isPaused = false; BulkState.isCancelled = false;
   { const cb = $('bulkCancelBtn'); if (cb) { cb.disabled = false; cb.textContent = 'Cancel'; } const pb = $('bulkPauseBtn'); if (pb) { pb.disabled = false; pb.textContent = 'Pause'; } }
   BulkState.results = []; BulkState.pendingFlush = []; BulkState._flushActive = false;
+  document.getElementById('bpLiveBadge')?.classList.remove('off');
   BulkState.currentBatchId = `queue_${Date.now()}`; BulkState.huntStartTime = Date.now();
   const fakeTabs = toHunt.map(i => ({ tabId: i.id, url: i.url, title: i.title || i.url,
     platform: typeof i.platform === 'string' ? { name: i.platform, tag: i.platform.substring(0,3).toUpperCase() } : (i.platform ? { name: i.platform, tag: String(i.platform).substring(0,3).toUpperCase() } : null) }));
@@ -7043,6 +7322,16 @@ function huntRefreshSummary() {
     `${total} product${total === 1 ? '' : 's'} · ${totalImgs} images · ${BulkState.huntDurStr || ''}` + (pending ? ` · ${pending} pending` : ''));
   const doneBtn = $('bulkResultDoneBtn');
   if (doneBtn) doneBtn.textContent = pending ? `Close (${pending} pending)` : 'Done';
+  // v9.10.2 — result hero
+  const ready = ok + partial;
+  const pct = total ? Math.round((ok / total) * 100) : 0;
+  const hero = $('bpDoneHero');
+  if (hero) hero.dataset.state = BulkState.isCancelled ? 'cancel' : (fail || pending) ? 'warn' : 'ok';
+  const ico = $('bpDoneIco'); if (ico) ico.textContent = BulkState.isCancelled ? '■' : (fail || pending) ? '!' : '✓';
+  const hd = $('bpDoneHead'); if (hd) hd.textContent = BulkState.isCancelled ? 'Hunt cancelled' : `${ready}/${total} products ready`;
+  const sb = $('bpDoneSub'); if (sb) sb.textContent = `${totalImgs} images · ${BulkState.huntDurStr || '—'}` + (pending ? ` · ${pending} retry chahiye` : fail ? ` · ${fail} failed` : ' · sab complete 🎉');
+  const bar = $('bpDoneBar'); if (bar) requestAnimationFrame(() => { bar.style.width = pct + '%'; });
+  $('bpLiveBadge')?.classList.add('off');
   return pending;
 }
 
@@ -12335,6 +12624,26 @@ function buildProductAiPrompt(r, currentTitle, instruction) {
   return finalPrompt;
 }
 
+// v9.10.2 — Send button / Enter / preset chips for the Title Optimizer instruction
+(function initTemuAiPromptSend() {
+  const inp = $('temuAiPromptInp');
+  const send = $('temuAiPromptSendBtn');
+  const go = () => {
+    if (!inp?.value.trim()) { inp?.focus(); toast('Pehle AI ko instruction likhein (ya chip chunein)', 'info'); return; }
+    temuAiBulkRewrite();
+  };
+  send?.addEventListener('click', go);
+  inp?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
+  inp?.addEventListener('input', () => send?.classList.toggle('ready', !!inp.value.trim()));
+  document.querySelectorAll('.temu-ai-preset').forEach(b => b.addEventListener('click', () => {
+    if (!inp) return;
+    const add = b.dataset.p || '';
+    inp.value = inp.value.trim() ? (inp.value.includes(add) ? inp.value : inp.value.trim() + '; ' + add) : add;
+    send?.classList.add('ready');
+    inp.focus();
+  }));
+})();
+
 // Bulk AI Rewrite for checked products only
 async function temuAiBulkRewrite() {
   const bulkBtn = $('temuAiBulkRewriteBtn');
@@ -12501,9 +12810,11 @@ function temuUpdateImgEditCount(rows) {
 
 async function temuStartBulkImageEdit() {
   if (TemuImgStepper.running) {
-    $('temuImgStepperModal')?.classList.remove('hidden');
-    toast('Image editing pehle se chal rahi hai', 'info');
-    return;
+    // v9.10.1 — an old (often stuck) session used to re-open here with its old products.
+    // Now: stop it and start fresh with what is selected right now.
+    temuStepCancelActiveJob();
+    TemuImgStepper.running = false;
+    toast('Purana session band — naye selected products se shuru', 'info');
   }
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
@@ -12624,7 +12935,7 @@ async function temuStepProcessCurrent() {
   temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine}...`);
 
   // Paste & Next is only for the manual engines
-  $('temuStepPasteNextBtn')?.classList.toggle('hidden', TemuImgStepper.engine === 'flow');
+  $('temuStepPasteNextBtn')?.classList.remove('hidden'); // v9.10.1 — manual fallback for Flow too
 
   await temuStepSendCurrent();
 }
@@ -12643,6 +12954,15 @@ async function temuStepSendCurrent() {
     TemuImgStepper.activeJobId = jobId;
     current.jobId = jobId;
     temuStepSetStatus('⏳ Flow ko bhej raha hoon…');
+    // v9.10.1 — remember which Flow images already exist, so the side panel can spot the new
+    // result by itself (no dependency on messages from the Flow tab)
+    current.done = false;
+    current.snap = null;
+    try {
+      const snap = await flowScanImages();
+      if (Array.isArray(snap)) current.snap = new Set(snap.map(g => g.id));
+    } catch (_) {}
+    current.sentAt = Date.now();
     const sent = await triggerFlowEdit({
       src: current.imgUrl,
       title: current.product.title,
@@ -12782,6 +13102,11 @@ async function temuStepHandlePasteNext() {
     } catch (_) {}
   }
 
+  if (base64FromClipboard && TemuImgStepper.engine === 'flow') {
+    if (btn) btn.disabled = false;
+    await temuStepApplyManualImage(base64FromClipboard, 'Paste');
+    return;
+  }
   if (base64FromClipboard) {
     // Replace image in product
     current.product.images[current.imgIndex] = base64FromClipboard;
@@ -12822,7 +13147,13 @@ async function temuStepFinish() {
   temuStepCancelActiveJob();
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
-  $('temuImgStepperModal')?.classList.add('hidden');
+  if (TemuImgStepper.engine === 'flow') {
+    const sk = stats?.skipped || 0;
+    temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}`, 'ok');
+    const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · Done ✅`;
+    await new Promise(r => setTimeout(r, 2500));
+  }
+  if (!TemuImgStepper.running) $('temuImgStepperModal')?.classList.add('hidden');
   await temuRenderReview();
   if (TemuImgStepper.engine === 'flow') {
     const skipped = stats?.skipped || 0;
@@ -12865,12 +13196,26 @@ async function temuOpenGeminiModal(imgUrl, productTitle, productId = null, image
 }
 
 
+// v9.10.1 — bulk-hunt / sheet rows had NO id: every product looked like the same one
+// (image queue collapsed to 1, results could not find their product). Give each a stable id.
+function _ensureRowIds(rows) {
+  (rows || []).forEach((r, i) => {
+    if (r && !r.id) {
+      const key = String(r.tabId ?? '') + '|' + String(r.url || r.title || i);
+      let h = 0;
+      for (let k = 0; k < key.length; k++) h = (h * 31 + key.charCodeAt(k)) | 0;
+      r.id = 'zr_' + (h >>> 0).toString(36) + '_' + (r.tabId ?? i);
+    }
+  });
+  return rows;
+}
+
 async function temuGetQueuedRows() {
   const source = $('temuSource')?.value || 'bulk';
-  if (source === 'bulk') return (BulkState?.results || []).filter(x => x.status !== 'fail');
-  if (source === 'library_sel' && TemuLibPick?.ids) return (await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id));
-  if (source === 'sheet' && TemuSheetRows) return TemuSheetRows;
-  return await getMasterRows();
+  if (source === 'bulk') return _ensureRowIds((BulkState?.results || []).filter(x => x.status !== 'fail'));
+  if (source === 'library_sel' && TemuLibPick?.ids) return _ensureRowIds((await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id)));
+  if (source === 'sheet' && TemuSheetRows) return _ensureRowIds(TemuSheetRows);
+  return _ensureRowIds(await getMasterRows());
 }
 
 // ── Auto Detect & Sync Store from Temu Seller Tab ─────────────────

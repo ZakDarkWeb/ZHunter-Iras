@@ -1,5 +1,20 @@
 # ZHunter PRO — CHANGELOG
 
+## v9.10.1 (2026-09-29) — Flow: "Generate click ke baad generation shuru nahi hui" fix
+- Flow ab JavaScript (synthetic) click ko Generate par ignore karta hai. Ab order: page click → **asli (CDP) mouse click** (click ke foran baad debugger detach) → Enter key. Har qadam ke baad start confirm.
+- Start confirm mein naya signal: prompt box (image chip + text) khali ho jaye = Flow ne submit le liya.
+- **Asal wajah:** Agent mode ON account mein Flow ka normal prompt box gayab ho kar Agent chat panel ("Untitled session") mein chala jata hai; extension image + prompt wahan daal deta tha, Agent chat generate nahi karta (confirm maangta hai). Ab: Agent panel band → "Agent" chip off → sirf normal prompt box use hota hai (Agent panel wala kabhi nahi).
+- **Double-click bug:** har click do dafa ja raha tha (event + el.click()) — Settings panel khul kar foran band ho jata tha, is liye 1:1 aur x1 kabhi select nahi hote the. Ab ek hi click; har setting check hoti hai, na lage to asli (CDP) click; phir bhi na lage to saaf error.
+- **Replace fix:** result tile ab "Reuse prompt" button par depend nahi (naye Flow UI mein nahi hota); upload wali reference image kabhi result nahi maani jati. Result message ke saath storage se bhi side panel tak jata hai; current step ka result kabhi chup-chaap ignore nahi hota (duplicate se bachao).
+- **Result watchdog:** step ke dauran har 2.5s storage se Flow job check — message na bhi pohanche to result khud lag jata hai. Flow tab mein result ab image-URL scan se bhi pakda jata hai (har Flow build mein chalta hai).
+- **Manual fallback:** stepper mein paste box (Ctrl+V / file drop) + "⬇ Flow se latest" button + "Paste & Next" ab Flow ke liye bhi. Isi product image ki jagah lagti hai, phir agla step khud.
+- **Pacing:** har kamiyab image ke baad 4–9s random pause (bot jaisa lagatar generate nahi), ek waqt mein sirf ek job.
+- **Auto replace (side panel poller):** generation shuru hote hi Flow tab un images ki list bhejta hai jo pehle se thin; side panel har 4s Flow grid scan karta hai ("Flow se latest" wala tareeqa, jo har Flow build pe chalta hai) aur nayi generated image milte hi usi product slot mein laga deta hai. Phir Flow tab ko "done" bata deta hai taake agla job foran chale (3 min atakna khatam).
+- **Auto replace, Flow message ke baghair:** bhejne se pehle side panel Flow grid ki list (snapshot) le leta hai; phir har 4s khud nayi generated image dhoondta hai (upload "zhunter_*.jpg" skip). Flow tab ka message na bhi aaye to image lag jati hai aur agla product khud shuru.
+- Side panel console mein har Flow message ka log (`[ZHunter] Flow msg …`).
+- Library (storage) wale products mein replace ab save bhi hota hai.
+- Fail hone par console mein Generate button ki state log hoti hai.
+
 ## v9.10.0 (2026-09-29) — Bulk hunt: koi link skip nahi + naya popup motion
 - **Complete = title + price.** Is se kam data wala link "partial" hai aur dobara hunt hota hai (dono modes: open tabs + background queue).
 - **Koi link skip nahi:** pehle pass mein jo link jawab na de ya adhoora aaye woh baqi hunt nahi rokta; sab ke baad **3 auto-recovery rounds** (1: reload · 2: hard reload / fresh tab, lamba intezaar · 3: tab saamne la kar, content script dobara). Har round ke baad sab se behtar data rakha jata hai — retry ka kharab jawab achhe data ko nahi mitata.

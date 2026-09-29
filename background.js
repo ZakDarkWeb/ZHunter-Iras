@@ -1151,7 +1151,7 @@ const CONTENT_SCRIPT_ACTIONS = new Set([
   'FETCH_BASE64_BATCH', 'GET_PENDING_IMAGE_HUNT', 'CHECK_BULK_QUEUE',
   'ADD_TO_BULK_QUEUE',
   // v9.9.0 — Google Flow image studio (flow_automation.js / content.js lightbox)
-  'ZH_CDP_CLICK', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS'
+  'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS'
 ]);
 
 function isAuthorizedMessage(msg, sender) {
@@ -1296,6 +1296,12 @@ async function handleMessage(msg, sender) {
       } catch (e) {
         return { ok: false, error: e?.message || String(e) };
       }
+    }
+    case 'ZH_CDP_DETACH': {
+      // v9.10.1 — release the debugger right after the Generate click (no lingering banner)
+      const tabId = sender?.tab?.id || msg.tabId;
+      if (tabId) await cdpDetach(tabId);
+      return { ok: true };
     }
     case 'ZH_REPLACE_IMAGE_FROM_FLOW':
     case 'ZH_FLOW_STATUS':
@@ -1835,6 +1841,11 @@ async function cdpEnsureAttached(tabId) {
     console.warn('[ZHunter CDP] Attach failed:', m);
     return false;
   }
+}
+
+async function cdpDetach(tabId) {
+  _cdpAttached.delete(tabId);
+  try { await chrome.debugger.detach({ tabId }); } catch (_) {}
 }
 
 async function cdpMouseClick(tabId, x, y) {

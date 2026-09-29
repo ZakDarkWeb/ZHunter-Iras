@@ -77,8 +77,11 @@
     try { el.focus(); } catch (_) {}
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...opts, buttons: 0, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 })); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 })); } catch (_) {}
-    try { el.click(); } catch (_) {}
+    // v9.10.1 — exactly ONE click. Before, a dispatched click + el.click() fired twice:
+    // the settings popover opened and closed again, toggles flipped back, generate ran twice.
+    let sent = false;
+    try { sent = el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 })) || true; } catch (_) {}
+    if (!sent) { try { el.click(); } catch (_) {} }
     return true;
   }
 
@@ -134,11 +137,15 @@
 
   // ── Flow DOM (from real DOM harvests, Sep 2026) ─────────────────
   const Q = {
+    // v9.10.1 — never use the Agent chat panel's prompt box (flow-agent-panel): a submit
+    // there goes to the Agent chat (and waits for "confirm"), not to image generation.
     promptRoot: () =>
       document.querySelector('flow-prompt-box flow-base-prompt-box') ||
-      document.querySelector('flow-base-prompt-box'),
+      Array.from(document.querySelectorAll('flow-base-prompt-box')).find(el => !el.closest('flow-agent-panel')) || null,
     editor: (root) => root?.querySelector('.ProseMirror'),
-    agentChip: () => document.querySelector('flow-agent-mode-toggle-chip button.agent-mode-chip'),
+    agentChip: () => document.querySelector('flow-agent-mode-toggle-chip button.agent-mode-chip') ||
+      document.querySelector('flow-agent-mode-toggle-chip button[aria-pressed]'),
+    agentPanel: () => { const p = document.querySelector('flow-agent-panel'); return p && isShown(p) ? p : null; },
     clearBtn: (root) => root?.querySelector('button[aria-label="Clear prompt"]'),
     chips: (root) => Array.from(root?.querySelectorAll('flow-image-ingredient-chip button.chip-container') || []),
     genBtn: (root) => root?.querySelector('flow-generate-icon-button button[aria-label="Start generation"]'),
@@ -170,6 +177,25 @@
   }
 
   const allTiles = () => Q.tiles().map(tileInfo);
+
+  // v9.10.1 — every Flow media <img> in the grid, whatever the tile markup looks like
+  // (Flow ships different builds per account). Id comes from the signed URL /image/<id>.
+  const FLOW_IMG_RE = /^https:\/\/flow-content\.google\/image\/([\w-]+)/i;
+  function gridImages() {
+    return Array.from(document.querySelectorAll('img')).map(img => {
+      const src = img.currentSrc || img.src || '';
+      const m = src.match(FLOW_IMG_RE);
+      if (!m) return null;
+      if (img.closest('flow-base-prompt-box, flow-add-menu-popover-content, flow-agent-panel, .cdk-overlay-container, #zh-flow-hud')) return null;
+      const holder = img.closest('flow-grid-tile-container, [aria-label]');
+      return {
+        img, src, mediaId: img.getAttribute('data-media-id') || m[1],
+        title: (holder?.getAttribute('aria-label') || '').trim(),
+        loaded: img.complete && img.naturalWidth > 0
+      };
+    }).filter(Boolean);
+  }
+  const looksLikeUpload = (title) => /\.(png|jpe?g|webp|gif|avif|heic)$/i.test(title || '') || /^zhunter_/i.test(title || '');
   const pendingCount = () => allTiles().filter(t => t.pending).length;
   const mediaIdSet = () => new Set(allTiles().map(t => t.mediaId).filter(Boolean));
 
@@ -228,10 +254,14 @@
   }
 
   // ── Job reporting ────────────────────────────────────────────────
-  function reportStatus(job, phase, text, isError = false) {
+  function reportStatus(job, phase, text, isError = false, extra = {}) {
     updateFlowHUD(text, isError ? 'warn' : 'info');
-    sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, phase, text, error: isError });
+    sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, phase, text, error: isError, ...extra });
   }
+
+  // v9.10.1 — latest job record seen in storage: lets a running job stop waiting as soon as
+  // the side panel has taken the result (or a newer job replaced it).
+  let latestPending = null;
 
   async function finishJob(job, status, extra = {}) {
     try {
@@ -245,15 +275,50 @@
   class JobError extends Error {}
 
   // ── Step 1: prepare the prompt box ──────────────────────────────
+  // v9.10.1 — Agent mode has two parts: the "Agent" chip in the prompt box and the Agent chat
+  // panel ("Untitled session"). While the panel is open the normal prompt box is gone.
+  // Close the panel, then switch the chip off; fall back to a real (CDP) click if needed.
+  const agentOn = () => !!Q.agentPanel() || Q.agentChip()?.getAttribute('aria-pressed') === 'true' ||
+    !!document.querySelector('flow-prompt-box flow-creative-agent-prompt-box');
+
+  async function cdpClickEl(el) {
+    if (!el || !el.isConnected) return false;
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    await sleep(120);
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const res = await sendBg({ action: 'ZH_CDP_CLICK', x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    sendBg({ action: 'ZH_CDP_DETACH' });
+    return !!res?.ok;
+  }
+
+  async function clickUntil(el, done, label, ms = 3000) {
+    await trustedClick(el, label);
+    if (await waitFor(done, ms, 200)) return true;
+    warn(`${label}: page click ignored — trying trusted click`);
+    await cdpClickEl(el);
+    return !!(await waitFor(done, ms, 200));
+  }
+
   async function ensureAgentOff() {
-    const chip = Q.agentChip();
-    if (chip && chip.getAttribute('aria-pressed') === 'true') {
-      log('Agent mode is ON — turning it off');
-      await trustedClick(chip, 'agent chip');
-      const off = await waitFor(() => Q.agentChip()?.getAttribute('aria-pressed') === 'false', 5000);
-      if (!off) throw new JobError('Agent mode band nahi hua — Flow mein "Agent" chip khud off kar dein');
-      await sleep(600);
+    for (let attempt = 0; attempt < 3 && agentOn(); attempt++) {
+      const panel = Q.agentPanel();
+      if (panel) {
+        log('Agent panel open — closing it');
+        const back = panel.querySelector('.agent-panel-header button[aria-label="Back"]');
+        if (back) { await trustedClick(back, 'agent back'); await sleep(400); }
+        const close = Q.agentPanel()?.querySelector('.agent-panel-header button[aria-label="Close"]');
+        if (close) await clickUntil(close, () => !Q.agentPanel(), 'agent panel close', 4000);
+        await sleep(500);
+      }
+      const chip = Q.agentChip();
+      if (chip && chip.getAttribute('aria-pressed') === 'true') {
+        log('Agent mode is ON — turning it off');
+        await clickUntil(chip, () => Q.agentChip()?.getAttribute('aria-pressed') === 'false', 'agent chip', 4000);
+        await sleep(600);
+      }
     }
+    if (agentOn()) throw new JobError('Agent mode band nahi hua — Flow mein Agent panel band karke "Agent" chip khud off kar dein');
   }
 
   function settingsSummary(root) {
@@ -261,56 +326,61 @@
   }
 
   async function pickToggle(groupLabel, text) {
-    const group = document.querySelector(`flow-prompt-box-settings flow-toggles[aria-label="${groupLabel}"]`);
-    if (!group) return false;
-    const btn = Array.from(group.querySelectorAll('button.mat-button-toggle-button'))
-      .find(b => (b.textContent || '').replace(/\s+/g, ' ').includes(text));
-    if (!btn) return false;
+    const find = () => {
+      const group = document.querySelector(`flow-prompt-box-settings flow-toggles[aria-label="${groupLabel}"]`);
+      return Array.from(group?.querySelectorAll('button.mat-button-toggle-button') || [])
+        .find(b => (b.textContent || '').replace(/\s+/g, ' ').includes(text)) || null;
+    };
+    const btn = find();
+    if (!btn) { warn(`Setting not found: ${groupLabel} ${text}`); return false; }
     if (btn.getAttribute('aria-checked') === 'true') return true;
-    await trustedClick(btn, `${groupLabel} ${text}`);
-    return !!(await waitFor(() => btn.getAttribute('aria-checked') === 'true', 3000));
+    return clickUntil(btn, () => find()?.getAttribute('aria-checked') === 'true', `${groupLabel} ${text}`, 2500);
+  }
+
+  const settingsOk = (sum) => /nano banana 2/i.test(sum) && /crop_square/.test(sum) && /\bx1\b/.test(sum);
+  const settingsPanel = () => document.querySelector('flow-prompt-box-settings');
+
+  async function closeSettings() {
+    if (!settingsPanel()) return;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    if (await waitFor(() => !settingsPanel(), 800, 100)) return;
+    const backdrop = document.querySelector('.cdk-overlay-backdrop');
+    if (backdrop) await trustedClick(backdrop, 'settings backdrop');
+    if (await waitFor(() => !settingsPanel(), 800, 100)) return;
+    const b = Q.settingsBtn(Q.promptRoot());
+    if (b) await clickUntil(b, () => !settingsPanel(), 'settings (close)', 1500);
   }
 
   async function ensureSettings() {
-    const root = Q.promptRoot();
-    const sum = settingsSummary(root);
-    const okModel = /nano banana 2/i.test(sum);
-    const okRatio = /crop_square/.test(sum);
-    const okCount = /\bx1\b/.test(sum);
-    if (okModel && okRatio && okCount) return;
-
-    log('Adjusting settings. Current summary:', sum);
-    const btn = Q.settingsBtn(root);
-    if (!btn) return;
-    await trustedClick(btn, 'settings');
-    const panel = await waitFor(() => document.querySelector('flow-prompt-box-settings'), 4000);
-    if (!panel) { warn('Settings panel did not open'); return; }
-    await pickToggle('Mode', 'Image');
-    await pickToggle('Aspect ratio', '1:1');
-    await pickToggle('Output count', 'x1');
-
-    if (!okModel) {
-      const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Select model family"]');
-      if (modelBtn) {
-        await trustedClick(modelBtn, 'model menu');
-        const item = await waitFor(() => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
-          .find(el => /nano banana 2/i.test(el.textContent || '')), 3000);
-        if (item) await trustedClick(item, 'Nano Banana 2');
-        else warn('Nano Banana 2 option not found in model menu');
-        await sleep(400);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const sum = settingsSummary(Q.promptRoot());
+      if (settingsOk(sum)) return;
+      log('Adjusting settings. Current summary:', sum);
+      const btn = Q.settingsBtn(Q.promptRoot());
+      if (!btn) break;
+      if (!settingsPanel()) await clickUntil(btn, () => !!settingsPanel(), 'settings', 3000);
+      if (!settingsPanel()) { warn('Settings panel did not open'); continue; }
+      await pickToggle('Mode', 'Image');
+      await pickToggle('Aspect ratio', '1:1');
+      await pickToggle('Output count', 'x1');
+      if (!/nano banana 2/i.test(sum)) {
+        const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Select model family"]');
+        if (modelBtn) {
+          const menuItem = () => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
+            .find(el => /nano banana 2/i.test(el.textContent || ''));
+          await clickUntil(modelBtn, () => !!menuItem(), 'model menu', 2500);
+          const item = menuItem();
+          if (item) await trustedClick(item, 'Nano Banana 2');
+          else warn('Nano Banana 2 option not found in model menu');
+          await sleep(400);
+        }
       }
-    }
-    // Close the settings popover
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-    await sleep(300);
-    if (document.querySelector('flow-prompt-box-settings')) {
-      const again = Q.settingsBtn(Q.promptRoot());
-      if (again) await trustedClick(again, 'settings (close)');
+      await closeSettings();
       await sleep(300);
     }
     const after = settingsSummary(Q.promptRoot());
-    if (!/nano banana 2/i.test(after) || !/crop_square/.test(after) || !/\bx1\b/.test(after)) {
-      warn('Settings still not Nano Banana 2 · 1:1 · x1 →', after);
+    if (!settingsOk(after)) {
+      throw new JobError(`Flow settings set nahi huin (${after.replace('crop_square', '1:1')}) — khud "Nano Banana 2 · 1:1 · x1" select karke "Send Again" dabayein`);
     }
   }
 
@@ -494,28 +564,85 @@
 
     scrollGridTop();
     const before = mediaIdSet();
+    gridImages().forEach(g => before.add(g.mediaId));
+    // The ingredient chip image points at the uploaded product image: never return that.
+    const refIds = new Set(Q.chips(Q.promptRoot())
+      .map(c => ((c.querySelector('img')?.src || '').match(/\/image\/([\w-]+)/) || [])[1]).filter(Boolean));
     const pendingBefore = pendingCount();
     const tilesBefore = Q.tiles().length;
-    const started = () => pendingCount() > pendingBefore || Q.tiles().length > tilesBefore ||
-      allTiles().some(t => t.mediaId && !before.has(t.mediaId));
+    const probe = editorText(Q.promptRoot()).replace(/\s+/g, '').slice(0, 40);
+    const started = () => {
+      if (pendingCount() > pendingBefore || Q.tiles().length > tilesBefore ||
+        allTiles().some(t => t.mediaId && !before.has(t.mediaId))) return true;
+      // v9.10.1 — Flow clears the prompt box once it accepts a submit (image chip + text gone)
+      const r = Q.promptRoot();
+      return !!(r && probe && !Q.chips(r).length && !editorText(r).replace(/\s+/g, '').includes(probe));
+    };
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation');
-      if (await waitFor(started, START_TIMEOUT_MS / 2, 400)) break;
-      if (attempt === 2) throw new JobError('Generate click ke baad generation shuru nahi hui');
+    // v9.10.1 — Flow ignores synthetic (isTrusted=false) clicks on "Start generation".
+    // Try the page-level click once, then a real CDP mouse click (debugger is detached
+    // right after, so no lingering banner), then Enter as a last resort.
+    const genCenter = () => {
+      const b = Q.genBtn(Q.promptRoot()) || gen;
+      if (!b || !b.isConnected) return null;
+      try { b.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+      const r = b.getBoundingClientRect();
+      return r.width && r.height ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    };
+    const cdpGenClick = async () => {
+      const c = genCenter();
+      if (!c) return false;
+      await sleep(150);
+      const c2 = genCenter() || c; // re-measure after scroll
+      const res = await sendBg({ action: 'ZH_CDP_CLICK', x: c2.x, y: c2.y });
+      sendBg({ action: 'ZH_CDP_DETACH' });
+      if (!res?.ok) warn('CDP click failed:', res?.error);
+      return !!res?.ok;
+    };
+    const enterSubmit = async () => {
+      const ed = Q.editor(Q.promptRoot());
+      if (!ed) return;
+      ed.focus();
+      const o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+      ed.dispatchEvent(new KeyboardEvent('keydown', o));
+      ed.dispatchEvent(new KeyboardEvent('keypress', o));
+      ed.dispatchEvent(new KeyboardEvent('keyup', o));
+    };
+
+    const attempts = [
+      ['page click', async () => { await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation'); }, 8000],
+      ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS],
+      ['Enter key', enterSubmit, 6000]
+    ];
+    let ok = false;
+    for (const [name, fn, wait] of attempts) {
+      if (await waitFor(started, 300, 100)) { ok = true; break; }
+      log('Start generation via', name);
+      await fn();
+      if (await waitFor(started, wait, 400)) { ok = true; break; }
+      warn(`Generation did not start after ${name}`);
+    }
+    if (!ok) {
       const b = Q.genBtn(Q.promptRoot());
-      if (!b || isDisabled(b)) {
-        // Button went disabled = Flow accepted the submit; give it the rest of the window.
-        if (await waitFor(started, START_TIMEOUT_MS / 2, 400)) break;
-        throw new JobError('Generate click ke baad generation shuru nahi hui');
-      }
-      warn('Generation did not start — clicking again');
+      warn('Gen button state:', b ? b.outerHTML.slice(0, 400) : 'NOT FOUND',
+        '| agent chip:', Q.agentChip()?.getAttribute('aria-pressed'));
+      throw new JobError('Generate click ke baad generation shuru nahi hui');
     }
 
-    reportStatus(job, 'generating', `🎨 Generating · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`);
+    const beforeIds = [...before], refIdList = [...refIds];
+    reportStatus(job, 'generating', `🎨 Generating · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`, false,
+      { beforeIds, refIds: refIdList });
+    try {
+      const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
+      if (cur && cur.jobId === job.jobId) {
+        await chrome.storage.local.set({ pendingFlowAction: { ...cur, phase: 'generating', beforeIds, refIds: refIdList } });
+      }
+    } catch (_) {}
     const t0 = Date.now();
     let lastSnack = '';
     const result = await waitFor(() => {
+      const lp = latestPending;
+      if (lp && (lp.jobId !== job.jobId || (lp.processed && lp.status === 'done'))) return { cancelled: true };
       scrollGridTop();
       // Check for failed generation tiles immediately (don't wait 3 minutes!)
       const failed = Q.tiles().slice(0, 6).find(t => {
@@ -533,10 +660,14 @@
 
       // Only the first few tiles (grid is newest-first) — protects against old tiles
       // that the virtual scroller renders later.
-      const fresh = allTiles().slice(0, 6).find(t =>
-        t.mediaId && !before.has(t.mediaId) && t.generated && !t.pending &&
-        /^https:\/\/flow-content\.google\//i.test(t.src));
+      const fresh = allTiles().slice(0, 8).find(t =>
+        t.mediaId && !before.has(t.mediaId) && !refIds.has(t.mediaId) && !t.pending &&
+        /^https:\/\/flow-content\.google\//i.test(t.src) &&
+        (t.generated || !/\.(png|jpe?g|webp|gif|avif)$/i.test(t.title)));
       if (fresh) return fresh;
+      const fresh2 = gridImages().slice(0, 10).find(g =>
+        !before.has(g.mediaId) && !refIds.has(g.mediaId) && g.loaded && !looksLikeUpload(g.title));
+      if (fresh2) { log('Result found via image scan:', fresh2.mediaId); return { mediaId: fresh2.mediaId, src: fresh2.src }; }
       const s = snackText();
       if (s && s !== lastSnack) { lastSnack = s; log('Flow says:', s); }
       if (s && /(couldn.?t|could not|failed|unable|violat|policy|try again|error)/i.test(s) && Date.now() - t0 > 3000) {
@@ -546,6 +677,7 @@
     }, RESULT_TIMEOUT_MS, 1500);
 
     if (!result) throw new JobError('Image 3 minute mein nahi bani');
+    if (result.cancelled) return result;
     if (result.error) throw new JobError('Flow error: ' + result.error);
     return result;
   }
@@ -561,9 +693,11 @@
       await chrome.storage.local.set({ pendingFlowAction: { ...job, status: 'running', startedAt: Date.now() } });
 
       reportStatus(job, 'prepare', `ZHunter: prompt box tayyar · ${job.shortTitle}`);
-      await waitFor(() => Q.promptRoot(), 15000);
-      if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
+      // Agent panel open = no normal prompt box, so turn Agent off first.
+      await waitFor(() => Q.promptRoot() || Q.agentPanel(), 15000);
       await ensureAgentOff();
+      await waitFor(() => Q.promptRoot(), 8000);
+      if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
       await ensureSettings();
       await clearPromptBox();
 
@@ -574,6 +708,11 @@
       await injectPrompt(job.prompt);
 
       const res = await generateAndCapture(job);
+      if (res.cancelled) {
+        log('Result already taken by ZHunter (or newer job) — done');
+        updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
+        return;
+      }
       log('Generated media', res.mediaId, res.src);
 
       await sendBg({
@@ -585,7 +724,7 @@
         mediaId: res.mediaId,
         newImgUrl: res.src
       });
-      await finishJob(job, 'done', { mediaId: res.mediaId });
+      await finishJob(job, 'done', { mediaId: res.mediaId, newImgUrl: res.src });
       updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
     } catch (e) {
       const msg = e instanceof JobError ? e.message : `Unexpected error: ${e?.message || e}`;
@@ -664,6 +803,7 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       const nv = area === 'local' ? changes.pendingFlowAction?.newValue : null;
+      if (nv) latestPending = nv;
       if (nv && !nv.processed && nv.status !== 'running' && nv.jobId !== runningJobId) handlePendingFlowAction();
     });
   } catch (_) {}

@@ -680,7 +680,7 @@
     <div class="modal-box bulk-progress-box">
       <div class="modal-head bp-head">
         <div class="bp-head-txt">
-          <h3 id="bulkProgressTitle">Hunting products</h3>
+          <h3><span id="bulkProgressTitle">Hunting products</span><span class="bp-live" id="bpLiveBadge"><i></i>LIVE</span></h3>
           <div class="bp-sub" id="bulkProgressSub">Reading product pages…</div>
         </div>
         <button id="bulkProgressCloseBtn" class="modal-close hidden" aria-label="Close">✕</button>
@@ -724,6 +724,14 @@
 
         <!-- ═══ RESULT (hidden during run) ═══ -->
         <div id="bulkResultSummary" class="bulk-result-summary hidden">
+          <div class="bp-done-hero" id="bpDoneHero">
+            <div class="bp-done-ico" id="bpDoneIco">✓</div>
+            <div class="bp-done-txt">
+              <b id="bpDoneHead">Hunt complete</b>
+              <small id="bpDoneSub">Sab products ready</small>
+              <div class="bp-done-bar"><i id="bpDoneBar"></i></div>
+            </div>
+          </div>
           <div class="bulk-result-stats">
             <div class="bulk-rs-item ok"><div class="bulk-rs-num" id="bulkRsOk">0</div><div class="bulk-rs-lbl">Successful</div></div>
             <div class="bulk-rs-item partial"><div class="bulk-rs-num" id="bulkRsPartial">0</div><div class="bulk-rs-lbl">Partial</div></div>
@@ -937,7 +945,18 @@
                 </button>
               </div>
               <div class="temu-ai-bar-inp-row">
-                <input type="text" id="temuAiPromptInp" class="inp temu-ai-prompt-inp" placeholder="Custom AI instruction (e.g. Include target audience, keywords, specific details)..." />
+                <div class="temu-ai-send-wrap">
+                  <input type="text" id="temuAiPromptInp" class="inp temu-ai-prompt-inp" placeholder="AI ko batayein… (e.g. keywords add karo, 60 chars)" />
+                  <button id="temuAiPromptSendBtn" class="temu-ai-send-btn" type="button" title="Checked titles ko is instruction se rewrite karo (Enter)" aria-label="Send to AI">
+                    <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                  </button>
+                </div>
+                <div class="temu-ai-presets">
+                  <button type="button" class="temu-ai-preset" data-p="SEO keywords add karo, brand + product type + size shuru mein">🔍 SEO</button>
+                  <button type="button" class="temu-ai-preset" data-p="Short aur clear title, max 60 characters">✂️ Short</button>
+                  <button type="button" class="temu-ai-preset" data-p="Brand name hata do, generic Temu style title">🏷️ No brand</button>
+                  <button type="button" class="temu-ai-preset" data-p="Target audience aur use case add karo">🎯 Audience</button>
+                </div>
               </div>
             </div>
 
@@ -1569,7 +1588,12 @@
           <div id="temuStepStatus" style="font-size:11px; color:#00E5FF; font-weight:500;">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
         </div>
       </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <div id="temuStepPasteZone" tabindex="0" title="Generated image copy karke yahan Ctrl+V karein, ya file drop karein"
+        style="border:1.5px dashed rgba(0,229,255,0.45); border-radius:8px; padding:9px 10px; margin-bottom:10px; font-size:11px; color:var(--text-dim); text-align:center; cursor:pointer; outline:none;">
+        📋 <b style="color:#fff;">Manual:</b> image copy karke yahan <b style="color:#00E5FF;">Ctrl+V</b> karein ya file drop karein — isi product image ki jagah lag jayegi
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+        <button id="temuStepGrabFlowBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Flow project ki sab se nayi generated image utha kar is product mein laga do">⬇ Flow se latest</button>
         <button id="temuStepSkipBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Skip ⏩</button>
         <button id="temuStepSendAgainBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Re-open tab with this image & prompt">Send Again 🔄</button>
         <button id="temuStepPasteNextBtn" class="btn btn-primary btn-sm" type="button" style="font-size:11.5px; font-weight:600; background:linear-gradient(135deg,#00E5FF,#0284c7); border:none;">
