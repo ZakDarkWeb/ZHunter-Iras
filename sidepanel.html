@@ -173,7 +173,6 @@
         <div class="summary" id="bulkSummary"><span id="bulkSelectedCount">0 selected</span><span id="bulkTimeEstimate"></span></div>
         <div class="card-actions">
           <button id="bulkHuntStartBtn" class="btn btn-primary btn-lg rainbow" type="button" disabled><span class="bulk-main-text">Hunt all open tabs</span></button>
-          <button id="bulkTemuOpenBtn" class="btn btn-ghost" type="button" title="Temu Export window: export / upload / Fix drafts / Settings / Categories — bina hunt ke bhi">Temu</button>
           <button id="bulkAddAllTabsToQueueBtn" class="hidden" type="button" aria-hidden="true" tabindex="-1"></button>
         </div>
         <label class="check-row" title="Close each tab as soon as its data is captured">
@@ -379,6 +378,10 @@
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Bulk hunt</span>
       <div class="set" id="spQuickSettings">
+        <div class="it"><div class="l"><b>Tabs ek sath hunt</b><span>Kitne soye hue / loading tabs ek sath load hon. Jo tabs pehle se khule hain wo foran scrape hote hain. Zyada = tez, lekin computer par load zyada</span></div>
+          <select class="sel" data-setting="bulkParallelTabs" style="width:auto;min-width:74px;">
+            <option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="12">12</option>
+          </select></div>
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Retries once with backoff on timeout/error</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Failed tabs always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>URLs only; Master ZIP won't include images. Hunt runs 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
@@ -830,6 +833,14 @@
 
           <!-- 1. Store & Template 2-Step Setup Card -->
           <div class="temu-card temu-setup-card" id="temuSetupCard">
+            <!-- v9.11.0 — shown instead of the 2 steps once store + template are set -->
+            <div class="temu-setup-compact" id="temuSetupCompact">
+              <div class="tsc-item"><span class="tsc-ic">🏪</span><div class="tsc-txt"><b id="tscStore">—</b><small class="tsc-tpl">📄 <span id="tscTpl">—</span> · ready</small></div></div>
+              <div class="tsc-actions">
+                <button type="button" class="tsc-btn" id="tscTestBtn" title="Temu Seller Center connection test">⚡ Test</button>
+                <button type="button" class="tsc-btn" id="tscChangeBtn" title="Store / template badlein">Change</button>
+              </div>
+            </div>
             <div class="temu-setup-header">
               <div class="temu-setup-title-group">
                 <span class="temu-setup-accent-bar"></span>
@@ -867,6 +878,7 @@
               </div>
               <div class="temu-step-action">
                 <label class="btn btn-secondary btn-xs temu-step-btn temu-step-tpl-lbl" for="temuTplFile" id="temuTplBtnLbl">
+                  <svg viewBox="0 0 24 24" class="tsc-svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 12v6M9 15l3-3 3 3"/></svg>
                   <span id="temuTplBtnTxt">Select .xlsx</span>
                 </label>
                 <input type="file" id="temuTplFile" accept=".xlsx" class="temu-tpl-input" />
@@ -874,47 +886,35 @@
             </div>
           </div>
 
-          <!-- 2. Products Source & Pricing Card -->
-          <div class="temu-card temu-settings-card">
-            <div class="temu-card-header">
-              <div class="temu-card-title-group">
-                <span class="temu-card-icon">📦</span>
-                <div>
-                  <div class="temu-card-title">Products Source &amp; Pricing</div>
-                  <div class="temu-card-subtitle">Choose source products and markup multiplier</div>
-                </div>
-              </div>
+          <!-- 2. Products Source (v9.11.0 — segmented; price multiplier lives in Settings) -->
+          <div class="temu-card temu-settings-card temu-src-card">
+            <div class="temu-src-head">
+              <span class="temu-setting-lbl" style="margin:0">Products source</span>
+              <button type="button" class="temu-src-px" id="temuSrcPxChip" title="Price multiplier — Settings mein badlein">Price × <b id="temuSrcPxVal">5</b></button>
             </div>
-
-            <div class="temu-source-pricing-grid">
-              <!-- Left: Source & Import -->
-              <div class="temu-source-col">
-                <label class="temu-setting-lbl" for="temuSource">Products Source</label>
-                <div class="temu-source-combo">
-                  <select id="temuSource" class="sel temu-source-sel">
-                    <option value="bulk">Last bulk hunt results</option>
-                    <option value="master">Library (all saved products)</option>
-                    <option value="library_sel" hidden>Library — selected products</option>
-                    <option value="sheet" hidden>Imported sheet</option>
-                  </select>
-                  <button id="temuSheetBtn" class="btn btn-ghost btn-xs temu-btn-import-sheet" type="button" title="Extension se export ki hui XLSX / CSV / JSON sheet import karein aur seedha Temu par upload">
-                    📥 Import sheet…
-                  </button>
-                  <input id="temuSheetFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.json" style="display:none">
-                </div>
-              </div>
-
-              <!-- Right: Price Multiplier -->
-              <div class="temu-price-col">
-                <label class="temu-setting-lbl" for="tgPx">Price Multiplier</label>
-                <div class="temu-input-with-affix">
-                  <input id="tgPx" class="inp" placeholder="5" inputmode="decimal" title="Source price × ye = Temu base price (x.99 par round)" />
-                  <span class="temu-affix">×</span>
-                </div>
-              </div>
+            <div class="temu-src-seg" id="temuSrcSeg" role="tablist">
+              <button type="button" data-src="bulk" role="tab">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <span>Last hunt</span></button>
+              <button type="button" data-src="master" role="tab">
+                <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span>Library</span></button>
+              <button type="button" data-src="sheet" role="tab">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Import sheet</span></button>
             </div>
-
-            <!-- Readiness status bar -->
+            <div class="temu-src-note" id="temuSrcNote"></div>
+            <div style="display:none">
+              <select id="temuSource" class="sel temu-source-sel">
+                <option value="bulk">Last bulk hunt results</option>
+                <option value="master">Library (all saved products)</option>
+                <option value="library_sel" hidden>Library — selected products</option>
+                <option value="sheet" hidden>Imported sheet</option>
+              </select>
+              <button id="temuSheetBtn" type="button">Import sheet</button>
+              <input id="temuSheetFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.json">
+              <input id="tgPx" class="inp" inputmode="decimal" />
+            </div>
             <div id="temuSrcInfo" class="temu-src-info-badge">—</div>
           </div>
 
@@ -936,15 +936,16 @@
             </div>
             <div id="temuReviewAiBar" class="temu-review-ai-bar hidden">
               <div class="temu-ai-bar-top">
-                <div class="temu-ai-bar-title">
+                <button type="button" class="temu-ai-bar-title temu-coll-tgl" data-coll="ai" aria-expanded="false">
+                  <svg class="temu-coll-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
                   <span class="temu-ai-bar-badge">AI</span>
                   <span>Title Optimizer</span>
-                </div>
+                </button>
                 <button id="temuAiBulkRewriteBtn" class="btn btn-primary btn-xs temu-ai-bulk-btn" type="button" title="Rewrite titles of all checked products">
                   ⚡ Rewrite Checked Titles
                 </button>
               </div>
-              <div class="temu-ai-bar-inp-row">
+              <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
                 <div class="temu-ai-send-wrap">
                   <input type="text" id="temuAiPromptInp" class="inp temu-ai-prompt-inp" placeholder="AI ko batayein… (e.g. keywords add karo, 60 chars)" />
                   <button id="temuAiPromptSendBtn" class="temu-ai-send-btn" type="button" title="Checked titles ko is instruction se rewrite karo (Enter)" aria-label="Send to AI">
@@ -963,7 +964,8 @@
             <!-- AI Image Studio Bar -->
             <div id="temuReviewImgBar" class="temu-review-img-bar hidden">
               <div class="temu-img-bar-header">
-                <div class="temu-img-bar-label">
+                <div class="temu-img-bar-label temu-coll-tgl" data-coll="img" role="button" tabindex="0" aria-expanded="false">
+                  <svg class="temu-coll-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
                   <svg viewBox="0 0 24 24" class="temu-img-bar-icon"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
                   <span>AI Image Studio</span>
                 </div>
@@ -972,6 +974,7 @@
                   Prompt
                 </button>
               </div>
+              <div class="temu-coll-body" data-coll-body="img">
               <div class="temu-img-pick-row">
                 <span id="temuImgEditCount" class="temu-img-pick-count">✨ 0 products · 0 images</span>
                 <button id="temuImgSelAllBtn" class="temu-img-pick-btn" type="button" title="Sab products image editing ke liye select">Select all</button>
@@ -1028,6 +1031,7 @@
               </div>
               <div id="temuAiImgPromptWrap" class="temu-img-prompt-wrap hidden">
                 <textarea id="temuAiImgPromptInp" class="inp inp-ta temu-img-prompt-ta" placeholder="Enter commercial photography AI prompt..."></textarea>
+              </div>
               </div>
             </div>
             <div id="temuReviewList" class="temu-review-list hidden"></div>
@@ -1328,6 +1332,7 @@
               <svg class="i i-sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               Save All Settings
             </button>
+            <span class="temu-autosave-note">Changes khud save hote hain</span>
             <span id="tgSaveMsg" class="temu-inline-msg"></span>
           </div>
 

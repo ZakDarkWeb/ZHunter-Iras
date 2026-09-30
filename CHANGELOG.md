@@ -6,6 +6,9 @@
 - **📦 Make Pack:** title ke aage "N Pack - ", phir **Edit Studio (manual)** khulta hai — auto nahi chalta, debugger banner nahi aata.
 - Studio: **✨ AI rewrite** title button (pack prefix aage hi rehta hai); Pack size naya segmented selector (1 · 2× · 3× · 4× · 6× · 8× · 10× · 12×).
 - Manual "Paste in Flow" kabhi debugger (CDP) use nahi karta. Auto mein Generate ke liye pehle Enter try hota hai; Flow na maane tab hi CDP click (banner sirf tab).
+- **Bulk hunt tez:** soye hue tabs sirf EK dafa reload hote hain aur poora load hone tak intezaar (pehle 2s ke baad fail → 3–4 reloads). Pehle se khule tabs foran scrape; soye hue tabs ek sath kitne jagein — Settings → Bulk hunt → "Tabs ek sath hunt" (default 3). Hunt ke dauran Chrome tabs ko dobara nahi sulata. "Auto-retry" setting ab save bhi hoti hai.
+- **Temu Export:** setup mukammal ho to ek patti (store · template · Test · Change); Products source ab 3 buttons (Last hunt / Library / Import sheet); Price × chip Settings kholta hai (Upload se duplicate multiplier hataya); Title Optimizer aur AI Image Studio collapse (aakhri haalat yaad); Settings auto-save; Package specs layout; History/Categories search icon fix, empty states, department pills wrap. Bulk tab ka neeche wala "Temu" button hataya. Header ka Temu Export button rounded-rect, Bulk tab count badge cyan theme.
+- **PROJECT_HANDOFF.md:** poori project detail — nayi chat mein zip ke sath do, wahin se kaam shuru.
 - **Speed setting (Safe / Normal / Fast):** sirf images ke beech ka gap badalta hai; ek waqt mein ek hi generation. "Unusual activity" aaye to khud Safe par aa jata hai.
 - **Tez auto:** Generate par pehle asli (CDP) click (pehle ~8s zaya hote the), result 0.7s / side panel 1.5s scan, agli image generate ke dauran pehle se download, replace foran local copy se (Temu link background mein).
 

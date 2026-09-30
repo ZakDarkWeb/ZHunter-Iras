@@ -1,5 +1,7 @@
 # ZHunter PRO — Agent Rules
 
+> Pehle `PROJECT_HANDOFF.md` parhein — project, user ki pasand aur v9.11.0 tak ke sab changes wahan hain.
+
 ## IMPORTANT: Credits are Limited — Follow These Rules Strictly
 
 ### Rule 1: ALWAYS Make a Plan First

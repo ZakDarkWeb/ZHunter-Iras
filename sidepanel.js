@@ -6175,6 +6175,10 @@ async function startBulkHunt(tabsOverride) {
   };
   flushLoop();
 
+  // v9.11.0 — Chrome must not put the hunted tabs back to sleep while we work
+  const huntTabIds = selectedTabs.map(t => t.tabId).filter(id => Number.isFinite(id));
+  huntTabIds.forEach(id => chrome.tabs.update(id, { autoDiscardable: false }, () => { void chrome.runtime.lastError; }));
+
   try {
     bpSetPhase('hunt');
     updateBulkProgressTitle('Hunting products', `Processing ${selectedTabs.length} tabs…`);
@@ -6192,6 +6196,7 @@ async function startBulkHunt(tabsOverride) {
   } catch (e) {
     toast('Bulk hunt error: ' + (e?.message || 'unknown'), 'err');
   }
+  huntTabIds.forEach(id => chrome.tabs.update(id, { autoDiscardable: true }, () => { void chrome.runtime.lastError; }));
 
   BulkState.isHunting = false;
   // Wait for flush loop to finish — 10s safety timeout so we never hang
@@ -6291,11 +6296,42 @@ function toggleFailedList() {
   btn.textContent = (hidden ? 'Show' : 'Hide') + ' failed tabs';
 }
 
+// v9.11.0 — wait until a tab has really finished loading (sleeping tabs need a full load)
+async function huntWaitComplete(tabId, timeoutMs = 25000) {
+  const deadline = Date.now() + timeoutMs;
+  let sawLoading = false;
+  while (Date.now() < deadline && !BulkState.isCancelled) {
+    const t = await new Promise(r => chrome.tabs.get(tabId, x => r(chrome.runtime.lastError ? null : x)));
+    if (!t) return false;
+    if (t.status === 'loading') sawLoading = true;
+    if (t.status === 'complete' && !t.discarded && (sawLoading || Date.now() > deadline - timeoutMs + 600)) return true;
+    await sleep(200);
+  }
+  return false;
+}
+// Sites that fill price/images late — a short settle after load
+const huntSettleMs = (url) => /walmart\.com|samsclub\.com|amazon\.|faire\.com|target\.com/i.test(url || '') ? 900 : 400;
+
+// v9.11.0 — how many SLEEPING / loading tabs may wake at once (Settings → Bulk hunt).
+// Tabs that are already loaded don't wait for this: they're scraped straight away.
+function huntWakeLimit() {
+  const v = parseInt(State?.data?.settings?.bulkParallelTabs, 10);
+  return v >= 1 && v <= 12 ? v : 3;
+}
+
 async function processSmartQueue(tabs) {
   const activeDomains = {};
   const running = new Set();
-  const MAX_GLOBAL = BulkState.PARALLEL || 8;
-  const MAX_PER_DOMAIN = 3;
+  const WAKE_LIMIT = huntWakeLimit();
+  const MAX_GLOBAL = Math.max(8, WAKE_LIMIT);
+  const MAX_PER_DOMAIN = Math.max(3, WAKE_LIMIT);
+  let waking = 0;
+  // Which tabs need a (re)load? Loaded ones go first so their data comes in immediately.
+  await Promise.all(tabs.map(async t => {
+    const d = await new Promise(r => chrome.tabs.get(t.tabId, x => r(chrome.runtime.lastError ? null : x)));
+    t._heavy = !d || d.discarded || d.status !== 'complete';
+  }));
+  tabs.sort((a, b) => (a._heavy ? 1 : 0) - (b._heavy ? 1 : 0));
 
   // Returns true if there are any tabs not yet started
   const hasUnstarted = () => tabs.some(t => !t._started);
@@ -6313,9 +6349,11 @@ async function processSmartQueue(tabs) {
         if (running.size >= MAX_GLOBAL) break;
         const host = safeHost(tabs[i].url);
         if ((activeDomains[host] || 0) >= MAX_PER_DOMAIN) continue;
+        if (tabs[i]._heavy && waking >= WAKE_LIMIT) continue;
 
         const tab = tabs[i];
         tab._started = true;
+        if (tab._heavy) waking++;
         activeDomains[host] = (activeDomains[host] || 0) + 1;
         startedAny = true;
 
@@ -6344,13 +6382,9 @@ async function processSmartQueue(tabs) {
                 try {
                   const td = await new Promise(r => chrome.tabs.get(tab.tabId, t => r(chrome.runtime.lastError ? null : t)));
                   if (td && (td.discarded || td.status !== 'complete')) {
-                    chrome.tabs.reload(tab.tabId, {}, () => { void chrome.runtime.lastError; });
-                    for (let w = 0; w < 24; w++) {
-                      await sleep(500);
-                      const td2 = await new Promise(r => chrome.tabs.get(tab.tabId, t => r(chrome.runtime.lastError ? null : t)));
-                      if (!td2 || td2.status === 'complete') break;
-                    }
-                    await sleep(300);
+                    if (td.discarded) chrome.tabs.reload(tab.tabId, {}, () => { void chrome.runtime.lastError; });
+                    await huntWaitComplete(tab.tabId, 25000);
+                    await sleep(huntSettleMs(tab.url));
                   }
                 } catch (_) {}
 
@@ -6374,6 +6408,7 @@ async function processSmartQueue(tabs) {
             }
           } finally {
             tab._done = true;
+            if (tab._heavy) waking--;
             activeDomains[host]--;
             running.delete(p);
           }
@@ -6412,17 +6447,18 @@ async function scrapeOneTab(tabInfo) {
     // ── Wait for tab to load / Wake discarded tabs ──
     let tabDetails = await new Promise(resolve => chrome.tabs.get(tabInfo.tabId, t => resolve(chrome.runtime.lastError ? null : t)));
     if (tabDetails) {
+      // v9.11.0 — a sleeping tab is loaded ONCE and we wait until it's really ready
+      // (before: 2s wait → scrape failed → reload again, 3–4 reloads per tab)
       if (tabDetails.discarded) {
         setBulkRowMeta(tabInfo.tabId, 'Waking tab…');
         chrome.tabs.reload(tabInfo.tabId, {}, () => { void chrome.runtime.lastError; });
       }
       if (tabDetails.discarded || tabDetails.status !== 'complete') {
-        for (let i = 0; i < 10; i++) { // 10 × 200ms = 2s max wait
-          if (BulkState.isCancelled) { setBulkRowStatus(tabInfo.tabId, 'fail', { error: 'cancelled' }); return; }
-          tabDetails = await new Promise(resolve => chrome.tabs.get(tabInfo.tabId, t => resolve(chrome.runtime.lastError ? null : t)));
-          if (!tabDetails || tabDetails.status === 'complete') break;
-          await sleep(200);
-        }
+        setBulkRowMeta(tabInfo.tabId, 'Loading…');
+        await huntWaitComplete(tabInfo.tabId, 25000);
+        if (BulkState.isCancelled) { setBulkRowStatus(tabInfo.tabId, 'fail', { error: 'cancelled' }); return; }
+        await sleep(huntSettleMs(tabInfo.url));
+        setBulkRowMeta(tabInfo.tabId, 'Scraping…');
       }
     }
 
@@ -6792,13 +6828,9 @@ async function scrapeOneTab(tabInfo) {
         // Refresh the tab and wait for it to finish loading (up to 15 seconds)
         try { await new Promise(r => chrome.tabs.reload(tabInfo.tabId, {}, r)); } catch (_) {}
         let reloadDetails = null;
-        for (let i = 0; i < 15; i++) {               // 15 × 200ms = 3s max
-          if (BulkState.isCancelled) break;
-          reloadDetails = await new Promise(r => chrome.tabs.get(tabInfo.tabId, t => r(chrome.runtime.lastError ? null : t)));
-          if (!reloadDetails || reloadDetails.status === 'complete') break;
-          await sleep(200);
-        }
-        if (reloadDetails) await sleep(200);
+        await huntWaitComplete(tabInfo.tabId, 25000);
+        reloadDetails = await new Promise(r => chrome.tabs.get(tabInfo.tabId, t => r(chrome.runtime.lastError ? null : t)));
+        if (reloadDetails) await sleep(huntSettleMs(tabInfo.url));
 
         if (!BulkState.isCancelled) {
           setBulkRowMeta(tabInfo.tabId, 'Retrying after refresh…');
@@ -6915,10 +6947,11 @@ async function scrapeOneTab(tabInfo) {
   if (shouldRetryTab && status === 'fail' && !tabInfo._retried && !BulkState.isCancelled && error !== 'cancelled') {
     tabInfo._retried = true;
     setBulkRowMeta(tabInfo.tabId, 'Retrying (1/1)…');
-    await sleep(1500);
+    await sleep(300);
     try {
       chrome.tabs.reload(tabInfo.tabId, {}, () => { void chrome.runtime.lastError; });
-      await sleep(1500);
+      await huntWaitComplete(tabInfo.tabId, 25000);
+      await sleep(huntSettleMs(tabInfo.url));
     } catch (_) {}
     return await scrapeOneTab(tabInfo);
   }
@@ -11632,6 +11665,17 @@ function temuUpdateTplStatus() {
     }
   }
 
+  // v9.11.0 — once both steps are done the card shrinks to one line
+  const card = $('temuSetupCard');
+  if (card) {
+    const ready = hasStore && hasTemplate;
+    card.classList.toggle('is-ready', ready);
+    if (!ready) card.classList.remove('expanded');
+    const a = $('tscStore'), b = $('tscTpl');
+    if (a) a.textContent = n || '—';
+    if (b) { b.textContent = name ? trunc(name, 26) : '—'; b.title = name || ''; }
+  }
+
   // Setup Progress Badge
   const badge = $('temuSetupBadge');
   if (badge) {
@@ -12152,6 +12196,7 @@ function temuFillForm() {
 }
 // "N products ready" line under the source selector
 async function temuUpdateSrcInfo() {
+  temuSyncSrcSeg();
   const el = $('temuSrcInfo'); if (!el) return;
   try {
     const source = $('temuSource')?.value || 'bulk';
@@ -14378,4 +14423,86 @@ async function temuMakePack() {
     chrome.storage.local.get(['zhunterFlowSpeed']).then(st => { if (FLOW_SPEEDS[st?.zhunterFlowSpeed]) sp.value = st.zhunterFlowSpeed; });
     sp.addEventListener('change', () => chrome.storage.local.set({ zhunterFlowSpeed: sp.value }));
   }
+})();
+
+
+// ═════════════════════════════════════════════════════════════════
+// v9.11.0 — Temu Export polish: source segments, compact setup, collapsible
+// Title Optimizer / Image Studio, settings auto-save
+// ═════════════════════════════════════════════════════════════════
+function temuSyncSrcSeg() {
+  const sel = $('temuSource');
+  const seg = $('temuSrcSeg');
+  if (!sel || !seg) return;
+  const v = sel.value;
+  const key = v === 'library_sel' ? 'master' : v;
+  seg.querySelectorAll('button[data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === key));
+  const note = $('temuSrcNote');
+  if (note) {
+    const opt = sel.selectedOptions?.[0];
+    note.textContent = v === 'library_sel' || v === 'sheet' ? (opt?.textContent || '') : '';
+    note.classList.toggle('show', !!note.textContent);
+  }
+  const pv = $('temuSrcPxVal');
+  if (pv) pv.textContent = ($('tgPx2')?.value || $('tgPx')?.value || '5');
+}
+
+(function initTemuPolish() {
+  // source segments drive the (hidden) original select, so all old logic keeps working
+  $('temuSrcSeg')?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-src]');
+    if (!b) return;
+    const sel = $('temuSource');
+    if (!sel) return;
+    const want = b.dataset.src;
+    if (want === 'sheet') {
+      const o = sel.querySelector('option[value="sheet"]');
+      if (o && !o.hidden && sel.value !== 'sheet') { sel.value = 'sheet'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      else $('temuSheetFile')?.click(); // pick (or re-pick) a sheet
+      return;
+    }
+    if (want === 'master') {
+      const o = sel.querySelector('option[value="library_sel"]');
+      sel.value = o && !o.hidden && TemuLibPick ? 'library_sel' : 'master';
+    } else sel.value = want;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  $('temuSrcPxChip')?.addEventListener('click', () => { temuSwitchTab('settings'); setTimeout(() => $('tgPx2')?.focus(), 50); });
+
+  // compact setup bar
+  $('tscChangeBtn')?.addEventListener('click', () => $('temuSetupCard')?.classList.toggle('expanded'));
+  $('tscTestBtn')?.addEventListener('click', () => $('temuTestConnBtn')?.click());
+
+  // collapsible sections (closed by default, last state remembered)
+  const KEY = 'zhTemuCollapse';
+  let st = {};
+  const apply = () => document.querySelectorAll('.temu-coll-tgl[data-coll]').forEach(t => {
+    const k = t.dataset.coll, open = !!st[k];
+    t.setAttribute('aria-expanded', open ? 'true' : 'false');
+    t.closest('.temu-review-ai-bar, .temu-review-img-bar')?.classList.toggle('coll-open', open);
+  });
+  chrome.storage.local.get([KEY]).then(r => { st = r?.[KEY] || {}; apply(); }).catch(apply);
+  const toggle = (k, force) => { st[k] = force ?? !st[k]; apply(); chrome.storage.local.set({ [KEY]: st }); };
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('.temu-coll-tgl[data-coll]');
+    if (t) { toggle(t.dataset.coll); return; }
+    if (e.target.closest('#temuAiImgPromptToggleBtn') && !st.img) toggle('img', true);
+  });
+  document.addEventListener('keydown', (e) => {
+    const t = e.target.closest?.('.temu-coll-tgl[data-coll]');
+    if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(t.dataset.coll); }
+  });
+
+  // settings auto-save (same checks as "Save All Settings")
+  let saveT = null;
+  const pane = document.querySelector('#temuModal [data-tpane="settings"]');
+  const kick = (e) => {
+    if (!e.target.matches('input, select, textarea')) return;
+    clearTimeout(saveT);
+    saveT = setTimeout(() => $('tgSaveBtn')?.click(), 800);
+  };
+  pane?.addEventListener('change', kick);
+  pane?.addEventListener('input', (e) => { if (e.target.type !== 'checkbox') kick(e); });
+  document.addEventListener('change', (e) => { if (e.target?.id === 'tgPx2') temuSyncSrcSeg(); });
+  temuSyncSrcSeg();
 })();

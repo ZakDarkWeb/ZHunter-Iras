@@ -3773,3 +3773,75 @@ body.compact-mode .row-quick-actions {
 .zs-btn.sm.paste:hover { background: #00E5FF; color: #020617; }
 .zs-slot { cursor: pointer; }
 .zs-img:not(.done) .zs-slot:hover { border-color: #00E5FF; background: rgba(0,229,255,0.1); }
+
+/* ── v9.11.0 Temu Export polish ───────────────────────────── */
+/* compact setup bar */
+.temu-setup-compact { display: none; align-items: center; gap: 10px; }
+.temu-setup-card.is-ready .temu-setup-compact { display: flex; }
+.temu-setup-card.is-ready:not(.expanded) > :not(.temu-setup-compact) { display: none !important; }
+.temu-setup-card.is-ready:not(.expanded) { padding-top: 10px; padding-bottom: 10px; }
+.temu-setup-card.is-ready.expanded .temu-setup-compact { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line-2); }
+.tsc-item { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; }
+.tsc-ic { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.35); position: relative; }
+.tsc-ic::after { content: '✓'; position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: #10B981; color: #fff; font-size: 8px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.tsc-txt { display: flex; flex-direction: column; min-width: 0; }
+.tsc-txt small { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-3); }
+.tsc-txt small.tsc-tpl { text-transform: none; letter-spacing: 0; font-weight: 500; color: #34D399; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.tsc-txt b { font-size: 12.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsc-actions { display: flex; gap: 5px; flex-shrink: 0; }
+.tsc-btn, .temu-step-btn { height: 28px !important; padding: 0 11px !important; border-radius: 7px !important; font-size: 11px !important; font-weight: 600 !important; border: 1px solid var(--line-2) !important; background: var(--surface-3) !important; color: var(--ink-2) !important; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .15s; }
+.tsc-btn:hover, .temu-step-btn:hover { border-color: var(--accent) !important; color: var(--ink) !important; background: rgba(0,229,255,0.08) !important; transform: none; }
+.temu-step-row.is-active .temu-step-btn:not(.temu-test-btn) { background: linear-gradient(135deg, var(--accent), var(--accent-dark)) !important; color: var(--accent-fg) !important; border-color: transparent !important; }
+.tsc-svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* products source segments */
+.temu-src-card { padding-top: 12px !important; }
+.temu-src-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.temu-src-px { font-size: 10.5px; font-weight: 600; color: var(--ink-3); background: var(--surface-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 3px 10px; cursor: pointer; transition: all .15s; }
+.temu-src-px b { color: var(--accent); }
+.temu-src-px:hover { border-color: var(--accent); color: var(--ink); }
+.temu-src-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 10px; background: rgba(2,6,23,0.55); border: 1px solid var(--line-2); }
+.temu-src-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 34px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-3); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all .18s; }
+.temu-src-seg button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.temu-src-seg button:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+.temu-src-seg button.on { color: var(--accent); background: rgba(0,229,255,0.1); border-color: rgba(0,229,255,0.45); box-shadow: 0 0 12px rgba(0,229,255,0.12); }
+.temu-src-note { display: none; margin-top: 6px; font-size: 11px; color: var(--ink-2); padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.temu-src-note.show { display: block; }
+.temu-src-card .temu-src-info-badge { margin-top: 8px; }
+
+/* collapsible Title Optimizer / Image Studio */
+.temu-coll-tgl { cursor: pointer; user-select: none; background: none; border: 0; padding: 0; font: inherit; }
+button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
+.temu-coll-chev { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s ease; flex-shrink: 0; opacity: .8; }
+.coll-open .temu-coll-chev { transform: rotate(90deg); }
+.temu-coll-body { display: none; }
+.coll-open .temu-coll-body { display: flex; flex-direction: column; gap: 8px; animation: tcollIn .2s ease both; }
+.temu-ai-bar-inp-row.temu-coll-body { gap: 6px; }
+.temu-review-ai-bar:not(.coll-open), .temu-review-img-bar:not(.coll-open) { gap: 0; }
+@keyframes tcollIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* settings */
+.temu-autosave-note { font-size: 10.5px; color: var(--ink-3); }
+.temu-grid-5 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 6px !important; }
+.temu-grid-5 .temu-setting-box { padding: 7px 8px; }
+.temu-grid-5 .temu-setting-sub { display: none; }
+.temu-grid-5 .temu-setting-box:last-child { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
+.temu-grid-5 .temu-setting-box:last-child .temu-setting-lbl::after { content: ' — is se bhari product skip'; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ink-3); }
+.temu-grid-5 .temu-setting-box:last-child .temu-input-with-affix { width: 96px; }
+
+/* history / categories fixes */
+.temu-hist-search-ico, .temu-cat-search-ico { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; color: var(--ink-3); }
+.temu-hist-search-ico { position: absolute; left: 10px; width: 14px; height: 14px; pointer-events: none; }
+.temu-cat-dept-bar { flex-wrap: wrap; overflow: visible !important; }
+.temu-hist-records:empty::before { content: 'Abhi koi upload record nahi — Export ya Upload ke baad yahan dikhega'; display: block; text-align: center; font-size: 11.5px; color: var(--ink-3); padding: 18px 8px; border: 1px dashed var(--line-2); border-radius: 8px; }
+.temu-week-days:empty::before { content: 'Pichhle 7 din ka data abhi nahi'; grid-column: 1 / -1; display: block; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+
+/* ── v9.11.0 header + tab badge match the cyan theme ───────── */
+.tab-n { font: 700 10.5px var(--mono); color: var(--accent); background: rgba(0,229,255,0.12); border: 1px solid rgba(0,229,255,0.35); padding: 0 6px; min-width: 18px; height: 17px; line-height: 15px; text-align: center; border-radius: 5px; margin-left: 2px; box-sizing: border-box; display: inline-block; }
+.tab-btn.active .tab-n { background: var(--accent); color: #020617; border-color: var(--accent); box-shadow: 0 0 10px rgba(0,229,255,0.35); }
+.temu-top-pill { height: 32px !important; border-radius: 8px !important; padding: 0 12px 0 5px !important; gap: 7px !important; background: linear-gradient(180deg, rgba(0,229,255,0.10), rgba(0,229,255,0.04)) !important; border: 1px solid rgba(0,229,255,0.35) !important; }
+.temu-top-pill .temu-pill-ico { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #0284c7); }
+.temu-top-pill .temu-pill-ico svg { width: 12px; height: 12px; stroke: #020617; stroke-width: 2.4; }
+.temu-top-pill .temu-pill-name { font-weight: 700; letter-spacing: .1px; }
+.app-header .stat-pill { height: 32px; border-radius: 8px; }
+.app-header .hdr-btn { border-radius: 8px; }

@@ -58,7 +58,7 @@ const SECRET_SETTING_KEYS = new Set([]); // no secrets since v7.12 (AI removed)
 const PUBLIC_SETTING_KEYS = new Set([
   'autoCategory', 'duplicateCheck', 'badgeEnabled', 'saveToCurrentFolder',
   'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup',
-  'bulkSkipImageDownload', 'zhExportFolder',
+  'bulkSkipImageDownload', 'zhExportFolder', 'bulkParallelTabs', 'bulkAutoRetry',
   'imageFormat', 'imageRatio', 'imageBg', 'imageMinSize', 'imageMax5MB',
   'bulkQueueAutoCapture', 'bulkSheetColumns', 'customBulkColumns',
   'temuConfig', 'temuTemplateB64', 'temuTemplateName',
