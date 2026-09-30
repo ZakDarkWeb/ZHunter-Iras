@@ -3,7 +3,9 @@
 ## v9.11.0 (2026-09-29) — Manual Board, Pack, tez auto Flow
 - **✨ Edit Studio (manual):** "Edit Images" par pehle choose: Manual studio / Auto. Studio mein ek waqt ek product (‹ Prev / Next ›, ← → keys, progress bar): title edit (x/180), Pack chips Single·2·3·4·5·6·8·10·12 → title ke aage "2 Pack - ", Image prompt / Pack prompt (editable) + Copy. Sirf selected images (+ "Sab images" toggle); har image: 📋 Copy, result slot (Ctrl+V = selected slot, agla slot khud select), ⬇ Flow se lo (Flow ki nayi image, jo pehle use na hui ho), ↩ Undo.
 - **⚡ Paste in Flow:** tick ki hui images (+ prompt, optional) Flow ke prompt box mein lag jati hain — generate aap khud dabate hain.
-- **📦 Make Pack (auto):** title ab AI ke bajaye "N Pack - Title"; main image simple pack prompt se.
+- **📦 Make Pack:** title ke aage "N Pack - ", phir **Edit Studio (manual)** khulta hai — auto nahi chalta, debugger banner nahi aata.
+- Studio: **✨ AI rewrite** title button (pack prefix aage hi rehta hai); Pack size naya segmented selector (1 · 2× · 3× · 4× · 6× · 8× · 10× · 12×).
+- Manual "Paste in Flow" kabhi debugger (CDP) use nahi karta. Auto mein Generate ke liye pehle Enter try hota hai; Flow na maane tab hi CDP click (banner sirf tab).
 - **Speed setting (Safe / Normal / Fast):** sirf images ke beech ka gap badalta hai; ek waqt mein ek hi generation. "Unusual activity" aaye to khud Safe par aa jata hai.
 - **Tez auto:** Generate par pehle asli (CDP) click (pehle ~8s zaya hote the), result 0.7s / side panel 1.5s scan, agli image generate ke dauran pehle se download, replace foran local copy se (Temu link background mein).
 

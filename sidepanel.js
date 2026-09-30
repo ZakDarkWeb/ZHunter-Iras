@@ -13874,7 +13874,7 @@ try { document.addEventListener('DOMContentLoaded', initTemuExport); if (documen
 // "Paste in Flow" puts the ticked images (+ prompt) into Flow's prompt box — no generate.
 // ═════════════════════════════════════════════════════════════════
 let ZhStudio = { items: [], page: 0, open: false, basePrompt: '', usedFlowIds: new Set(), withPrompt: true };
-const ZS_PACKS = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+const ZS_PACKS = [1, 2, 3, 4, 6, 8, 10, 12];
 const PACK_PREFIX_RE = /^\s*(?:\d+\s*[- ]?\s*pack|pack\s+of\s+\d+)\s*[-–|:]?\s*/i;
 
 function packTitle(title, n) {
@@ -14000,11 +14000,14 @@ function zhStudioRender(dir = 0) {
   body.innerHTML = `
     <div class="zs-anim ${dir > 0 ? 'from-r' : dir < 0 ? 'from-l' : ''}">
       <div class="zs-sec">
-        <div class="zs-lbl">Title <span class="zs-cnt ${title.length > 180 ? 'over' : ''}" id="zsTitleCnt">${title.length}/180</span></div>
+        <div class="zs-lbl"><span>Title</span><span style="display:flex;align-items:center;gap:8px;">
+          <span class="zs-cnt ${title.length > 180 ? 'over' : ''}" id="zsTitleCnt">${title.length}/180</span>
+          <button type="button" class="zs-ai" id="zsAiTitle" title="AI se title rewrite (pack wala hissa aage hi rahega)">✨ AI rewrite</button></span></div>
         <textarea id="zsTitle" class="zs-title" rows="2" spellcheck="false">${esc(title)}</textarea>
+        <div class="zs-lbl" style="margin:10px 0 6px">Pack size</div>
         <div class="zs-packs">
-          <span class="zs-lbl" style="margin:0">Pack</span>
-          ${ZS_PACKS.map(p => `<button type="button" class="zs-chip${it.pack === p ? ' on' : ''}" data-pack="${p}">${p === 1 ? 'Single' : p}</button>`).join('')}
+          ${ZS_PACKS.map(p => `<button type="button" class="zs-chip${it.pack === p ? ' on' : ''}" data-pack="${p}" title="${p === 1 ? 'Single product (pack hatao)' : p + ' Pack - title'}">
+            <b>${p === 1 ? '1' : p + '×'}</b><small>${p === 1 ? 'Single' : 'Pack'}</small></button>`).join('')}
         </div>
       </div>
       <div class="zs-sec">
@@ -14036,11 +14039,12 @@ function zhStudioRender(dir = 0) {
                 ${isPick || s.newUrl ? `<div class="zs-slot" data-act="select">
                   ${s.busy ? '<span class="zs-hint">⏳</span>'
                     : s.newUrl ? `<img src="${esc(s.newUrl)}" alt="" /><span class="zs-ok">✓</span>`
-                    : '<span class="zs-hint">Ctrl+V</span>'}
+                    : '<span class="zs-hint">Click =<br>Paste</span>'}
                 </div>` : ''}
               </div>
               <div class="zs-img-btns">
                 <button type="button" class="zs-btn sm" data-act="copy" title="Image copy — Flow mein Ctrl+V">📋 Copy</button>
+                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Clipboard ki image isi slot mein (Ctrl+V ki zaroorat nahi)">📥 Paste</button>` : ''}
                 ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Flow ki sab se nayi bani image is slot mein">⬇ Flow se lo</button>` : ''}
                 ${s.newUrl ? `<button type="button" class="zs-btn sm" data-act="undo" title="Original wapis">↩</button>` : ''}
               </div>
@@ -14065,6 +14069,63 @@ function zsSetTitle(it, t) {
     const inp = card.querySelector('.temu-rv-title-inp'); if (inp) inp.value = t;
     const sn = card.querySelector('.temu-rv-title-snippet'); if (sn) sn.textContent = t;
   }
+}
+
+// AI title rewrite — same optimizer as the bulk "AI" button; the "N Pack - " prefix is kept
+async function zsAiRewriteTitle(it) {
+  const btn = $('zsAiTitle');
+  if (btn?.classList.contains('busy')) return;
+  if (btn) { btn.classList.add('busy'); btn.textContent = '⏳ Rewriting…'; }
+  try {
+    const cur = it.product.title || '';
+    const base = cur.replace(PACK_PREFIX_RE, '').trim();
+    const instruction = getTemuOptimizerInstruction($('temuAiPromptInp')?.value?.trim());
+    const out = await callGroqAPI({
+      prompt: buildProductAiPrompt(it.product, base, instruction),
+      systemPrompt: 'You are a Temu Product Title Optimization Specialist. Return ONLY the new optimized title text, no quotes, no explanation.',
+      temperature: 0.7
+    });
+    let t = String(out || '').trim().replace(/^["'`]|["'`]$/g, '').replace(PACK_PREFIX_RE, '');
+    if (!t) throw new Error('khali jawab');
+    t = packTitle(t, it.pack);
+    zsSetTitle(it, t);
+    zhStudioRender();
+    toast('✨ Title rewrite ho gaya', 'ok');
+  } catch (e) {
+    toast('AI title error: ' + (e?.message || e), 'warn');
+    if (btn) { btn.classList.remove('busy'); btn.textContent = '✨ AI rewrite'; }
+  }
+}
+
+// Clipboard image as data URL (side panel first, then via the Flow tab as a fallback)
+async function zsReadClipboardImage() {
+  const read = async () => {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(x => x.startsWith('image/'));
+      if (type) {
+        const blob = await item.getType(type);
+        return await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(blob); });
+      }
+    }
+    return null;
+  };
+  try { const v = await read(); if (v) return v; } catch (e) { console.warn('[ZHunter] clipboard read:', e); }
+  try {
+    const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+    const tab = tabs.find(x => /\/project\//.test(x.url || '')) || tabs[0];
+    if (!tab) return null;
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: async () => {
+      try {
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.find(x => x.startsWith('image/'));
+          if (type) { const b = await item.getType(type); return await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(b); }); }
+        }
+      } catch (_) {}
+      return null;
+    } });
+    return r?.result || null;
+  } catch (_) { return null; }
 }
 
 async function zsApply(it, i, src, how = 'Paste') {
@@ -14214,6 +14275,7 @@ function zsGo(delta) {
       return;
     }
     if (t.closest('[data-pm]')) { it.promptMode = t.closest('[data-pm]').dataset.pm; zhStudioRender(); return; }
+    if (t.closest('#zsAiTitle')) { await zsAiRewriteTitle(it); return; }
     if (t.id === 'zsCopyPrompt') { if (await zhCopyText(it.prompts[it.promptMode] || '')) toast('📝 Prompt copied', 'ok'); return; }
     if (t.id === 'zsShowAll') { it.showAll = !it.showAll; zhStudioRender(); return; }
     if (t.id === 'zsPasteFlow') { await zsPasteInFlow(it); return; }
@@ -14221,7 +14283,9 @@ function zsGo(delta) {
     const card = t.closest('.zs-img');
     if (!card || t.closest('.zs-tick')) return;
     const i = +card.dataset.i;
-    const act = t.closest('[data-act]')?.dataset.act || 'select';
+    let act = t.closest('[data-act]')?.dataset.act || 'select';
+    // empty result slot: one click pastes straight from the clipboard
+    if (act === 'select' && t.closest('.zs-slot') && !it.slots[i]?.newUrl) act = 'paste';
     if (act !== 'undo' && it.active !== i && (it.picked.includes(i) || it.slots[i]?.newUrl)) {
       it.active = i;
       body.querySelectorAll('.zs-img').forEach(c => c.classList.toggle('active', +c.dataset.i === i));
@@ -14231,6 +14295,10 @@ function zsGo(delta) {
       toast('📋 Copy ho rahi hai…', 'info');
       if (await zhCopyImage(src)) toast(`📋 P${it.pNo} · #${i + 1} copied — Flow mein Ctrl+V`, 'ok');
       else toast('Copy nahi hui — side panel par ek dafa click karke dobara try karein', 'warn');
+    } else if (act === 'paste') {
+      const src = await zsReadClipboardImage();
+      if (!src) { toast('Clipboard mein image nahi — Flow mein image par Right click → Copy image karein', 'warn'); return; }
+      await zsApply(it, i, src, 'Paste');
     } else if (act === 'flow') {
       const g = await flowLatestGenerated(ZhStudio.usedFlowIds);
       if (!g) { toast('Flow mein koi nayi generated image nahi mili (Flow project tab khula rakhein)', 'warn'); return; }
@@ -14295,11 +14363,12 @@ async function temuMakePack() {
       } catch (e) { console.warn('[ZHunter] Pack title error:', e); }
     }
     if (MasterUIState?.allRows) await setMasterRows(MasterUIState.allRows);
-    toast(`📦 ${ok}/${selRows.length} titles → ${n}-pack. Ab main images Flow mein ban rahi hain…`, ok ? 'ok' : 'warn');
+    toast(`📦 ${ok}/${selRows.length} titles → "${n} Pack - …". Studio khul raha hai`, ok ? 'ok' : 'warn');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '📦 Make Pack'; }
   }
-  await temuStartBulkImageEdit({ prompt: packImagePrompt(n), mainOnly: true });
+  // v9.11.0 — manual studio (no auto run, no debugger banner), pack prompt ready to copy
+  await zhStudioOpen();
 }
 
 (function initPackAndSpeed() {

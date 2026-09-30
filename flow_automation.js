@@ -612,8 +612,8 @@
     // v9.11.0 — the page-level click was tried first and Flow ignores it, so every image
     // lost ~8s right after the prompt was pasted. The real (CDP) click now goes first.
     const attempts = [
+      ['Enter key', enterSubmit, 2500],
       ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS],
-      ['Enter key', enterSubmit, 5000],
       ['page click', async () => { await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation'); }, 5000]
     ];
     let ok = false;
@@ -838,7 +838,8 @@
     if (runningJobId) return { ok: false, error: 'Auto job chal rahi hai — khatam hone dein' };
     if (!/\/project\/[\w-]+/i.test(location.pathname)) return { ok: false, error: 'Flow mein pehle koi project kholein (+ New project)' };
     await waitFor(() => Q.promptRoot() || Q.agentPanel(), 8000);
-    await ensureAgentOff();
+    // v9.11.0 — manual mode never uses the debugger (no "started debugging" banner)
+    if (agentOn()) return { ok: false, error: 'Flow mein "Agent" off karein (Agent panel band karein), phir dobara dabayein' };
     if (!Q.promptRoot()) return { ok: false, error: 'Flow ka prompt box nahi mila' };
     if (clear) await clearPromptBox();
     await dismissFlowError();
