@@ -2929,6 +2929,40 @@ async function toFlowSafeDataUrl(dataUrl) {
   }
 }
 
+// v9.11.0 — download + Flow-safe convert a product image once; the stepper warms this up
+// for the NEXT step while the current one is still generating.
+const FlowB64Cache = new Map(); // url -> Promise<dataUrl|null>
+function flowPrefetchImage(src) {
+  if (!src) return Promise.resolve(null);
+  if (FlowB64Cache.has(src)) return FlowB64Cache.get(src);
+  const p = (async () => {
+    let b64 = src.startsWith('data:') ? src : null;
+    if (!b64) {
+      try {
+        const resp = await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
+        if (resp?.success && resp.base64) b64 = resp.base64;
+      } catch (_) {}
+    }
+    return b64 ? await toFlowSafeDataUrl(b64) : null;
+  })();
+  FlowB64Cache.set(src, p);
+  p.then(v => { if (!v) FlowB64Cache.delete(src); });
+  if (FlowB64Cache.size > 12) FlowB64Cache.delete(FlowB64Cache.keys().next().value);
+  return p;
+}
+
+// v9.11.0 — auto speed: Safe / Normal / Fast (only the pause between images changes;
+// still ONE generation at a time so results can never land on the wrong product)
+const FLOW_SPEEDS = {
+  safe:   { min: 4000, max: 9000, label: 'Safe' },
+  normal: { min: 2000, max: 4000, label: 'Normal' },
+  fast:   { min: 800,  max: 1600, label: 'Fast' }
+};
+function flowSpeedKey() {
+  const v = $('temuAiImgSpeedSel')?.value;
+  return FLOW_SPEEDS[v] ? v : 'normal';
+}
+
 // Flow smart editor automation helper — returns the jobId (or null if nothing was sent)
 async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
   if (!src) return null;
@@ -2940,18 +2974,13 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
 
   toast('Preparing image & prompt for Flow…', 'info');
 
-  let base64 = src.startsWith('data:') ? src : null;
-  if (!base64) {
-    try {
-      const resp = await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
-      if (resp?.success && resp.base64) base64 = resp.base64;
-    } catch (_) {}
-  }
+  // v9.11.0 — the next step's image is usually downloaded already (flowPrefetchImage)
+  let base64 = await flowPrefetchImage(src);
+  FlowB64Cache.delete(src);
   if (!base64) {
     toast('Product image download nahi hui — Flow ko nahi bheji', 'warn');
     return null;
   }
-  base64 = await toFlowSafeDataUrl(base64);
   if (!base64) {
     toast('Image format Flow ke liye convert nahi ho saka', 'warn');
     return null;
@@ -3007,6 +3036,12 @@ function _productRowsById(productId) {
     const s = TemuSheetRows.find(x => x.id === productId);
     if (s) out.push(s);
   }
+  // v9.11.0 — Manual Board product objects
+  try {
+    for (const it of (ZhStudio?.items || [])) {
+      if (it?.product?.id === productId && !out.includes(it.product)) out.push(it.product);
+    }
+  } catch (_) {}
   // v9.10.1 — the stepper's own product objects (e.g. Library rows loaded straight from storage)
   try {
     for (const q of (TemuImgStepper?.queue || [])) {
@@ -3129,6 +3164,12 @@ function onFlowStatus(m) {
     temuStepSetStatus((m.error ? '⚠️ ' : '⏳ ') + (m.text || m.phase || ''), m.error ? 'error' : 'info');
   }
   if (m.error) {
+    // v9.11.0 — Google flagged the account: drop back to Safe pacing automatically
+    if (/unusual activity/i.test(m.text || '') && flowSpeedKey() !== 'safe') {
+      const sel = $('temuAiImgSpeedSel');
+      if (sel) { sel.value = 'safe'; chrome.storage.local.set({ zhunterFlowSpeed: 'safe' }); }
+      toast('⚠️ Google ne "unusual activity" kaha — speed Safe kar di. Thora ruk kar naya Flow project banayein.', 'warn');
+    }
     FlowJobs.delete(m.jobId);
     if (isActiveStepperJob(m.jobId)) {
       TemuImgStepper.activeJobId = null;
@@ -3247,7 +3288,8 @@ function temuStepScheduleNext() {
   if (!TemuImgStepper.running) return;
   const more = TemuImgStepper.currentIndex + 1 < TemuImgStepper.queue.length;
   if (!more) { setTimeout(() => temuStepAdvance(), 800); return; }
-  const wait = 4000 + Math.floor(Math.random() * 5000);
+  const sp = FLOW_SPEEDS[flowSpeedKey()];
+  const wait = sp.min + Math.floor(Math.random() * (sp.max - sp.min));
   temuStepSetStatus(`✓ Replaced — agla image ${Math.round(wait / 1000)}s mein…`, 'ok');
   const idx = TemuImgStepper.currentIndex;
   setTimeout(() => {
@@ -3286,13 +3328,15 @@ async function temuStepApplyManualImage(src, how = 'manual') {
   temuStepCancelActiveJob();
   temuStepSetStatus(`⏳ ${how}: image laga raha hoon…`);
 
+  // v9.11.0 — local copy first (fast); the public Temu link is made in the background below,
+  // so the next step no longer waits for the upload.
   let finalUrl = src;
   if (/^https:\/\/flow-content\.google\//i.test(src)) {
-    finalUrl = await uploadImageToPublicHost(src);
-    if (!finalUrl || /flow-content\.google/i.test(finalUrl)) {
+    try {
       const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src });
-      finalUrl = r?.success && r.base64 ? r.base64 : src;
-    }
+      if (r?.success && r.base64) finalUrl = r.base64;
+    } catch (_) {}
+    if (finalUrl === src) finalUrl = (await uploadImageToPublicHost(src)) || src;
   }
   const pid = current.product?.id, idx = current.imgIndex;
   let ok = await replaceProductImage(pid, idx, finalUrl, null);
@@ -3411,7 +3455,7 @@ setInterval(async () => {
     }
   } catch (e) { console.warn('[ZHunter] Auto poll error:', e); }
   finally { _flowPollBusy = false; }
-}, 4000);
+}, 1500);
 
 // Newest generated image in the open Flow project (skips uploads and prompt-box chips)
 async function temuStepGrabLatestFromFlow() {
@@ -12768,7 +12812,7 @@ function temuInitReviewToggle() {
     temuUpdateReviewCount(rows);
     if (!list.classList.contains('hidden')) await temuRenderReview();
   });
-  $('temuAiBulkImgBtn')?.addEventListener('click', temuStartBulkImageEdit);
+  $('temuAiBulkImgBtn')?.addEventListener('click', () => zhChooseEditMode());
   // v9.9.0 — pick products for image editing without touching the upload selection
   const imgSelAll = async (on) => {
     const rows = await temuGetQueuedRows();
@@ -12808,7 +12852,7 @@ function temuUpdateImgEditCount(rows) {
   if (btn && !TemuImgStepper.running) btn.disabled = !sel.length;
 }
 
-async function temuStartBulkImageEdit() {
+async function temuStartBulkImageEdit(opts = {}) {
   if (TemuImgStepper.running) {
     // v9.10.1 — an old (often stuck) session used to re-open here with its old products.
     // Now: stop it and start fresh with what is selected right now.
@@ -12824,14 +12868,14 @@ async function temuStartBulkImageEdit() {
   }
 
   const engine = $('temuAiImgEngineSel')?.value || 'flow';
-  const prompt = ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
+  const prompt = opts.prompt || ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
 
   // Queue of { product, imgUrl, imgIndex } — the exact slot each result must go back to
   const queue = [];
   const seen = new Set();
   selRows.forEach(r => {
     const allImgs = _allImgUrls(r);
-    temuImgTargetIndices(r).forEach(idx => {
+    (opts.mainOnly ? [0] : temuImgTargetIndices(r)).forEach(idx => {
       const key = r.id + '#' + idx;
       if (!allImgs[idx] || seen.has(key)) return;
       seen.add(key);
@@ -12966,7 +13010,7 @@ async function temuStepSendCurrent() {
     const sent = await triggerFlowEdit({
       src: current.imgUrl,
       title: current.product.title,
-      prompt: prompt,
+      prompt: current.prompt || prompt,
       productId: current.product.id,
       imageIndex: current.imgIndex,
       source: 'stepper',
@@ -12980,6 +13024,9 @@ async function temuStepSendCurrent() {
     if (TemuImgStepper.activeJobId === jobId) {
       temuStepSetStatus('⏳ Flow: image attach → prompt → generate. Result khud aa jayega aur agla step shuru hoga.');
     }
+    // v9.11.0 — download the next step's image while this one generates
+    const nxt = queue[currentIndex + 1];
+    if (nxt?.imgUrl) flowPrefetchImage(nxt.imgUrl);
   } else if (engine === 'gemini') {
     let base64Data = current.imgUrl;
     if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
@@ -13818,3 +13865,448 @@ function initTemuExport() {
   });
 }
 try { document.addEventListener('DOMContentLoaded', initTemuExport); if (document.readyState !== 'loading') initTemuExport(); } catch (_) {}
+
+// ═════════════════════════════════════════════════════════════════
+// v9.11.0 — EDIT STUDIO (manual)
+// "Edit Images" → choose Manual studio / Auto. The studio shows ONE product per page:
+// title (editable) · pack chips (adds "N Pack - " in front) · image / pack prompt to copy ·
+// the images picked for editing, each with Copy, a result slot (Ctrl+V) and "Flow se lo".
+// "Paste in Flow" puts the ticked images (+ prompt) into Flow's prompt box — no generate.
+// ═════════════════════════════════════════════════════════════════
+let ZhStudio = { items: [], page: 0, open: false, basePrompt: '', usedFlowIds: new Set(), withPrompt: true };
+const ZS_PACKS = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+const PACK_PREFIX_RE = /^\s*(?:\d+\s*[- ]?\s*pack|pack\s+of\s+\d+)\s*[-–|:]?\s*/i;
+
+function packTitle(title, n) {
+  const base = String(title || '').replace(PACK_PREFIX_RE, '').trim();
+  return n > 1 ? `${n} Pack - ${base}`.slice(0, 180) : base;
+}
+function packFromTitle(title) {
+  const m = String(title || '').match(/^\s*(\d+)\s*[- ]?\s*pack\b/i) || String(title || '').match(/^\s*pack\s+of\s+(\d+)/i);
+  return m ? parseInt(m[1], 10) : 1;
+}
+function packImagePrompt(n) {
+  return `Create a ${n} pack of this product. Show ${n} identical units of this exact product together on a clean white background. Keep the packaging, logo, colors and all text exactly the same as the reference. No extra text or badges.`;
+}
+
+async function zhImageToPngBlob(src) {
+  let dataUrl = src;
+  if (!/^data:/i.test(src)) {
+    const r = /^https:\/\/flow-content\.google\//i.test(src)
+      ? await msg({ action: 'FETCH_FLOW_IMAGE', url: src })
+      : await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
+    if (r?.success && r.base64) dataUrl = r.base64;
+  }
+  if (!/^data:/i.test(dataUrl)) throw new Error('image download nahi hui');
+  const blob = await (await fetch(dataUrl)).blob();
+  if (blob.type === 'image/png') return blob;
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  try { bmp.close(); } catch (_) {}
+  return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('png convert fail')), 'image/png'));
+}
+async function zhCopyImage(src) {
+  try {
+    // Promise inside ClipboardItem keeps the click's permission while the image downloads
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': zhImageToPngBlob(src) })]);
+    return true;
+  } catch (e) { console.warn('[ZHunter] Copy image failed:', e); return false; }
+}
+async function zhCopyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (_) { return false; }
+}
+
+// Newest generated image in the open Flow project that this studio hasn't used yet
+async function flowLatestGenerated(excludeIds = new Set()) {
+  const list = await flowScanImages();
+  if (!Array.isArray(list)) return null;
+  return list.find(g => g.loaded !== false && !excludeIds.has(g.id) && !_flowUploadTitle(g.title)) || null;
+}
+
+// ── mode chooser ────────────────────────────────────────────────
+function zhChooseEditMode() {
+  const rowsSel = TemuImgEditSelected.size;
+  if (!rowsSel) { toast('Pehle ✨ checkbox se products select karein (ya "Select all")', 'warn'); return; }
+  $('zhModeModal')?.classList.remove('hidden');
+}
+(function initZhMode() {
+  const close = () => $('zhModeModal')?.classList.add('hidden');
+  $('zhModeCloseBtn')?.addEventListener('click', close);
+  $('zhModeManualBtn')?.addEventListener('click', () => { close(); zhStudioOpen(); });
+  $('zhModeAutoBtn')?.addEventListener('click', () => { close(); temuStartBulkImageEdit(); });
+})();
+
+// ── studio ──────────────────────────────────────────────────────
+async function zhStudioOpen() {
+  const rows = await temuGetQueuedRows();
+  const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
+  if (!selRows.length) { toast('Pehle ✨ checkbox se products select karein', 'warn'); return; }
+  const basePrompt = ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
+  const items = selRows.map((r, i) => {
+    const all = _allImgUrls(r);
+    const picked = temuImgTargetIndices(r).filter(x => all[x]);
+    const pack = packFromTitle(r.title);
+    return {
+      product: r, pNo: i + 1, picked, showAll: false, pack,
+      promptMode: pack > 1 ? 'pack' : 'image',
+      prompts: { image: basePrompt, pack: packImagePrompt(Math.max(2, pack)) },
+      slots: {}, pasteSel: new Set(picked), active: picked[0] ?? 0
+    };
+  });
+  ZhStudio = { ...ZhStudio, items, page: 0, open: true, basePrompt, usedFlowIds: new Set() };
+  try { const st = await chrome.storage.local.get(['zhStudioWithPrompt']); if (typeof st?.zhStudioWithPrompt === 'boolean') ZhStudio.withPrompt = st.zhStudioWithPrompt; } catch (_) {}
+  $('zhStudioModal')?.classList.remove('hidden');
+  zhStudioRender(0);
+}
+
+function zhStudioClose() {
+  ZhStudio.open = false;
+  $('zhStudioModal')?.classList.add('hidden');
+  if (MasterUIState?.allRows) setMasterRows(MasterUIState.allRows).catch(() => {});
+  temuRenderReview().catch(() => {});
+}
+
+const zsCur = () => ZhStudio.items[ZhStudio.page];
+function zsShownIdx(it) {
+  const all = _allImgUrls(it.product);
+  return it.showAll ? all.map((_, i) => i).filter(i => all[i]) : it.picked;
+}
+function zsStats() {
+  let done = 0, total = 0;
+  for (const it of ZhStudio.items) { total += it.picked.length; done += it.picked.filter(i => it.slots[i]?.newUrl).length; }
+  return { done, total };
+}
+
+function zhStudioRender(dir = 0) {
+  const it = zsCur();
+  const body = $('zhStudioBody');
+  if (!it || !body) return;
+  const { done, total } = zsStats();
+  const n = ZhStudio.items.length;
+  $('zhStudioSub').textContent = `Product ${ZhStudio.page + 1} / ${n} · ${done}/${total} images replaced`;
+  $('zhStudioBar').style.width = `${total ? Math.round(done / total * 100) : 0}%`;
+  $('zhStudioPrevBtn').disabled = ZhStudio.page === 0;
+  const nx = $('zhStudioNextBtn');
+  nx.innerHTML = ZhStudio.page === n - 1 ? '✓ Done' : 'Next ›';
+
+  const all = _allImgUrls(it.product);
+  const shown = zsShownIdx(it);
+  const title = it.product.title || '';
+  const prompt = it.prompts[it.promptMode];
+  const extra = all.filter(Boolean).length - it.picked.length;
+
+  body.innerHTML = `
+    <div class="zs-anim ${dir > 0 ? 'from-r' : dir < 0 ? 'from-l' : ''}">
+      <div class="zs-sec">
+        <div class="zs-lbl">Title <span class="zs-cnt ${title.length > 180 ? 'over' : ''}" id="zsTitleCnt">${title.length}/180</span></div>
+        <textarea id="zsTitle" class="zs-title" rows="2" spellcheck="false">${esc(title)}</textarea>
+        <div class="zs-packs">
+          <span class="zs-lbl" style="margin:0">Pack</span>
+          ${ZS_PACKS.map(p => `<button type="button" class="zs-chip${it.pack === p ? ' on' : ''}" data-pack="${p}">${p === 1 ? 'Single' : p}</button>`).join('')}
+        </div>
+      </div>
+      <div class="zs-sec">
+        <div class="zs-row">
+          <div class="zs-seg">
+            <button type="button" data-pm="image" class="${it.promptMode === 'image' ? 'on' : ''}">Image prompt</button>
+            <button type="button" data-pm="pack" class="${it.promptMode === 'pack' ? 'on' : ''}">Pack prompt${it.pack > 1 ? ` (${it.pack})` : ''}</button>
+          </div>
+          <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>
+        </div>
+        <textarea id="zsPrompt" class="zs-prompt" rows="3" spellcheck="false">${esc(prompt)}</textarea>
+      </div>
+      <div class="zs-sec">
+        <div class="zs-row">
+          <span class="zs-lbl" style="margin:0">Images · ${it.picked.length} for editing</span>
+          ${extra > 0 ? `<button type="button" class="zs-link" id="zsShowAll">${it.showAll ? 'Sirf selected' : `+ Sab images (${all.filter(Boolean).length})`}</button>` : ''}
+        </div>
+        <div class="zs-imgs">
+          ${shown.map(i => {
+            const s = it.slots[i] || {};
+            const isPick = it.picked.includes(i);
+            return `
+            <div class="zs-img${i === it.active ? ' active' : ''}${s.newUrl ? ' done' : ''}" data-i="${i}">
+              <div class="zs-img-top">
+                <label class="zs-tick" title="Paste in Flow ke liye"><input type="checkbox" data-paste="${i}" ${it.pasteSel.has(i) ? 'checked' : ''}/> #${i + 1}${i === 0 ? ' · Main' : ''}</label>
+              </div>
+              <div class="zs-pair">
+                <img class="zs-orig" src="${esc(all[i])}" alt="" />
+                ${isPick || s.newUrl ? `<div class="zs-slot" data-act="select">
+                  ${s.busy ? '<span class="zs-hint">⏳</span>'
+                    : s.newUrl ? `<img src="${esc(s.newUrl)}" alt="" /><span class="zs-ok">✓</span>`
+                    : '<span class="zs-hint">Ctrl+V</span>'}
+                </div>` : ''}
+              </div>
+              <div class="zs-img-btns">
+                <button type="button" class="zs-btn sm" data-act="copy" title="Image copy — Flow mein Ctrl+V">📋 Copy</button>
+                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Flow ki sab se nayi bani image is slot mein">⬇ Flow se lo</button>` : ''}
+                ${s.newUrl ? `<button type="button" class="zs-btn sm" data-act="undo" title="Original wapis">↩</button>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="zs-flowbar">
+        <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in Flow (${it.pasteSel.size})</button>
+        <label class="zs-tick"><input type="checkbox" id="zsWithPrompt" ${ZhStudio.withPrompt ? 'checked' : ''}/> + prompt</label>
+        <button type="button" class="zs-btn" id="zsOpenFlow">↗ Open Flow</button>
+      </div>
+    </div>`;
+}
+
+// title edits → product rows + review card (saved when studio page changes / closes)
+function zsSetTitle(it, t) {
+  it.product.title = t;
+  for (const x of _productRowsById(it.product.id)) x.title = t;
+  const card = document.querySelector(`.temu-rv-card[data-id="${it.product.id}"]`);
+  if (card) {
+    const inp = card.querySelector('.temu-rv-title-inp'); if (inp) inp.value = t;
+    const sn = card.querySelector('.temu-rv-title-snippet'); if (sn) sn.textContent = t;
+  }
+}
+
+async function zsApply(it, i, src, how = 'Paste') {
+  const s = it.slots[i] || (it.slots[i] = {});
+  if (!src || s.busy) return;
+  const all = _allImgUrls(it.product);
+  if (!s.orig) s.orig = all[i];
+  s.busy = true; zhStudioRender();
+  try {
+    let finalUrl = src;
+    if (/^https:\/\/flow-content\.google\//i.test(src)) {
+      try { const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src }); if (r?.success && r.base64) finalUrl = r.base64; } catch (_) {}
+    }
+    const pid = it.product.id;
+    await replaceProductImage(pid, i, finalUrl, null);
+    if (Array.isArray(it.product.images)) {
+      const e = it.product.images[i];
+      it.product.images[i] = typeof e === 'string' || e == null ? finalUrl : { ...e, url: finalUrl };
+    }
+    s.newUrl = finalUrl;
+    if (!it.picked.includes(i)) it.picked.push(i), it.picked.sort((a, b) => a - b);
+    toast(`✓ P${it.pNo} · Image #${i + 1} replaced (${how})`, 'ok');
+    if (/^data:image\//i.test(finalUrl)) {
+      (async () => {
+        const pub = await uploadImageToPublicHost(finalUrl);
+        if (pub && /^https?:\/\//i.test(pub) && s.newUrl === finalUrl) {
+          await replaceProductImage(pid, i, pub, finalUrl);
+          const e = it.product.images?.[i];
+          if (e === finalUrl) it.product.images[i] = pub;
+          else if (e && e.url === finalUrl) it.product.images[i] = { ...e, url: pub };
+          s.newUrl = pub;
+        }
+      })();
+    }
+    const next = it.picked.find(x => x > i && !it.slots[x]?.newUrl) ?? it.picked.find(x => !it.slots[x]?.newUrl);
+    if (next != null) it.active = next;
+  } catch (e) {
+    toast('Image nahi lagi: ' + (e?.message || e), 'warn');
+  } finally {
+    s.busy = false;
+    zhStudioRender();
+  }
+}
+
+async function zsUndo(it, i) {
+  const s = it.slots[i];
+  if (!s?.newUrl || !s.orig) return;
+  await replaceProductImage(it.product.id, i, s.orig, null);
+  if (Array.isArray(it.product.images)) {
+    const e = it.product.images[i];
+    it.product.images[i] = typeof e === 'string' || e == null ? s.orig : { ...e, url: s.orig };
+  }
+  s.newUrl = null;
+  it.active = i;
+  zhStudioRender();
+  toast(`↩ P${it.pNo} · Image #${i + 1} original`, 'info');
+}
+
+async function zsPasteInFlow(it) {
+  const all = _allImgUrls(it.product);
+  const idx = [...it.pasteSel].sort((a, b) => a - b).filter(i => all[i]);
+  if (!idx.length) { toast('Kam se kam ek image tick karein', 'warn'); return; }
+  const btn = $('zsPasteFlow');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Images tayyar…'; }
+  try {
+    const imgs = (await Promise.all(idx.map(i => flowPrefetchImage(all[i])))).filter(Boolean);
+    if (!imgs.length) { toast('Images download nahi huin', 'warn'); return; }
+    const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+    const tab = tabs.find(t => /\/project\//.test(t.url || ''));
+    if (!tab) {
+      toast('Flow mein pehle ek project kholein (+ New project), phir dobara dabayein', 'warn');
+      if (!tabs.length) chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+      else chrome.tabs.update(tabs[0].id, { active: true });
+      return;
+    }
+    await chrome.tabs.update(tab.id, { active: true });
+    if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) {}
+    if (btn) btn.textContent = `⏳ Flow mein ${imgs.length} images…`;
+    const res = await chrome.tabs.sendMessage(tab.id, {
+      action: 'ZH_FLOW_MANUAL_ATTACH', images: imgs,
+      prompt: ZhStudio.withPrompt ? (it.prompts[it.promptMode] || '') : '', clear: true
+    }).catch(e => ({ ok: false, error: e?.message }));
+    if (res?.ok) toast(`✓ ${res.added}/${res.total} images Flow mein${ZhStudio.withPrompt ? ' + prompt' : ''} — Generate dabayein`, 'ok');
+    else toast('Flow: ' + (res?.error || 'images nahi lagin'), 'warn');
+  } finally {
+    if (btn) btn.disabled = false;
+    zhStudioRender();
+  }
+}
+
+function zsGo(delta) {
+  const n = ZhStudio.items.length;
+  const p = ZhStudio.page + delta;
+  if (MasterUIState?.allRows) setMasterRows(MasterUIState.allRows).catch(() => {});
+  if (p >= n) { zhStudioClose(); const { done, total } = zsStats(); toast(`🎉 Studio done: ${done}/${total} images replaced`, 'ok'); return; }
+  if (p < 0) return;
+  ZhStudio.page = p;
+  zhStudioRender(delta);
+}
+
+(function initZhStudio() {
+  $('zhStudioCloseBtn')?.addEventListener('click', zhStudioClose);
+  $('zhStudioPrevBtn')?.addEventListener('click', () => zsGo(-1));
+  $('zhStudioNextBtn')?.addEventListener('click', () => zsGo(1));
+  const body = $('zhStudioBody');
+  if (!body) return;
+
+  body.addEventListener('input', (e) => {
+    const it = zsCur(); if (!it) return;
+    if (e.target.id === 'zsTitle') {
+      const t = e.target.value.replace(/\n+/g, ' ');
+      zsSetTitle(it, t);
+      const c = $('zsTitleCnt'); if (c) { c.textContent = `${t.length}/180`; c.classList.toggle('over', t.length > 180); }
+      const p = packFromTitle(t);
+      if (p !== it.pack) { it.pack = p; body.querySelectorAll('.zs-chip').forEach(b => b.classList.toggle('on', +b.dataset.pack === p)); }
+    } else if (e.target.id === 'zsPrompt') {
+      it.prompts[it.promptMode] = e.target.value;
+    }
+  });
+
+  body.addEventListener('change', (e) => {
+    const it = zsCur(); if (!it) return;
+    if (e.target.dataset.paste != null) {
+      const i = +e.target.dataset.paste;
+      e.target.checked ? it.pasteSel.add(i) : it.pasteSel.delete(i);
+      const b = $('zsPasteFlow'); if (b) b.textContent = `⚡ Paste in Flow (${it.pasteSel.size})`;
+    } else if (e.target.id === 'zsWithPrompt') {
+      ZhStudio.withPrompt = e.target.checked;
+      chrome.storage.local.set({ zhStudioWithPrompt: e.target.checked });
+    }
+  });
+
+  body.addEventListener('click', async (e) => {
+    const it = zsCur(); if (!it) return;
+    const t = e.target;
+    if (t.closest('.zs-chip')) {
+      const p = +t.closest('.zs-chip').dataset.pack;
+      it.pack = p;
+      zsSetTitle(it, packTitle(it.product.title, p));
+      if (p > 1) {
+        const custom = it.prompts.pack && !/^Create a \d+ pack of this product\./.test(it.prompts.pack);
+        if (!custom) it.prompts.pack = packImagePrompt(p);
+        it.promptMode = 'pack';
+      } else it.promptMode = 'image';
+      zhStudioRender();
+      return;
+    }
+    if (t.closest('[data-pm]')) { it.promptMode = t.closest('[data-pm]').dataset.pm; zhStudioRender(); return; }
+    if (t.id === 'zsCopyPrompt') { if (await zhCopyText(it.prompts[it.promptMode] || '')) toast('📝 Prompt copied', 'ok'); return; }
+    if (t.id === 'zsShowAll') { it.showAll = !it.showAll; zhStudioRender(); return; }
+    if (t.id === 'zsPasteFlow') { await zsPasteInFlow(it); return; }
+    if (t.id === 'zsOpenFlow') { focusOrOpenFlowTab().catch(() => {}); return; }
+    const card = t.closest('.zs-img');
+    if (!card || t.closest('.zs-tick')) return;
+    const i = +card.dataset.i;
+    const act = t.closest('[data-act]')?.dataset.act || 'select';
+    if (act !== 'undo' && it.active !== i && (it.picked.includes(i) || it.slots[i]?.newUrl)) {
+      it.active = i;
+      body.querySelectorAll('.zs-img').forEach(c => c.classList.toggle('active', +c.dataset.i === i));
+    }
+    if (act === 'copy') {
+      const src = _allImgUrls(it.product)[i];
+      toast('📋 Copy ho rahi hai…', 'info');
+      if (await zhCopyImage(src)) toast(`📋 P${it.pNo} · #${i + 1} copied — Flow mein Ctrl+V`, 'ok');
+      else toast('Copy nahi hui — side panel par ek dafa click karke dobara try karein', 'warn');
+    } else if (act === 'flow') {
+      const g = await flowLatestGenerated(ZhStudio.usedFlowIds);
+      if (!g) { toast('Flow mein koi nayi generated image nahi mili (Flow project tab khula rakhein)', 'warn'); return; }
+      ZhStudio.usedFlowIds.add(g.id);
+      await zsApply(it, i, g.src, 'Flow');
+    } else if (act === 'undo') {
+      await zsUndo(it, i);
+    }
+  });
+
+  document.addEventListener('paste', async (e) => {
+    if (!ZhStudio.open || $('zhStudioModal')?.classList.contains('hidden')) return;
+    const item = Array.from(e.clipboardData?.items || []).find(x => x.kind === 'file' && x.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const it = zsCur();
+    const f = item.getAsFile();
+    if (it && f) await zsApply(it, it.active, await _fileToDataUrl(f), 'Paste');
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (!ZhStudio.open || $('zhStudioModal')?.classList.contains('hidden')) return;
+    if (e.target.closest?.('input, textarea, select')) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); zsGo(1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); zsGo(-1); }
+    else if (e.key === 'Escape') zhStudioClose();
+  });
+})();
+
+// ═════════════════════════════════════════════════════════════════
+// v9.11.0 — PACK (2 / 3 / 4 … pack)
+// Selected products are changed in place: AI rewrites the title as an N-pack, then the
+// main image (#1) goes through Flow with a pack prompt.
+// ═════════════════════════════════════════════════════════════════
+async function temuMakePack() {
+  const n = parseInt($('temuAiImgPackSel')?.value || '', 10);
+  if (!n) { toast('Pehle "Pack" mein 2 / 3 / 4… choose karein', 'warn'); return; }
+  const rows = await temuGetQueuedRows();
+  const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
+  if (!selRows.length) { toast('Pehle ✨ checkbox se products select karein', 'warn'); return; }
+  const btn = $('temuMakePackBtn');
+  if (btn) btn.disabled = true;
+  let ok = 0;
+  try {
+    for (let i = 0; i < selRows.length; i++) {
+      const r = selRows[i];
+      if (btn) btn.textContent = `⏳ Title ${i + 1}/${selRows.length}`;
+      try {
+        const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
+        const cur = card?.querySelector('.temu-rv-title-inp')?.value || r.title || '';
+        const t = packTitle(cur, n);
+        r.title = t;
+        for (const x of _productRowsById(r.id)) x.title = t;
+        if (card) {
+          const inp = card.querySelector('.temu-rv-title-inp');
+          const snip = card.querySelector('.temu-rv-title-snippet');
+          if (inp) inp.value = t;
+          if (snip) snip.textContent = t;
+        }
+        ok++;
+      } catch (e) { console.warn('[ZHunter] Pack title error:', e); }
+    }
+    if (MasterUIState?.allRows) await setMasterRows(MasterUIState.allRows);
+    toast(`📦 ${ok}/${selRows.length} titles → ${n}-pack. Ab main images Flow mein ban rahi hain…`, ok ? 'ok' : 'warn');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📦 Make Pack'; }
+  }
+  await temuStartBulkImageEdit({ prompt: packImagePrompt(n), mainOnly: true });
+}
+
+(function initPackAndSpeed() {
+  $('temuMakePackBtn')?.addEventListener('click', temuMakePack);
+  const sp = $('temuAiImgSpeedSel');
+  if (sp) {
+    chrome.storage.local.get(['zhunterFlowSpeed']).then(st => { if (FLOW_SPEEDS[st?.zhunterFlowSpeed]) sp.value = st.zhunterFlowSpeed; });
+    sp.addEventListener('change', () => chrome.storage.local.set({ zhunterFlowSpeed: sp.value }));
+  }
+})();

@@ -185,4 +185,3 @@
     document.addEventListener('DOMContentLoaded', checkPendingAction);
   }
 })();
-

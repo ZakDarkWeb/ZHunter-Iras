@@ -31,4 +31,3 @@
 ### Rule 6: Report What You Did — Briefly
 - After making changes, give a SHORT summary (2-3 lines max)
 - Do NOT write long explanations of what the code does
-

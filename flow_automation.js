@@ -527,7 +527,7 @@
       for (const c of extras) await trustedClick(c, 'remove extra chip');
       await waitFor(() => Q.chips(Q.promptRoot()).length === 1, 4000);
     }
-    const ready = await waitFor(() => chipReady(Q.promptRoot()) || (flowErrorEl() ? 'err' : null), ATTACH_TIMEOUT_MS, 500);
+    const ready = await waitFor(() => chipReady(Q.promptRoot()) || (flowErrorEl() ? 'err' : null), ATTACH_TIMEOUT_MS, 250);
     if (ready === 'err') await failIfFlowError();
     if (!ready) throw new JobError('Image upload poora nahi hua (chip ready nahi)');
   }
@@ -609,17 +609,19 @@
       ed.dispatchEvent(new KeyboardEvent('keyup', o));
     };
 
+    // v9.11.0 — the page-level click was tried first and Flow ignores it, so every image
+    // lost ~8s right after the prompt was pasted. The real (CDP) click now goes first.
     const attempts = [
-      ['page click', async () => { await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation'); }, 8000],
       ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS],
-      ['Enter key', enterSubmit, 6000]
+      ['Enter key', enterSubmit, 5000],
+      ['page click', async () => { await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation'); }, 5000]
     ];
     let ok = false;
     for (const [name, fn, wait] of attempts) {
       if (await waitFor(started, 300, 100)) { ok = true; break; }
       log('Start generation via', name);
       await fn();
-      if (await waitFor(started, wait, 400)) { ok = true; break; }
+      if (await waitFor(started, wait, 200)) { ok = true; break; }
       warn(`Generation did not start after ${name}`);
     }
     if (!ok) {
@@ -674,7 +676,7 @@
         return { error: s };
       }
       return null;
-    }, RESULT_TIMEOUT_MS, 1500);
+    }, RESULT_TIMEOUT_MS, 700);
 
     if (!result) throw new JobError('Image 3 minute mein nahi bani');
     if (result.cancelled) return result;
@@ -734,7 +736,7 @@
     } finally {
       runningJobId = null;
       // A newer job (e.g. "Send Again") may have arrived while this one was running.
-      setTimeout(handlePendingFlowAction, 800);
+      setTimeout(handlePendingFlowAction, 300);
     }
   }
 
@@ -808,7 +810,59 @@
     });
   } catch (_) {}
 
-  chrome.runtime.onMessage?.addListener((msg) => {
+  // ── v9.11.0 Manual studio: put images (+ prompt) into the prompt box — NO generate ──
+  async function pasteOneImage(file, want) {
+    const got = () => Q.chips(Q.promptRoot()).length >= want;
+    const ed = Q.editor(Q.promptRoot());
+    if (ed) {
+      ed.focus();
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      ed.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+      if (await waitFor(() => got() || !!flowErrorEl(), 4000, 150) && !flowErrorEl()) return true;
+    }
+    if (flowErrorEl()) return false;
+    const target = Q.promptRoot()?.querySelector('.base-prompt-box') || Q.promptRoot();
+    if (!target) return false;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const r = target.getBoundingClientRect();
+    const o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    target.dispatchEvent(new DragEvent('dragenter', o));
+    target.dispatchEvent(new DragEvent('dragover', o));
+    target.dispatchEvent(new DragEvent('drop', o));
+    return !!(await waitFor(() => got() || !!flowErrorEl(), 4000, 150)) && !flowErrorEl();
+  }
+
+  async function manualAttach({ images = [], prompt = '', clear = true }) {
+    if (runningJobId) return { ok: false, error: 'Auto job chal rahi hai — khatam hone dein' };
+    if (!/\/project\/[\w-]+/i.test(location.pathname)) return { ok: false, error: 'Flow mein pehle koi project kholein (+ New project)' };
+    await waitFor(() => Q.promptRoot() || Q.agentPanel(), 8000);
+    await ensureAgentOff();
+    if (!Q.promptRoot()) return { ok: false, error: 'Flow ka prompt box nahi mila' };
+    if (clear) await clearPromptBox();
+    await dismissFlowError();
+    let n = Q.chips(Q.promptRoot()).length, added = 0;
+    for (let i = 0; i < images.length; i++) {
+      updateFlowHUD(`ZHunter: image ${i + 1}/${images.length} paste`, 'info');
+      const raw = dataUrlToFile(images[i], `zhunter_img_${i + 1}.png`);
+      const file = await ensureSupportedImage(raw);
+      if (!file) continue;
+      if (await pasteOneImage(file, n + 1)) { n++; added++; }
+      else { await dismissFlowError(); }
+    }
+    await waitFor(() => Q.chips(Q.promptRoot()).every(c => c.getAttribute('aria-busy') !== 'true'), ATTACH_TIMEOUT_MS, 250);
+    if (prompt) { try { await injectPrompt(prompt); } catch (_) {} }
+    Q.editor(Q.promptRoot())?.focus();
+    updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ab Generate dabayein`, added ? 'ok' : 'warn');
+    return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images prompt box mein nahi lagin' };
+  }
+
+  chrome.runtime.onMessage?.addListener((msg, _sender, sendResponse) => {
     if (msg?.action === 'ZH_FLOW_EXECUTE') handlePendingFlowAction();
+    if (msg?.action === 'ZH_FLOW_MANUAL_ATTACH') {
+      manualAttach(msg).then(sendResponse, e => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
   });
 })();

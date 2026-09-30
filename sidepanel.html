@@ -1000,6 +1000,32 @@
                   <span id="temuImgEditBtnLabel">Edit Images</span>
                 </button>
               </div>
+              <!-- v9.11.0 — speed, pack, manual board -->
+              <div class="temu-img-bar-controls">
+                <div class="temu-img-sel-wrap">
+                  <label class="temu-img-sel-label">Speed</label>
+                  <select id="temuAiImgSpeedSel" class="temu-img-sel" title="Auto Flow: images ke beech ka gap. Tez = account flag ka zyada risk">
+                    <option value="safe">🐢 Safe (4–9s)</option>
+                    <option value="normal" selected>🚶 Normal (2–4s)</option>
+                    <option value="fast">⚡ Fast (1–2s)</option>
+                  </select>
+                </div>
+                <div class="temu-img-sel-wrap">
+                  <label class="temu-img-sel-label">Pack</label>
+                  <select id="temuAiImgPackSel" class="temu-img-sel" title="Selected products ko N-pack mein convert (title + main image)">
+                    <option value="">Off</option>
+                    <option value="2">2 Pack</option>
+                    <option value="3">3 Pack</option>
+                    <option value="4">4 Pack</option>
+                    <option value="5">5 Pack</option>
+                    <option value="6">6 Pack</option>
+                    <option value="8">8 Pack</option>
+                    <option value="10">10 Pack</option>
+                    <option value="12">12 Pack</option>
+                  </select>
+                </div>
+                <button id="temuMakePackBtn" class="temu-img-pick-btn" type="button" title="AI title → N-pack, phir main image Flow mein pack banegi">📦 Make Pack</button>
+              </div>
               <div id="temuAiImgPromptWrap" class="temu-img-prompt-wrap hidden">
                 <textarea id="temuAiImgPromptInp" class="inp inp-ta temu-img-prompt-ta" placeholder="Enter commercial photography AI prompt..."></textarea>
               </div>
@@ -1599,6 +1625,45 @@
         <button id="temuStepPasteNextBtn" class="btn btn-primary btn-sm" type="button" style="font-size:11.5px; font-weight:600; background:linear-gradient(135deg,#00E5FF,#0284c7); border:none;">
           📋 Paste &amp; Next
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ v9.11.0 EDIT MODE CHOOSER ═══ -->
+  <div id="zhModeModal" class="modal-back hidden" style="z-index:2500;">
+    <div class="modal-box zs-mode-box">
+      <div class="zs-head">
+        <div><b class="zs-h">Images kaise edit karein?</b><div class="zs-sub">Selected products ke liye</div></div>
+        <button id="zhModeCloseBtn" class="modal-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <button id="zhModeManualBtn" type="button" class="zs-mode on">
+        <span class="zs-mode-ic">✋</span>
+        <span><b>Manual studio</b><small>Aap Flow mein edit karein — copy, prompt, title, pack sab ek jagah</small></span>
+        <span class="zs-badge">Fast</span>
+      </button>
+      <button id="zhModeAutoBtn" type="button" class="zs-mode">
+        <span class="zs-mode-ic">🤖</span>
+        <span><b>Auto</b><small>Extension khud Flow mein ek ek image banaye (Speed setting ke mutabiq)</small></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ v9.11.0 EDIT STUDIO ═══ -->
+  <div id="zhStudioModal" class="modal-back hidden" style="z-index:2500;">
+    <div class="modal-box zs-box">
+      <div class="zs-head">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <span class="zs-logo">✨</span>
+          <div style="min-width:0;"><b class="zs-h">Edit Studio</b><div class="zs-sub" id="zhStudioSub">Product 1 / 1</div></div>
+        </div>
+        <button id="zhStudioCloseBtn" class="modal-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="zs-progress"><div id="zhStudioBar"></div></div>
+      <div id="zhStudioBody" class="zs-body"></div>
+      <div class="zs-foot">
+        <button id="zhStudioPrevBtn" type="button" class="zs-btn">‹ Prev</button>
+        <span class="zs-keys">← → product · Ctrl+V = selected slot</span>
+        <button id="zhStudioNextBtn" type="button" class="zs-btn primary">Next ›</button>
       </div>
     </div>
   </div>
