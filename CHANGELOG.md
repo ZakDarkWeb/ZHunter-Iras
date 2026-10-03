@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Image editing:** Edited main image stays first; original main moves to second. Repeated edits do not add another original. Secondary edits replace their own slot; Library save, edit recovery, queues and Studio undo preserve ordering.
 - **Temu connection recovery:** Fix drafts automatically reconnects the content script, then refreshes once and retries when needed.
 - **Temu store card:** Professional SVG store icon; “Failed details” renamed to “Upload errors” to clarify its purpose. No version bump or new ZIP for these small updates.
 - **🛡️ Multi-Tier Attribute Detection (`product-action.html`):** Modern Temu table rows mein dropdown selectors (`.ST_outerWrapper`, `data-testid="beast-core-select"`) ko direct fallback tier se detect kiya jata hai taake koi bhi missing attribute miss na ho.

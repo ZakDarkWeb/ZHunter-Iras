@@ -3058,20 +3058,72 @@ function currentProductImage(productId, idx) {
   return _imgEntryUrl(rows[0].images[idx]);
 }
 
+// Keep the first main image when editing; undo restores the original gallery.
+function zhSetEditedImage(row, idx, newUrl) {
+  const current = row.images[idx];
+  const oldUrl = _imgEntryUrl(current);
+  if (oldUrl === newUrl) return 0;
+  row.images = row.images.slice();
+  let shift = 0;
+  if (idx === 0 && oldUrl) {
+    if (row.zhOriginalMainUrl === newUrl) {
+      if (_imgEntryUrl(row.images[1]) === newUrl) {
+        row.images.splice(1, 1);
+        shift = -1;
+      }
+      delete row.zhOriginalMainUrl;
+    } else if (!row.zhOriginalMainUrl) {
+      row.zhOriginalMainUrl = oldUrl;
+      row.images.splice(1, 0, current);
+      shift = 1;
+    }
+  }
+  row.images[idx] = typeof current === 'string' ? newUrl : { ...current, url: newUrl };
+  return shift;
+}
+
+function zhShiftImageEditors(productId, delta) {
+  if (!delta) return;
+  const move = i => i > 0 ? Math.max(1, i + delta) : i;
+  for (const job of FlowJobs.values()) {
+    if (job.productId === productId) job.imageIndex = move(job.imageIndex);
+  }
+  try {
+    for (const q of TemuImgStepper.queue || []) {
+      if (q.product?.id === productId) q.imgIndex = move(q.imgIndex);
+    }
+  } catch (_) {}
+  try {
+    for (const it of ZhStudio.items || []) {
+      if (it.product?.id !== productId) continue;
+      const slots = {};
+      for (const [idx, slot] of Object.entries(it.slots || {})) {
+        if (delta < 0 && Number(idx) === 1) continue;
+        slots[move(Number(idx))] = slot;
+      }
+      it.slots = slots;
+      it.picked = [...new Set(it.picked.filter(i => delta > 0 || i !== 1).map(move))];
+      it.pasteSel = new Set([...(it.pasteSel || [])].filter(i => delta > 0 || i !== 1).map(move));
+      it.active = move(it.active);
+    }
+  } catch (_) {}
+}
+
 // Replace ONLY if the slot still holds `expectedUrl`. Returns true if anything changed.
 async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
-  let changed = false, oldUrl = null, pUrl = '';
-  for (const row of _productRowsById(productId)) {
+  let changed = false, oldUrl = null, pUrl = '', shift = 0;
+  for (const row of new Set(_productRowsById(productId))) {
     if (!Array.isArray(row.images) || idx == null || idx < 0 || idx >= row.images.length) continue;
     const cur = _imgEntryUrl(row.images[idx]);
     if (expectedUrl && cur !== expectedUrl) continue;
     if (oldUrl == null) oldUrl = cur;
     if (!pUrl) pUrl = row.url || '';
-    if (typeof row.images[idx] === 'string') row.images[idx] = newUrl;
-    else row.images[idx] = { ...row.images[idx], url: newUrl };
+    const delta = zhSetEditedImage(row, idx, newUrl);
+    if (delta) shift = delta;
     changed = true;
   }
   if (changed && productId) {
+    await _zhEditsChain;
     // v9.12.8 — fresh read-modify-write of ONLY this image, one write at a time.
     // (Pehle purani in-memory Library poori likh di jati thi, aur do saves ek saath hon to
     //  doosra pehle wale ki image mita deta tha — is liye edit hui images wapas purani ho jati thin.)
@@ -3082,11 +3134,25 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
         const cur = _imgEntryUrl(row.images[idx]);
         if (cur === newUrl) return false;
         if (expectedUrl && cur !== expectedUrl && cur !== oldUrl) return false;
-        row.images[idx] = typeof row.images[idx] === 'string' ? newUrl : { ...row.images[idx], url: newUrl };
+        zhSetEditedImage(row, idx, newUrl);
         return true;
       });
     } catch (e) { console.warn('[ZHunter] Library save after replace failed:', e); }
-    zhEditsRecord(productId, idx, oldUrl, newUrl, pUrl);
+    if (shift) {
+      zhShiftImageEditors(productId, shift);
+      const edits = await zhEditsLoad();
+      const shifted = [];
+      for (const [key, edit] of Object.entries(edits)) {
+        if (edit.idx > 0 && ((edit.id && edit.id === productId) || (pUrl && edit.url === pUrl))) {
+          delete edits[key];
+          if (shift < 0 && edit.idx === 1) continue;
+          edit.idx += shift;
+          shifted.push(edit);
+        }
+      }
+      for (const edit of shifted) edits[`${edit.url || edit.id}#${edit.idx}`] = edit;
+    }
+    await zhEditsRecord(productId, idx, oldUrl, newUrl, pUrl);
   }
   return changed;
 }
@@ -3139,13 +3205,13 @@ async function zhApplyImgEdits(rows) {
   if (!list.length) return rows;
   for (const r of rows) {
     if (!r || !Array.isArray(r.images)) continue;
-    for (const e of list) {
+    for (const e of list.slice().sort((a, b) => a.idx - b.idx)) {
       if (!((e.id && r.id === e.id) || (e.url && r.url === e.url))) continue;
       if (e.idx < 0 || e.idx >= r.images.length) continue;
       const cur = _imgEntryUrl(r.images[e.idx]);
       if (cur === e.newUrl) continue;
       if (cur === e.orig || (e.via || []).includes(cur)) {
-        r.images[e.idx] = typeof r.images[e.idx] === 'string' ? e.newUrl : { ...r.images[e.idx], url: e.newUrl };
+        zhSetEditedImage(r, e.idx, e.newUrl);
       }
     }
   }
@@ -13475,23 +13541,15 @@ async function temuRenderReview() {
           }
 
           if (base64FromClipboard) {
-            r.images[iIdx] = base64FromClipboard;
-            if (MasterUIState?.allRows) {
-              const m = MasterUIState.allRows.find(x => x.id === r.id);
-              if (m) m.images = r.images;
-              await setMasterRows(MasterUIState.allRows);
+            if (!(await replaceProductImage(r.id, iIdx, base64FromClipboard, null))) {
+              toast('Product image nahi mili', 'warn'); return;
             }
             await temuRenderReview();
             toast('✓ Image pasted! Uploading link for Temu...', 'info');
             (async () => {
               const pub = await uploadImageToPublicHost(base64FromClipboard);
               if (pub && pub.startsWith('http')) {
-                r.images[iIdx] = pub;
-                if (MasterUIState?.allRows) {
-                  const m = MasterUIState.allRows.find(x => x.id === r.id);
-                  if (m) m.images = r.images;
-                  await setMasterRows(MasterUIState.allRows);
-                }
+                await replaceProductImage(r.id, iIdx, pub, base64FromClipboard);
                 toast('✓ Temu image link ready!', 'ok');
               }
             })();
@@ -14539,25 +14597,14 @@ async function temuStepHandlePasteNext() {
     return;
   }
   if (base64FromClipboard) {
-    // Replace image in product
-    current.product.images[current.imgIndex] = base64FromClipboard;
-    if (MasterUIState?.allRows) {
-      const m = MasterUIState.allRows.find(x => x.id === current.product.id);
-      if (m) m.images = current.product.images;
-      await setMasterRows(MasterUIState.allRows);
-    }
+    await replaceProductImage(current.product.id, current.imgIndex, base64FromClipboard, null);
     toast(`✓ Image #${current.imgIndex + 1} updated!`, 'ok');
 
     // Async upload to public host for Temu template
     (async () => {
       const pub = await uploadImageToPublicHost(base64FromClipboard);
       if (pub && pub.startsWith('http')) {
-        current.product.images[current.imgIndex] = pub;
-        if (MasterUIState?.allRows) {
-          const m = MasterUIState.allRows.find(x => x.id === current.product.id);
-          if (m) m.images = current.product.images;
-          await setMasterRows(MasterUIState.allRows);
-        }
+        await replaceProductImage(current.product.id, current.imgIndex, pub, base64FromClipboard);
       }
     })();
 
