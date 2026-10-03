@@ -1,4 +1,85 @@
-# ZHunter PRO — CHANGELOG
+# ZHunter Iras — CHANGELOG
+
+## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Temu connection recovery:** Fix drafts automatically reconnects the content script, then refreshes once and retries when needed.
+- **Temu store card:** Professional SVG store icon; “Failed details” renamed to “Upload errors” to clarify its purpose. No version bump or new ZIP for these small updates.
+- **🛡️ Multi-Tier Attribute Detection (`product-action.html`):** Modern Temu table rows mein dropdown selectors (`.ST_outerWrapper`, `data-testid="beast-core-select"`) ko direct fallback tier se detect kiya jata hai taake koi bhi missing attribute miss na ho.
+- **🏷️ Accurate Product Title Extraction:** Title extraction ko update kiya gaya taake checkbox cell ke bajaye actual product title (`13PC Knife Set...`) parha jaye.
+- **🛑 Auto-Submit Safety Lock:** Agar dropdown unselected ho ya page par koi required field khali reh jaye, to extension Temu ka Submit button nahi dabayegi aur alert degi taake Temu ka red validation error na aaye.
+
+## v9.12.12 (2026-10-04) — Modern Temu product-action.html Dropdown Precision & Option Stem Matching
+- **🎯 Precise Dropdown & Options Matching:** `product-action.html` par Beast Core form-items ki 4x duplicate counting fix ki (ek control par do martaba click se popup foran band hone ka masla hal). Dropdown listbox items (`li[role="option"]`, `.ST_dropdownPanel_123 li`, `.cIL_item_123`) ko correctly parh kar option click kiya jata hai.
+- **✨ Polishing vs Polished Value Alignment:** Temu dropdown ki actual option value `Polishing` hai. Category profile `block_knife_sets` aur fallback matching mein `Polishing` set kiya gaya aur `polish` stem-matching add ki gayi, taake missing required attributes 100% select ho kar page submit ho sake.
+
+## v9.12.11 (2026-10-04) — Modern Temu "Product action required" (product-action.html) Auto-Fix & Block Knife Sets Profile
+- **🛠️ Product Action Required (product-action.html) Auto-Fix:** Temu ka modern "Missing required attributes" page (`product-action.html`) ab "Fix drafts on Temu" button se fully integrated hai. Extension khule huye table rows mein unselected required attributes (`*Surface Finishing Type`, `Material`, etc.) ko detect kar ke safe value (`Polished` ya pehla valid option) select karti hai aur neechay wala `Submit` button auto-click karti hai.
+- **🔪 Block Knife Sets Category Profile:** `temu_categories.js` aur `TEMU_DRAFT_FALLBACKS` mein Knife Sets ke liye `Surface Finishing Type: Polished`, `Blade Material: Stainless Steel`, `Handle Material: Stainless Steel` add kar diya gaya hai taake export sheet mein yeh attributes pehle se hi fill hon aur Temu par koi missing attribute error na aaye.
+
+## v9.12.10 (2026-10-04) — Zero-Tolerance Temu Restricted Words (AI Titles, Description & Bullets)
+- **🚫 Complete Anti-Violation Protection (Description & Bullets):** `TEMU_DESC_AVOID_DEFAULT` aur `temuScrubText` mein Temu ki 6 high-risk restricted categories shamil: Health & Medical (`medical`, `cure`, `healing`, `treatment`, `therapy`, `pain relief`, `anti-inflammatory`, `infection`, `antibacterial`, `antiviral`, `orthopedic`), Allergy (`hypoallergenic`, `allergy-free`, `allergen-free`), Environmental (`eco-friendly`, `sustainable`, `biodegradable`, `non-toxic`, `chemical-free`), Safety & Performance (`100% safe`, `harmless`, `guaranteed`, `risk-free`, `100% effective`, `professional-grade`), Certification (`FDA approved`, `CE certified`, `doctor recommended`, `clinically tested`). Description ya bullets mein se koi bhi restricted claim wala jumla khud drop ho jata hai.
+- **✨ AI Title Optimizer Engine Integration:** AI Title Rewrite prompt (`getTemuOptimizerInstruction`) mein user ka standardized prompt aur restricted content rules integrate kar diye gaye hain. AI ab product titles generate karte waqt in restricted categories se mukammal parhez karega aur factual keyword structure follow karega.
+
+## v9.12.9 (2026-10-04) — Fast image export, bullet points & description extraction, Temu failed details fix
+- **⚡ Fast Image Export:** Temu export mein edited/base64 images canvas ke zariye 1500px HD resolution par 0.92 JPEG mein auto-compress hoti hain (6MB PNG → ~200KB, visual quality 100% barkarar bina pixel loss). Uploads ab 4-concurrency parallel chunking ke sath 10-15 seconds mein mukammal hoti hain (15s abort timeout ke sath jo kabhi hang nahi hota).
+- **📝 Bullet Points & Description Extractor:** Walmart, Sam's Club, Amazon aur generic stores se description aur bullet points dono extract hote hain (`__NEXT_DATA__` keyFeatures/detailedDescription + modern DOM fallbacks). Agar bullet list khali ho to description ke clean jumlon ko 4–6 bullets mein tabdeel kiya jata hai taake sheet mein `bullets=0` ya `NO_BULLETS` na aaye.
+- **🔄 Temu Failed Details & Spinner:** Temu ke naye button texts ("View processing results", "Complete product information", "Download processing result") auto-detect hote hain. Report mein `⏳ Failed details parh raha hoon…` spinner khatam ho kar mukammal status dikhata hai.
+
+## v9.12.8 (2026-10-02) — Edit hui images kabhi wapas purani nahi hongi
+- **Bug:** auto edit mein 5 images badal kar error aaya to woh 5 bhi wapas purani ho gayin. Wajah: (1) `replaceProductImage` purani in-memory Library (`MasterUIState.allRows`) poori storage par likh deta tha; (2) do saves ek saath (pichhli image ka Temu link background mein + agla step) purani copy parh kar likhte the → doosra pehle wale ko mita deta tha.
+- **Fix:** Library mein ab sirf usi product ki usi image ko fresh parh kar badla jata hai, aur saves ek ke baad ek (`zhLibPatch`, serialized).
+- **Edit record (`zhImgEdits` storage):** har badli hui image ka record (product id/url, image #, original, naya). `temuGetQueuedRows()` (review, export, agla Edit Images, sab sources: Last hunt / Library / Sheet) yeh record laga deta hai — error, stepper band, side panel reload ke baad bhi badli hui images wapis. ↩ Undo se original par wapas = record khatam. 30 din / 600 records ke baad purane saaf.
+- Stepper band karne par: "N badli hui images save hain ✓".
+
+## v9.12.7 (2026-10-02) — Flow: Errors page par ghalat alarm band
+- Flow ki aam nakami ("unusual activity", policy, timeout) ab `console.log` mein jati hai, `console.warn` mein nahi — Chrome extensions ke **Errors** page par lal error nahi banta. Side panel ka countdown / naya project / manual waise hi. Sirf asal unexpected code errors warn hote hain.
+
+## v9.12.6 (2026-10-02) — Flow "unusual activity": khud naya project + manual tools
+- **Auto naya project:** auto image edit mein Google "unusual activity" kahe to stepper 60s countdown dikhata hai, phir Flow tab ko home par le ja kar "+ New project" banata hai aur **wahi image (wahi step)** dobara bhejta hai. Ek run mein zyada se zyada 2 dafa; teesri dafa auto ruk jata hai aur manual row chamakti hai. Speed khud Safe. Countdown ke dauran Skip / Send Again / Close / koi manual button dabane se countdown ruk jata hai.
+- **Stepper mein ✋ Manual row:** 📋 Image (isi step ki image clipboard mein → Flow mein Ctrl+V), 📝 Prompt copy, ⚡ Paste in Flow (image + prompt khule Flow project mein, Generate aap dabayein; result "⬇ Flow se latest" ya Ctrl+V se), ✋ Manual Studio (auto band, Edit Studio **isi product se** khulta hai).
+
+## v9.12.5 (2026-10-02) — AI title rewrite ke baad list chhoti rahe
+- Bulk "Rewrite Checked Titles" ab har card **nahi kholta** (pehle har card title + price + images ke saath khul jata tha, list bohot lambi).
+- **"Title changes" panel** list ke upar: "✨ 5 titles updated · 1 same" — **Compare ▾** se chhoti list (naya title + kata hua purana, apna scroll). Row click = us card par jao (chamakta hai, compare khul jata hai). ✕ se band. Activity ab khud nahi khulti.
+- Card par "✨ Updated ▾" click = sirf us card ke neeche Naya/Pehle (card band rehta hai). Title par hover = dono title.
+- Review list ab apne box mein scroll hoti hai (screen ka ~60%), "Export + Upload" button tak pohanchna aasaan. Upar sticky patti: "✨ Sirf updated" filter, "▴ Sab band".
+
+## v9.12.4 (2026-10-02) — Recovery ke baad tabs band, behtar hunt popup
+- **Tabs ab band hote hain:** pehle sirf pehle round mein complete tab band hota tha. Ab auto-recovery rounds, ↻ Retry aur Retry all mein bhi link complete hote hi tab band (`huntCloseTab`, "Auto-close tabs" ON ho to). Jo tabs extension ne khud dobara khole, woh aakhir mein band (↗ se phir khul jate hain). Aap ke apne khole hue jo links abhi bhi incomplete hain woh khule rehte hain.
+- Queue mode: sab link pehle hi complete hon to worker tab ab band hota hai (pehle khula reh jata tha).
+- **Recovery card:** recovery ke dauran ghalat "100% · Finishing up · DONE" ki jagah amber card — round dots (1/2/3), "Link 1/2", abhi wala link, bar, "✓ theek hue / baqi". Ring ab sirf complete links ginti hai.
+- Retry wale links list mein sab se upar aa jate hain. Filter: All · Complete · Baqi/retry. Band hue tab ki row par "tab ✕".
+- **Result popup:** "✓ 28/28 links hunt hue · 0 skip · N tabs band" patti (koi link skip nahi, yeh saboot). Har link ki list result mein bhi (band, kholein). Tile click = list usi filter par. 0 wali tiles dhundli. Check-mark draw animation, confetti (sab complete par), buttons ki entrance, Temu upload par shine. Repeat images/time line hata di.
+
+## v9.12.3 (2026-10-02) — AI title rewrite: saaf nazar aaye, pakka save ho
+- **Card par saaf farq:** rewrite ke baad har card par "✨ Updated" (ya "= Same" jab AI wahi title de) badge, card khud khulta hai, neeche **Naya:** poora naya title (hara) aur **Pehle:** purana title (kata hua). Pehle sirf shuru ke ~30 akshar dikhte the, jo AI format ("1 Pack, …") ki wajah se same lagte the.
+- **Activity report:** har product: purana → naya; phir verify: "✓ Upload file mein naye titles: 4/4" aur "✓ Library mein save: 4/4" (save na ho to ✗).
+- **Message sach bataye:** "3 titles updated · 1 same · 0 failed" — pehle har dafa "4 updated" aata tha.
+- **Safe save (`temuSaveTitles`):** naya title Library storage se fresh parh kar sirf usi product (id, warna url) par likha jata hai — purani in-memory Library copy se overwrite/khaali hone ka khatra khatam. Bulk rewrite, card ka ⚡ AI, haath se title edit aur 📦 Make Pack sab isi se save hote hain.
+- **Double-run fix:** Temu window har dafa kholne par Review ke buttons par ek aur click-listener lag jata tha (Rewrite 2–3 dafa chalta, Groq limit jaldi khatam; Prompt/list toggles ulat jate). Ab sirf ek dafa; Rewrite chalte waqt dobara click ignore.
+
+## v9.12.2 (2026-10-02) — Naya naam: ZHunter Iras
+- Extension ka naam "ZHunter PRO" se **"ZHunter Iras"** (Chrome extensions list, toolbar, shortcut, side panel header badge "IRAS", PDF/Excel/HTML catalog exports). Data/settings waise hi.
+
+## v9.12.1 (2026-10-02) — Auto-pilot hataya (baad mein dobara)
+- v9.12.0 ka Auto-pilot ("Agle steps" card, Studio "Done → Upload", auto-start toggle) live kaam nahi kiya, isliye poora hata diya. Hunt complete popup, Edit Studio aur Temu upload bilkul pehle jaise.
+- Description + bullets aur Department pricing waise hi hain.
+
+## v9.12.0 (2026-10-02) — Description + Bullets, Department pricing
+- **📝 Description + bullet points:** Temu file ke `item_note` ×6 (max 700) aur `item_description` (max 2000) ab bharte hain — hunt ke bullets se (bullets na hon to description ke jumlon se). Saaf: links, emojis, 【】 headers → "Header: text", "Add to cart"/"Make sure this fits" jaisi web lines, store names (Amazon/Walmart/Sam's/Costco/eBay) wale jumle, brand na mila ho to us ka naam. Bullet max ~200 chars, description ~900.
+- **Avoid words (Settings → Description & Bullet Points):** jis jumle mein ye lafz ho woh poora jumla hat jata hai (Best Seller, Guaranteed, FDA approved, Cure, Antibacterial, Free shipping…). "↺ Default list" button. On/off toggle. Report mein `bullets=N`, warning `NO_BULLETS`.
+- **💲 Department pricing:** Settings → Pricing mein table (Grocery, Home & Kitchen, Toys…): Price × / Min $ / Max $; khali = store default. Categories tab → Edit → **Price ×** aur **Min $** (sirf us category ka). Order: Category → Department → Store. Report mein `×7 (Grocery & Gourmet Food)`; review cards ki price bhi isi hisaab se.
+- (Auto-pilot bhi isi version mein tha — v9.12.1 mein hata diya.)
+
+## v9.11.4 (2026-10-02) — Temu Structure Enforcement & Junk Filtering
+- **🚫 "Add to cart" & Website Junk Filter:** Product features aur title se web UI ke alfaaz (`Add to cart`, `Add to list`, `Free shipping`, `In stock`, `Buy now`, etc.) mukammal filter kiye gaye.
+- **📐 Strict Temu Structure Format:** AI prompt ko explicit comma-separated template diya gaya: `[Quantifier/Pack] + [Core Product] + [Key Features] + [Target Audience/Use] + [Size/Color/Quantity] + [Product Category]` (130-165 chars).
+- **🔄 Fresh Title Application:** Title rewrite par "already valid / skip" logic khatam ki gayi taake har checked product par naya Temu title apply ho.
+
+## v9.11.3 (2026-10-02) — AI Title Optimizer & Groq Keys Fix
+- **🧪 Test Keys Tool (Settings):** Settings tab mein naya "🧪 Test Keys" button — har Groq key ko foran verify karta hai (Active 200 OK vs Invalid 401). Sath hi "🗑️ Remove Dead Keys" button jo expired keys ko 1-click mein saaf kar deta hai.
+- **⚡ Fast & Resilient Title Rewrite:** Heavy double-LLM review judge aur JSON candidate loop ko streamline kiya. Direct, high-quality 1-call prompt se Temu optimized title generate hota hai.
+- **🛡️ Graceful Title Length & Format:** Agar title 115 ya 165 characters ka ho to fatal error throw nahi karta; 180 limit ke andar safely format aur trim hota hai.
+- **⏱️ Rate Limit Pacing:** Bulk rewrite mein har product ke beech 500ms ka waqfa taake Groq burst limit kabhi trigger na ho. User keys expire hon to automatic working fallback.
 
 ## v9.11.0 (2026-09-29) — Manual Board, Pack, tez auto Flow
 - **✨ Edit Studio (manual):** "Edit Images" par pehle choose: Manual studio / Auto. Studio mein ek waqt ek product (‹ Prev / Next ›, ← → keys, progress bar): title edit (x/180), Pack chips Single·2·3·4·5·6·8·10·12 → title ke aage "2 Pack - ", Image prompt / Pack prompt (editable) + Copy. Sirf selected images (+ "Sab images" toggle); har image: 📋 Copy, result slot (Ctrl+V = selected slot, agla slot khud select), ⬇ Flow se lo (Flow ki nayi image, jo pehle use na hui ho), ↩ Undo.

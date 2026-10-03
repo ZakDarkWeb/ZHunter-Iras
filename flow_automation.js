@@ -191,12 +191,31 @@
       return {
         img, src, mediaId: img.getAttribute('data-media-id') || m[1],
         title: (holder?.getAttribute('aria-label') || '').trim(),
+        generated: !!img.closest('flow-grid-tile-container')?.querySelector('button[aria-label="Reuse prompt"]'),
         loaded: img.complete && img.naturalWidth > 0
       };
     }).filter(Boolean);
   }
   const looksLikeUpload = (title) => /\.(png|jpe?g|webp|gif|avif|heic)$/i.test(title || '') || /^zhunter_/i.test(title || '');
   const pendingCount = () => allTiles().filter(t => t.pending).length;
+  function generationFailureText(tile) {
+    const txt = (tile.textContent || '').replace(/\s+/g, ' ').trim();
+    return /failed/i.test(txt) && /unusual activity|help center|charged|could not|couldn|polic|violat/i.test(txt) ? txt : '';
+  }
+  function failureCounts(tiles) {
+    const counts = new Map();
+    for (const tile of tiles) {
+      const text = generationFailureText(tile);
+      if (text) counts.set(text, (counts.get(text) || 0) + 1);
+    }
+    return counts;
+  }
+  function newFailureText(tiles, baseline) {
+    for (const [text, count] of failureCounts(tiles)) {
+      if (count > (baseline.get(text) || 0)) return text;
+    }
+    return '';
+  }
   const mediaIdSet = () => new Set(allTiles().map(t => t.mediaId).filter(Boolean));
 
   function scrollGridTop() {
@@ -337,7 +356,9 @@
     return clickUntil(btn, () => find()?.getAttribute('aria-checked') === 'true', `${groupLabel} ${text}`, 2500);
   }
 
-  const settingsOk = (sum) => /nano banana 2/i.test(sum) && /crop_square/.test(sum) && /\bx1\b/.test(sum);
+  // Nano Banana 2 Lite is a different model; never accept it as Nano Banana 2.
+  const correctModel = (sum) => /\bnano banana 2\b/i.test(sum) && !/\bnano banana 2\s*lite\b/i.test(sum);
+  const settingsOk = (sum) => correctModel(sum) && /crop_square|\b1\s*:\s*1\b/.test(sum) && /\bx1\b/.test(sum);
   const settingsPanel = () => document.querySelector('flow-prompt-box-settings');
 
   async function closeSettings() {
@@ -363,11 +384,11 @@
       await pickToggle('Mode', 'Image');
       await pickToggle('Aspect ratio', '1:1');
       await pickToggle('Output count', 'x1');
-      if (!/nano banana 2/i.test(sum)) {
+      if (!correctModel(settingsSummary(Q.promptRoot()))) {
         const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Select model family"]');
         if (modelBtn) {
           const menuItem = () => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
-            .find(el => /nano banana 2/i.test(el.textContent || ''));
+            .find(el => correctModel(el.textContent || ''));
           await clickUntil(modelBtn, () => !!menuItem(), 'model menu', 2500);
           const item = menuItem();
           if (item) await trustedClick(item, 'Nano Banana 2');
@@ -558,63 +579,43 @@
 
   // ── Step 4 + 5: generate and capture the result ─────────────────
   async function generateAndCapture(job) {
+    // Recheck immediately before submitting, including after image upload/paste.
+    await ensureSettings();
     const root = Q.promptRoot();
     const gen = await waitFor(() => { const b = Q.genBtn(Q.promptRoot()); return b && !isDisabled(b) ? b : null; }, 10000);
     if (!gen) throw new JobError('Generate button enable nahi hua');
 
     scrollGridTop();
+    // Existing failures belong to previous jobs, even if Flow recreates their DOM.
+    const failuresBefore = failureCounts(Q.tiles());
     const before = mediaIdSet();
     gridImages().forEach(g => before.add(g.mediaId));
     // The ingredient chip image points at the uploaded product image: never return that.
     const refIds = new Set(Q.chips(Q.promptRoot())
       .map(c => ((c.querySelector('img')?.src || '').match(/\/image\/([\w-]+)/) || [])[1]).filter(Boolean));
     const pendingBefore = pendingCount();
-    const tilesBefore = Q.tiles().length;
     const probe = editorText(Q.promptRoot()).replace(/\s+/g, '').slice(0, 40);
     const started = () => {
-      if (pendingCount() > pendingBefore || Q.tiles().length > tilesBefore ||
-        allTiles().some(t => t.mediaId && !before.has(t.mediaId))) return true;
+      if (pendingCount() > pendingBefore ||
+        allTiles().some(t => t.generated && t.mediaId && !before.has(t.mediaId))) return true;
       // v9.10.1 — Flow clears the prompt box once it accepts a submit (image chip + text gone)
       const r = Q.promptRoot();
       return !!(r && probe && !Q.chips(r).length && !editorText(r).replace(/\s+/g, '').includes(probe));
     };
 
-    // v9.10.1 — Flow ignores synthetic (isTrusted=false) clicks on "Start generation".
-    // Try the page-level click once, then a real CDP mouse click (debugger is detached
-    // right after, so no lingering banner), then Enter as a last resort.
-    const genCenter = () => {
-      const b = Q.genBtn(Q.promptRoot()) || gen;
-      if (!b || !b.isConnected) return null;
-      try { b.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
-      const r = b.getBoundingClientRect();
-      return r.width && r.height ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
-    };
+    // Submit once with a real mouse click. Unconfirmed submissions must not be
+    // retried through Enter or another click: Flow may already have accepted them.
     const cdpGenClick = async () => {
-      const c = genCenter();
-      if (!c) return false;
-      await sleep(150);
-      const c2 = genCenter() || c; // re-measure after scroll
-      const res = await sendBg({ action: 'ZH_CDP_CLICK', x: c2.x, y: c2.y });
-      sendBg({ action: 'ZH_CDP_DETACH' });
-      if (!res?.ok) warn('CDP click failed:', res?.error);
+      // Resolve the button in the worker AFTER debugger attach changes the viewport.
+      const selector = 'flow-base-prompt-box flow-generate-icon-button button[aria-label="Start generation"]';
+      let res;
+      try { res = await sendBg({ action: 'ZH_CDP_CLICK', selector }); }
+      finally { await sendBg({ action: 'ZH_CDP_DETACH' }); }
+      if (!res?.ok) throw new JobError('Send click nahi hua: ' + (res?.error || 'Chrome debugger attach nahi hua'));
       return !!res?.ok;
     };
-    const enterSubmit = async () => {
-      const ed = Q.editor(Q.promptRoot());
-      if (!ed) return;
-      ed.focus();
-      const o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-      ed.dispatchEvent(new KeyboardEvent('keydown', o));
-      ed.dispatchEvent(new KeyboardEvent('keypress', o));
-      ed.dispatchEvent(new KeyboardEvent('keyup', o));
-    };
-
-    // v9.11.0 — the page-level click was tried first and Flow ignores it, so every image
-    // lost ~8s right after the prompt was pasted. The real (CDP) click now goes first.
     const attempts = [
-      ['Enter key', enterSubmit, 2500],
-      ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS],
-      ['page click', async () => { await trustedClick(Q.genBtn(Q.promptRoot()) || gen, 'start generation'); }, 5000]
+      ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS]
     ];
     let ok = false;
     for (const [name, fn, wait] of attempts) {
@@ -647,15 +648,12 @@
       if (lp && (lp.jobId !== job.jobId || (lp.processed && lp.status === 'done'))) return { cancelled: true };
       scrollGridTop();
       // Check for failed generation tiles immediately (don't wait 3 minutes!)
-      const failed = Q.tiles().slice(0, 6).find(t => {
-        const txt = (t.textContent || '').toLowerCase();
-        return txt.includes('failed') && (txt.includes('unusual activity') || txt.includes('help center') || txt.includes('charged') || txt.includes('could not') || txt.includes('couldn'));
-      });
+      const failed = newFailureText(Q.tiles(), failuresBefore);
       if (failed && Date.now() - t0 > 2000) {
-        const txt = (failed.textContent || '').replace(/\s+/g, ' ').trim();
+        const txt = failed;
         log('Detected failed tile:', txt);
         if (txt.toLowerCase().includes('unusual activity')) {
-          return { error: 'We noticed some unusual activity. Barahe karam Google Flow mein "+ New project" banayein.' };
+          return { error: 'Google: "unusual activity" — ZHunter thora ruk kar naya project bana kar dobara try karega (side panel dekhein).' };
         }
         return { error: txt.slice(0, 100) };
       }
@@ -665,10 +663,10 @@
       const fresh = allTiles().slice(0, 8).find(t =>
         t.mediaId && !before.has(t.mediaId) && !refIds.has(t.mediaId) && !t.pending &&
         /^https:\/\/flow-content\.google\//i.test(t.src) &&
-        (t.generated || !/\.(png|jpe?g|webp|gif|avif)$/i.test(t.title)));
+        t.generated);
       if (fresh) return fresh;
       const fresh2 = gridImages().slice(0, 10).find(g =>
-        !before.has(g.mediaId) && !refIds.has(g.mediaId) && g.loaded && !looksLikeUpload(g.title));
+        !before.has(g.mediaId) && !refIds.has(g.mediaId) && g.loaded && g.generated);
       if (fresh2) { log('Result found via image scan:', fresh2.mediaId); return { mediaId: fresh2.mediaId, src: fresh2.src }; }
       const s = snackText();
       if (s && s !== lastSnack) { lastSnack = s; log('Flow says:', s); }
@@ -730,7 +728,10 @@
       updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
     } catch (e) {
       const msg = e instanceof JobError ? e.message : `Unexpected error: ${e?.message || e}`;
-      warn('Job failed:', msg, e);
+      // v9.12.7 — expected Flow failures (unusual activity, policy, timeout…) are handled by the
+      // side panel; log them quietly so Chrome's Errors page doesn't show a false alarm.
+      if (e instanceof JobError) log('Job failed (handled):', msg);
+      else warn('Job failed:', msg, e);
       reportStatus(job, 'error', msg, true);
       await finishJob(job, 'error', { error: msg });
     } finally {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ZHunter</title>
+  <title>ZHunter Iras</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -11,7 +11,7 @@
   <header class="app-header">
     <div class="brand-logo-wrap"><div class="brand-logo-glow"></div><img src="icon48.png" alt="" class="brand-logo-img" data-onerror="hide" /></div>
     <div class="brand-text">
-      <div class="brand-name-row"><span class="brand-name">ZHunter</span><span class="brand-pro">PRO</span></div>
+      <div class="brand-name-row"><span class="brand-name">ZHunter</span><span class="brand-pro">IRAS</span></div>
       <div class="brand-meta"><span class="brand-version" data-version>v9.8.0</span><span class="brand-sub">Ultimate Product Hunter</span></div>
     </div>
     <div class="sp"></div>
@@ -477,10 +477,19 @@
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> AI Engine</span>
       <div class="set" id="spGroqSettings">
         <div class="it">
-          <div class="l"><b>AI API Key</b><span>Batch title rewriter, brand stripper & SEO optimizer</span></div>
-          <div style="display:flex;gap:5px;align-items:center;">
-            <input type="password" id="groqApiKeyInput" class="inp" style="width:140px;font-family:var(--mono);" placeholder="gsk_..." />
-            <button type="button" id="saveGroqKeyBtn" class="btn btn-ghost btn-xs">Save</button>
+          <div style="width:100%;display:grid;gap:9px;">
+            <div class="l"><b>Groq API Keys</b><span>Save replaces the active key pool</span></div>
+            <select id="groqKeyMode" class="sel" aria-label="API key mode"><option value="single">Single key</option><option value="multiple">Multiple keys</option></select>
+            <input type="password" id="groqApiKeyInput" class="inp" autocomplete="off" spellcheck="false" placeholder="gsk_..." aria-label="Single Groq API key" />
+            <textarea id="groqApiKeysInput" class="inp keys-masked hidden" rows="4" autocomplete="off" spellcheck="false" placeholder="Har API key alag line mein paste karein" aria-label="Multiple Groq API keys" style="width:100%;resize:vertical;font-family:var(--mono);"></textarea>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button type="button" id="saveGroqKeyBtn" class="btn btn-primary btn-xs">Save / Replace</button>
+              <button type="button" id="testGroqKeysBtn" class="btn btn-ghost btn-xs" title="Test all keys to see which ones are working">🧪 Test Keys</button>
+              <button type="button" id="groqShowKeysBtn" class="btn btn-ghost btn-xs">Show</button>
+              <button type="button" id="clearGroqKeysBtn" class="btn btn-ghost btn-xs">Clear keys</button>
+              <span id="groqKeyStatus" style="font-size:11px;">Loading keys…</span>
+            </div>
+            <div id="groqKeyTestOutput" style="display:none;font-size:11px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);line-height:1.6;"></div>
           </div>
         </div>
         <div class="it">
@@ -716,13 +725,30 @@
         <!-- linear bar kept for phases (image download) -->
         <div class="bulk-prog-bar"><div class="bulk-prog-fill" id="bulkProgFill"></div></div>
 
+        <!-- v9.12.4 — auto-recovery card (only while incomplete links are re-hunted) -->
+        <div class="bp-recover hidden" id="bpRecover" aria-live="polite">
+          <div class="bp-rec-head">
+            <span class="bp-rec-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></span>
+            <div class="bp-rec-txt"><b>Auto-recovery</b><small id="bpRecSub">Incomplete links dobara hunt ho rahe hain</small></div>
+            <div class="bp-rec-rounds" id="bpRecRounds" title="Recovery rounds"><i></i><i></i><i></i></div>
+          </div>
+          <div class="bp-rec-now"><span class="bp-rec-k" id="bpRecK">Link 0/0</span><span class="bp-rec-name" id="bpRecName">—</span></div>
+          <div class="bp-rec-bar"><i id="bpRecBar"></i></div>
+          <div class="bp-rec-foot"><span id="bpRecFixed">✓ 0 theek hue</span><span id="bpRecLeft">0 baqi</span></div>
+        </div>
+
         <!-- Currently processing -->
         <div class="bps-current" id="bpsCurrent"></div>
 
         <!-- Live list (collapsible) -->
         <details class="bp-list-wrap" id="bpListWrap" open>
           <summary class="bp-list-summary"><span id="bpListLabel">All tabs</span><svg class="i i-xs chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
-          <div id="bulkProgList" class="bulk-prog-list"></div>
+          <div class="bp-filter" id="bpFilter" role="tablist">
+            <button type="button" data-f="all" class="on">All <b id="bpfAll">0</b></button>
+            <button type="button" data-f="ok">Complete <b id="bpfOk">0</b></button>
+            <button type="button" data-f="pend">Baqi / retry <b id="bpfPend">0</b></button>
+          </div>
+          <div id="bulkProgList" class="bulk-prog-list" data-f="all"></div>
         </details>
 
         <!-- ═══ RESULT (hidden during run) ═══ -->
@@ -835,7 +861,7 @@
           <div class="temu-card temu-setup-card" id="temuSetupCard">
             <!-- v9.11.0 — shown instead of the 2 steps once store + template are set -->
             <div class="temu-setup-compact" id="temuSetupCompact">
-              <div class="tsc-item"><span class="tsc-ic">🏪</span><div class="tsc-txt"><b id="tscStore">—</b><small class="tsc-tpl">📄 <span id="tscTpl">—</span> · ready</small></div></div>
+              <div class="tsc-item"><span class="tsc-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10V6l2-3h14l2 3v4M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 13v8h14v-8M9 21v-6h6v6"/></svg></span><div class="tsc-txt"><b id="tscStore">—</b><small class="tsc-tpl">📄 <span id="tscTpl">—</span> · ready</small></div></div>
               <div class="tsc-actions">
                 <button type="button" class="tsc-btn" id="tscTestBtn" title="Temu Seller Center connection test">⚡ Test</button>
                 <button type="button" class="tsc-btn" id="tscChangeBtn" title="Store / template badlein">Change</button>
@@ -1054,7 +1080,7 @@
               </button>
               <button id="temuFailedBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Temu upload history ka 'View failed details' popup parh kar har failed product ki wajah dikhaye; duplicate wale listed-history mein mark">
                 <svg class="i i-xs" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                Failed details
+                Upload errors
               </button>
               <button id="temuMarkListedBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" hidden title="Agar aap ne exported file Temu par khud upload kar di ho to in products ko 'listed' mark karein (agli baar skip)">
                 Mark as listed
@@ -1155,6 +1181,57 @@
             <div class="temu-hint-pill">
               <span>💡</span>
               <div>Base Price = Source Price × Multiplier (clamped between Min $ and Max $, rounded to .99). Random quantity assigned per listing within min–max range.</div>
+            </div>
+
+            <!-- v9.12.0 — department pricing -->
+            <div class="tg-dept-wrap">
+              <div class="tg-dept-head">
+                <div>
+                  <div class="temu-field-title">Department pricing</div>
+                  <div class="temu-field-hint">Har department ka apna Price ×, Min aur Max. Khali box = upar wala store default.</div>
+                </div>
+                <span class="temu-badge-soft" id="tgDeptCount">0 set</span>
+              </div>
+              <div class="tg-dept-table" id="tgDeptTable">
+                <div class="tg-dept-row tg-dept-th"><span>Department</span><span>Price ×</span><span>Min $</span><span>Max $</span></div>
+              </div>
+              <div class="temu-field-hint">Kisi ek category ka price alag chahiye? <b>Categories</b> tab → category Edit → "Price ×". Order: Category → Department → Store default.</div>
+            </div>
+          </div>
+
+          <!-- v9.12.0 — Description & bullet points -->
+          <div class="temu-card temu-settings-card">
+            <div class="temu-card-header">
+              <div class="temu-card-title-group">
+                <span class="temu-card-icon">📝</span>
+                <div>
+                  <div class="temu-card-title">Description &amp; Bullet Points</div>
+                  <div class="temu-card-subtitle">Hunt ke bullets se chhote, saaf bullets (max 6) aur description</div>
+                </div>
+              </div>
+            </div>
+            <div class="temu-switches-list">
+              <label class="temu-switch-row" for="tgDescOn">
+                <div class="temu-switch-content">
+                  <div class="temu-switch-title">Description + bullets Temu file mein daalo</div>
+                  <div class="temu-switch-desc">Links, emojis, "Add to cart" jaisi web cheezein, store names (Amazon/Walmart…) aur neeche wale alfaaz hat jate hain.</div>
+                </div>
+                <div class="temu-toggle-wrap">
+                  <input type="checkbox" id="tgDescOn" class="temu-toggle-chk" checked />
+                  <span class="temu-toggle-slider"></span>
+                </div>
+              </label>
+            </div>
+            <div class="temu-field-block">
+              <label class="temu-field-header" for="tgAvoidWords">
+                <span class="temu-field-title">Avoid words</span>
+                <span class="temu-badge-soft">Comma-separated</span>
+              </label>
+              <textarea id="tgAvoidWords" class="inp temu-full-inp tg-avoid-inp" rows="3" placeholder="e.g. Best Seller, Guaranteed, FDA approved, Cure, Free shipping"></textarea>
+              <div class="tg-avoid-foot">
+                <div class="temu-field-hint">Jis line mein in mein se koi lafz ho, woh poori line description/bullets se hat jati hai (taake jumla adhoora na lage).</div>
+                <button id="tgAvoidReset" class="btn btn-ghost btn-xs" type="button">↺ Default list</button>
+              </div>
             </div>
           </div>
 
@@ -1493,7 +1570,11 @@
               <div class="temu-field"><label class="temu-lbl">Width</label><input id="tcWd" class="inp temu-dim-inp" placeholder="—" inputmode="decimal" /></div>
               <div class="temu-field"><label class="temu-lbl">Height</label><input id="tcH" class="inp temu-dim-inp" placeholder="—" inputmode="decimal" /></div>
             </div>
-            <div class="temu-hint">Wazan/size khali chhorein to title ka wazan ya default use hoga.</div>
+            <div class="temu-row">
+              <div class="temu-field"><label class="temu-lbl">Price × (optional)</label><input id="tcPx" class="inp temu-dim-inp" placeholder="dept" inputmode="decimal" title="Sirf is category ka price multiplier. Khali = department / store wala" /></div>
+              <div class="temu-field"><label class="temu-lbl">Min $ (optional)</label><input id="tcMinPx" class="inp temu-dim-inp" placeholder="dept" inputmode="decimal" /></div>
+            </div>
+            <div class="temu-hint">Wazan/size khali chhorein to title ka wazan ya default use hoga. Price × khali = department ya store ka price.</div>
             <div class="temu-cat-form-foot">
               <button id="tcSaveBtn" class="btn btn-primary btn-xs" type="button">Save category</button>
               <button id="tcCancelBtn" class="btn btn-ghost btn-xs" type="button">Cancel</button>
@@ -1623,8 +1704,18 @@
         style="border:1.5px dashed rgba(0,229,255,0.45); border-radius:8px; padding:9px 10px; margin-bottom:10px; font-size:11px; color:var(--text-dim); text-align:center; cursor:pointer; outline:none;">
         📋 <b style="color:#fff;">Manual:</b> image copy karke yahan <b style="color:#00E5FF;">Ctrl+V</b> karein ya file drop karein — isi product image ki jagah lag jayegi
       </div>
+      <!-- v9.12.6 — manual tools for this step -->
+      <div id="temuStepManualRow" class="temu-step-manual">
+        <span class="temu-step-manual-lbl">✋ Manual</span>
+        <button type="button" data-m="img" title="Is product ki image copy — Flow mein Ctrl+V">📋 Image</button>
+        <button type="button" data-m="prompt" title="Prompt copy">📝 Prompt</button>
+        <button type="button" id="temuStepPasteFlowBtn" data-m="flow" title="Image + prompt khule Flow project ke prompt box mein laga do (Generate aap dabayein)">⚡ Paste in Flow</button>
+        <button type="button" data-m="studio" class="studio" title="Auto band karke isi product se Edit Studio (manual) kholo">✋ Manual Studio</button>
+      </div>
       <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
         <button id="temuStepGrabFlowBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Flow project ki sab se nayi generated image utha kar is product mein laga do">⬇ Flow se latest</button>
+        <button id="temuStepDeviceBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Device se image</button>
+        <input id="temuStepDeviceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
         <button id="temuStepSkipBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Skip ⏩</button>
         <button id="temuStepSendAgainBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Re-open tab with this image & prompt">Send Again 🔄</button>
         <button id="temuStepPasteNextBtn" class="btn btn-primary btn-sm" type="button" style="font-size:11.5px; font-weight:600; background:linear-gradient(135deg,#00E5FF,#0284c7); border:none;">
@@ -1768,6 +1859,7 @@
   <script src="lib/jszip.min.js"></script>
   <script src="lib/mux-mp4.min.js"></script>
   <script src="temu_categories.js"></script>
+  <script src="title_optimizer_rules.js"></script>
   <script src="sidepanel.js"></script>
   <script src="sidepanel-shell.js"></script>
 </body>

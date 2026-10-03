@@ -2738,6 +2738,32 @@ const TEMU_OFFICIAL_CATEGORIES = {
     "length_in": 8,
     "width_in": 6,
     "height_in": 3
+  },
+  "block_knife_sets": {
+    "name": "Block Knife Sets",
+    "category_keyword": "Block Knife Sets",
+    "full_path": "Home & Kitchen / Kitchen & Dining / Kitchen Utensils & Gadgets / Kitchen Knives & Accessories / Block Knife Sets",
+    "match": [
+      "Block Knife Set",
+      "Block Knife Sets",
+      "Knife Set",
+      "Knife Sets",
+      "Kitchen Knife Set",
+      "Kitchen Knife Sets",
+      "Knife Block Set",
+      "Knife Block Sets"
+    ],
+    "keyword_attributes": "Surface Finishing Type: Polishing, Material: Stainless Steel",
+    "attributes": {
+      "Surface Finishing Type": "Polishing",
+      "Blade Material": "Stainless Steel",
+      "Handle Material": "Stainless Steel",
+      "Material": "Stainless Steel"
+    },
+    "weight_lb": 5,
+    "length_in": 14,
+    "width_in": 9,
+    "height_in": 6
   }
 };
 

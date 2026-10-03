@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "ZHunter PRO",
-  "version": "9.11.0",
+  "name": "ZHunter Iras",
+  "version": "9.12.13",
   "description": "Product research side panel: hunt product images, videos and details from Amazon, Walmart, Sam's Club, Alibaba, AliExpress and more; bulk-hunt open tabs or a background queue; export XLSX/CSV/HTML/PDF sheets and image ZIPs.",
   "author": "ZHunter",
   "permissions": [
@@ -24,7 +24,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_title": "ZHunter PRO",
+    "default_title": "ZHunter Iras",
     "default_icon": {
       "16": "icon16.png",
       "32": "icon32.png",
@@ -50,7 +50,7 @@
         "default": "Ctrl+Shift+L",
         "mac": "Command+Shift+L"
       },
-      "description": "Open ZHunter PRO"
+      "description": "Open ZHunter Iras"
     },
     "save-current-tab": {
       "suggested_key": {
@@ -65,8 +65,16 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icon16.png", "icon32.png", "icon48.png", "icon128.png"],
-      "matches": ["http://*/*", "https://*/*"]
+      "resources": [
+        "icon16.png",
+        "icon32.png",
+        "icon48.png",
+        "icon128.png"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
     }
   ],
   "content_scripts": [
@@ -109,5 +117,3 @@
     }
   ]
 }
-
-

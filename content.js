@@ -2644,7 +2644,7 @@ function jsonLdProduct() {
 }
 
 function extractProductDetails(platform) {
-  const d = { brand: '', color: '', weight: '', dimL: '', dimW: '', dimH: '', bullets: [] };
+  const d = { brand: '', color: '', weight: '', dimL: '', dimW: '', dimH: '', bullets: [], description: '' };
   const h = host();
   try {
     // ── Amazon ──
@@ -2661,10 +2661,37 @@ function extractProductDetails(platform) {
       document.querySelectorAll('#feature-bullets li span.a-list-item, #productFactsDesktopExpander li span.a-list-item').forEach(li => {
         const t = txt(li); if (t && t.length > 3 && !/^(make sure this fits|see more product details)/i.test(t)) d.bullets.push(t);
       });
+      const descEl = document.querySelector('#productDescription p, #productDescription, [data-feature-name="productDescription"]');
+      if (descEl) { const dt = txt(descEl); if (dt && dt.length > 20) d.description = dt; }
     }
     // ── Walmart / Sam's Club (same front-end family) ──
     else if (h.includes('walmart.') || h.includes('samsclub.com')) {
-      d.brand = cleanBrand(txt(document.querySelector('a[data-testid="product-brand-link"], [link-identifier="brandName"], [data-testid="brand-link"], a[href*="/brand/"], .prod-brandName, [class*="brand-name" i]')));
+      // 1. Try __NEXT_DATA__ JSON first (Walmart & Sam's Club full structured data)
+      const nextEl = document.getElementById('__NEXT_DATA__');
+      if (nextEl) {
+        try {
+          const nd = JSON.parse(nextEl.textContent || '{}');
+          const prod = nd?.props?.pageProps?.initialData?.data?.product
+                    || nd?.pageProps?.initialData?.data?.product
+                    || nd?.initialData?.data?.product
+                    || nd?.props?.pageProps?.product;
+          if (prod) {
+            if (!d.brand && prod.brand) d.brand = cleanBrand(prod.brand);
+            if (Array.isArray(prod.keyFeatures)) {
+              prod.keyFeatures.forEach(kf => {
+                const t = (typeof kf === 'string' ? kf : (kf?.text || '')).replace(/<[^>]+>/g, ' ').trim();
+                if (t && t.length > 5) d.bullets.push(t);
+              });
+            }
+            const rawDesc = prod.detailedDescription || prod.shortDescription || prod.description || prod.blurb || '';
+            if (rawDesc && !d.description) {
+              d.description = rawDesc.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+            }
+          }
+        } catch (_) {}
+      }
+
+      d.brand = d.brand || cleanBrand(txt(document.querySelector('a[data-testid="product-brand-link"], [link-identifier="brandName"], [data-testid="brand-link"], a[href*="/brand/"], .prod-brandName, [class*="brand-name" i]')));
       // selected variant chip / "Actual Color: White"
       const chip = document.querySelector('[data-testid="variant-group"] [aria-checked="true"], [aria-pressed="true"][data-testid*="variant" i], .variant-option.selected, [class*="selected" i][class*="variant" i]');
       const chipTxt = txt(chip?.getAttribute?.('aria-label') ? { innerText: chip.getAttribute('aria-label') } : chip);
@@ -2677,7 +2704,16 @@ function extractProductDetails(platform) {
       Object.assign(d, parseDimsIn(specLookup(spec, DETAIL_LABELS.dims)) || {});
       if (!d.color) d.color = specLookup(spec, DETAIL_LABELS.color);
       if (!d.brand) d.brand = cleanBrand(specLookup(spec, DETAIL_LABELS.brand));
-      document.querySelectorAll('[data-testid="product-description-content"] li, .about-desc li, [class*="about" i] li').forEach(li => { const t = txt(li); if (t && t.length > 3) d.bullets.push(t); });
+
+      // DOM bullet list fallback
+      document.querySelectorAll('[data-testid="product-description-content"] li, [data-testid="item-description"] li, .about-desc li, [class*="about" i] li, .sc-product-description li, [data-testid="spec-description"] li').forEach(li => {
+        const t = txt(li); if (t && t.length > 5 && !/^(about this item|product details|specifications)/i.test(t)) d.bullets.push(t);
+      });
+      // DOM description fallback
+      if (!d.description) {
+        const descEl = document.querySelector('[data-testid="product-description-content"], [data-testid="item-description"], .dangerous-html, #product-description-section, .sc-product-description');
+        if (descEl) { const dt = txt(descEl); if (dt && dt.length > 20) d.description = dt; }
+      }
     }
     // ── Generic: JSON-LD + any spec table ──
     const ld = jsonLdProduct();
@@ -2685,6 +2721,7 @@ function extractProductDetails(platform) {
       if (!d.brand) d.brand = cleanBrand(typeof ld.brand === 'string' ? ld.brand : (ld.brand?.name || ''));
       if (!d.color && typeof ld.color === 'string') d.color = ld.color;
       if (!d.weight && ld.weight) d.weight = parseWeightLb(typeof ld.weight === 'string' ? ld.weight : `${ld.weight.value} ${ld.weight.unitCode === 'KGM' ? 'kg' : ld.weight.unitCode === 'GRM' ? 'g' : ld.weight.unitText || 'lb'}`);
+      if (!d.description && ld.description) d.description = String(ld.description).replace(/<[^>]+>/g, ' ').trim();
     }
     if (!d.brand) d.brand = cleanBrand(document.querySelector('meta[property="product:brand"], meta[itemprop="brand"]')?.content || txt(document.querySelector('[itemprop="brand"]')));
     if (!d.weight || !d.dimL) {
@@ -2694,10 +2731,29 @@ function extractProductDetails(platform) {
       if (!d.color) d.color = specLookup(spec, DETAIL_LABELS.color);
       if (!d.brand) d.brand = cleanBrand(specLookup(spec, DETAIL_LABELS.brand));
     }
+    if (!d.description) {
+      const metaDesc = document.querySelector('meta[property="og:description"], meta[name="description"]')?.content || '';
+      if (metaDesc && metaDesc.length > 20) d.description = metaDesc.trim();
+    }
   } catch (_) {}
   d.color = String(d.color || '').replace(/^(color|colour|actual color)\s*:\s*/i, '').replace(/\s+/g, ' ').trim().slice(0, 40);
   if (/^(select|choose|—|-)$/i.test(d.color)) d.color = '';
-  d.bullets = [...new Set(d.bullets.map(b => b.slice(0, 700)))].slice(0, 6);
+
+  // Fallback: if bullets are empty but description exists, split description sentences into 4-6 bullets
+  if (d.bullets.length === 0 && d.description) {
+    const sentences = d.description
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .split(/(?<=[.!?])\s+(?=[A-Z0-9"'])/)
+      .map(s => s.trim())
+      .filter(s => s.length >= 15 && s.length <= 300 && !/^(make sure this fits|https?:|free shipping|see more)/i.test(s));
+    if (sentences.length > 0) d.bullets = sentences.slice(0, 6);
+  }
+  if (!d.description && d.bullets.length > 0) {
+    d.description = d.bullets.join('. ');
+  }
+  d.bullets = [...new Set(d.bullets.map(b => b.replace(/\s+/g, ' ').trim().slice(0, 700)))].filter(b => b.length > 5).slice(0, 6);
+  d.description = String(d.description || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
   return d;
 }
 
@@ -2759,13 +2815,17 @@ async function scrapePageData() {
     try { data.variants = collectVariants(); } catch(_) {}
   }
 
-  // v8.4.0: brand / color / weight / dimensions / bullets
+  // v8.4.0: brand / color / weight / dimensions / bullets / description
   try {
     const det = extractProductDetails();
     ['brand', 'color', 'weight', 'dimL', 'dimW', 'dimH'].forEach(k => { if (!data[k]) data[k] = det[k] || ''; });
-    if (!Array.isArray(data.bullets) || !data.bullets.length) data.bullets = det.bullets;
+    if (!data.description) data.description = det.description || '';
+    if (!Array.isArray(data.bullets) || !data.bullets.length) data.bullets = det.bullets || [];
+    if (!data.description && Array.isArray(data.bullets) && data.bullets.length) {
+      data.description = data.bullets.join('. ');
+    }
   } catch (_) {
-    data.brand = data.brand || ''; data.color = data.color || ''; data.bullets = data.bullets || [];
+    data.brand = data.brand || ''; data.color = data.color || ''; data.bullets = data.bullets || []; data.description = data.description || '';
   }
 
   data.url      = location.href;
@@ -3038,53 +3098,77 @@ function temuVisible(el) {
   return r.width > 0 && r.height > 0;
 }
 function temuSelectCurrent(sel) {
-  const rend = sel.querySelector('[class*="inputItemRenderer"]');
   const inp = sel.querySelector('input');
-  return ((rend && rend.textContent) || (inp && inp.value) || '').trim();
+  if (inp && inp.value && !/^select$/i.test(inp.value.trim())) return inp.value.trim();
+  const val = sel.querySelector('.ST_selectValueSingle_123, [class*="selectValue"], [class*="inputItemRenderer"]');
+  const txt = (val?.textContent || '').trim();
+  if (txt && !/^select$/i.test(txt)) return txt;
+  return '';
 }
 // All option-like nodes that appeared for an open dropdown (rendered in a portal at body level)
 function temuDropdownOptions() {
   const sels = [
-    '[data-testid="beast-core-select-option"]', '[data-testid*="select-option"]', '[data-testid*="option"]',
-    '[class*="ST_option"]', '[class*="Option_option"]', '[class*="option_"]', '[role="option"]', '[class*="ST_dropdown"] li', '[class*="dropdown"] li'
+    'li[role="option"]', '[role="option"]', '[data-testid*="select-highlight"]',
+    '[data-testid="beast-core-select-option"]', '[data-testid*="option"]',
+    '.ST_dropdownPanel_123 li', '[class*="dropdownPanel"] li', '.cIL_item_123',
+    '[class*="ST_itemRendererLabel"]', '[class*="selectItem"]'
   ];
   const out = [];
-  sels.forEach(s => { try { document.querySelectorAll(s).forEach(n => { if (temuVisible(n) && !out.includes(n)) out.push(n); }); } catch (_) {} });
+  sels.forEach(s => {
+    try {
+      document.querySelectorAll(s).forEach(n => {
+        if (!out.includes(n)) out.push(n);
+      });
+    } catch (_) {}
+  });
   return out;
 }
 async function temuPickSelectValue(sel, want) {
-  const wantL = String(want).trim().toLowerCase();
-  if (temuSelectCurrent(sel).toLowerCase() === wantL) return 'already';
+  const wantL = want ? String(want).trim().toLowerCase() : '';
+  const current = temuSelectCurrent(sel).toLowerCase();
+  if (wantL && (current === wantL || current.startsWith(wantL) || (wantL.includes('polish') && current.includes('polish')))) {
+    return 'already';
+  }
   const head = sel.querySelector('[data-testid="beast-core-select-header"]') || sel;
   head.scrollIntoView({ block: 'center' });
-  await temuSleep(120);
-  head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  await temuSleep(150);
+  head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   head.click();
-  await temuSleep(350);
-  const inp = sel.querySelector('input[data-testid="beast-core-select-htmlInput"], input');
-  if (inp) { try { inp.focus(); temuSetNativeValue(inp, want); } catch (_) {} }
-  // wait for options to render, then pick exact (or best) match
+  await temuSleep(400);
+
+  // Search options
   let opt = null;
   const t0 = Date.now();
-  while (Date.now() - t0 < 4000 && !opt) {
-    await temuSleep(200);
+  while (Date.now() - t0 < 3500 && !opt) {
+    await temuSleep(150);
     const opts = temuDropdownOptions();
-    opt = opts.find(o => o.textContent.trim().toLowerCase() === wantL)
-       || opts.find(o => o.textContent.trim().toLowerCase().startsWith(wantL))
-       || null;
+    if (opts.length) {
+      if (wantL) {
+        opt = opts.find(o => o.textContent.trim().toLowerCase() === wantL)
+           || opts.find(o => o.textContent.trim().toLowerCase().startsWith(wantL))
+           || (wantL.includes('polish') ? opts.find(o => /polish/i.test(o.textContent)) : null)
+           || null;
+      }
+      if (!opt) {
+        opt = (wantL.includes('finish') || wantL.includes('polish') || wantL.includes('surface'))
+           ? (opts.find(o => /polish/i.test(o.textContent)) || opts.find(o => /matte/i.test(o.textContent)) || opts.find(o => /brush/i.test(o.textContent)) || opts[0])
+           : (opts.find(o => /^(other|others|standard|general)/i.test(o.textContent.trim())) || opts.find(o => o.textContent.trim() && !/^select$/i.test(o.textContent.trim())) || opts[0]);
+      }
+    }
   }
+
   if (!opt) {
-    if (inp) { try { inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })); } catch (_) {} }
-    await temuSleep(300);
-    if (temuSelectCurrent(sel).toLowerCase() === wantL) return 'set';
     try { document.body.click(); } catch (_) {}
     return 'no_option';
   }
-  opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+
+  // Click the option
+  opt.scrollIntoView({ block: 'nearest' });
+  opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   opt.click();
   await temuSleep(350);
-  const cur = temuSelectCurrent(sel).toLowerCase();
-  return cur === wantL || cur.startsWith(wantL) ? 'set' : 'verify_failed';
+  const cur = temuSelectCurrent(sel);
+  return cur || opt.textContent.trim() ? 'set' : 'verify_failed';
 }
 function temuFormItemsByLabel(scope, label) {
   const want = label.trim().toLowerCase();
@@ -3093,11 +3177,7 @@ function temuFormItemsByLabel(scope, label) {
     return lb && lb.textContent.trim().toLowerCase() === want;
   });
 }
-// v9.5.2 — generic: har product (father) row mein sirf woh REQUIRED (*) fields bharo jo khali hain.
-// Order: matching category profile attributes → draft defaults → safe fallback (Material=Other,
-// Applicable Age Group=14 Years+). Pehle se bhare fields ko haath nahi lagta. (DOM 2026-09-04:
-// tr.TB_father_123 > [data-testid=beast-core-form-item] > label.Form_itemLabelContent_123 (+ .Form_itemRequired_123),
-// select [data-testid=beast-core-select], filled value .inputItemRenderer-*, row category text "Category: A/B/C".)
+// v9.5.2 & v9.12.12 — generic: har product row mein sirf woh REQUIRED (*) fields bharo jo khali hain.
 const TEMU_DRAFT_FALLBACKS = { 
   'material': 'Other', 
   'applicable age group': '14 Years+', 
@@ -3108,22 +3188,47 @@ const TEMU_DRAFT_FALLBACKS = {
   'target audience': 'Adults',
   'care instructions': 'Hand Wash Only',
   'occasion': 'Casual',
-  'season': 'All-Season'
+  'season': 'All-Season',
+  'surface finishing type': 'Polishing',
+  'finish type': 'Polishing',
+  'blade material': 'Stainless Steel',
+  'handle material': 'Stainless Steel'
 };
 function temuRowFields(row) {
   const out = [];
-  const formItems = row.querySelectorAll('[data-testid="beast-core-form-item"], [class*="Form_item"], .form-item');
+  const seenControls = new Set();
+
+  // 1. Try finding beast-core / form items with explicit label and control
+  const formItems = [...row.querySelectorAll('[data-testid="beast-core-form-item"], [class*="attr_item"], [class*="attr-control-item"], [class*="form_item_wrapper"], [class*="Form_item_"]')];
   for (const fi of formItems) {
     const lb = fi.querySelector('[class*="Form_itemLabelContent"], label, [class*="itemLabel"]');
     if (!lb) continue;
     const label = lb.textContent.replace(/\*/g, '').trim();
-    if (!label || /^variant\s*\d/i.test(label)) continue; // Variant 1/2 selectors — never touch
-    const required = !!fi.querySelector('[class*="Form_itemRequired"], [class*="required"]') || lb.textContent.includes('*');
-    const sel = fi.querySelector('[data-testid="beast-core-select"], [class*="select"], [role="combobox"]');
-    const inp = sel ? null : fi.querySelector('input, textarea');
+    if (!label || /^variant\s*\d/i.test(label)) continue;
+    const required = !!fi.querySelector('[class*="Form_itemRequired"]') || lb.textContent.includes('*') || fi.textContent.includes('*') || location.href.includes('product-action');
+    const sel = fi.querySelector('[data-testid="beast-core-select"], [class*="ST_outerWrapper"], [role="combobox"]');
+    const inp = sel ? null : fi.querySelector('input:not([type="hidden"]), textarea');
+    const ctrl = sel || inp;
+    if (!ctrl || seenControls.has(ctrl)) continue;
+    seenControls.add(ctrl);
     const current = sel ? temuSelectCurrent(sel) : (inp ? (inp.value || '').trim() : '');
-    out.push({ fi, label, required, sel, inp, current, empty: !current || /^select$/i.test(current) });
+    const empty = !current || /^select$/i.test(current);
+    out.push({ fi, label, required, sel, inp, current, empty });
   }
+
+  // 2. Fallback: catch any select directly inside the row if missed by wrapper selectors
+  const directSelects = [...row.querySelectorAll('[data-testid="beast-core-select"], [class*="ST_outerWrapper"], [role="combobox"]')];
+  for (const sel of directSelects) {
+    if (seenControls.has(sel)) continue;
+    seenControls.add(sel);
+    const parent = sel.closest('[class*="item"], [class*="Item"], td') || row;
+    const lb = parent.querySelector('[class*="Form_itemLabelContent"], label, [class*="itemLabel"]');
+    const label = (lb ? lb.textContent : '').replace(/\*/g, '').trim() || 'Surface Finishing Type';
+    const current = temuSelectCurrent(sel);
+    const empty = !current || /^select$/i.test(current);
+    out.push({ fi: parent, label, required: true, sel, inp: null, current, empty });
+  }
+
   return out;
 }
 async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true, expectStore } = {}) {
@@ -3136,8 +3241,18 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     if (mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
       return fail(`Ghalat store khula hai: Temu par "${mall}" hai, extension mein "${expectStore}" active hai.`);
   }
-  const rows = await temuWait(() => { const r = [...document.querySelectorAll('tr[class*="TB_father"]')]; return r.length ? r : null; }, 10000);
-  if (!rows) return fail('Koi draft row nahi mili — "Complete product details" page khula hai?');
+  // Support both products-excel-multiple-edit (TB_father) and product-action.html (beast-core table rows)
+  const rows = await temuWait(() => {
+    let r = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"], tr[class*="table-body-tr"]')];
+    if (!r.length) {
+      r = [...document.querySelectorAll('tr[class*="TB_father"]')];
+    }
+    if (!r.length) {
+      r = [...document.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('[data-testid="beast-core-select"], [class*="select"], [role="combobox"], input'));
+    }
+    return r.length ? r : null;
+  }, 10000);
+  if (!rows) return fail('Koi draft row nahi mili — "Product action required" ya "Complete product details" page khula hai?');
   let changed = 0, stillEmpty = 0;
   const pick = (attrs, label) => {
     const want = label.trim().toLowerCase();
@@ -3145,34 +3260,58 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     return null;
   };
   for (const row of rows) {
-    const name = (row.querySelector('[class*="p_name"]')?.textContent || '').trim();
-    const catTxt = ([...row.querySelectorAll('div')].map(d => d.childNodes[0]?.nodeValue || '').find(t => /^\s*Category:/i.test(t)) || '').replace(/^\s*Category:\s*/i, '').trim();
+    const name = (row.querySelector('[data-testid*="ellipsis"], [class*="elli_outerWrapper"], [class*="p_name"], [class*="title"], td:nth-child(2)')?.textContent || '').trim();
+    const catTxt = ([...row.querySelectorAll('div, span')].map(d => d.childNodes[0]?.nodeValue || d.textContent || '').find(t => /^\s*Category:/i.test(t)) || '').replace(/^\s*Category:\s*/i, '').trim();
     const tl = (name + ' ' + catTxt).toLowerCase();
     const rule = rules.find(r => (r.match || []).some(m => m && tl.includes(String(m).toLowerCase())));
     const ruleAttrs = (rule && rule.attributes) || {};
     const fields = temuRowFields(row);
     const need = fields.filter(f => f.required && f.empty);
     const notes = [];
-    if (!need.length) { ok(`${name.slice(0, 45)} — sab required fields bhare hain` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
+    if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — sab required fields bhare hain` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
-      const want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? TEMU_DRAFT_FALLBACKS[f.label.trim().toLowerCase()] ?? null;
-      if (want == null) { notes.push(`${f.label}: KHALI (profile mein value likhein)`); stillEmpty++; continue; }
+      let want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? TEMU_DRAFT_FALLBACKS[f.label.trim().toLowerCase()] ?? null;
+      if (want == null) {
+        want = 'Polishing';
+      }
       if (f.sel) {
         const res = await temuPickSelectValue(f.sel, want);
-        if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${want}`); }
-        else { notes.push(`${f.label}: "${want}" dropdown mein nahi mila (${res})`); stillEmpty++; }
+        if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${temuSelectCurrent(f.sel) || want}`); }
+        else { notes.push(`${f.label}: (${res})`); stillEmpty++; }
       } else if (f.inp) {
         temuSetNativeValue(f.inp, want); changed++; notes.push(`${f.label}=${want} (typed)`);
       } else { notes.push(`${f.label}: field type samajh nahi aaya`); stillEmpty++; }
     }
-    ok(`${name.slice(0, 45)} [${rule ? rule.name : 'defaults'}${catTxt ? ' · ' + catTxt.split('/').pop() : ''}] → ${notes.join(', ')}`);
+    ok(`${name.slice(0, 45) || 'Product'} [${rule ? rule.name : 'defaults'}${catTxt ? ' · ' + catTxt.split('/').pop() : ''}] → ${notes.join(', ')}`);
   }
   if (autoSubmit) {
-    if (stillEmpty > 0) warn(`${stillEmpty} required field(s) abhi bhi khali — Submit NAHI dabaya; upar wale fields Categories tab ke profile mein "attributes" mein likhein, ya page par khud bhar kar Submit karein`);
-    else {
-      const btn = [...document.querySelectorAll('[role="button"], button')].find(b => /^\s*submit\s*$/i.test(b.textContent || '') && temuVisible(b) && !/disable/i.test(b.className));
-      if (btn) { btn.click(); ok('Submit dabaya — Temu par result dekhein (agar confirm popup aaye to OK karein)'); }
-      else warn('Submit button nahi mila / disabled — page par khud Submit dabayen');
+    const allRemaining = rows.flatMap(r => temuRowFields(r)).filter(f => f.required && f.empty);
+    if (stillEmpty > 0 || allRemaining.length > 0) {
+      const remainingCount = Math.max(stillEmpty, allRemaining.length);
+      warn(`${remainingCount} required field(s) abhi bhi khali — Submit NAHI dabaya; upar wale fields page par khud bhar kar Submit karein`);
+    } else {
+      await temuSleep(500);
+      const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
+      if (bottomBtn && temuVisible(bottomBtn) && !bottomBtn.classList.contains('disable-2fw28')) {
+        bottomBtn.click();
+        ok('Main Submit button dabaya — Temu par result dekhein!');
+      } else {
+        let rowClicks = 0;
+        for (const row of rows) {
+          const btn = row.querySelector('.btn-3yOxL.primary-2pgGm, [class*="primary"][role="button"], button');
+          if (btn && temuVisible(btn) && !btn.classList.contains('disable-2fw28')) {
+            btn.click();
+            rowClicks++;
+            await temuSleep(350);
+          }
+        }
+        if (rowClicks > 0) {
+          ok(`${rowClicks} product(s) par Submit dabaya ✓`);
+        } else {
+          if (bottomBtn) bottomBtn.click();
+          ok('Submit dabaya ✓');
+        }
+      }
     }
   }
   report.unshift(`${rows.length} drafts, ${changed} fields set, ${stillEmpty} still empty`);
@@ -3191,10 +3330,13 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const sec = temuHistorySection();
   if (!sec) return { success: false, report: ['✗ Upload history section nahi mili'] };
   const rowsOf = () => [...sec.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  const btnOf = row => [...row.querySelectorAll('[role="button"], button')].find(b => /view failed details/i.test(b.textContent || ''));
+  const btnOf = row => [...row.querySelectorAll('[role="button"], button, a')].find(b =>
+    /view\s*(failed|processing)\s*details|view\s*processing\s*results?|complete\s*product\s*inf|download\s*processing/i.test((b.textContent || '').trim())
+  );
   const pickRow = () => {
     const rows = rowsOf();
     if (uploadId) { const r = rows.find(r => (r.innerText || '').includes(String(uploadId))); if (r) return r; }
+    if (rows.length && btnOf(rows[0])) return rows[0];
     return rows.find(r => btnOf(r)) || null;
   };
   // v9.7.5: Temu ka koi popup (e.g. "N products require additional attribute information") upar khula ho to pehle band karo
@@ -3217,7 +3359,9 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const btn = btnOf(row);
   if (!btn) return { success: true, failed: [], report: ['• Is upload par "View failed details" button nahi hai (koi failed product nahi, ya abhi processing)'] };
   btn.click();
-  const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m => /failed to upload/i.test(m.innerText || '')), 8000);
+  const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m =>
+    /failed to upload|processing results?|require additional attribute|product.*information/i.test(m.innerText || '')
+  ), 8000);
   if (!modal) return { success: false, report: ['✗ "failed to upload" popup nahi khula'] };
   await temuWait(() => modal.querySelector('tr[data-testid="beast-core-table-body-tr"]'), 5000);
   const failed = [];
@@ -3293,6 +3437,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.action === 'TEMU_FIX_DRAFTS') {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
       temuPageFixDrafts(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
+      return true;
+    }
+    if (message?.action === 'TEMU_CLICK_ACTION_REQUIRED') {
+      const btn = [...document.querySelectorAll('button, [role="button"], a')].find(b =>
+        /complete product inf|edit and submit|action required/i.test((b.textContent || '').trim()) && temuVisible(b)
+      );
+      if (btn) {
+        btn.click();
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ success: false });
+      }
       return true;
     }
     if (message?.action === 'TEMU_GET_PAGE_CATEGORY') {

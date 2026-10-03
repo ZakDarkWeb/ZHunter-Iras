@@ -1879,14 +1879,23 @@ async function cdpClickSelector(tabId, selector) {
   if (!selector) return false;
   if (!(await cdpEnsureAttached(tabId))) return false;
   try {
+    // Chrome's debugger infobar can resize the viewport. Let layout settle first.
+    await new Promise(resolve => setTimeout(resolve, 350));
     const evalResult = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
       expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
+        const el = Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(candidate => {
+          const box = candidate.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && !candidate.closest('flow-agent-panel');
+        });
         if (!el) return null;
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true') return null;
         el.scrollIntoView({ block: 'center', inline: 'center' });
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || (hit !== el && !el.contains(hit))) return null;
+        return { x, y };
       })()`,
       returnByValue: true
     });
