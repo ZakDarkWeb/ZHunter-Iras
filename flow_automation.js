@@ -67,10 +67,10 @@
     if (!el || !el.isConnected) return false;
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
     await sleep(80);
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return false;
-    const x = r.left + r.width / 2;
-    const y = r.top + r.height / 2;
+    const box = el.getBoundingClientRect();
+    if (!box.width || !box.height) return false;
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
     const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1, composed: true };
     try { el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}

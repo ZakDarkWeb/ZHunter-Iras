@@ -1293,24 +1293,21 @@ async function handleMessage(msg, sender) {
       return await bgGroupTabs(msg.tabIds || []);
     }
     case 'ZH_CDP_CLICK': {
-      // v9.9.0 — trusted click inside the SENDER's own tab (Flow). The content script
-      // sends viewport coordinates (x, y); a selector is still accepted as fallback.
       const tabId = sender?.tab?.id || msg.tabId;
       if (!tabId) return { ok: false, error: 'no_tab' };
       if (sender?.tab?.id && !/^https:\/\/flow\.google\.com\//i.test(String(sender.tab.url || ''))) {
         return { ok: false, error: 'flow_only' };
       }
       try {
-        const ok = (typeof msg.x === 'number' && typeof msg.y === 'number')
-          ? await cdpClickAt(tabId, msg.x, msg.y)
-          : await cdpClickSelector(tabId, String(msg.selector || ''));
+        const ok = msg.selector
+          ? await cdpClickSelector(tabId, msg.selector)
+          : await cdpClickAt(tabId, msg.x, msg.y);
         return { ok };
       } catch (e) {
         return { ok: false, error: e?.message || String(e) };
       }
     }
     case 'ZH_CDP_DETACH': {
-      // v9.10.1 — release the debugger right after the Generate click (no lingering banner)
       const tabId = sender?.tab?.id || msg.tabId;
       if (tabId) await cdpDetach(tabId);
       return { ok: true };
@@ -1814,14 +1811,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   chrome.runtime.sendMessage({ action: 'BULK_QUEUE_UPDATED', item: newItem }).catch(() => {});
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CDP (Chrome DevTools Protocol) Click Helper — for Google Flow automation
-// Uses chrome.debugger to send truly trusted mouse events that Angular responds to
-// ─────────────────────────────────────────────────────────────────────────────
-const _cdpAttached = new Set(); // track attached tabs
-
-// v9.9.0 — keep the set honest when Chrome (or the user) detaches the debugger,
-// and forget closed tabs. Registered once, not per attach.
+// ============================================================
+// Google Flow — Chrome DevTools Protocol (CDP) trusted click
+// Bypasses synthetic event detection without permanent debugging banner
+// ============================================================
+const _cdpAttached = new Set();
 try {
   chrome.debugger.onDetach.addListener((source) => {
     if (source?.tabId) _cdpAttached.delete(source.tabId);
