@@ -14997,6 +14997,7 @@ async function updateTopTemuStorePill() {
   } catch (_) {}
 
   pill.innerHTML = `
+    ${temuIco}
     <span class="temu-dot-live"></span>
     <span class="temu-pill-name">${esc(store)}</span>
     <span class="temu-pill-divider"></span>

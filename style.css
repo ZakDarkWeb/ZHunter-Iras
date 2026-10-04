@@ -10,7 +10,7 @@
   --accent: #00E5FF; --accent-hover: #67E8F9; --accent-dark: #0EA5E9; --accent-soft: rgba(0,229,255,.10); --accent-line: rgba(0,229,255,.38); --accent-ink: #67E8F9; --accent-fg: #050816; --accent-glow: rgba(0,229,255,.42);
   --bg: #03060F; --surface: #060D1E; --surface-2: #0A1428; --surface-3: #0F1E3A; --hover: #162545; --input: #080F22;
   --line: #1A2A4A; --line-2: #1F3360;
-  --ink: #E2E8F0; --ink-2: #94A3B8; --ink-3: #64748B; --ink-4: #3B4A63;
+  --ink: #E2E8F0; --ink-2: #94A3B8; --ink-3: #94A3B8; --ink-4: #94A3B8;
   --ok: #34D399; --ok-soft: rgba(52,211,153,.12); --ok-line: rgba(52,211,153,.35);
   --warn: #FBBF24; --warn-soft: rgba(251,191,36,.12); --warn-line: rgba(251,191,36,.35);
   --bad: #F87171; --bad-soft: rgba(248,113,113,.12); --bad-line: rgba(248,113,113,.35);
@@ -28,7 +28,7 @@
   --ink-1: var(--ink); --text-dim: var(--ink-3); --text-sec: var(--ink-2);
   --surface-1: var(--surface); --surface-4: #162545; --bg-1: #131C2E; --bg-2: #0B1221;
   --line-3: #324765; --accent-mid: var(--accent-dark);
-  --ai: #8B5CF6; --ai-ink: #C4B5FD; --ai-hover: #6D28D9; --ai-soft: rgba(139,92,246,.12); --ai-line: rgba(139,92,246,.4); --ai-fg: #FFFFFF;
+  --ai: #7C3AED; --ai-ink: #C4B5FD; --ai-hover: #6D28D9; --ai-soft: rgba(139,92,246,.12); --ai-line: rgba(139,92,246,.4); --ai-fg: #FFFFFF;
   --on-image: #FFFFFF; --image-canvas: #020610; --image-overlay: rgba(3,6,15,.7);
   --disabled-ink: #64748B; --disabled-bg: var(--surface-2); --focus-ring: var(--accent-soft);
   --panel-shade: rgba(0,0,0,.25); --panel-track: rgba(2,6,23,.55); --panel-inset: rgba(2,6,23,.6);
@@ -47,17 +47,19 @@
 
   --accent-rgb: 0,229,255; --selected-ink: #050816; --deep-rgb: 7,12,24;
   --upload-bg: linear-gradient(105deg,#00C4DB 0%,#00E5FF 35%,#60F4FF 50%,#00E5FF 65%,#00C4DB 100%); --upload-ink: #0A1628; --upload-motion: temu-upload-glow 2.5s ease-in-out infinite, temu-btn-shimmer 3s linear infinite; --row-hover-rgb: 20,32,58;
-  --ai-button-bg: linear-gradient(180deg,#8B5CF6,#6D28D9); --stepper-shadow: 0 16px 48px rgba(0,0,0,.85),0 0 24px rgba(0,229,255,.2); --modal-header-bg: linear-gradient(135deg,rgba(15,23,42,.95),rgba(30,58,95,.4));
+  --ai-button-bg: linear-gradient(180deg,#7C3AED,#6D28D9); --stepper-shadow: 0 16px 48px rgba(0,0,0,.85),0 0 24px rgba(0,229,255,.2); --modal-header-bg: linear-gradient(135deg,rgba(15,23,42,.95),rgba(30,58,95,.4));
   --studio-primary-bg: linear-gradient(135deg,#00E5FF,#0284C7);
+  --text1: var(--ink); --text2: var(--ink-2); --text3: var(--ink-3); --text4: var(--ink-4);
+  --supplier-amazon: #FF9900; --supplier-walmart: #38BDF8; --supplier-sams: #3DDC84; --supplier-temu: #FB923C; --supplier-ali: #F97316; --supplier-etsy: #F472B6; --supplier-shein: #E2E8F0; --supplier-ebay: #FBBF24;
 }
 body.light-mode, html.light-mode {
-  --accent: #0E7490; --accent-hover: #0E7490; --accent-dark: #0369A1; --accent-soft: rgba(8,145,178,.10); --accent-line: rgba(8,145,178,.35); --accent-ink: #0369A1; --accent-fg: #FFFFFF; --accent-glow: rgba(14,116,144,.16);
+  --accent: #0B5E75; --accent-hover: #0C6078; --accent-dark: #075985; --accent-soft: rgba(8,145,178,.10); --accent-line: rgba(8,145,178,.35); --accent-ink: #075985; --accent-fg: #FFFFFF; --accent-glow: rgba(14,116,144,.16);
   --bg: #F3F6FA; --surface: #FFFFFF; --surface-2: #F5F7FA; --surface-3: #EAF0F6; --hover: #E8F4F8; --input: #FFFFFF;
   --line: #D6DEE8; --line-2: #B9C5D4;
   --ink: #0F172A; --ink-2: #3F4D60; --ink-3: #52637A; --ink-4: #5F7086;
-  --ok: #047857; --ok-soft: rgba(5,150,105,.10); --ok-line: rgba(5,150,105,.3);
-  --warn: #B45309; --warn-soft: rgba(180,83,9,.10); --warn-line: rgba(180,83,9,.3);
-  --bad: #DC2626; --bad-soft: rgba(220,38,38,.08); --bad-line: rgba(220,38,38,.3);
+  --ok: #065F46; --ok-soft: rgba(5,150,105,.10); --ok-line: rgba(5,150,105,.3);
+  --warn: #92400E; --warn-soft: rgba(180,83,9,.10); --warn-line: rgba(180,83,9,.3);
+  --bad: #B91C1C; --bad-soft: rgba(220,38,38,.08); --bad-line: rgba(220,38,38,.3);
   --run: #2563EB; --run-soft: rgba(37,99,235,.10);
   --shadow: 0 1px 2px rgba(15,23,42,.06);
   --shadow-pop: 0 16px 40px rgba(15,23,42,.18);
@@ -74,7 +76,7 @@ body.light-mode, html.light-mode {
   --heading-strong: var(--ink); --hero-bg: var(--surface-2);
   --stepper-bg: var(--surface); --stepper-edge: var(--line-2);
 
-  --ink-bright: var(--ink); --ink-soft: var(--ink-2); --cyan-ink: var(--accent-ink); --sky-ink: #0369A1; --lavender-ink: var(--ai-ink);
+  --ink-bright: var(--ink); --ink-soft: var(--ink-2); --cyan-ink: var(--accent-ink); --sky-ink: #075985; --lavender-ink: var(--ai-ink);
   --signal-ok: var(--ok); --signal-warn: var(--warn); --signal-bad: var(--bad);
   --slate-900-rgb: 245,247,250; --slate-950-rgb: 234,240,246; --navy-rgb: 245,247,250; --hero-rgb: 245,247,250; --track-rgb: 226,234,243; --black-rgb: 226,234,243;
   --panel-shadow: var(--shadow); --header-action-ink: var(--accent-ink);
@@ -83,6 +85,7 @@ body.light-mode, html.light-mode {
   --upload-bg: linear-gradient(135deg,var(--accent),var(--accent-dark)); --upload-ink: var(--accent-fg); --upload-motion: none; --row-hover-rgb: 232,244,248;
   --ai-button-bg: linear-gradient(180deg,#7C3AED,#5B21B6); --stepper-shadow: var(--shadow-pop); --modal-header-bg: linear-gradient(135deg,var(--surface),var(--surface-3));
   --studio-primary-bg: linear-gradient(135deg,var(--accent),var(--accent-dark));
+  --supplier-amazon: #9A4B05; --supplier-walmart: #0369A1; --supplier-sams: #047857; --supplier-temu: #9A3412; --supplier-ali: #9A3412; --supplier-etsy: #9D174D; --supplier-shein: #334155; --supplier-ebay: #92400E;
 }
 html[data-fx="off"] { --dur: 0ms; }
 @media (prefers-reduced-motion: reduce) { :root { --dur: 0ms; } }
@@ -924,15 +927,15 @@ body.light-mode .tab-btn.active { text-shadow: none; }
 .bulk-tab-row .bulk-tab-title { color: var(--ink-2); font-size: 11.5px; }
 .bulk-tab-row::before, .master-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: 0; box-shadow: 0 0 8px var(--accent); }
 .bulk-tab-row.checked::before, .master-row.selected::before { opacity: 1; }
-[data-plat="amz"] { color: #FF9900; background: rgba(255,153,0,.12); border-color: rgba(255,153,0,.30); }
-[data-plat="wmt"] { color: #38BDF8; background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.30); }
-[data-plat="sam"], [data-plat="sams"] { color: #34D399; background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.30); }
-[data-plat="tmu"] { color: #FB923C; background: rgba(251,146,60,.12); border-color: rgba(251,146,60,.30); }
-[data-plat="alb"], [data-plat="ali"] { color: #F97316; background: rgba(249,115,22,.12); border-color: rgba(249,115,22,.30); }
-[data-plat="ety"] { color: #F472B6; background: rgba(244,114,182,.12); border-color: rgba(244,114,182,.30); }
-[data-plat="shn"] { color: #E2E8F0; background: rgba(226,232,240,.12); border-color: rgba(226,232,240,.30); }
-[data-plat="eby"] { color: #FBBF24; background: rgba(251,191,36,.12); border-color: rgba(251,191,36,.30); }
-[data-plat="drz"] { color: #FB923C; background: rgba(251,146,60,.12); border-color: rgba(251,146,60,.30); }
+[data-plat="amz"] { color: var(--supplier-amazon); background: rgba(255,153,0,.12); border-color: rgba(255,153,0,.30); }
+[data-plat="wmt"] { color: var(--supplier-walmart); background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.30); }
+[data-plat="sam"], [data-plat="sams"] { color: var(--supplier-sams); background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.30); }
+[data-plat="tmu"] { color: var(--supplier-temu); background: rgba(251,146,60,.12); border-color: rgba(251,146,60,.30); }
+[data-plat="alb"], [data-plat="ali"] { color: var(--supplier-ali); background: rgba(249,115,22,.12); border-color: rgba(249,115,22,.30); }
+[data-plat="ety"] { color: var(--supplier-etsy); background: rgba(244,114,182,.12); border-color: rgba(244,114,182,.30); }
+[data-plat="shn"] { color: var(--supplier-shein); background: rgba(226,232,240,.12); border-color: rgba(226,232,240,.30); }
+[data-plat="eby"] { color: var(--supplier-ebay); background: rgba(251,191,36,.12); border-color: rgba(251,191,36,.30); }
+[data-plat="drz"] { color: var(--supplier-ali); background: rgba(251,146,60,.12); border-color: rgba(251,146,60,.30); }
 [data-plat="wgb"], [data-plat="wgs"] { color: #4ADE80; background: rgba(74,222,128,.12); border-color: rgba(74,222,128,.30); }
 .summary { color: var(--accent-ink); }
 
@@ -2758,11 +2761,11 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 @keyframes bpspin { to { transform: rotate(360deg); } }
 
 /* ═══ v9.10 — hunt popup motion ═══ */
-#bulkProgressModal { --bp-c: #00E5FF; --bp-c2: #0099FF; --bp-glow: rgba(var(--accent-rgb),0.35); }
-#bulkProgressModal[data-phase="recover"]   { --bp-c: #F59E0B; --bp-c2: #F97316; --bp-glow: rgba(245, 158, 11, 0.35); }
-#bulkProgressModal[data-phase="download"]  { --bp-c: #A78BFA; --bp-c2: #7C3AED; --bp-glow: rgba(167, 139, 250, 0.35); }
-#bulkProgressModal[data-phase="done"]      { --bp-c: #10B981; --bp-c2: #059669; --bp-glow: rgba(16, 185, 129, 0.35); }
-#bulkProgressModal[data-phase="attention"] { --bp-c: #F59E0B; --bp-c2: #F97316; --bp-glow: rgba(245, 158, 11, 0.3); }
+#bulkProgressModal { --bp-c: var(--cyan-ink); --bp-c2: var(--accent-dark); --bp-glow: rgba(var(--accent-rgb),0.35); }
+#bulkProgressModal[data-phase="recover"]   { --bp-c: var(--warn); --bp-c2: var(--signal-warn); --bp-glow: rgba(245, 158, 11, 0.35); }
+#bulkProgressModal[data-phase="download"]  { --bp-c: var(--lavender-ink); --bp-c2: var(--ai); --bp-glow: rgba(167, 139, 250, 0.35); }
+#bulkProgressModal[data-phase="done"]      { --bp-c: var(--ok); --bp-c2: var(--signal-ok); --bp-glow: rgba(16, 185, 129, 0.35); }
+#bulkProgressModal[data-phase="attention"] { --bp-c: var(--warn); --bp-c2: var(--signal-warn); --bp-glow: rgba(245, 158, 11, 0.3); }
 
 #bulkProgressModal .bulk-progress-box { animation: bpBoxIn .42s cubic-bezier(0.16, 1, 0.3, 1) both; }
 @keyframes bpBoxIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
@@ -5095,7 +5098,9 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
   .app-header .brand-pro, .app-header .brand-sub { display: none; }
   .app-header .stat-pill { padding-inline: 7px; }
   .app-header .temu-top-pill { width: 32px; padding: 5px !important; justify-content: center; }
-  .app-header .temu-pill-name { display: none; }
+  .app-header .temu-pill-name, .app-header .temu-pill-count, .app-header .temu-pill-divider, .app-header .temu-dot-live { display: none; }
 }
 
 @media (max-width: 400px) { .master-toolbar-row { flex-wrap: wrap; } .master-toolbar-row .master-search-wrap { flex: 1 0 100%; } .master-toolbar-row .master-sort-sel { flex: 1; width: auto; } }
+
+@media (min-width: 401px) and (max-width: 560px) { .app-header { gap: 6px; padding-inline: 10px; } .app-header .brand-pro, .app-header .brand-sub { display: none; } .app-header .temu-pill-name { max-width: 62px; } .app-header .temu-pill-count, .app-header .temu-pill-divider { display: none; } .app-header .hdr-btn, .app-header .stat-pill, .app-header .temu-top-pill { flex-shrink: 0; } }
