@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Recent Hunt filter fix:** Library rows retain batch IDs; older batches recover only with matching timestamps/counts. Hunt selection clears conflicting searches, repeated clicks reset the filter, and unmatched hunts keep the current list visible.
 - **Compact History records:** Reduced card spacing, top-right CSV/Delete actions, and one metadata line for date/item count.
 - **History alignment:** Full-width store selector, equal segmented filters, consistent record action row, and balanced footer controls matching extension themes.
 - **Settings and History workspace:** Collapsible settings/department pricing with remembered fold state, compact upload cards and folded metadata/week view, aligned filters/actions, shared dark/light theme colours.

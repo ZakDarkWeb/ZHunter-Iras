@@ -4611,10 +4611,7 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = [
-  "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",
-  "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"
-]; // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -5436,6 +5433,7 @@ function initBulkTab() {
       }
       document.querySelectorAll('#masterFilterChips .filter-chip:not(#compactModeToggle)').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      MasterUIState.filterBatchId = null;
       MasterUIState.filterPlatform = btn.dataset.filter || 'all';
       filterAndRenderMasterRows();
     });
@@ -8205,6 +8203,7 @@ async function appendToMasterSheet(rows) {
 
   const lean = newRows.map(r => ({
     id:           `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    batchId:      BulkState.currentBatchId || null,
     title:        r.title,
     url:          r.url,
     platform:     r.platform,
@@ -8278,6 +8277,7 @@ async function updateMasterStats() {
 
   renderMasterBatches(batches);
   MasterUIState.allRows = rows;
+  MasterUIState.batches = batches;
   filterAndRenderMasterRows();
 }
 
@@ -8303,6 +8303,25 @@ async function toggleStarRow(id) {
   }
   filterAndRenderMasterRows();
   toast(r.starred ? 'Product starred ★' : 'Removed from starred', 'ok');
+}
+
+// Older Library rows omitted batchId. Recover only an unambiguous full batch.
+function masterRowsForBatch(rows, batch, batches) {
+  if (!batch?.id) return [];
+  const direct = rows.filter(r => r.batchId === batch.id);
+  const startFor = b => {
+    const match = /^(?:batch|queue)_(\d+)$/.exec(b.id || '');
+    return match ? Number(match[1]) : NaN;
+  };
+  const start = startFor(batch);
+  if (!Number.isFinite(start)) return direct;
+  const next = Math.min(...(batches || []).map(startFor).filter(t => t > start));
+  const candidates = rows.filter(r => {
+    if (r.batchId) return r.batchId === batch.id;
+    const time = typeof r.scrapedAt === 'number' ? r.scrapedAt : Date.parse(r.scrapedAt);
+    return Number.isFinite(time) && time >= start && time < next;
+  });
+  return candidates.length === Number(batch.count) ? candidates : direct;
 }
 
 function filterAndRenderMasterRows() {
@@ -8343,7 +8362,8 @@ function filterAndRenderMasterRows() {
 
   // Batch ID filter (from Recent Hunts Filter button)
   if (MasterUIState.filterBatchId) {
-    rows = rows.filter(r => (r.batchId || '') === MasterUIState.filterBatchId);
+    const batch = (MasterUIState.batches || []).find(b => b.id === MasterUIState.filterBatchId);
+    rows = masterRowsForBatch(rows, batch || { id: MasterUIState.filterBatchId }, MasterUIState.batches);
   }
 
   // Sort rows
@@ -8843,12 +8863,20 @@ function renderMasterBatches(batches) {
     card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
       // Switch to Library tab
       $('tab-btn-library')?.click();
-      // Set batchId filter (precise — shows only this batch's products)
-      MasterUIState.filterBatchId = b.id || null;
+      const clear = MasterUIState.filterBatchId === b.id;
+      const matched = masterRowsForBatch(MasterUIState.allRows || [], b, MasterUIState.batches || batches);
+      if (!clear && !matched.length) {
+        toast('Is hunt ke saved products nahi mile. Library filter change nahi kiya.', 'warn');
+        return;
+      }
+      MasterUIState.filterBatchId = clear ? null : b.id;
       MasterUIState.filterPlatform = 'all';
+      MasterUIState.searchQuery = '';
+      if ($('masterSearchInp')) $('masterSearchInp').value = '';
       document.querySelectorAll('#masterPlatBar .plat-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.plat === 'all'));
+      document.querySelectorAll('#masterFilterChips .filter-chip:not(#compactModeToggle)').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === 'all'));
       filterAndRenderMasterRows();
-      toast(`Batch filter: ${count} product${count !== 1 ? 's' : ''}`, 'info');
+      toast(clear ? 'All Library products' : `Batch filter: ${matched.length} products`, 'info');
     });
 
     list.appendChild(card);
