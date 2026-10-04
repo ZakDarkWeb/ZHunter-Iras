@@ -5423,6 +5423,7 @@ function initBulkTab() {
   });
   $('masterSearchInp')?.addEventListener('input', (e) => {
     MasterUIState.searchQuery = e.target.value;
+    MasterUIState.filterBatchId = null; // clear batch filter when user searches manually
     filterAndRenderMasterRows();
   });
   document.querySelectorAll('#masterFilterChips .filter-chip').forEach(btn => {
@@ -8340,6 +8341,11 @@ function filterAndRenderMasterRows() {
     });
   }
 
+  // Batch ID filter (from Recent Hunts Filter button)
+  if (MasterUIState.filterBatchId) {
+    rows = rows.filter(r => (r.batchId || '') === MasterUIState.filterBatchId);
+  }
+
   // Sort rows
   rows = [...rows];
   if (sort === 'newest') {
@@ -8835,12 +8841,14 @@ function renderMasterBatches(batches) {
       </button>`;
 
     card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
-      const searchInp = $('masterSearchInp');
-      if (searchInp && platLabel !== 'Mixed') {
-        searchInp.value = platLabel;
-        searchInp.dispatchEvent(new Event('input'));
-      }
-      toast(`Showing batch: ${count} products`, 'info');
+      // Switch to Library tab
+      $('tab-btn-library')?.click();
+      // Set batchId filter (precise — shows only this batch's products)
+      MasterUIState.filterBatchId = b.id || null;
+      MasterUIState.filterPlatform = 'all';
+      document.querySelectorAll('#masterPlatBar .plat-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.plat === 'all'));
+      filterAndRenderMasterRows();
+      toast(`Batch filter: ${count} product${count !== 1 ? 's' : ''}`, 'info');
     });
 
     list.appendChild(card);
