@@ -8772,49 +8772,78 @@ function renderMasterBatches(batches) {
   const list = $('masterBatchList');
   if (!list) return;
   if (!batches || batches.length === 0) {
-    list.innerHTML = '<div class="bulk-empty"><p>No batches yet. Hunt some tabs first!</p></div>';
+    list.innerHTML = '<div class="rh-empty"><p>No hunts yet — Hunt some tabs first!</p></div>';
     return;
   }
   list.innerHTML = '';
+
+  // Platform icon map
+  const platIco = (platStr) => {
+    const s = (platStr || '').toLowerCase();
+    if (s.includes('walmart'))    return `<svg viewBox="0 0 24 24"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" fill="#0071CE"/></svg>`;
+    if (s.includes('amazon'))     return `<svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z" fill="#FF9900"/></svg>`;
+    if (s.includes('temu'))       return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#FA5131"/></svg>`;
+    if (s.includes('aliexpress')) return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#E62E00"/></svg>`;
+    if (s.includes('sams'))       return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#0067A0"/></svg>`;
+    return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(0,229,255,0.4)"/></svg>`;
+  };
+
   batches.slice(0, 20).forEach((b, idx) => {
     const d = new Date(b.date);
-    const dateFormatted = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const timeFormatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const plats = (b.platforms || []).filter(Boolean).map(p => esc(p)).join(', ') || 'Mixed';
-    const isLatest = (idx === 0);
-    const labelHtml = b.label ? `<span class="mb-label">${esc(b.label)}</span>` : '';
-    const latestHtml = isLatest ? `<span class="mb-latest-badge">Latest</span>` : '';
+    const now = new Date();
+    const diffMs = now - d;
+    const diffH = Math.floor(diffMs / 3600000);
+    const diffD = Math.floor(diffMs / 86400000);
+    let timeAgo;
+    if (diffH < 1)       timeAgo = 'Just now';
+    else if (diffH < 24) timeAgo = `${diffH}h ago`;
+    else if (diffD < 7)  timeAgo = `${diffD}d ago`;
+    else timeAgo = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-    const row = document.createElement('div');
-    row.className = 'master-batch-row' + (isLatest ? ' mb-is-latest' : '');
-    row.innerHTML = `
-      <div class="mb-left">
-        <div class="mb-title-row">
-          <span class="mb-time">${dateFormatted} · ${timeFormatted}</span>
-          ${latestHtml}
-          <span class="mb-plat-badge">${plats}</span>
+    const timeExact = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateFull  = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const plats = (b.platforms || []).filter(Boolean);
+    const platLabel = plats.length ? plats.join(' · ') : 'Mixed';
+    const firstPlat = plats[0] || '';
+    const isLatest = (idx === 0);
+    const count = b.count || 0;
+
+    const card = document.createElement('div');
+    card.className = 'rh-card' + (isLatest ? ' rh-card-latest' : '');
+
+    card.innerHTML = `
+      <div class="rh-card-accent"></div>
+      <div class="rh-plat-ico">${platIco(firstPlat)}</div>
+      <div class="rh-card-body">
+        <div class="rh-card-top">
+          <span class="rh-date-chip" title="${dateFull} ${timeExact}">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            ${dateFull} · ${timeExact}
+          </span>
+          ${isLatest ? `<span class="rh-latest-chip">● Latest</span>` : `<span class="rh-ago">${timeAgo}</span>`}
         </div>
-        ${labelHtml ? `<div class="mb-label-row">${labelHtml}</div>` : ''}
-        <div class="mb-sub">
-          <span class="mb-count-pill">${b.count} products</span>
-          <span class="mb-status-pill ok">✓ Completed</span>
+        <div class="rh-card-mid">
+          <span class="rh-count">${count}</span>
+          <span class="rh-count-lbl">product${count !== 1 ? 's' : ''}</span>
+          <span class="rh-plat-tag">${esc(platLabel)}</span>
+          ${b.label ? `<span class="rh-batch-lbl">${esc(b.label)}</span>` : ''}
         </div>
       </div>
-      <div class="mb-actions">
-        <button class="btn btn-ghost btn-xs mb-filter-btn" type="button" title="View in Library">Filter</button>
-      </div>`;
+      <button class="rh-view-btn" type="button" title="Filter these products in Library">
+        <svg viewBox="0 0 24 24"><polyline points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3"/></svg>
+        <span>Filter</span>
+      </button>`;
 
-    row.querySelector('.mb-filter-btn')?.addEventListener('click', () => {
-      $('tab-btn-library')?.click();
+    card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
       const searchInp = $('masterSearchInp');
-      if (searchInp) {
-        searchInp.value = plats !== 'Mixed' ? plats : '';
+      if (searchInp && platLabel !== 'Mixed') {
+        searchInp.value = platLabel;
         searchInp.dispatchEvent(new Event('input'));
       }
-      toast(`Filtered ${plats} products`, 'info');
+      toast(`Showing batch: ${count} products`, 'info');
     });
 
-    list.appendChild(row);
+    list.appendChild(card);
   });
 }
 
