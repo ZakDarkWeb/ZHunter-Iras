@@ -16029,6 +16029,29 @@ function temuSyncSrcSeg() {
   }
   const pv = $('temuSrcPxVal');
   if (pv) pv.textContent = ($('tgPx2')?.value || $('tgPx')?.value || '5');
+
+  // U2: Show product count badges on source segment buttons
+  (async () => {
+    const bulkCnt  = (BulkState?.results || []).filter(x => x.status !== 'fail').length;
+    const masterRows = MasterUIState.allRows || [];
+    const libCnt = masterRows.length;
+    const counts = { bulk: bulkCnt, master: libCnt, sheet: TemuSheetRows?.length || 0 };
+    seg.querySelectorAll('button[data-src]').forEach(b => {
+      const src = b.dataset.src;
+      const cnt = counts[src] ?? 0;
+      let badge = b.querySelector('.src-cnt');
+      if (!badge) { badge = document.createElement('span'); badge.className = 'src-cnt'; b.appendChild(badge); }
+      badge.textContent = cnt > 0 ? String(cnt) : '';
+    });
+  })();
+
+  // U10: Live price preview next to multiplier input
+  const pxInput = $('tgPx2') || $('tgPx');
+  const pxPreview = $('temuPxPreview');
+  if (pxPreview && pxInput) {
+    const mult = parseFloat(pxInput.value) || 5;
+    pxPreview.textContent = `e.g. $5.99 → $${(5.99 * mult).toFixed(2)}`;
+  }
 }
 
 (function initTemuPolish() {
@@ -16087,6 +16110,87 @@ function temuSyncSrcSeg() {
   };
   pane?.addEventListener('change', kick);
   pane?.addEventListener('input', (e) => { if (e.target.type !== 'checkbox') kick(e); });
+  // U10: also update on tgPx2 input (live)
+  $('tgPx2')?.addEventListener('input', () => temuSyncSrcSeg());
+
+  // U4: Batch name character counter
+  const batchInp = $('temuBatchNameInp');
+  const batchCnt = $('temuBatchNameCount');
+  if (batchInp && batchCnt) {
+    const updateBatchCount = () => {
+      const len = batchInp.value.length;
+      batchCnt.textContent = `${len}/60`;
+      batchCnt.classList.toggle('temu-batch-name-count-warn', len > 50);
+    };
+    batchInp.addEventListener('input', updateBatchCount);
+    updateBatchCount();
+  }
+
+  // U5: Export + Upload button — loading state
+  const autoBtn = $('temuAutoBtn');
+  const autoBtnTxt = $('temuAutoBtnTxt');
+  const autoBtnSpinner = $('temuAutoBtnSpinner');
+  if (autoBtn) {
+    const origListener = autoBtn.onclick;
+    // Wrap via observer: watch disabled state to toggle spinner
+    const obs = new MutationObserver(() => {
+      const busy = autoBtn.disabled;
+      autoBtnSpinner?.classList.toggle('hidden', !busy);
+      if (autoBtnTxt) autoBtnTxt.textContent = busy ? 'Processing...' : 'Export + Upload to Temu';
+    });
+    obs.observe(autoBtn, { attributes: true, attributeFilter: ['disabled'] });
+  }
+
+  // U1: Setup compact — add connection status dot
+  const updateSetupDot = () => {
+    const compact = $('temuSetupCompact');
+    if (!compact) return;
+    const storeName = $('tscStore')?.textContent?.trim();
+    const isConnected = storeName && storeName !== '—';
+    let dot = compact.querySelector('.tsc-status-dot');
+    if (!dot) {
+      dot = document.createElement('span');
+      dot.className = 'tsc-status-dot';
+      compact.prepend(dot);
+    }
+    dot.className = 'tsc-status-dot ' + (isConnected ? 'tsc-dot-ok' : 'tsc-dot-off');
+    dot.title = isConnected ? `Connected: ${storeName}` : 'Not connected — add store first';
+  };
+  // Call once + after any setup change
+  setTimeout(updateSetupDot, 500);
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#temuTestConnBtn,#temuStoreAddBtn,#tscChangeBtn')) {
+      setTimeout(updateSetupDot, 800);
+    }
+  });
+
+  // U7: Review list — show skeleton while loading
+  const origTemuBuildReview = window.temuBuildReviewList;
+  const reviewList = $('temuReviewList');
+  if (reviewList) {
+    const showSkeleton = (n = 3) => {
+      reviewList.classList.remove('hidden');
+      reviewList.innerHTML = Array.from({length: n}, () =>
+        `<div class="temu-review-skel"><div class="skel-img"></div><div class="skel-lines"><div class="skel-line skel-w80"></div><div class="skel-line skel-w50"></div></div></div>`
+      ).join('');
+    };
+    // Expose so temuBuildReviewList can call it
+    window.temuShowReviewSkeleton = showSkeleton;
+  }
+
+  // U9: Categories bulk bar — ensure count text reads "X selected"
+  const origCatBulkBar = window.temuCatUpdateBulkBar;
+  // temuCatUpdateBulkBar already sets temuCatBulkCount — just make bar label clearer
+  const catBulkLbl = document.querySelector('#temuCatBulkBar .temu-bulk-sel-lbl');
+  if (catBulkLbl) {
+    const orig = window.temuCatUpdateBulkBar;
+    window.temuCatUpdateBulkBar = function() {
+      if (orig) orig();
+      const n = TemuCatSelected?.size || 0;
+      catBulkLbl.textContent = n === 1 ? '1 category selected' : `${n} categories selected`;
+    };
+  }
+
   document.addEventListener('change', (e) => { if (e.target?.id === 'tgPx2') temuSyncSrcSeg(); });
   temuSyncSrcSeg();
 })();

@@ -1089,11 +1089,11 @@
           <div class="temu-actions-wrap">
             <div class="temu-batch-name-row">
               <svg class="i i-xs" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-              <input id="temuBatchNameInp" class="inp temu-batch-name-inp" type="text" placeholder="Batch name (optional)..." maxlength="60" autocomplete="off" />
+              <input id="temuBatchNameInp" class="inp temu-batch-name-inp" type="text" placeholder="Batch name (optional)..." maxlength="60" autocomplete="off" /><span id="temuBatchNameCount" class="temu-batch-name-count">0/60</span>
             </div>
             <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button">
               <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              Export + Upload to Temu
+              <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt">Export + Upload to Temu</span>
             </button>
             <div class="temu-actions-sub-bar">
               <button id="temuExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Sirf file download — Temu par khud upload karein">

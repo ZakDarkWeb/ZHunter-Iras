@@ -1472,10 +1472,48 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 /* ── UPLOAD ACTIONS ── */
 .temu-actions-wrap { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
 /* Batch Name Input Row */
-.temu-batch-name-row { display: flex; align-items: center; gap: 7px; }
+.temu-batch-name-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .temu-batch-name-row svg { width: 13px; height: 13px; stroke: var(--ink-3); stroke-width: 2; flex-shrink: 0; }
-.temu-batch-name-inp { flex: 1; height: 30px; font-size: 12px; background: rgba(255,255,255,0.03); }
+.temu-batch-name-inp { flex: 1; height: 30px; font-size: 12px; background: rgba(255,255,255,0.03); min-width: 0; }
 .temu-batch-name-inp::placeholder { color: var(--ink-4); font-style: italic; }
+/* U4: Batch name char counter */
+.temu-batch-name-count { font: 500 10px var(--mono); color: var(--ink-4); flex-shrink: 0; }
+.temu-batch-name-count-warn { color: #eab308 !important; }
+
+/* U1: Setup compact status dot */
+.tsc-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.tsc-dot-ok  { background: #22c55e; box-shadow: 0 0 5px rgba(34,197,94,.5); }
+.tsc-dot-off { background: #ef4444; box-shadow: 0 0 5px rgba(239,68,68,.4); }
+
+/* U2: Source segment count badges */
+.temu-src-seg button .src-cnt {
+  display: inline-block; min-width: 16px; padding: 0 4px; height: 14px; line-height: 14px;
+  font: 700 9px var(--mono); border-radius: 999px; text-align: center;
+  background: rgba(0,229,255,.15); color: var(--accent); margin-left: 3px; flex-shrink: 0;
+}
+.temu-src-seg button .src-cnt:empty { display: none; }
+
+/* U5: Upload button spinner */
+.temu-btn-spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid rgba(10,22,40,.3);
+  border-top-color: #0a1628;
+  animation: temu-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes temu-spin { to { transform: rotate(360deg); } }
+
+/* U7: Review list skeleton */
+.temu-review-skel { display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid var(--line); }
+.skel-img { width: 50px; height: 50px; border-radius: 8px; background: var(--surface-2); flex-shrink: 0; }
+.skel-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.skel-line { height: 10px; border-radius: 5px; background: var(--surface-2); animation: skel-pulse 1.4s ease-in-out infinite; }
+.skel-w80 { width: 80%; } .skel-w50 { width: 50%; }
+@keyframes skel-pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
+
+/* U10: Price multiplier preview */
+.temu-px-preview { font: 600 10px var(--mono); color: var(--accent); margin-top: 3px; display: block; }
+
 /* Category Bulk Action Bar */
 .temu-cat-bulk-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.18); margin-bottom: 6px; }
 .temu-cat-bulk-bar.hidden { display: none; }
