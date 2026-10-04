@@ -4181,3 +4181,5 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .zt-fold > summary { padding: 10px; }.zt-fold > summary b { font-size: 11px; }.zt-field { margin-bottom: 9px; }.zt-original { margin-top: 5px; }
 .zt-footer { padding: 9px 14px; gap: 7px; }.zt-footer .btn { min-height: 30px; height: 30px; }.zt-footer span { min-width: 0; }
 @media (max-width: 500px) { .zt-modal { height: min(710px, calc(100dvh - 12px)); }.zt-head { padding: 12px 13px; }.zt-editor { padding: 12px 13px; }.zt-footer { padding: 9px 13px; } }
+
+.zh-sourcing-controls { padding: 12px 14px; display: grid; gap: 10px; }.zh-sourcing-actions { display: flex; flex-wrap: wrap; gap: 7px; }.zh-sourcing-controls p { font-size: 11px; color: var(--ink-2); overflow-wrap: anywhere; }.zh-sourcing-controls summary { cursor: pointer; font-size: 11px; color: var(--accent-ink); }.zh-sourcing-controls details > * { margin-top: 9px; }.zh-sourcing-controls label { display: grid; gap: 5px; font-size: 11px; color: var(--ink-2); }.zh-sourcing-controls .inp { width: 100%; }.zh-sourcing-controls a { font-size: 11px; }

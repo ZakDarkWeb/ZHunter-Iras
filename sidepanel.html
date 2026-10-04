@@ -1397,6 +1397,22 @@
             </div>
           </div>
 
+          <div class="temu-card temu-settings-card" id="zhSourcingCard">
+            <div class="temu-card-header"><div><div class="temu-card-title">Sourcing records</div><div class="temu-card-subtitle">Updated titles and supplier links, grouped by store</div></div></div>
+            <div class="zh-sourcing-controls">
+              <div class="zh-sourcing-actions"><button type="button" id="zhSourcingOpen" class="btn btn-secondary btn-xs">Open sheet</button><button type="button" id="zhSourcingRetry" class="btn btn-secondary btn-xs">Retry pending</button></div>
+              <p id="zhSourcingStatus" role="status">Checking connection?</p>
+              <details><summary>Connect Google Sheet</summary>
+                <p>One-time Apps Script setup. Your sheet stays private.</p>
+                <label>Sourcing spreadsheet<input id="zhSourcingWorkbook" class="inp" type="url" placeholder="https://docs.google.com/spreadsheets/d/?/edit"></label>
+                <label>Web App URL<input id="zhSourcingEndpoint" class="inp" type="url" placeholder="https://script.google.com/macros/s/?/exec"></label>
+                <label>Connection key<input id="zhSourcingKey" class="inp" type="password" autocomplete="off" placeholder="64-character private key"></label>
+                <div class="zh-sourcing-actions"><button type="button" id="zhSourcingNewKey" class="btn btn-secondary btn-xs">Create connection key</button><button type="button" id="zhSourcingConnect" class="btn btn-primary btn-xs">Connect</button></div>
+                <a href="integrations/google_sourcing/SETUP.md" target="_blank">Setup instructions</a>
+              </details>
+            </div>
+          </div>
+
           <!-- 6. Save Bar -->
           <div class="temu-settings-save-bar">
             <button id="tgSaveBtn" class="btn btn-primary temu-save-main-btn" type="button">
@@ -1856,6 +1872,7 @@
   <script src="title_optimizer_rules.js"></script>
   <script src="sidepanel.js"></script>
   <script src="text_studio.js"></script>
+  <script src="sourcing_panel.js"></script>
   <script src="sidepanel-shell.js"></script>
 </body>
 </html>

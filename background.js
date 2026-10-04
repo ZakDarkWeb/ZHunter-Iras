@@ -3,6 +3,7 @@
 // Handles storage operations, messaging, content script orchestration, and AI generation
 // ============================================================
 'use strict';
+importScripts('sourcing_sync.js');
 
 // Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
 let _zhExportFolder = true;
@@ -1182,10 +1183,12 @@ function tabsSend(tabId, message) {
     } catch (e) { res({ __err: e?.message || String(e) }); }
   });
 }
-async function temuBgAutoUpload({ b64, filename, expectStore, background }) {
+async function temuBgAutoUpload({ b64, filename, expectStore, background, sourcing }) {
   const report = [];
   const bg = background !== false;
+  let sourcingQueued = false;
   startKeepAlive();
+  if (sourcing) { try { await zhSourcingQueue(sourcing); sourcingQueued = true; } catch (e) { report.push('Sourcing record: ' + e.message); } }
   try {
     let prevTab = null;
     try { prevTab = (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0] || null; } catch (_) {}
@@ -1226,6 +1229,10 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background }) {
       }
     } catch (_) {}
     _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
+    if (sourcingQueued) {
+      try { out.sourcing = await zhSourcingRetry(true, sourcing.id); out.report.push(out.sourcing.success ? 'Sourcing records saved to Google Sheet' : (out.sourcing.error || 'Sourcing sync pending')); }
+      catch (e) { out.report.push('Sourcing sync pending: ' + e.message); }
+    }
     try { await chrome.storage.local.set({ temuLastUploadReport: { t: Date.now(), ...out } }); } catch (_) {}
     stopKeepAlive();
     return out;
@@ -1254,6 +1261,11 @@ async function handleMessage(msg, sender) {
     }
     case 'GET_LINK_IMAGES':    return { success: true, images: await getImagesFromIndexedDB(msg.id) };
     case 'START_KEEPALIVE':    startKeepAlive(); return { success: true };
+    case 'SOURCING_CONNECT': return await zhSourcingConnect(msg.config);
+    case 'SOURCING_STATUS': return await zhSourcingStatus();
+    case 'SOURCING_RETRY': return await zhSourcingRetry(true);
+    case 'SOURCING_QUEUE': return await zhSourcingQueue(msg.snapshot);
+    case 'SOURCING_OPEN': await zhSourcingOpen(); return { success: true };
     case 'TEMU_AUTO_UPLOAD':   return await temuBgAutoUpload(msg);
     case 'TEMU_NEED_VISIBLE': {
       // content script (hidden Temu tab) says the page won't mount its upload box while hidden →

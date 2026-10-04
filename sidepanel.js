@@ -11749,7 +11749,7 @@ function temuEnrich(rows, cfg) {
       bullets: copy.bullets, description: copy.description, pxLabel,
       category_keyword: prof.category_keyword || '',
       keyword_attributes: prof.keyword_attributes || '',
-      base, list,
+      base, list, sourcingPrice: r.sourcingPrice !== '' && r.sourcingPrice != null ? r.sourcingPrice : (r.price ?? ''),
       qty: Math.floor(Math.random() * (cfg.quantity_max - cfg.quantity_min + 1)) + cfg.quantity_min,
       weight, dimL: prof.length_in ?? d.length_in,
       dimW: prof.width_in ?? d.width_in, dimH: prof.height_in ?? d.height_in,
@@ -11808,6 +11808,10 @@ function temuFillTemplate(wb, items, cfg) {
 let TemuLast = null; // { bytes, items, skipped, n } from the last export
 let TemuLibPick = null; // v9.6.1: Library tab se chune huay products {ids:Set, n}
 let TemuSheetRows = null; // v9.7.0: Temu window mein import ki hui sheet ke rows
+
+function temuSourcingSnapshot() {
+  return { id: TemuLast.sourcingId || (TemuLast.sourcingId = 'src_' + crypto.randomUUID()), t: Date.now(), store: TemuLast.store || temuActiveStoreName(), items: TemuLast.items.map(it => ({ title: it.title, url: it.url, sourcingPrice: it.sourcingPrice, list: it.list })) };
+}
 
 async function temuRunExport(opts = {}) {
   const rep = $('temuReport');
@@ -11900,7 +11904,7 @@ async function temuRunExport(opts = {}) {
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
-    TemuLast = { bytes: out, items, skipped, n, marked: false };
+    TemuLast = { bytes: out, items, skipped, n, marked: false, store: temuActiveStoreName(), sourcingId: 'src_' + crypto.randomUUID() };
     // v9.3.1: listed-history ab sirf CONFIRMED upload ke baad mark hoti hai (export-only par nahi).
     { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Mark ${n} as listed`; } }
     zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'temu_upload.xlsx');
@@ -11923,6 +11927,7 @@ async function temuAutoUpload() {
   if (!TemuLast) { await temuRunExport({ forUpload: true }); }
   if (!TemuLast) return;
   { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
+  const sourcingSnapshot = temuSourcingSnapshot();
   const bg = temuGetCfg().upload_in_background !== false;
   say((rep?.textContent || '') + (bg ? '\n\nTemu tab khul raha hai — processing poori hote hi focus wapas aap ke tab par aa jayega…' : '\n\nTemu page khul raha hai…'));
   try {
@@ -11946,7 +11951,7 @@ async function temuAutoUpload() {
     const onProg = (m) => { if (m?.action === 'TEMU_UPLOAD_PROGRESS' && rep) rep.textContent = base + '\n' + fmtProg(m); };
     try { chrome.runtime.onMessage.addListener(onProg); } catch (_) {}
     let result;
-    try { result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: 'temu_upload.xlsx', expectStore: temuActiveStoreName(), background: bg }); }
+    try { result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: 'temu_upload.xlsx', expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }); }
     finally { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} }
     if (rep) rep.textContent = base; // drop the live ⏳ line
     // v9.4.3 — result numbers from the report ("Completed: 28 records processed, 28 added, 0 errors")
@@ -12400,7 +12405,7 @@ async function temuExportAllHistoryCsv() {
   zhSaveBlob(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }), `temu_all_history_${new Date().toISOString().slice(0, 10)}.csv`);
   toast(`Exported ${allItems.length} records to CSV`, 'ok');
 }
-const temuHistItems = items => (items || []).map(it => ({ sku: it.sku, title: (it.title || '').slice(0, 120), url: it.url, base: it.base, variation: `${it.vtype || 'Color'}: ${it.color}` }));
+const temuHistItems = items => (items || []).map(it => ({ sku: it.sku, title: it.title || '', url: it.url, base: it.base, sourcingPrice: it.sourcingPrice ?? '', list: it.list ?? '', variation: `${it.vtype || 'Color'}: ${it.color}` }));
 
 // v9.7.1 — Temu general-template file (temu_upload.xlsx) pehchano: row 3 mein keys (seller_sku, item_name), data row 5 se
 function temuParseTemuFile(buf) {
@@ -15090,6 +15095,11 @@ function initTemuExport() {
       if (!TemuLast?.items?.length) return;
       if (!confirm(`${TemuLast.items.length} products ko "listed" mark karein? (Sirf tab jab aap ne ye file Temu par khud upload kar di ho)`)) return;
       await temuMarkListed(TemuLast.items); TemuLast.marked = true;
+      try {
+        const queued = await msg({ action: 'SOURCING_QUEUE', snapshot: temuSourcingSnapshot() });
+        if (queued?.success) await msg({ action: 'SOURCING_RETRY' });
+        else toast(queued?.error || 'Sourcing record missing', 'warn');
+      } catch (e) { toast('Sourcing sync pending: ' + e.message, 'warn'); }
       try { await temuHistAdd({ kind: 'manual', store: temuActiveStoreName() || '—', n: TemuLast.items.length, items: temuHistItems(TemuLast.items) }); } catch (_) {}
       const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true;
       const rep = $('temuReport'); if (rep) rep.textContent += `\n✓ ${TemuLast.items.length} products listed mark kiye`;
