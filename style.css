@@ -2321,15 +2321,9 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 .temu-cat-item.collapsed .temu-cat-body {
   display: none;
 }
-/* Collapsed keyword preview row — visible under header when collapsed */
+/* Keyword preview row — hidden in all states (chips show only inside expanded body) */
 .temu-cat-kw-preview {
-  display: none;
-  padding: 3px 12px 6px 38px;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.temu-cat-item.collapsed .temu-cat-kw-preview {
-  display: flex;
+  display: none !important;
 }
 .temu-cat-kw-pill {
   font-size: 10px;
