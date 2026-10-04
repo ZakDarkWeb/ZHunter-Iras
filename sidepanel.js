@@ -4611,7 +4611,10 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = [
+  "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",
+  "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"
+]; // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';

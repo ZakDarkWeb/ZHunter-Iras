@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" data-fx="full">
 <head>
   <meta charset="UTF-8" />
@@ -361,7 +361,7 @@
           </div>
         </div>
         <div class="rh-header"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Recent Hunts</span></div>
-        <div id="masterBatchList" class="rh-list"><div class="rh-empty"><p>No hunts yet � Hunt some tabs first!</p></div></div>
+        <div id="masterBatchList" class="rh-list"><div class="rh-empty"><p>No hunts yet � Hunt some tabs first!</p></div></div>
         <div class="card-actions">
           <div class="dd" style="flex:1">
             <button id="masterExportMenuBtn" class="btn btn-primary btn-lg" type="button" aria-haspopup="menu">
@@ -524,9 +524,9 @@
           <div class="l"><b>AI Model</b><span>Ultra-fast inference via Groq</span></div>
           <select id="groqModelSel" class="sel" style="width:160px">
             <option value="qwen/qwen3.8-27b" selected>Qwen 3.8 27B (Fast & Accurate)</option>
-            <option value="openai/gpt-oss-20b">GPT OSS 20B � Balanced</option>
-            <option value="openai/gpt-oss-120b">GPT OSS 120B � ? Accurate</option>
-            <option value="groq/compound-mini">Compound Mini � Compact</option>
+            <option value="openai/gpt-oss-20b">GPT OSS 20B � Balanced</option>
+            <option value="openai/gpt-oss-120b">GPT OSS 120B � ? Accurate</option>
+            <option value="groq/compound-mini">Compound Mini � Compact</option>
           </select>
         </div>
       </div>
@@ -869,7 +869,7 @@
             <div class="temu-head-sub">Hunted products → Temu listing file → auto upload</div>
           </div>
         </div>
-        <button id="temuModalClose" class="modal-close" aria-label="Close">✕</button>
+        <button id="temuModalClose" class="modal-close" aria-label="Close"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <!-- Tabs -->
@@ -891,7 +891,7 @@
             <div class="temu-setup-compact" id="temuSetupCompact">
               <div class="tsc-item"><span class="tsc-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10V6l2-3h14l2 3v4M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 13v8h14v-8M9 21v-6h6v6"/></svg></span><div class="tsc-txt"><b id="tscStore">—</b><small class="tsc-tpl">📄 <span id="tscTpl">—</span> · ready</small></div></div>
               <div class="tsc-actions">
-                <button type="button" class="tsc-btn" id="tscTestBtn" title="Temu Seller Center connection test">⚡ Test</button>
+                <button type="button" class="tsc-btn" id="tscTestBtn" title="Temu Seller Center connection test"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Test</button>
                 <button type="button" class="tsc-btn" id="tscChangeBtn" title="Store / template badlein">Change</button>
               </div>
             </div>
@@ -911,13 +911,13 @@
                   <span class="temu-step-title" id="temuStep1Title">Add your store</span>
                   <div class="temu-step-store-select-wrap" id="temuStepStoreWrap" style="display:none">
                     <select id="temuStoreSel" class="sel temu-step-store-sel"></select>
-                    <button id="temuStoreDelBtn" class="btn btn-ghost btn-xs btn-danger temu-step-del-btn" type="button" title="Active store delete karein">✕</button>
+                    <button id="temuStoreDelBtn" class="btn btn-ghost btn-xs btn-danger temu-step-del-btn" type="button" title="Active store delete karein"><svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                   </div>
                 </div>
                 <div class="temu-step-desc" id="temuStep1Desc">Naam bilkul wahi jo Temu Seller Center mein upar-right dikhta hai</div>
               </div>
               <div class="temu-step-action" style="display:flex;gap:5px;align-items:center;">
-                <button id="temuTestConnBtn" class="temu-step-btn temu-test-btn" type="button" title="Temu Seller Center tab aur session test karein">⚡ Test</button>
+                <button id="temuTestConnBtn" class="temu-step-btn temu-test-btn" type="button" title="Temu Seller Center tab aur session test karein"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg> Test</button>
                 <button id="temuStoreAddBtn" class="btn btn-secondary btn-xs temu-step-btn" type="button" title="Temu tab se store auto-detect karein">+ Add</button>
               </div>
             </div>
@@ -969,7 +969,7 @@
               <input id="temuSheetFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.json">
               <input id="tgPx" class="inp" inputmode="decimal" />
             </div>
-            <div id="temuSrcInfo" class="temu-src-info-badge">—</div>
+            <div id="temuSrcInfo" class="temu-src-info-badge"></div>
           </div>
 
           <!-- ── Product Review Studio ── -->
@@ -1024,7 +1024,7 @@
               </div>
               <div class="temu-coll-body" data-coll-body="img">
               <div class="temu-img-pick-row">
-                <span id="temuImgEditCount" class="temu-img-pick-count">✨ 0 products · 0 images</span>
+                <span id="temuImgEditCount" class="temu-img-pick-count">0 products · 0 images</span>
                 <button id="temuImgSelAllBtn" class="temu-img-pick-btn" type="button" title="Sab products image editing ke liye select">Select all</button>
                 <button id="temuImgSelNoneBtn" class="temu-img-pick-btn" type="button" title="Image editing selection saaf">None</button>
               </div>
@@ -1056,9 +1056,9 @@
                 <div class="temu-img-sel-wrap">
                   <label class="temu-img-sel-label">Speed</label>
                   <select id="temuAiImgSpeedSel" class="temu-img-sel" title="Auto Flow: images ke beech ka gap. Tez = account flag ka zyada risk">
-                    <option value="safe">🐢 Safe (4–9s)</option>
-                    <option value="normal" selected>🚶 Normal (2–4s)</option>
-                    <option value="fast">⚡ Fast (1–2s)</option>
+                    <option value="safe">🛡 Safe (4–9s)</option>
+                    <option value="normal" selected>⚡ Normal (2–4s)</option>
+                    <option value="fast">🚀 Fast (1–2s)</option>
                   </select>
                 </div>
                 <div class="temu-img-sel-wrap">
