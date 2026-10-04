@@ -3508,20 +3508,22 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
   color: #c4b5fd;
 }
 .temu-img-pick-btn {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 5px;
-  border: 1px solid rgba(124, 58, 237, 0.4);
-  background: rgba(124, 58, 237, 0.12);
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 600 10px var(--mono);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  background: rgba(124, 58, 237, 0.08);
   color: #c4b5fd;
   cursor: pointer;
   transition: all 0.15s ease;
 }
+.temu-img-pick-btn svg { stroke: currentColor; fill: none; flex-shrink: 0; }
 .temu-img-pick-btn:hover {
   border-color: #a78bfa;
-  background: rgba(124, 58, 237, 0.22);
+  background: rgba(124, 58, 237, 0.2);
   color: #ede9fe;
+  transform: translateY(-1px);
 }
 .temu-rv-edit-wrap {
   flex-shrink: 0;
@@ -4730,9 +4732,45 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .temu-rv-tools { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; margin: 0 -10px 8px; padding: 7px 10px;
   background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line-2); }
 .temu-rv-tools-n { flex: 1; font: 700 10.5px var(--font); color: var(--ink-3); }
-.temu-rv-tools button { height: 24px; padding: 0 9px; border-radius: 999px; font: 700 10.5px var(--font); color: var(--ink-2); background: var(--surface-3); border: 1px solid var(--line-2); cursor: pointer; transition: all .18s ease; }
-.temu-rv-tools button:hover { color: var(--ink); border-color: var(--accent-line); }
-.temu-rv-tools button.on { color: var(--accent-fg, #04131a); background: var(--accent); border-color: var(--accent); }
+.temu-rv-tools-right { display: flex; align-items: center; gap: 5px; }
+
+/* AI Updated chip button */
+.temu-rv-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 10px;
+  border-radius: 999px;
+  font: 700 9.5px var(--mono); letter-spacing: .04em;
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: all .18s ease;
+}
+.temu-rv-chip svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
+.temu-rv-chip:hover { color: var(--ink); border-color: var(--accent-line); }
+.temu-rv-chip.on {
+  color: #030712;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0,229,255,.3);
+}
+.temu-rv-chip.on svg { stroke: #030712; }
+
+/* Collapse All icon button */
+.temu-rv-icon-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 9px;
+  border-radius: 6px;
+  font: 600 9.5px var(--mono); letter-spacing: .03em;
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: all .18s ease;
+}
+.temu-rv-icon-btn svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
+.temu-rv-icon-btn:hover { color: var(--ink); border-color: var(--line-3); background: var(--surface-2); }
+
 .temu-review-list.only-upd .temu-rv-card:not(.rv-updated):not(.rv-same) { display: none; }
 
 .temu-rv-upd-tag { cursor: pointer; transition: filter .15s ease; }

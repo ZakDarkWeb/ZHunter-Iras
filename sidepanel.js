@@ -13369,8 +13369,16 @@ async function temuRenderReview() {
     const tools = document.createElement('div');
     tools.className = 'temu-rv-tools';
     tools.innerHTML = `<span class="temu-rv-tools-n">${rows.length} products</span>
-      <button type="button" data-t="upd" title="Sirf AI se badle hue titles dikhayein">✨ Sirf updated</button>
-      <button type="button" data-t="close" title="Sab khule cards band karein">▴ Sab band</button>`;
+      <div class="temu-rv-tools-right">
+        <button type="button" class="temu-rv-chip" data-t="upd" title="Show only products whose titles were rewritten by AI">
+          <svg viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
+          AI Updated
+        </button>
+        <button type="button" class="temu-rv-icon-btn" data-t="close" title="Collapse all expanded product cards">
+          <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+          Collapse All
+        </button>
+      </div>`;
     tools.addEventListener('click', e => {
       const b = e.target.closest('button[data-t]');
       if (!b) return;
