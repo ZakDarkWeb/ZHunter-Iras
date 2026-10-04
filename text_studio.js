@@ -154,22 +154,75 @@ function zhTextEnsureModal() {
   modal.id = 'zhTextStudioModal';
   modal.className = 'modal-back hidden';
   modal.innerHTML = `<section class="zt-modal" role="dialog" aria-modal="true" aria-labelledby="ztHeading">
-    <header class="zt-head"><span class="zt-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/><path d="M19 3v4M17 5h4"/></svg></span><div><span class="zt-eyebrow">AI WORKSPACE</span><h2 id="ztHeading">Content Studio</h2><p>Titles, bullet points &amp; descriptions</p></div><button type="button" id="ztClose" class="modal-close" aria-label="Close">×</button></header>
-    <div class="zt-nav"><button type="button" id="ztPrev" class="btn btn-ghost btn-xs" aria-label="Previous product">‹</button><label class="zt-product-picker"><span id="ztPosition">Product 1 of 1</span><select id="ztProduct" class="sel" aria-label="Choose product"></select></label><button type="button" id="ztNext" class="btn btn-ghost btn-xs" aria-label="Next product">›</button></div>
+    <header class="zt-head">
+      <span class="zt-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/><path d="M19 3v4M17 5h4"/></svg></span>
+      <div class="zt-head-text">
+        <span class="zt-eyebrow">AI WORKSPACE</span>
+        <h2 id="ztHeading">Content Studio</h2>
+        <p>Titles, bullet points &amp; descriptions</p>
+      </div>
+      <button type="button" id="ztClose" class="zt-close-btn" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+    <div class="zt-nav">
+      <button type="button" id="ztPrev" class="zt-nav-btn" aria-label="Previous product">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <label class="zt-product-picker">
+        <span id="ztPosition" class="zt-pos-badge">PRODUCT 1 OF 1</span>
+        <select id="ztProduct" class="sel" aria-label="Choose product"></select>
+      </label>
+      <button type="button" id="ztNext" class="zt-nav-btn" aria-label="Next product">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
     <details class="zt-selection"><summary id="ztSelectionLabel">Select products</summary><div class="zt-sidebar"><label class="zt-all"><input type="checkbox" id="ztSelectAll" checked>Select all</label><div id="ztQueue"></div></div></details>
-    <div class="zt-toolbar"><div class="zt-fields"><span>Rewrite</span>${ZH_TEXT_FIELDS.map(f => `<label><input type="checkbox" id="ztField-${f}" checked> ${f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description'}</label>`).join('')}</div>
-      <div class="zt-actions"><select id="ztScope" class="sel" aria-label="Generation scope"><option value="checked">Selected products</option><option value="current">This product only</option></select><button type="button" id="ztGenerate" class="btn btn-primary btn-xs">AI Rewrite</button><button type="button" id="ztStop" class="btn btn-ghost btn-xs" hidden disabled>Stop</button></div>
+    <div class="zt-toolbar">
+      <div class="zt-fields">
+        <span class="zt-fields-lbl">Rewrite</span>
+        ${ZH_TEXT_FIELDS.map(f => `<label class="zt-field-chip"><input type="checkbox" id="ztField-${f}" checked><span>${f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description'}</span></label>`).join('')}
+      </div>
+      <div class="zt-actions">
+        <select id="ztScope" class="sel zt-scope-sel" aria-label="Generation scope">
+          <option value="checked">Selected products</option>
+          <option value="current">This product only</option>
+        </select>
+        <button type="button" id="ztGenerate" class="btn btn-primary btn-xs zt-gen-btn">
+          <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
+          AI Rewrite
+        </button>
+        <button type="button" id="ztStop" class="btn btn-ghost btn-xs zt-stop-btn" hidden disabled>
+          <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop
+        </button>
+      </div>
       <details class="zt-preferences"><summary>Instructions <span>Optional</span></summary><textarea id="ztPreferences" class="inp" rows="3" placeholder="Extra preferences for the selected fields…" aria-label="AI instructions"></textarea></details>
     </div>
-    <div class="zt-progress" id="ztProgress" role="status" aria-live="polite">Ready — AI drafts ko review karke Save karein.</div>
+    <div class="zt-progress" id="ztProgress" role="status" aria-live="polite">
+      <svg class="zt-progress-ico" viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Ready — Review AI drafts then click Save.
+    </div>
     <main id="ztEditor" class="zt-editor"></main>
-    <footer class="zt-footer"><span id="ztCount"></span><button type="button" id="ztSaveOne" class="btn btn-secondary btn-xs">Save current</button><button type="button" id="ztSaveAll" class="btn btn-primary btn-xs">Save selected</button></footer>
+    <footer class="zt-footer">
+      <span id="ztCount" class="zt-count"></span>
+      <div class="zt-footer-btns">
+        <button type="button" id="ztSaveOne" class="zt-save-one-btn">
+          <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Current
+        </button>
+        <button type="button" id="ztSaveAll" class="zt-save-all-btn">
+          <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Selected
+        </button>
+      </div>
+    </footer>
   </section>`;
   document.body.appendChild(modal);
   $('ztClose').addEventListener('click', zhTextClose);
   $('ztGenerate').addEventListener('click', () => zhTextRun($('ztScope').value === 'current'));
   $('ztProduct').addEventListener('change', e => { ZhTextStudio.page = Number(e.target.value); zhTextRender(); });
-  $('ztStop').addEventListener('click', () => { ZhTextStudio.stop = true; $('ztProgress').textContent = 'Stopping — current AI request finish hone dein…'; });
+  $('ztStop').addEventListener('click', () => { ZhTextStudio.stop = true; $('ztProgress').innerHTML = '<svg class="zt-progress-ico" viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><line x1="8" y1="8" x2="16" y2="16"/></svg> Stopping — waiting for current AI request to finish…'; });
   $('ztSaveOne').addEventListener('click', () => zhTextSave(true));
   $('ztSaveAll').addEventListener('click', () => zhTextSave(false));
   $('ztPrev').addEventListener('click', () => zhTextGo(-1));
