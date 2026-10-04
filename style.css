@@ -4628,3 +4628,33 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .temu-hist-acts { margin-left: auto; gap: 6px; }.temu-hist-csv-btn { background: var(--surface-3); color: var(--ink); border-color: var(--line-2); }.temu-hist-csv-btn:hover { background: var(--hover); color: var(--accent-ink); border-color: var(--accent-line); }.temu-hist-del-btn { background: var(--surface-3); color: var(--ink-2); border-color: var(--line-2); }.temu-hist-del-btn:hover { background: var(--bad-soft); color: var(--bad); border-color: var(--bad-line); }
 .temu-hist-foot { gap: 9px; flex-wrap: wrap; }.temu-history-manage { font-size: 10.5px; color: var(--ink-2); margin-left: auto; }.temu-history-manage summary { cursor: pointer; }.temu-history-manage[open] .btn { margin-top: 8px; }
 @media (max-width: 400px) { .temu-settings-summary { padding: 11px 12px; }.temu-setting-content { padding: 11px 12px; }.temu-settings-summary .temu-card-subtitle { font-size: 10px; }.temu-hist-info-col { flex-basis: 100%; }.temu-hist-store-sel { width: 100%; }.temu-hist-filters { width: 100%; }.temu-hist-fbtn { flex: 1; justify-content: center; padding: 5px 7px; }.temu-prog-target-wrap { margin-left: 0; }.temu-settings-summary .temu-badge-soft { font-size: 9px; max-width: 85px; } }
+
+/* v9.12.13 History: consistent toolbar, record actions and footer. */
+[data-tpane="history"] .temu-hist-filter-row { display: grid; grid-template-columns: minmax(0,1fr); gap: 9px; margin: 12px 0 16px; }
+[data-tpane="history"] .temu-hist-filter-row > .temu-hist-store-pill { border: 0; padding: 0; background: transparent; border-radius: 0; }
+.temu-hist-filter-row .temu-hist-store-sel { width: 100%; height: 32px; padding: 0 10px; border-radius: var(--r); font-weight: 500; }
+[data-tpane="history"] .temu-hist-filters { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 3px; padding: 3px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface-2); }
+[data-tpane="history"] .temu-hist-fbtn { justify-content: center; height: 29px; min-width: 0; padding: 0 5px; gap: 5px; border-radius: 5px; border-color: transparent; background: transparent; box-shadow: none; font-size: 10.5px; }
+[data-tpane="history"] .temu-hist-fbtn:hover { background: var(--hover); color: var(--ink); }
+[data-tpane="history"] .temu-hist-fbtn.active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); box-shadow: none; }
+[data-tpane="history"] .temu-hist-fbtn.active :is(.temu-dot-ok,.temu-dot-bad,.temu-dot-file) { background: var(--accent-ink); }
+[data-tpane="history"] .temu-hist { padding: 12px; }
+[data-tpane="history"] .temu-hist-card-inner { display: flex; flex-direction: column; align-items: stretch; gap: 11px; }
+[data-tpane="history"] .temu-hist-info-col { flex: auto; gap: 9px; }
+[data-tpane="history"] .temu-hist-header-line { gap: 7px; }
+[data-tpane="history"] :is(.temu-hist-store-pill,.temu-hist-badge) { border-radius: 5px; padding: 3px 7px; line-height: 1.3; }
+[data-tpane="history"] .temu-hist-details summary { color: var(--ink-2); padding: 3px 0; }
+[data-tpane="history"] .temu-hist-acts { width: 100%; margin: 0; padding-top: 10px; border-top: 1px solid var(--line-2); justify-content: flex-end; gap: 7px; }
+[data-tpane="history"] .temu-hist-acts .btn { height: 30px; min-height: 30px; min-width: 65px; padding: 0 10px !important; border-radius: var(--r); font-size: 10.5px !important; justify-content: center; background: var(--surface-3) !important; color: var(--ink-2) !important; border-color: var(--line-2) !important; box-shadow: none; }
+[data-tpane="history"] .temu-hist-acts .btn:hover { background: var(--hover) !important; color: var(--accent-ink) !important; border-color: var(--accent-line) !important; }
+[data-tpane="history"] .temu-hist-acts .temu-hist-del-btn:hover { color: var(--bad) !important; background: var(--bad-soft) !important; border-color: var(--bad-line) !important; }
+[data-tpane="history"] .temu-hist-foot { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 8px; margin-top: 16px; padding-top: 12px; }
+[data-tpane="history"] .temu-hist-foot > .btn, [data-tpane="history"] .temu-history-manage > summary { display: flex; justify-content: center; align-items: center; gap: 6px; width: 100%; height: 32px; min-height: 32px; padding: 0 7px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface-3); color: var(--ink-2); font-size: 10.5px; font-weight: 600; cursor: pointer; box-sizing: border-box; }
+[data-tpane="history"] .temu-history-manage { margin: 0; min-width: 0; }
+[data-tpane="history"] .temu-history-manage > summary { list-style: none; }
+[data-tpane="history"] .temu-history-manage > summary::-webkit-details-marker { display: none; }
+[data-tpane="history"] .temu-history-manage > summary::after { content: '\203A'; font-size: 16px; color: var(--ink-3); }
+[data-tpane="history"] .temu-history-manage[open] > summary::after { transform: rotate(90deg); }
+[data-tpane="history"] .temu-hist-foot > .btn:hover, [data-tpane="history"] .temu-history-manage > summary:hover { border-color: var(--accent-line); color: var(--accent-ink); background: var(--hover); }
+[data-tpane="history"] .temu-history-manage[open] > .btn { width: 100%; min-height: 30px; }
+[data-tpane="history"] :is(.temu-hist-fbtn,.temu-hist-store-sel,.temu-hist-acts .btn,.temu-hist-foot > .btn,.temu-history-manage > summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
