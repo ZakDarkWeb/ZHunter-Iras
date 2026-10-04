@@ -4593,7 +4593,7 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -12324,7 +12324,7 @@ async function temuRenderHistory() {
 
     let chipsHtml = '';
     if (h.uploadId) {
-      chipsHtml += `<span class="temu-hist-chip" title="Upload ID">🆔 ${esc(h.uploadId)}</span>`;
+      chipsHtml += `<span class="temu-hist-chip" title="Upload ID">ID ${esc(h.uploadId)}</span>`;
     }
     if (h.added != null) {
       chipsHtml += `<span class="temu-hist-chip temu-chip-ok">+${h.added} added</span>`;
@@ -12346,11 +12346,11 @@ async function temuRenderHistory() {
         <div class="temu-hist-info-col">
           <div class="temu-hist-header-line">
             ${statusBadge}
-            <span class="temu-hist-store-pill">🏪 ${esc(h.store || 'Default')}</span>
+            <span class="temu-hist-store-pill">${esc(h.store || 'Default')}</span>
             <span class="temu-hist-date">${esc(when)}</span>
-            <span class="temu-hist-qty-badge">📦 ${h.n} items</span>
+            <span class="temu-hist-qty-badge">${h.n} items</span>
           </div>
-          ${chipsHtml ? `<div class="temu-hist-chips-line">${chipsHtml}</div>` : ''}
+          ${chipsHtml ? `<details class="temu-hist-details"><summary>Upload details</summary><div class="temu-hist-chips-line">${chipsHtml}</div></details>` : ''}
         </div>
         <div class="temu-hist-acts">
           <button class="btn btn-ghost btn-xs temu-hist-csv-btn" type="button" data-act="csv" title="Download record CSV">CSV</button>

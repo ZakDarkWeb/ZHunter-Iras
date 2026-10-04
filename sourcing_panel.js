@@ -4,6 +4,8 @@
   if (!label) return;
   async function refresh() {
     const status = await msg({ action: 'SOURCING_STATUS' });
+    const summary = $('zhSourcingSummaryStatus');
+    if (summary) summary.textContent = status?.success ? (status.connected ? 'Connected' : 'Setup required') : 'Connection';
     label.textContent = status?.success ? `${status.connected ? 'Connected' : 'Setup required'} · ${status.pending} uploads pending${status.error ? ' · ' + status.error : ''}` : 'Connection status unavailable';
   }
   async function run(button, work) {
