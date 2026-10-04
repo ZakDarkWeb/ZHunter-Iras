@@ -13172,7 +13172,7 @@ function temuUpdateReviewCount(rows) {
   countEl.textContent = `${included} / ${rows.length}`;
   const bulkBtn = $('temuAiBulkRewriteBtn');
   if (bulkBtn && !bulkBtn.disabled) {
-    bulkBtn.textContent = `Rewrite titles (${included})`;
+    bulkBtn.textContent = `AI Title Rewrite (${included})`;
   }
   temuUpdateImgEditCount(rows);
 }
@@ -13716,16 +13716,14 @@ async function rewriteValidatedTemuTitle(r, currentTitle, instruction, useDefaul
   throw lastErr || new Error('Title rewrite complete nahi hua');
 }
 
-// Structured title preferences; a single rewrite action, no accumulating prompt chips.
+// Rewrite follows the shared user title rules. Focused actions never become sticky presets.
 function temuTitlePreferences() {
-  const style = $('temuTitleStyle')?.value || 'standard';
-  const parts = [];
-  if (style === 'seo') parts.push('Use relevant search keywords naturally; keep the recommended title structure.');
-  if (style === 'short') parts.push('Short and clear title, maximum 60 characters.');
-  if ($('temuTitleNoBrand')?.checked) parts.push('Remove brand names; use a generic product title.');
-  if ($('temuTitleAudience')?.checked) parts.push('Include only explicitly sourced intended use or target audience.');
-  if ($('temuAiPromptInp')?.value?.trim()) parts.push($('temuAiPromptInp').value.trim());
-  return parts.join(' ');
+  return $('temuAiPromptInp')?.value?.trim() || '';
+}
+function temuTitleActionInstruction(action) {
+  if (action === 'shorten') return 'Focused edit: shorten the CURRENT TITLE to maximum 60 characters. Preserve its product identity and most important provided specifications. Do not add keywords, benefits, audience or features. Return only the shortened title.';
+  if (action === 'removeBrand') return 'Focused edit: remove only brand names from the CURRENT TITLE. Preserve all remaining wording, order, quantities and specifications. If there is no brand name, return the current title unchanged. Do not shorten, expand or restructure the title. Return only the edited title.';
+  return getTemuOptimizerInstruction(temuTitlePreferences());
 }
 function temuTitleMaxLength(instruction = '') {
   const match = String(instruction).match(/(?:max(?:imum)?|up to|under|at most)\s*(\d{2,3})\s*(?:characters?|chars?)/i);
@@ -13738,41 +13736,27 @@ function temuLimitTitle(title, max = 180) {
 }
 (function initTemuTitleOptions() {
   const inp = $('temuAiPromptInp');
-  const save = () => chrome.storage.local.set({
-    zhunterTitleOptimizerInstruction: inp?.value || '',
-    zhunterTitleOptimizerOptions: { style: $('temuTitleStyle')?.value || 'standard', noBrand: !!$('temuTitleNoBrand')?.checked, audience: !!$('temuTitleAudience')?.checked }
+  const save = () => chrome.storage.local.set({ zhunterTitleOptimizerInstruction: inp?.value || '' }).catch(() => {});
+  chrome.storage.local.get(['zhunterTitleOptimizerInstruction']).then(saved => {
+    if (!inp || inp.value.trim()) return;
+    inp.value = saved.zhunterTitleOptimizerInstruction || '';
+    const legacy = ['Brand name hata do, generic Temu style title','Short aur clear title, max 60 characters','SEO keywords add karo, brand + product type + size shuru mein','Target audience aur use case add karo'];
+    for (const phrase of legacy) inp.value = inp.value.split(phrase).join('');
+    inp.value = inp.value.replace(/^[\s;]+|[\s;]+$/g, '').replace(/;\s*;/g, ';');
+    save();
   }).catch(() => {});
-  chrome.storage.local.get(['zhunterTitleOptimizerInstruction', 'zhunterTitleOptimizerOptions']).then(saved => {
-    if (inp && !inp.value.trim()) inp.value = saved.zhunterTitleOptimizerInstruction || '';
-    const options = saved.zhunterTitleOptimizerOptions;
-    if (options) {
-      if (['standard','seo','short'].includes(options.style)) $('temuTitleStyle').value = options.style;
-      $('temuTitleNoBrand').checked = !!options.noBrand;
-      $('temuTitleAudience').checked = !!options.audience;
-    } else if (inp) {
-      const presets = [
-        ['Brand name hata do, generic Temu style title', () => $('temuTitleNoBrand').checked = true],
-        ['Short aur clear title, max 60 characters', () => $('temuTitleStyle').value = 'short'],
-        ['SEO keywords add karo, brand + product type + size shuru mein', () => { if ($('temuTitleStyle').value !== 'short') $('temuTitleStyle').value = 'seo'; }],
-        ['Target audience aur use case add karo', () => $('temuTitleAudience').checked = true]
-      ];
-      for (const [phrase, apply] of presets) if (inp.value.includes(phrase)) { apply(); inp.value = inp.value.split(phrase).join(''); }
-      inp.value = inp.value.replace(/^[\s;]+|[\s;]+$/g, '').replace(/;\s*;/g, ';');
-      save();
-    }
-  }).catch(() => {});
-  for (const id of ['temuTitleStyle','temuTitleNoBrand','temuTitleAudience']) $(id)?.addEventListener('change', save);
   inp?.addEventListener('input', save);
   inp?.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); temuAiBulkRewrite(); } });
 })();
 
 // Bulk AI Rewrite for checked products only
 let TemuRewriteBusy = false;
-async function temuAiBulkRewrite() {
+async function temuAiBulkRewrite(action = 'rewrite') {
   const bulkBtn = $('temuAiBulkRewriteBtn');
   if (!bulkBtn || bulkBtn.disabled || TemuRewriteBusy) return;
   TemuRewriteBusy = true;           // v9.12.3 — set before any await (double-click / double-listener safe)
   bulkBtn.disabled = true;
+  for (const id of ['temuTitleShortenBtn','temuTitleRemoveBrandBtn']) if ($(id)) $(id).disabled = true;
   let rows = [];
   const changes = [], failures = [];
   let sameCount = 0;
@@ -13785,7 +13769,7 @@ async function temuAiBulkRewrite() {
       return;
     }
     const userPrompt = temuTitlePreferences();
-    const instruction = getTemuOptimizerInstruction(userPrompt);
+    const instruction = temuTitleActionInstruction(action);
 
     for (let i = 0; i < targetRows.length; i++) {
       const r = targetRows[i];
@@ -13793,7 +13777,7 @@ async function temuAiBulkRewrite() {
       const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
       const oldTitle = card?.querySelector('.temu-rv-title-inp')?.value || r.title || '';
       try {
-        const cleaned = await rewriteValidatedTemuTitle(r, oldTitle, instruction, !userPrompt);
+        const cleaned = await rewriteValidatedTemuTitle(r, oldTitle, instruction, action === 'rewrite' && !userPrompt);
         if (!cleaned) throw new Error('AI ne title nahi diya');
         const same = temuNormTitle(cleaned) === temuNormTitle(oldTitle);
         if (same) sameCount++;
@@ -13849,6 +13833,7 @@ async function temuAiBulkRewrite() {
   } finally {
     TemuRewriteBusy = false;
     bulkBtn.disabled = false;
+    for (const id of ['temuTitleShortenBtn','temuTitleRemoveBrandBtn']) if ($(id)) $(id).disabled = false;
     temuUpdateReviewCount(rows);
   }
 }
@@ -13998,7 +13983,9 @@ function temuInitReviewToggle() {
   });
   // Bulk AI Rewrite Button
   const bulkBtn = $('temuAiBulkRewriteBtn');
-  bulkBtn?.addEventListener('click', temuAiBulkRewrite);
+  bulkBtn?.addEventListener('click', () => temuAiBulkRewrite('rewrite'));
+  $('temuTitleShortenBtn')?.addEventListener('click', () => temuAiBulkRewrite('shorten'));
+  $('temuTitleRemoveBrandBtn')?.addEventListener('click', () => temuAiBulkRewrite('removeBrand'));
 
   // Bulk AI Image Studio
   const imgPromptInp = $('temuAiImgPromptInp');

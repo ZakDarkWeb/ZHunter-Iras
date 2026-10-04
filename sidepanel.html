@@ -970,13 +970,14 @@
                 <button id="temuContentStudioBtn" class="btn btn-secondary btn-xs" type="button" title="Bulk edit titles, bullet points and descriptions with preview and save">Open studio</button>
               </div>
               <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
-                <div class="temu-title-options">
-                  <label class="temu-title-style">Title style<select id="temuTitleStyle" class="sel"><option value="standard">Standard · descriptive</option><option value="seo">Search-friendly</option><option value="short">Short · up to 60 characters</option></select></label>
-                  <label class="temu-title-check"><input id="temuTitleNoBrand" type="checkbox">Remove brand name</label>
-                  <label class="temu-title-check"><input id="temuTitleAudience" type="checkbox">Include intended use</label>
+                <p class="temu-title-help">Rewrite with your Temu title format, or make a focused edit.</p>
+                <button id="temuAiBulkRewriteBtn" class="btn btn-primary temu-title-main" type="button" title="Apply your provided Temu title format to checked products">AI Title Rewrite</button>
+                <div class="temu-title-tools">
+                  <button id="temuTitleShortenBtn" class="btn btn-secondary" type="button" title="Shorten checked titles to 60 characters">Shorten Title <span>60 max</span></button>
+                  <button id="temuTitleRemoveBrandBtn" class="btn btn-secondary" type="button" title="Remove brand names from checked titles while preserving other wording">Remove Brand</button>
                 </div>
-                <details class="temu-title-advanced"><summary>Custom instructions <span>Optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="Extra preferences for titles…" aria-label="Custom title instructions"></textarea></details>
-                <div class="temu-title-run"><small>Updates checked products only</small><button id="temuAiBulkRewriteBtn" class="btn btn-primary btn-xs temu-ai-bulk-btn" type="button" title="Rewrite checked product titles with the selected options">Rewrite titles</button></div>
+                <details class="temu-title-advanced"><summary>Custom instructions <span>Optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="Extra preferences for AI Title Rewrite?" aria-label="Custom title instructions"></textarea></details>
+                <small class="temu-title-help">Applies to checked products only</small>
               </div>
             </div>
 

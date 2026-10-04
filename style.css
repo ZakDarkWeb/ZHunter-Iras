@@ -4087,7 +4087,7 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .temu-title-run .temu-ai-bulk-btn { padding: 8px 12px !important; border-radius: 8px !important; box-shadow: none !important; background: var(--accent) !important; color: var(--accent-fg) !important; }
 #zhTextStudioModal { z-index: 2600; padding: 10px; }
 .zt-modal { width: min(860px, 100%); height: min(820px, calc(100dvh - 20px)); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow-pop); }
-.zt-modal .btn { font-size: 11.5px; min-height: 32px; border-radius: 8px; padding: 6px 11px; box-shadow: none; }
+.zt-modal .btn { font-size: 11.5px; padding: 0 11px; }
 .zt-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 17px 18px; border-bottom: 1px solid var(--line-2); }
 .zt-head h2 { font-size: 18px; font-weight: 700; }.zt-head p { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
 .zt-head .modal-close { width: 30px; height: 30px; background: var(--surface-2); border-radius: 8px; }
@@ -4103,7 +4103,7 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .zt-queue-row button { min-width: 0; flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 8px; text-align: left; }.zt-queue-row b { font-size: 11px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.zt-queue-row small { color: var(--ink-3); font-size: 10px; flex-shrink: 0; }
 .zt-toolbar { padding: 12px 17px 8px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); background: var(--surface-2); }
 .zt-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 11px; }.zt-fields > span { color: var(--ink-3); font-size: 10px; margin-right: 2px; }.zt-fields label { display: flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; }
-.zt-actions { display: flex; gap: 8px; align-items: center; }.zt-actions select { min-width: 0; flex: 1; height: 33px; border-radius: 8px; font-size: 11px; background: var(--input); }.zt-actions .btn-primary { flex-shrink: 0; background: var(--accent); color: var(--accent-fg); }
+.zt-actions { display: flex; gap: 8px; align-items: center; }.zt-actions select { min-width: 0; flex: 1; height: 33px; border-radius: 8px; font-size: 11px; background: var(--input); }.zt-actions .btn-primary { flex-shrink: 0; }
 .zt-actions [hidden] { display: none !important; }
 .zt-preferences { margin-top: 10px; color: var(--ink-3); font-size: 10px; }.zt-preferences summary { cursor: pointer; padding: 3px 0; }.zt-preferences summary span { float: right; }.zt-preferences textarea { width: 100%; min-height: 72px; margin: 8px 0 5px; line-height: 1.5; resize: vertical; }
 .zt-progress { flex-shrink: 0; padding: 10px 17px; font-size: 10.5px; color: var(--ink-3); border-bottom: 1px solid var(--line-2); overflow-wrap: anywhere; }
@@ -4115,7 +4115,7 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .zt-original { color: var(--ink-3); font-size: 10px; margin-top: 7px; }.zt-original summary { cursor: pointer; }.zt-original pre { font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; padding: 9px; margin-top: 7px; background: var(--surface-2); border-radius: 7px; }
 .zt-fold { border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; background: var(--surface-2); }.zt-fold > summary { display: flex; align-items: center; gap: 9px; padding: 13px; cursor: pointer; list-style: none; }.zt-fold > summary b { flex: 1; font-size: 12px; font-weight: 600; }.zt-fold > summary span { color: var(--ink-3); font-size: 10px; }.zt-fold > summary::after { content: '\203A'; font-size: 19px; color: var(--ink-3); line-height: 1; transition: transform .15s; }.zt-fold[open] > summary::after { transform: rotate(90deg); }.zt-fold[open] > summary { border-bottom: 1px solid var(--line-2); }.zt-fold .zt-field-content { padding: 12px; background: var(--surface); }
 .zt-error { color: var(--bad); background: var(--bad-soft); padding: 10px; border-radius: 8px; font-size: 11px; margin-bottom: 12px; overflow-wrap: anywhere; }
-.zt-footer { display: flex; align-items: center; gap: 8px; padding: 12px 17px; border-top: 1px solid var(--line-2); }.zt-footer span { flex: 1; font-size: 10px; color: var(--ink-3); }.zt-footer .btn-primary { background: var(--accent); color: var(--accent-fg); }
+.zt-footer { display: flex; align-items: center; gap: 8px; padding: 12px 17px; border-top: 1px solid var(--line-2); }.zt-footer span { flex: 1; font-size: 10px; color: var(--ink-3); }
 @media (max-width: 500px) { #zhTextStudioModal { padding: 6px; }.zt-modal { height: calc(100dvh - 12px); border-radius: 11px; }.zt-head { padding: 14px; }.zt-nav { padding: 11px 13px 8px; }.zt-selection { margin: 0 13px 8px; }.zt-toolbar { padding: 11px 13px 8px; }.zt-progress { padding: 9px 13px; }.zt-editor { padding: 14px 13px; }.zt-footer { padding: 11px 13px; }.zt-fields { gap: 8px; }.zt-modal .btn { font-size: 11px; padding: 6px 9px; }.zt-actions { gap: 6px; } }
 
 /* Content workspace polish ? retain the extension accent palette. */
@@ -4139,7 +4139,7 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .zt-fields { gap: 7px; }.zt-fields > span { text-transform: uppercase; letter-spacing: .8px; }
 .zt-fields label { border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 8px; background: var(--surface); }
 .zt-fields label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
-.zt-actions .btn-primary, .zt-footer .btn-primary { background: linear-gradient(110deg, var(--accent), #42e5f5); box-shadow: 0 3px 12px var(--accent-soft); font-weight: 750; }
+
 .zt-progress { background: var(--surface-2); color: var(--ink-2); border-left: 3px solid var(--accent); }
 .zt-product { padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; background: linear-gradient(125deg, var(--accent-soft), var(--surface-2) 70%); margin-bottom: 17px; }
 .zt-product img { width: 54px; height: 54px; border: 1px solid var(--line-2); }.zt-product small { display: inline-block; color: var(--accent); padding: 2px 7px; background: var(--accent-soft); border-radius: 5px; }
@@ -4154,3 +4154,17 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 @media (max-width: 360px) { .zt-fields label { padding: 5px; }.zt-brand-mark { width: 34px; height: 34px; }.zt-head h2 { font-size: 18px; }.temu-title-check { white-space: normal; } }
 
 .zt-fold[data-section="description"] > summary::before { content: "T"; font-size: 11px; font-weight: 700; }
+
+/* Use the existing extension button, panel and input theme for all copy tools. */
+.temu-title-help { display: block; color: var(--ink-2); font-size: 11px; line-height: 1.5; margin: 0 0 10px; }
+.temu-title-main { width: 100%; height: 36px; margin-bottom: 8px; }
+.temu-title-tools { display: flex; gap: 8px; margin-bottom: 12px; }.temu-title-tools .btn { flex: 1; min-width: 0; font-size: 11px; }
+.temu-title-tools span { font-size: 9px; color: var(--ink-2); font-weight: 500; }
+#temuReviewAiBar { background: var(--surface); }.zt-modal { background: var(--bg); border-radius: var(--r-lg); }
+.zt-head { background: var(--surface); }.zt-toolbar, .zt-footer, .zt-product { background: var(--surface-2); }
+.zt-editor { background: var(--bg); }.zt-fold { background: var(--surface); border-radius: var(--r); }
+.zt-head .modal-close { background: var(--surface-3); }.zt-product-picker select, .zt-actions select { background: var(--input); }
+.zt-modal .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: var(--accent-fg); border: 1px solid var(--accent); box-shadow: var(--glow); }
+.zt-modal .btn-primary:disabled { background: var(--surface-3); border-color: var(--line-2); color: var(--ink-3); box-shadow: none; }
+.zt-modal .btn-secondary, .zt-modal .btn-ghost { background: var(--surface-3); border-color: var(--line-2); color: var(--ink); }
+.zt-modal .btn-secondary:hover:not(:disabled), .zt-modal .btn-ghost:hover:not(:disabled) { background: var(--hover); border-color: var(--accent-line); color: var(--accent-ink); box-shadow: 0 0 12px var(--accent-glow); }
