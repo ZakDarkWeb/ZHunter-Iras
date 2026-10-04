@@ -1528,27 +1528,41 @@
 
         <!-- ═══════════ TAB: CATEGORIES ═══════════ -->
         <div class="temu-pane" data-tpane="categories">
-          <div class="temu-hint temu-hint-top">Set keywords per product type to auto-assign the correct Temu category, weight and attributes. Products that don't match any profile are auto-categorized by Temu.</div>
+          <!-- Compact Modern Header Banner -->
+          <div class="temu-cat-header-banner">
+            <svg class="temu-cat-banner-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <span>Set keywords per product type to auto-assign Temu categories, dimensions, and weights.</span>
+          </div>
 
-          <!-- Toolbar: Search + Add Category button -->
+          <!-- Modern Toolbar: Search + Quick Actions -->
           <div class="temu-cat-toolbar">
             <div class="temu-cat-search-wrap">
               <svg class="temu-cat-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <input id="temuCatSearch" type="text" class="inp" placeholder="Search category profiles..." />
+              <input id="temuCatSearch" type="text" class="inp temu-cat-search-inp" placeholder="Search profiles, keywords, IDs..." autocomplete="off" />
+              <button type="button" id="temuCatSearchClear" class="temu-cat-search-clear hidden" title="Clear search">✕</button>
             </div>
-            <button id="temuAddCategoryTopBtn" class="btn btn-primary temu-btn-add-cat" type="button">+ Add Category</button>
+            <div class="temu-cat-toolbar-actions">
+              <button id="temuPickCatalogTopBtn" class="btn btn-ghost temu-cat-secondary-btn" type="button" title="Pick from built-in 50+ catalog">
+                <svg class="i" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span>Catalog</span>
+              </button>
+              <button id="temuAddCategoryTopBtn" class="btn btn-primary temu-btn-add-cat" type="button">
+                <svg class="i" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>New Category</span>
+              </button>
+            </div>
           </div>
 
-          <!-- Department filter pills -->
+          <!-- Modern Department Filter Tabs -->
           <div class="temu-cat-dept-bar" id="temuCatDeptBar">
-            <button type="button" class="temu-cat-dept-btn active" data-dept="all">All (<span id="temuCatCountAll">172</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Grocery">Grocery (<span id="temuCatCountGrocery">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Home & Kitchen">Home & Kitchen (<span id="temuCatCountHome">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Toys">Toys & Games (<span id="temuCatCountToys">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Sports">Sports (<span id="temuCatCountSports">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Health">Health & Household (<span id="temuCatCountHealth">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="Electronics">Electronics (<span id="temuCatCountElec">0</span>)</button>
-            <button type="button" class="temu-cat-dept-btn" data-dept="other">Other (<span id="temuCatCountOther">0</span>)</button>
+            <button type="button" class="temu-cat-dept-btn active" data-dept="all"><span>All</span><span class="temu-cat-dept-count" id="temuCatCountAll">172</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Grocery"><span>Grocery</span><span class="temu-cat-dept-count" id="temuCatCountGrocery">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Home & Kitchen"><span>Home & Kitchen</span><span class="temu-cat-dept-count" id="temuCatCountHome">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Toys"><span>Toys & Games</span><span class="temu-cat-dept-count" id="temuCatCountToys">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Sports"><span>Sports</span><span class="temu-cat-dept-count" id="temuCatCountSports">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Health"><span>Health</span><span class="temu-cat-dept-count" id="temuCatCountHealth">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="Electronics"><span>Electronics</span><span class="temu-cat-dept-count" id="temuCatCountElec">0</span></button>
+            <button type="button" class="temu-cat-dept-btn" data-dept="other"><span>Other</span><span class="temu-cat-dept-count" id="temuCatCountOther">0</span></button>
           </div>
 
           <!-- Profiles list with Collapsible Items -->

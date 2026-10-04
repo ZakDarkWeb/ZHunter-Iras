@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Categories theme:** Shared surface/accent tokens replace fixed dark, purple and neon chip colours; category cards, filters, buttons and edit inputs match dark/light extension themes and fit narrow panels.
 - **Google sourcing records:** Durable upload snapshots include exact exported titles, original supplier links/prices and list price, including failed Temu items. Per-store tabs, authenticated Apps Script connection, offline retry and duplicate prevention; one-time deployment required. Destination is the approved sourcing workbook. Same version, no ZIP.
 - **Compact Studio editor:** Smaller title box and panels, aligned footer, clearer AI Rewrite label, and current-title Rewrite/Shorten/Remove Brand toolbar; previews still require Save.
 - **Title actions restored:** AI Title Rewrite uses the shared user format; separate Shorten Title (60 max) and Remove Brand actions edit checked products without sticky presets. Content Studio uses existing extension background/button theme.

@@ -4593,10 +4593,7 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = [
-  "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",
-  "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"
-]; // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -12679,6 +12676,8 @@ function temuRenderProfiles() {
   });
 
   const search = ($('temuCatSearch')?.value || '').trim().toLowerCase();
+  const searchClearBtn = $('temuCatSearchClear');
+  if (searchClearBtn) searchClearBtn.classList.toggle('hidden', !search);
   
   const filtered = entries.filter(([name, p]) => {
     if (TemuCatActiveDept !== 'all') {
@@ -12741,7 +12740,7 @@ function temuRenderProfiles() {
   pageItems.forEach(([name, p]) => {
     const isExpanded = TemuExpandedProfiles.has(name);
     const item = document.createElement('div');
-    item.className = 'temu-cat-item' + (isExpanded ? '' : ' collapsed');
+    item.className = 'temu-cat-item' + (isExpanded ? ' expanded' : ' collapsed');
     
     const displayName = p.name || name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const catBadge = p.category_keyword || 'Auto Category';
@@ -12753,45 +12752,52 @@ function temuRenderProfiles() {
     let chipsHtml = '';
     (p.match || []).forEach(kw => {
       const cleanKw = String(kw).split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-      chipsHtml += `<span class="temu-chip temu-chip-kw"><span class="temu-chip-ico">🔑</span> ${esc(cleanKw)}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-kw" title="Keyword match"><svg class="i" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"></circle><path d="M21 3l-9.5 9.5"></path><path d="M15.5 7.5L18 10"></path></svg><span>${esc(cleanKw)}</span></span>`;
     });
     (p.exclude || []).forEach(ex => {
       const cleanEx = String(ex).split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-      chipsHtml += `<span class="temu-chip temu-chip-ex"><span class="temu-chip-ico">⛔</span> ${esc(cleanEx)}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-ex" title="Exclude word"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg><span>${esc(cleanEx)}</span></span>`;
     });
     if (p.keyword_attributes) {
-      chipsHtml += `<span class="temu-chip temu-chip-attr"><span class="temu-chip-ico">⚙️</span> ${esc(p.keyword_attributes)}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-attr" title="Attributes"><svg class="i" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg><span>${esc(p.keyword_attributes)}</span></span>`;
     }
     if (p.price_multiplier) {
-      chipsHtml += `<span class="temu-chip temu-chip-px"><span class="temu-chip-ico">💲</span> ×${esc(p.price_multiplier)}${p.price_min ? ' · min $' + esc(p.price_min) : ''}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-px" title="Price multiplier"><svg class="i" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg><span>×${esc(p.price_multiplier)}${p.price_min ? ' · min $' + esc(p.price_min) : ''}</span></span>`;
     }
     if (wt) {
-      chipsHtml += `<span class="temu-chip temu-chip-dim"><span class="temu-chip-ico">⚖️</span> ${esc(wt)}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-dim" title="Weight"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18"></path><path d="M6 8l-3 7h6l-3-7"></path><path d="M18 8l-3 7h6l-3-7"></path><path d="M3 8h18"></path></svg><span>${esc(wt)}</span></span>`;
     }
     if (dims) {
-      chipsHtml += `<span class="temu-chip temu-chip-dim"><span class="temu-chip-ico">📐</span> ${esc(dims)}</span>`;
+      chipsHtml += `<span class="temu-chip temu-chip-dim" title="Dimensions"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="9" y2="3"></line></svg><span>${esc(dims)}</span></span>`;
     }
 
     const showDiffBadge = catBadge && catBadge.toLowerCase() !== displayName.toLowerCase();
-    const idBadge = p.id ? `<span class="temu-cat-badge" title="Temu Category ID"><span class="temu-cat-badge-ico">🆔</span> ${esc(p.id)}</span>` : '';
-    const diffBadge = showDiffBadge ? `<span class="temu-cat-badge"><span class="temu-cat-badge-ico">🏷️</span> ${esc(catBadge)}</span>` : '';
+    const idBadge = p.id ? `<span class="temu-cat-id-badge" title="Temu Category ID"><span class="temu-cat-id-lbl">ID</span><span class="temu-cat-id-num">${esc(p.id)}</span></span>` : '';
+    const diffBadge = showDiffBadge ? `<span class="temu-cat-diff-badge" title="Category Keyword"><svg class="i" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><span>${esc(catBadge)}</span></span>` : '';
 
     item.innerHTML = `
       <div class="temu-cat-head">
         <div class="temu-cat-head-left">
-          <span class="temu-cat-arrow">▼</span>
-          <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span class="temu-cat-arrow" aria-hidden="true">
+            <svg class="i" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
+          <div class="temu-cat-info">
+            <div class="temu-cat-top-line">
               <span class="temu-cat-title">${esc(displayName)}</span>
               ${idBadge}
               ${diffBadge}
             </div>
-            ${breadcrumb ? `<span style="font-size:10.5px;color:var(--ink-3);letter-spacing:0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📂 ${esc(breadcrumb)}</span>` : ''}
+            ${breadcrumb ? `<div class="temu-cat-breadcrumb" title="${esc(breadcrumb)}"><svg class="i temu-cat-folder-ico" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>${esc(breadcrumb)}</span></div>` : ''}
           </div>
         </div>
         <div class="temu-cat-actions">
-          <button class="temu-cat-btn" data-edit="${esc(name)}" type="button">Edit</button>
-          <button class="temu-cat-btn temu-cat-btn-del" data-del="${esc(name)}" type="button">Delete</button>
+          <button class="temu-cat-action-btn temu-cat-action-edit" data-edit="${esc(name)}" type="button" title="Edit category profile">
+            <svg class="i" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            <span>Edit</span>
+          </button>
+          <button class="temu-cat-action-btn temu-cat-action-del" data-del="${esc(name)}" type="button" title="Delete category profile">
+            <svg class="i" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
         </div>
       </div>
       <div class="temu-cat-body">
@@ -12808,6 +12814,7 @@ function temuRenderProfiles() {
         TemuExpandedProfiles.add(name);
         item.classList.remove('collapsed');
       }
+      item.classList.toggle('expanded', TemuExpandedProfiles.has(name));
     });
 
     item.querySelector('[data-edit]').addEventListener('click', (e) => {
@@ -14943,8 +14950,17 @@ function initTemuExport() {
         }
       }
     }
+    if (e.target.closest('#temuPickCatalogTopBtn') || e.target.closest('#temuPickCatalogBtn')) temuOpenCatalogModal();
+    if (e.target.closest('#temuCatSearchClear')) {
+      const inp = $('temuCatSearch');
+      if (inp) {
+        inp.value = '';
+        TemuCatPage = 1;
+        temuRenderProfiles();
+        inp.focus();
+      }
+    }
     if (e.target.closest('#temuFetchFromTabBtn')) temuFetchFromTemuTab();
-    if (e.target.closest('#temuPickCatalogBtn')) temuOpenCatalogModal();
     if (e.target.closest('#temuCatalogClose')) $('temuCatalogModal')?.classList.add('hidden');
     if (e.target.closest('#temuCatalogImportAllBtn')) temuImportAllCatalog();
     if (e.target.closest('#temuImportTplCatBtn')) $('temuCatTplFile')?.click();
