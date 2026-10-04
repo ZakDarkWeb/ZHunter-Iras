@@ -4366,15 +4366,17 @@ function initSettingsPanel() {
 
       const patch = { [k]: val };
       if (!State.data.settings) State.data.settings = {};
-      State.data.settings[k] = val;
+      const previous = State.data.settings[k];
       try {
-        await msg({ action: 'UPDATE_SETTINGS', settings: patch });
+        const result = await msg({ action: 'UPDATE_SETTINGS', settings: patch });
+        if (!result?.success) throw new Error(result?.error || 'Setting save failed');
+        State.data.settings[k] = val;
         if (k === 'bulkSkipImageDownload') {
           toast(val ? 'Fast mode ON — skip image downloads' : 'Fast mode OFF — download images', 'ok');
         } else {
           toast('Setting saved', 'ok');
         }
-      } catch (_) {}
+      } catch (e) { State.data.settings[k] = previous; if (el.type === 'checkbox') el.checked = previous !== false; toast(e.message, 'err'); return; }
 
       if (k.startsWith('showTab')) {
         applyTabVisibility();
@@ -4560,49 +4562,12 @@ function initSettingsPanel() {
   });
 
   $('spBackupDataBtn')?.addEventListener('click', async () => {
-    try {
-      const d = await msg({ action: 'GET_DATA' });
-      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const dateStr = new Date().toISOString().split('T')[0];
-      a.href = url;
-      a.download = `zhunter_backup_${dateStr}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast('✓ Backup downloaded!', 'ok');
-    } catch (err) {
-      toast('Backup failed: ' + (err?.message || err), 'err');
-    }
+    try { const result = await msg({ action: 'BACKUP_EXPORT' }); if (!result?.success) throw new Error(result?.error || 'Backup failed'); zhSaveBlob(new Blob([JSON.stringify(result.backup, null, 2)], { type: 'application/json' }), 'zhunter_backup_' + new Date().toISOString().slice(0, 10) + '.json'); toast('Complete backup downloaded', 'ok'); } catch (e) { toast(e.message, 'err'); }
   });
-
-  $('spResetLibraryBtn')?.addEventListener('click', async () => {
-    if (!confirm('Are you sure you want to reset the Library? This deletes all hunted products and history.')) return;
-    try {
-      await msg({ action: 'CLEAR_HISTORY' });
-      const d = await msg({ action: 'GET_DATA' });
-      if (d?.links) {
-        for (const l of d.links) {
-          await msg({ action: 'REMOVE_LINK', id: l.id });
-        }
-      }
-      await refresh();
-      toast('✓ Library reset completed', 'ok');
-    } catch (err) {
-      toast('Reset failed: ' + (err?.message || err), 'err');
-    }
-  });
-
+  $('spResetLibraryBtn')?.addEventListener('click', resetMasterSheet);
   $('spWipeAllBtn')?.addEventListener('click', async () => {
-    if (!confirm('DANGER: Wipe all products, queue, and history? This cannot be undone.')) return;
-    try {
-      await chrome.storage.local.remove(['zakBulkQueue', 'zakBulkResults', 'temuUploadHistory', 'zakMasterProducts']);
-      await msg({ action: 'CLEAR_HISTORY' });
-      await refresh();
-      toast('✓ All data wiped successfully', 'ok');
-    } catch (err) {
-      toast('Wipe failed: ' + (err?.message || err), 'err');
-    }
+    if (!confirm('Delete all products, queue, history, edits and pending sourcing records? Store configuration and connection keys remain.')) return;
+    try { const result = await msg({ action: 'MASTER_RESET', wipe: true }); if (!result?.success) throw new Error(result?.error || 'Wipe failed'); MasterUIState.allRows = []; MasterUIState.selectedIds.clear(); BulkState.results = []; TemuLast = null; await updateMasterStats(); await loadBulkQueue(); await refresh(); toast('Data cleared', 'ok'); } catch (e) { toast(e.message, 'err'); }
   });
 
   syncSettingsUI();
@@ -4611,10 +4576,7 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = [
-  "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",
-  "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"
-]; // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = []; // Configure your private keys in Settings; never bundle credentials. // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -4712,6 +4674,7 @@ async function callGroqAPIRequest({ prompt, systemPrompt, temperature = 0.3, max
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentKey}`
         },
+        signal: AbortSignal.timeout(45000),
         body: JSON.stringify({
           model,
           messages: [
@@ -4719,7 +4682,7 @@ async function callGroqAPIRequest({ prompt, systemPrompt, temperature = 0.3, max
             { role: 'user', content: prompt }
           ],
           temperature,
-          max_tokens: Math.min(Number(max_tokens) || 150, 600)
+          max_tokens: Math.min(Number(max_tokens) || 150, 2200)
         })
       });
 
@@ -4760,6 +4723,7 @@ async function callGroqAPIRequest({ prompt, systemPrompt, temperature = 0.3, max
 
       const data = await response.json();
       _groqKeyCooldowns.delete(currentKey);
+      if (data.choices?.[0]?.finish_reason === 'length') throw new Error('AI response truncated; reduce requested fields or retry');
       return data.choices?.[0]?.message?.content || '';
     } catch (err) {
       if (err.rateLimit) throw err;
@@ -8143,16 +8107,24 @@ async function huntRetryAll() {
 }
 
 // ── Master Sheet storage ─────────────────────────────────────
+function zhCaptureSourceFacts(row) { return JSON.parse(JSON.stringify({ title: row.title, description: row.description, bullets: row.bullets, brand: row.brand, color: row.color, size: row.size, material: row.material, weight: row.weight, variants: row.variants, images: row.images })); }
+const ZhMasterBaselines = new WeakMap();
 async function getMasterRows() {
-  return new Promise(resolve => {
-    chrome.storage.local.get(MASTER_KEY, res => resolve(res[MASTER_KEY] || []));
-  });
+  const saved = await chrome.storage.local.get([MASTER_KEY, 'zhTextEdits']);
+  const rows = saved[MASTER_KEY] || [];
+  ZhMasterBaselines.set(rows, JSON.parse(JSON.stringify(rows)));
+  for (const row of rows) if (!row._sourceFacts) {
+    const journal = saved.zhTextEdits?.[row.url || row.id];
+    row._sourceFacts = JSON.parse(JSON.stringify({ title: journal?.fields?.title?.previous?.[0] ?? row.title, description: journal?.fields?.description?.previous?.[0] ?? row.description, bullets: journal?.fields?.bullets?.previous?.[0] ?? row.bullets, brand: row.brand, color: row.color, size: row.size, material: row.material, weight: row.weight, variants: row.variants, images: row.images }));
+  }
+  return rows;
 }
-
-async function setMasterRows(rows) {
-  return new Promise(resolve => {
-    chrome.storage.local.set({ [MASTER_KEY]: rows }, () => resolve());
-  });
+async function setMasterRows(rows, original = rows) {
+  const baseline = ZhMasterBaselines.get(original);
+  if (!baseline) throw new Error('Unsafe Library save blocked; reload Library and retry');
+  const result = await msg({ action: 'MASTER_COMMIT', baseline, rows });
+  if (!result?.success) throw new Error(result?.error || 'Library save failed');
+  ZhMasterBaselines.set(rows, JSON.parse(JSON.stringify(rows)));
 }
 
 async function getMasterBatches() {
@@ -8162,9 +8134,7 @@ async function getMasterBatches() {
 }
 
 async function setMasterBatches(batches) {
-  return new Promise(resolve => {
-    chrome.storage.local.set({ [BATCHES_KEY]: batches }, () => resolve());
-  });
+  await chrome.storage.local.set({ [BATCHES_KEY]: batches });
 }
 
 async function appendToMasterSheet(rows) {
@@ -8180,18 +8150,21 @@ async function appendToMasterSheet(rows) {
     const key = (r.url || '').toLowerCase();
     const ex = byUrl.get(key);
     if (!ex) { if (!seenNew.has(key)) { seenNew.add(key); newRows.push(r); } continue; }
+    ex.batchIds = [...new Set([...(ex.batchIds || []), ex.batchId, BulkState.currentBatchId].filter(Boolean))].slice(-50);
+    upgraded++;
     if (huntResultScore(r) > huntResultScore(ex)) {
       Object.assign(ex, {
-        title: r.title || ex.title,
+        title: ex.title,
         price: r.price || ex.price,
         platform: r.platform || ex.platform,
-        description: r.description || ex.description,
+        description: ex.description,
         variants: (r.variants || []).length ? r.variants.join(', ') : ex.variants,
         imageCount: Array.isArray(r.images) && r.images.length ? r.images.length : ex.imageCount,
-        images: Array.isArray(r.images) && r.images.length ? r.images.slice(0, 10) : ex.images,
+        images: ex.images,
         brand: r.brand || ex.brand, color: r.color || ex.color, weight: r.weight || ex.weight,
         dimL: r.dimL || ex.dimL, dimW: r.dimW || ex.dimW, dimH: r.dimH || ex.dimH,
-        bullets: Array.isArray(r.bullets) && r.bullets.length ? r.bullets.slice(0, 6) : ex.bullets,
+        bullets: ex.bullets,
+        _sourceFacts: zhCaptureSourceFacts(r),
         status: r.status,
         lastRehunted: new Date().toISOString()
       });
@@ -8201,12 +8174,14 @@ async function appendToMasterSheet(rows) {
 
   if (newRows.length === 0) {
     if (upgraded) await setMasterRows(existing);
+    await zhRecordHuntBatch(rows);
     return;
   }
 
   const lean = newRows.map(r => ({
     id:           `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     batchId:      BulkState.currentBatchId || null,
+    _sourceFacts: zhCaptureSourceFacts(r),
     title:        r.title,
     url:          r.url,
     platform:     r.platform,
@@ -8226,25 +8201,16 @@ async function appendToMasterSheet(rows) {
     scrapedAt:    r.scrapedAt,
     lastRehunted: ''
   }));
-  await setMasterRows([...existing, ...lean]);
+  await setMasterRows([...existing, ...lean], existing);
 
-  const batches = await getMasterBatches();
-  const batch = batches.find(b => b.id === BulkState.currentBatchId);
-  if (batch) {
-    batch.count += newRows.length;
-    batch.platforms = [...new Set([...batch.platforms, ...newRows.map(r => r.platform)])];
-  } else {
-    batches.unshift({
-      id:        BulkState.currentBatchId,
-      label:     BulkState.batchLabel || '',
-      date:      new Date().toISOString(),
-      count:     newRows.length,
-      platforms: [...new Set(newRows.map(r => r.platform))]
-    });
-  }
-  await setMasterBatches(batches.slice(0, 50));
+  await zhRecordHuntBatch(rows);
 }
 
+async function zhRecordHuntBatch(rows) {
+  if (!BulkState.currentBatchId) return;
+  const result = await msg({ action: 'MASTER_BATCH_ADD', batch: { id: BulkState.currentBatchId, label: BulkState.batchLabel || '', date: new Date().toISOString(), urls: rows.map(r => r.url), platforms: rows.map(r => r.platform).filter(Boolean) } });
+  if (!result?.success) throw new Error(result?.error || 'Hunt history save failed');
+}
 async function updateMasterStats() {
   const list = $('masterRowsList');
   if (list && (!MasterUIState.allRows || !MasterUIState.allRows.length)) {
@@ -8311,7 +8277,7 @@ async function toggleStarRow(id) {
 // Older Library rows omitted batchId. Recover only an unambiguous full batch.
 function masterRowsForBatch(rows, batch, batches) {
   if (!batch?.id) return [];
-  const direct = rows.filter(r => r.batchId === batch.id);
+  const direct = rows.filter(r => r.batchId === batch.id || r.batchIds?.includes(batch.id) || batch.urls?.includes(r.url));
   const startFor = b => {
     const match = /^(?:batch|queue)_(\d+)$/.exec(b.id || '');
     return match ? Number(match[1]) : NaN;
@@ -8320,7 +8286,7 @@ function masterRowsForBatch(rows, batch, batches) {
   if (!Number.isFinite(start)) return direct;
   const next = Math.min(...(batches || []).map(startFor).filter(t => t > start));
   const candidates = rows.filter(r => {
-    if (r.batchId) return r.batchId === batch.id;
+    if (r.batchId || r.batchIds || batch.urls) return direct.includes(r);
     const time = typeof r.scrapedAt === 'number' ? r.scrapedAt : Date.parse(r.scrapedAt);
     return Number.isFinite(time) && time >= start && time < next;
   });
@@ -8372,9 +8338,9 @@ function filterAndRenderMasterRows() {
   // Sort rows
   rows = [...rows];
   if (sort === 'newest') {
-    rows.sort((a, b) => (b.scrapedAt || 0) - (a.scrapedAt || 0));
+    rows.sort((a, b) => (Date.parse(b.scrapedAt) || Number(b.scrapedAt) || 0) - (Date.parse(a.scrapedAt) || Number(a.scrapedAt) || 0));
   } else if (sort === 'oldest') {
-    rows.sort((a, b) => (a.scrapedAt || 0) - (b.scrapedAt || 0));
+    rows.sort((a, b) => (Date.parse(a.scrapedAt) || Number(a.scrapedAt) || 0) - (Date.parse(b.scrapedAt) || Number(b.scrapedAt) || 0));
   } else if (sort === 'price-desc') {
     const parsePrice = p => parseFloat(String(p || '').replace(/[^0-9.]/g, '')) || 0;
     rows.sort((a, b) => parsePrice(b.price) - parsePrice(a.price));
@@ -8517,7 +8483,7 @@ function renderMasterRows(rows) {
       e.stopPropagation();
       const existing = await getMasterRows();
       const filtered = existing.filter(item => item.id !== r.id);
-      await setMasterRows(filtered);
+      await setMasterRows(filtered, existing);
       MasterUIState.selectedIds.delete(r.id);
       renderMasterRows(filtered);
       await updateMasterStats();
@@ -8688,7 +8654,7 @@ async function bulkDeleteMasterRows() {
     'Delete',
     async () => {
       const remaining = rows.filter(r => !ids.includes(r.id));
-      await setMasterRows(remaining);
+      await setMasterRows(remaining, rows);
       MasterUIState.selectedIds.clear();
       await updateMasterStats();
       toast(`Deleted ${ids.length} product${ids.length === 1 ? '' : 's'}`, 'ok');
@@ -8777,22 +8743,23 @@ async function reHuntMasterRow(rowId) {
     if (r.id !== rowId) return r;
     return {
       ...r,
-      title:        scraped.title || r.title,
+      title:        r.title,
       price:        scraped.price || r.price,
-      description:  scraped.description || r.description,
+      description:  r.description,
       variants:     Array.isArray(scraped.variants) ? scraped.variants.join(', ') : r.variants,
       imageCount:   Array.isArray(scraped.images) ? scraped.images.length : r.imageCount,
       videoCount:   Array.isArray(scraped.videos) ? scraped.videos.length : r.videoCount,
-      images:       Array.isArray(scraped.images) ? scraped.images.slice(0, 10) : r.images,
+      images:       r.images,
       brand: scraped.brand || r.brand || '', color: scraped.color || r.color || '', weight: scraped.weight || r.weight || '',
       dimL: scraped.dimL || r.dimL || '', dimW: scraped.dimW || r.dimW || '', dimH: scraped.dimH || r.dimH || '',
-      bullets:      Array.isArray(scraped.bullets) && scraped.bullets.length ? scraped.bullets : (r.bullets || []),
+      bullets:      r.bullets || [],
+      _sourceFacts: zhCaptureSourceFacts(scraped),
       videos:       Array.isArray(scraped.videos) ? scraped.videos.slice(0, 4) : r.videos,
       status:       'ok',
       lastRehunted: new Date().toISOString()
     };
   });
-  await setMasterRows(updatedRows);
+  await setMasterRows(updatedRows, rows);
   await updateMasterStats();
   toast('✓ Updated with latest data', 'ok');
 }
@@ -8892,7 +8859,7 @@ async function resetMasterSheet() {
     'Delete all master sheet data? This cannot be undone.',
     'Delete All',
     async () => {
-      await setMasterRows([]);
+      const reset = await msg({ action: 'MASTER_RESET' }); if (!reset?.success) throw new Error(reset?.error || 'Reset failed');
       await setMasterBatches([]);
       toast('Master sheet reset', 'ok');
       updateMasterStats();
@@ -9447,16 +9414,18 @@ async function parseImportFile(file) {
     const pick = (...keys) => { for (const k of keys) { const v = r[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim(); } return ''; };
     const url = pick('url', 'Link', 'link', 'URL', 'Product Link', 'Soursing link', 'Sourcing link');
     if (!/^https?:\/\//i.test(url)) return null;
-    const basePx = pick('Base Price', 'base', 'temuBase', 'BasePrice', 'price', 'Price');
+    const basePx = pick('Base Price', 'base', 'temuBase', 'BasePrice');
     return {
-      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: pick('id') || `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      batchId: pick('batchId') || null,
       title: pick('title', 'Product Title', 'Title', 'name') || url,
       url, platform: pick('platform', 'Platform') || bgPlatformGuess(url),
       brand: pick('brand', 'Brand'), color: pick('color', 'Color', 'Variant'),
       weight: pick('weight', 'Weight'), dimL: pick('dimL', 'Length'), dimW: pick('dimW', 'Width'), dimH: pick('dimH', 'Height'),
       bullets: Array.isArray(r.bullets) ? r.bullets : String(pick('bullets', 'Bullet Points')).split(' | ').filter(Boolean),
       price: pick('price', 'Price', 'Scraped Price') || basePx,
-      temuBase: basePx || pick('price', 'Price', 'Scraped Price'),
+      temuBase: basePx,
+      sourcingPrice: pick('sourcingPrice', 'Sourcing Price') || pick('price', 'Price', 'Scraped Price'),
       labelCost: pick('labelCost', 'Sourcing Price', 'Label Cost'), listPrice: pick('listPrice', 'List Price'),
       description: pick('description', 'Description'), tags: pick('tags', 'Tags'), variants: pick('variants', 'Variants'),
       imageCount: Number(pick('imageCount', 'Images')) || 0, videoCount: Number(pick('videoCount', 'Videos')) || 0,
@@ -9490,6 +9459,12 @@ async function parseImportFile(file) {
   }
 }
 async function doImport(file) {
+  if (/\.json$/i.test(file.name || '')) {
+    try { const backup = JSON.parse(await file.text()); if (backup.format === 'zhunter-backup') {
+      if (!confirm('Restore this complete backup? This replaces products, queue, history and store settings. Private connection keys stay unchanged.')) return;
+      const result = await msg({ action: 'BACKUP_RESTORE', backup }); if (!result?.success) throw new Error(result?.error || 'Restore failed'); await refresh(); await updateMasterStats(); await loadBulkQueue(); toast('Backup restored', 'ok'); return;
+    } } catch (e) { toast('Restore failed: ' + e.message, 'err'); return; }
+  }
   const parsed = await parseImportFile(file);
   if (!parsed) return;
   const { rows, batches } = parsed;
@@ -9497,7 +9472,7 @@ async function doImport(file) {
     const existing = await getMasterRows();
     const seen = new Set(existing.map(r => (r.url || '').toLowerCase()));
     const fresh = rows.filter(r => !seen.has(r.url.toLowerCase()));
-    await setMasterRows([...existing, ...fresh]);
+    await setMasterRows([...existing, ...fresh], existing);
     if (batches && batches.length) { const cur = await getMasterBatches(); await chrome.storage.local.set({ [BATCHES_KEY]: [...batches, ...cur].slice(0, 200) }); }
     await updateMasterStats();
     toast(`Imported ${fresh.length} product${fresh.length !== 1 ? 's' : ''}${rows.length - fresh.length ? ` (${rows.length - fresh.length} already in Library)` : ''}`, 'ok');
@@ -11490,21 +11465,23 @@ async function temuUnmarkListed(items) {
   const store = temuActiveStoreName() || 'default';
   const m = { ...temuListedMap() };
   let n = 0;
-  (items || []).forEach(it => { const k = store + '|' + (it.sid || temuSourceId(it.url)); if (m[k]) { delete m[k]; n++; } });
+  (items || []).forEach(it => { const k = store + '|' + (it.url ? temuSourceIdentity(it.url) : it.sid); if (m[k]) { delete m[k]; n++; } });
   if (!n) return 0;
   const ok = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: m } });
   if (ok?.success) State.data.settings.temuListed = m;
   return n;
 }
-async function temuMarkListed(items) {
-  const store = temuActiveStoreName() || 'default';
+async function temuMarkListed(items, targetStore, state = 'listed') {
+  const store = targetStore || temuActiveStoreName() || 'default';
   const m = { ...temuListedMap() };
-  const now = new Date().toISOString().slice(0, 10);
+  const date = new Date();
+  const now = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
   // v9.6.2: aakhri mark yaad rakho (store + source ids) taake "Unmark last upload" reload ke baad bhi chale
-  try { chrome.storage.local.set({ temuLastMarked: { store, sids: (items || []).map(it => it.sid || temuSourceId(it.url)), n: (items || []).length, t: Date.now() } }); } catch (_) {}
+  try { chrome.storage.local.set({ temuLastMarked: { store, sids: (items || []).map(it => it.url ? temuSourceIdentity(it.url) : it.sid), n: (items || []).length, t: Date.now() } }); } catch (_) {}
   items.forEach(it => {
     const sid = it.sid || temuSourceId(it.url); // v9.7.1: as-is Temu file ke items mein sid SKU se aata hai
-    m[store + '|' + sid] = { t: (it.title || '').slice(0, 60), d: now };
+    const identity = it.url ? temuSourceIdentity(it.url) : sid;
+    m[store + '|' + identity] = { t: (it.title || '').slice(0, 60), d: now, state };
   });
   // cap history at 20k entries (oldest dropped)
   const keys = Object.keys(m);
@@ -11595,6 +11572,7 @@ function temuCleanTitle(t, cfg, row = null) {
   return cleaned.length > 180 ? cleanTemuTitleResult(cleaned) : cleaned;
 }
 
+function temuSourceIdentity(url) { try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase() + '|' + temuSourceId(url); } catch (_) { return ''; } }
 function temuSourceId(url) {
   let m = String(url).match(/-g-(\d{8,})\.html/); if (m) return m[1];        // Temu product
   m = String(url).match(/goods_id=(\d{6,})/); if (m) return m[1];              // Temu goods link
@@ -11757,8 +11735,14 @@ function temuPrice(src, cfg, prof) {
   let base = p * rule.px;
   if (base < rule.min) base = rule.min;
   if (base > rule.max) base = rule.max;
+  if (rule.min > rule.max) throw new Error('Price minimum cannot exceed maximum');
+  if (cfg.price_round_to_99 !== false) {
+    const rounded = Math.floor(base) + 0.99;
+    base = rounded <= rule.max ? rounded : Math.floor(rule.max - 0.99) + 0.99;
+    if (base < rule.min) base = rule.min;
+  }
   let list = base * (cfg.list_price_multiplier || 1.25);
-  if (cfg.price_round_to_99 !== false) { base = Math.floor(base) + 0.99; list = Math.floor(list) + 0.99; }
+  if (cfg.price_round_to_99 !== false) list = Math.floor(list) + 0.99;
   return [Math.round(base * 100) / 100, Math.round(list * 100) / 100, rule];
 }
 
@@ -11776,10 +11760,11 @@ function temuEnrich(rows, cfg) {
     if (/\/s\?k=|amazon\.[a-z.]+\/s\b|walmart\.com\/search|samsclub\.com\/s(\/|\?)/i.test(url)) { skipped.push('search page: ' + title.slice(0, 40)); return; }
     const sid = temuSourceId(url);
     if (!/^[A-Z0-9]{10}$/.test(sid) && !/^\d{6,}$/.test(sid)) { skipped.push('invalid product url: ' + title.slice(0, 40)); return; }
-    if (seenSrc.has(sid)) { skipped.push('duplicate: ' + title.slice(0, 40)); return; }
-    seenSrc.add(sid);
+    const identity = temuSourceIdentity(url);
+    if (seenSrc.has(identity)) { skipped.push('duplicate: ' + title.slice(0, 40)); return; }
+    seenSrc.add(identity);
     if (cfg.skip_listed !== false) {
-      const rec = temuListedMap()[(temuActiveStoreName() || 'default') + '|' + sid];
+      const rec = temuListedMap()[(temuActiveStoreName() || 'default') + '|' + identity] || temuListedMap()[(temuActiveStoreName() || 'default') + '|' + sid];
       if (rec) { skipped.push(`already listed (${rec.d}): ` + title.slice(0, 40)); return; }
     }
 
@@ -11814,7 +11799,8 @@ function temuEnrich(rows, cfg) {
         if (cfg.price_round_to_99 !== false) list = Math.floor(list) + 0.99;
       }
     }
-    const goods = `${cfg.sku_prefix}-${sid}`;
+    const supplier = new URL(url).hostname.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9]/gi, '').toUpperCase();
+    const goods = `${cfg.sku_prefix}-${supplier}-${sid}`;
     const vsfx = color.replace(/[^A-Za-z0-9]+/g, '') || 'Std';
     let sku = `${goods}-${vsfx}`;
     let n = 2; while (usedSku.has(sku)) sku = `${goods}-${vsfx}-${n++}`;
@@ -11841,7 +11827,9 @@ function temuEnrich(rows, cfg) {
     if (!profName && !r.copyCat) warn.push('NO_CATEGORY_PROFILE');
 
     // weight: profile → title (smart) → scraped (0.1–8 lb) → global default; > max → skip
-    let weight = (prof.weight_lb != null) ? prof.weight_lb : null, wsrc = weight != null ? 'profile' : '';
+    const scrapedWeight = parseFloat(r.weight);
+    if (Number.isFinite(scrapedWeight) && scrapedWeight > (cfg.max_weight_lb || 8)) { skipped.push('too heavy (sourced ' + scrapedWeight + ' lb): ' + title.slice(0, 40)); return; }
+    let weight = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? scrapedWeight : (prof.weight_lb ?? null), wsrc = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? 'scraped' : weight != null ? 'profile' : '';
     if (weight == null && cfg.smart_weight !== false) {
       const tw = temuWeightFromTitle(title);
       if (tw) { weight = tw; wsrc = 'title'; }
@@ -11862,8 +11850,8 @@ function temuEnrich(rows, cfg) {
       keyword_attributes: prof.keyword_attributes || '',
       base, list, sourcingPrice: r.sourcingPrice !== '' && r.sourcingPrice != null ? r.sourcingPrice : (r.price ?? ''),
       qty: Math.floor(Math.random() * (cfg.quantity_max - cfg.quantity_min + 1)) + cfg.quantity_min,
-      weight, dimL: prof.length_in ?? d.length_in,
-      dimW: prof.width_in ?? d.width_in, dimH: prof.height_in ?? d.height_in,
+      weight, dimL: num(r.dimL, prof.length_in ?? d.length_in),
+      dimW: num(r.dimW, prof.width_in ?? d.width_in), dimH: num(r.dimH, prof.height_in ?? d.height_in),
       warn
     });
   });
@@ -11882,7 +11870,10 @@ function temuFillTemplate(wb, items, cfg) {
     const k = cell && String(cell.v).trim();
     if (k) { (keyCols[k] = keyCols[k] || []).push(c); }
   }
-  if (!keyCols['item_name']) throw new Error('item_name column missing — wrong template file?');
+  const required = ['item_name','listing_id','seller_sku','category','main_image_url','map_price','list_price','quantity','item_weight','shipping_template'];
+  const missing = required.filter(key => !keyCols[key]);
+  if (missing.length) throw new Error('Incomplete Temu general template: ' + missing.join(', '));
+  for (const address of Object.keys(ws)) if (!address.startsWith('!') && XLSX.utils.decode_cell(address).r >= 4) delete ws[address];
   const d = cfg.defaults;
   const put = (r, key, val, idx = 0) => {
     const cols = keyCols[key];
@@ -11911,7 +11902,7 @@ function temuFillTemplate(wb, items, cfg) {
     put(r, 'fulfillment_channel', d.fulfillment_channel); put(r, 'origin_country', d.origin_country);
     r++;
   });
-  range.e.r = Math.max(range.e.r, r - 1);
+  range.e.r = Math.max(3, r - 1);
   ws['!ref'] = XLSX.utils.encode_range(range);
   return r - 4;
 }
@@ -11957,18 +11948,8 @@ async function temuRunExport(opts = {}) {
       if (w) cfg.defaults.weight_lb = w; if (l) cfg.defaults.length_in = l;
       if (wd) cfg.defaults.width_in = wd; if (ht) cfg.defaults.height_in = ht; }
     const source = $('temuSource')?.value || 'bulk';
-    let rows = [];
-    if (source === 'bulk') {
-      rows = (BulkState?.results || []).filter(x => x.status !== 'fail');
-      if (!rows.length) rows = await getMasterRows();
-    } else if (source === 'library_sel' && TemuLibPick?.ids) {
-      rows = (await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id));
-    } else if (source === 'sheet' && TemuSheetRows) {
-      rows = TemuSheetRows;
-    } else {
-      rows = await getMasterRows();
-    }
-    if (typeof zhApplyTextEdits === 'function') await zhApplyTextEdits(rows);
+    let rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+    rows = JSON.parse(JSON.stringify(rows));
     if (!rows.length) { say('✗ Export ke liye koi product nahi mila.\n→ Bulk tab → "Hunt all open tabs" chalayen (ya data source "Library" karein), phir dobara try karein.'); toast('No products — pehle hunt karein', 'warn'); return; }
     say('Checking images & converting ' + rows.length + ' products…');
 
@@ -11993,17 +11974,14 @@ async function temuRunExport(opts = {}) {
         await Promise.all(chunk.map(async (item) => {
           try {
             const pub = await uploadImageToPublicHost(item.img);
-            if (pub && pub.startsWith('http')) {
-              item.row.images[item.index] = pub;
-            }
-          } catch (_) {}
+            if (!pub || !/^https?:\/\//i.test(pub) || /^https:\/\/flow-content\.google\//i.test(pub)) throw new Error('Edited image is not on a public host');
+            item.row.images[item.index] = pub;
+          } catch (e) { throw new Error('Image upload failed for ' + item.row.title + ': ' + e.message); }
           doneCount++;
           say(`Cloud image upload: ${doneCount}/${pendingUploads.length} done…`);
         }));
       }
-      if (MasterUIState?.allRows) {
-        await setMasterRows(MasterUIState.allRows);
-      }
+      await zhLibPatch(saved => { let changed = false; for (const row of rows) { const m = saved.find(x => x.id === row.id || x.url === row.url); if (m) { m.images = [...row.images]; changed = true; } } return changed; });
     }
 
     const { items, skipped } = temuEnrich(rows, cfg);
@@ -12012,6 +11990,8 @@ async function temuRunExport(opts = {}) {
         '\n\nAgar dobara list karna hai to "Pehle se listed" checkbox off karein.');
       return;
     }
+    const blockers = items.filter(it => it.warn.some(w => ['NO_IMAGES', 'NO_PRICE', 'NO_CATEGORY_PROFILE'].includes(w)));
+    if (blockers.length) throw new Error('Export blocked: ' + blockers.map(it => it.title.slice(0, 45) + ': ' + it.warn.filter(w => ['NO_IMAGES','NO_PRICE','NO_CATEGORY_PROFILE'].includes(w)).join(', ')).join(' | '));
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
@@ -12031,18 +12011,27 @@ async function temuRunExport(opts = {}) {
 }
 
 
+let TemuUploadBusy = false;
 async function temuAutoUpload() {
+  if (TemuUploadBusy) { toast('Upload already running', 'info'); return; }
+  TemuUploadBusy = true;
+  const button = $('temuAutoBtn'); if (button) button.disabled = true;
+  try { await temuAutoUploadJob(); }
+  finally { TemuUploadBusy = false; if (button) button.disabled = false; }
+}
+async function temuAutoUploadJob() {
   const rep = $('temuReport');
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
   // Build fresh if nothing exported yet in this session
-  if (!TemuLast) { await temuRunExport({ forUpload: true }); }
+  if (!TemuLast?.asIs) { TemuLast = null; await temuRunExport({ forUpload: true }); }
   if (!TemuLast) return;
   { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
   const sourcingSnapshot = temuSourcingSnapshot();
+  const uploadSnapshot = { ...TemuLast, bytes: new Uint8Array(TemuLast.bytes).slice(), items: JSON.parse(JSON.stringify(TemuLast.items)), skipped: [...(TemuLast.skipped || [])] };
   const bg = temuGetCfg().upload_in_background !== false;
   say((rep?.textContent || '') + (bg ? '\n\nTemu tab khul raha hai — processing poori hote hi focus wapas aap ke tab par aa jayega…' : '\n\nTemu page khul raha hai…'));
   try {
-    const u8 = new Uint8Array(TemuLast.bytes);
+    const u8 = new Uint8Array(uploadSnapshot.bytes);
     let bin = '';
     for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
     const b64 = btoa(bin);
@@ -12064,6 +12053,15 @@ async function temuAutoUpload() {
     let result;
     try { result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: 'temu_upload.xlsx', expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }); }
     finally { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} }
+    if (result?.recoveryRequired) {
+      say('Previous upload was interrupted. Check Temu upload history before retrying.');
+      if (confirm('Check the previous upload in Temu first. Have you reviewed its result? This unlocks future uploads without resending this file.')) {
+        const acknowledged = await msg({action:'TEMU_UPLOAD_REVIEWED'});
+        if (!acknowledged?.success) throw new Error(acknowledged?.error || 'Could not unlock upload');
+        say('Previous upload review saved. Select only products that still need uploading.');
+      }
+      return;
+    }
     if (rep) rep.textContent = base; // drop the live ⏳ line
     // v9.4.3 — result numbers from the report ("Completed: 28 records processed, 28 added, 0 errors")
     const rl = (result?.report || []).join('\n');
@@ -12078,13 +12076,14 @@ async function temuAutoUpload() {
     // v9.7.0: history record
     try {
       const idm = rl.match(/ID (\d{13,20})/);
-      await temuHistAdd({ kind: 'upload', store: temuActiveStoreName() || '—', n: TemuLast.items.length, skipped: (TemuLast.skipped || []).length,
+      await temuHistAdd({ kind: 'upload', store: uploadSnapshot.store, n: uploadSnapshot.items.length, skipped: (uploadSnapshot.skipped || []).length,
         source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', confirmed: !!(result?.success && result?.confirmed), uploadId: idm ? idm[1] : '',
-        added: rm ? +rm[2] : null, errors: rm ? +rm[3] : null, items: temuHistItems(TemuLast.items), skippedList: (TemuLast.skipped || []).slice(0, 300) });
+        added: result?.added ?? (rm ? +rm[2] : null), errors: result?.errors ?? (rm ? +rm[3] : null), items: temuHistItems(uploadSnapshot.items), skippedList: (uploadSnapshot.skipped || []).slice(0, 300) });
     } catch (_) {}
-    if (result?.success && result?.confirmed) {
-      if (!TemuLast.marked) { await temuMarkListed(TemuLast.items); TemuLast.marked = true; }
-      say((rep?.textContent || '') + `\n✓ ${TemuLast.items.length} products listed-history mein save (agli baar skip honge)`);
+    const completeBatch = result?.success && result?.confirmed && result.status === 'Completed' && result.errors === 0 && result.processed === uploadSnapshot.items.length && result.added === uploadSnapshot.items.length;
+    if (completeBatch) {
+      if (!uploadSnapshot.marked) { await temuMarkListed(uploadSnapshot.items, uploadSnapshot.store, 'accepted'); uploadSnapshot.marked = true; }
+      say((rep?.textContent || '') + `\n✓ ${uploadSnapshot.items.length} products accepted-history mein save (live listing status Temu par verify karein)`);
       temuUpdateSrcInfo();
       // v9.6.0: errors hon to Temu ka "View failed details" khud parh kar wajah dikhao
       if (rm && +rm[3] > 0) {
@@ -12097,9 +12096,9 @@ async function temuAutoUpload() {
       }
     } else {
       say((rep?.textContent || '') + '\n(Products listed mark NAHI kiye — upload confirm nahi hua; agli export mein dobara aa jayenge)');
-      const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${TemuLast.items.length} as listed`; }
+      const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = true; mb.textContent = `Mark ${uploadSnapshot.items.length} as listed`; }
     }
-    toast(result?.success ? 'File Temu par upload ho gayi' : 'Auto-upload fail — file download ho chuki hai', result?.success ? 'ok' : 'warn');
+    toast(completeBatch ? 'Temu accepted all products; verify listing status' : result?.success ? 'Upload needs review; check Temu before retrying' : 'Auto-upload fail — file download ho chuki hai', completeBatch ? 'ok' : 'warn');
   } catch (e) {
     say((rep?.textContent || '') + '\n✗ ' + (e?.message || e));
   }
@@ -12112,13 +12111,6 @@ function temuDraftRules(cfg) {
   const rules = [];
   for (const [name, p] of Object.entries(cfg.category_profiles || {})) {
     let attrs = (p.attributes && typeof p.attributes === 'object') ? { ...p.attributes } : {};
-    if (!Object.keys(attrs).length && p.keyword_attributes) {
-      const toks = String(p.keyword_attributes).split(',').map(x => x.trim()).filter(Boolean);
-      toks.forEach(tk => {
-        if (/years?\s*\+|adults?|kids?|children|teens?|all ages/i.test(tk)) { if (!attrs['Applicable Age Group']) attrs['Applicable Age Group'] = tk; }
-        else if (!attrs['Material']) attrs['Material'] = tk;
-      });
-    }
     if (Object.keys(attrs).length) rules.push({ name, match: p.match || [], attributes: attrs });
   }
   return rules;
@@ -12213,7 +12205,7 @@ async function temuFixDrafts() {
       { action: 'TEMU_FIX_DRAFTS', rules, defaults, autoSubmit: cfg.draft_auto_submit !== false, expectStore: temuActiveStoreName() },
       r => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : r)));
     say((result?.report || []).join('\n'));
-    toast(result?.success ? (result.stillEmpty ? `${result.stillEmpty} field(s) khali — report dekhein` : `Drafts: ${result.changed ?? 0} fields set, Submit dabaya`) : 'Fix drafts fail — report dekhein', result?.success && !result.stillEmpty ? 'ok' : 'warn');
+    toast(result?.success ? (result.stillEmpty ? `${result.stillEmpty} field(s) khali — report dekhein` : `Drafts: ${result.changed ?? 0} fields set; ${result.submitted ?? 0} submit clicks ? Temu result verify karein`) : 'Fix drafts fail — report dekhein', result?.success && !result.stillEmpty ? 'ok' : 'warn');
   } catch (e) {
     say('✗ ' + (e?.message || e));
   }
@@ -12292,7 +12284,10 @@ async function temuRenderHistory() {
 
   // 1. Calculate Today's Progress
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+  const dayKey = value => { const d = new Date(value); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
+  const todayStr = dayKey(now);
+  const selectedHistoryStore = $('temuHistStoreFilter')?.value || '';
+  const scopedList = selectedHistoryStore ? list.filter(h => h.store === selectedHistoryStore) : list;
   const dayNameDate = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   const dateEl = $('temuTodayDate'); if (dateEl) dateEl.textContent = dayNameDate;
 
@@ -12306,17 +12301,17 @@ async function temuRenderHistory() {
 
   const isToday = (t) => {
     if (!t) return false;
-    return new Date(t).toISOString().slice(0, 10) === todayStr;
+    return dayKey(t) === todayStr;
   };
 
-  const listedMap = temuListedMap();
+  const listedMap = Object.fromEntries(Object.entries(temuListedMap()).filter(([key]) => !selectedHistoryStore || key.startsWith(selectedHistoryStore + '|')));
   let todayListedCount = Object.values(listedMap).filter(x => x && x.d === todayStr).length;
   
   let todayUploadsCount = 0;
   let todayErrorsCount = 0;
   let uploadItemsToday = 0;
 
-  for (const h of list) {
+  for (const h of scopedList) {
     if (isToday(h.t)) {
       if (h.kind === 'upload') {
         if (h.confirmed) {
@@ -12328,7 +12323,7 @@ async function temuRenderHistory() {
     }
   }
 
-  const finalListed = Math.max(todayListedCount, uploadItemsToday);
+  const finalListed = todayListedCount;
   const remaining = Math.max(0, dailyTarget - finalListed);
   const pct = Math.min(100, Math.round((finalListed / dailyTarget) * 100));
 
@@ -12345,7 +12340,7 @@ async function temuRenderHistory() {
     if (finalListed === 0) {
       stat.textContent = 'Aaj abhi kuch listed nahi';
     } else {
-      stat.textContent = `${finalListed} of ${dailyTarget} listed today (${pct}%)`;
+      stat.textContent = `${finalListed} of ${dailyTarget} accepted/marked today (${pct}%)`;
     }
   }
 
@@ -12357,12 +12352,12 @@ async function temuRenderHistory() {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dStr = d.toISOString().slice(0, 10);
+      const dStr = dayKey(d);
       const isCur = i === 0;
       const dayIdx = d.getDay();
       const letter = dayLetters[dayIdx];
 
-      const dayUploads = list.filter(h => new Date(h.t).toISOString().slice(0, 10) === dStr);
+      const dayUploads = scopedList.filter(h => dayKey(h.t) === dStr);
       const dayListed = Object.values(listedMap).filter(x => x && x.d === dStr).length;
       const hasActivity = dayUploads.length > 0 || dayListed > 0;
 
@@ -13295,7 +13290,7 @@ async function temuUpdateSrcInfo() {
     const cfg = temuGetCfg();
     const store = temuActiveStoreName() || 'default';
     const skipOn = $('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false; // v9.7.4: export ki tarah live checkbox
-    const listed = rows.filter(r => temuListedMap()[store + '|' + temuSourceId(r.url || '')]).length;
+    const listed = rows.filter(r => temuListedMap()[store + '|' + temuSourceIdentity(r.url || '')]).length;
     el.textContent = `${n} products ready` + (listed ? ` · ${listed} already listed (${skipOn ? 'skip' : 'skip OFF — dobara jayenge!'})` : '') + ` · store: ${temuActiveStoreName() || '—'}`;
   } catch (_) { el.textContent = '—'; }
 }
@@ -13478,6 +13473,7 @@ async function temuRenderReview() {
       if (chk.checked) TemuReviewExcluded.delete(r.id);
       else TemuReviewExcluded.add(r.id);
       card.classList.toggle('excluded', !chk.checked);
+      TemuLast = null;
       temuUpdateReviewCount(rows);
     });
 
@@ -13519,7 +13515,7 @@ async function temuRenderReview() {
         const existing = await getMasterRows();
         const filtered = existing.filter(x => x.id !== r.id && x.url !== r.url);
         if (filtered.length !== existing.length) {
-          await setMasterRows(filtered);
+          await setMasterRows(filtered, existing);
           if (MasterUIState?.allRows) MasterUIState.allRows = filtered;
         }
       } catch (_) {}
@@ -13562,12 +13558,11 @@ async function temuRenderReview() {
         const b = card.querySelector('.temu-rv-price-badge');
         if (b) b.textContent = '$' + val.toFixed(2);
       }
-      r.price = e.target.value;
-      if (MasterUIState?.allRows) {
-        const m = MasterUIState.allRows.find(x => x.id === r.id);
-        if (m) m.price = r.price;
-        await setMasterRows(MasterUIState.allRows);
-      }
+      if (!isFinite(val) || val <= 0) { delete r.temuBase; }
+      const override = r.temuBase ?? '';
+      for (const copy of _productRowsById(r.id)) copy.temuBase = override;
+      await zhLibPatch(saved => { const m = saved.find(x => x.id === r.id || x.url === r.url); if (!m) return false; m.temuBase = override; return true; });
+      TemuLast = null;
     });
 
     // Per-product AI Rewrite
@@ -13616,11 +13611,10 @@ async function temuRenderReview() {
           if (!Array.isArray(r.images) || iIdx >= r.images.length) return;
           const moved = r.images.splice(iIdx, 1)[0];
           r.images.unshift(moved);
-          if (MasterUIState?.allRows) {
-            const m = MasterUIState.allRows.find(x => x.id === r.id);
-            if (m) m.images = r.images;
-            await setMasterRows(MasterUIState.allRows);
-          }
+          const images = [...r.images];
+          for (const copy of _productRowsById(r.id)) copy.images = [...images];
+          await zhLibPatch(saved => { const m = saved.find(x => x.id === r.id || x.url === r.url); if (!m) return false; m.images = [...images]; return true; });
+          TemuLast = null;
           await temuRenderReview();
         } else if (action === 'zoom') {
           const imgUrl = btn.dataset.url || '';
@@ -13628,11 +13622,10 @@ async function temuRenderReview() {
         } else if (action === 'delimg') {
           if (!Array.isArray(r.images) || r.images.length <= 1) { toast('Kam az kam ek image zaruri hai', 'warn'); return; }
           r.images.splice(iIdx, 1);
-          if (MasterUIState?.allRows) {
-            const m = MasterUIState.allRows.find(x => x.id === r.id);
-            if (m) m.images = r.images;
-            await setMasterRows(MasterUIState.allRows);
-          }
+          const images = [...r.images];
+          for (const copy of _productRowsById(r.id)) copy.images = [...images];
+          await zhLibPatch(saved => { const m = saved.find(x => x.id === r.id || x.url === r.url); if (!m) return false; m.images = [...images]; return true; });
+          TemuLast = null;
           await temuRenderReview();
         } else if (action === 'gemini') {
           const imgUrl = btn.dataset.url || '';
@@ -13790,13 +13783,6 @@ function buildProductAiPrompt(r, currentTitle, instruction) {
   }
 
   let varTxt = r.color || (Array.isArray(r.variants) ? r.variants.join(', ') : r.variants) || '';
-  if (!varTxt) {
-    try {
-      const cfg = temuGetCfg();
-      const v = temuSmartVariation(r.title || currentTitle, r.color, cfg, {}, r.id || '');
-      if (v && v.value && v.value !== 'Standard') varTxt = `${v.type}: ${v.value}`;
-    } catch (_) {}
-  }
   if (varTxt) parts.push(`Product Variation / Color / Style: ${varTxt}`);
 
   if (Array.isArray(r.bullets) && r.bullets.length) {

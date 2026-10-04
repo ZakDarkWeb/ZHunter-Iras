@@ -2907,7 +2907,8 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
   // 0) Safety: make sure the right store is open in Seller Center
   if (expectStore) {
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (mall && mall.toLowerCase() !== String(expectStore).toLowerCase()) {
+    if (!mall) return fail('Store name unavailable ? upload blocked. Wait for Seller Center to load.');
+    if (mall.toLowerCase() !== String(expectStore).toLowerCase()) {
       return fail(`Ghalat store khula hai: Temu par "${mall}" hai, magar file "${expectStore}" ke liye bani hai. Store switch kar ke dobara try karein.`);
     }
     ok(`Store verified: ${mall || expectStore}`);
@@ -3025,7 +3026,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
       const m = t.match(/Number of records processed[^:]*:\s*(\d+)[\s\S]*?records added:\s*(\d+)[\s\S]*?(?:Ready to Submit:\s*(\d+))?[\s\S]*?records with errors:\s*(\d+)/i);
       const status = /\bCompleted\b/.test(t) ? 'Completed' : (/Action required/i.test(t) ? 'Action required' : null);
       if (!m && !status) return null;
-      return { status: status || 'Done', processed: m ? +m[1] : null, added: m ? +m[2] : null, ready: m && m[3] != null ? +m[3] : null, errors: m ? +m[4] : null };
+      return { status: status || 'Done', processed: m ? +m[1] : null, added: m ? +m[2] : null, ready: /Ready to Submit:\s*(\d+)/i.exec(t)?.[1] != null ? +/Ready to Submit:\s*(\d+)/i.exec(t)[1] : null, errors: m ? +m[4] : null };
     };
     // v9.4.3 — live progress → background → side panel (throttled: max 1 msg / 2s, rate-limit safe)
     let lastProg = 0, lastProgKey = '';
@@ -3068,7 +3069,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
     if (info && info.processed != null) {
       ok(`Processing mukammal (${secs}s) — ${info.status}: ${info.processed} records processed, ${info.added} added, ${info.errors} errors` + (uploadId ? ` (ID ${uploadId})` : ''));
       if (info.errors > 0) report.push(`• ${info.errors} record(s) mein error — Temu par "View processing results" dekh lein`);
-      return { success: true, confirmed: true, uploadId, processed: info.processed, added: info.added, errors: info.errors, report };
+      return { success: true, confirmed: true, uploadId, processed: info.processed, added: info.added, errors: info.errors, ready: info.ready, status: info.status, report };
     }
     ok(`Processing mukammal (${secs}s)` + (uploadId ? ` — Upload ID ${uploadId}` : ' — Upload history mein nayi entry aa gayi'));
     return { success: true, confirmed: true, uploadId, report };
@@ -3149,11 +3150,7 @@ async function temuPickSelectValue(sel, want) {
            || (wantL.includes('polish') ? opts.find(o => /polish/i.test(o.textContent)) : null)
            || null;
       }
-      if (!opt) {
-        opt = (wantL.includes('finish') || wantL.includes('polish') || wantL.includes('surface'))
-           ? (opts.find(o => /polish/i.test(o.textContent)) || opts.find(o => /matte/i.test(o.textContent)) || opts.find(o => /brush/i.test(o.textContent)) || opts[0])
-           : (opts.find(o => /^(other|others|standard|general)/i.test(o.textContent.trim())) || opts.find(o => o.textContent.trim() && !/^select$/i.test(o.textContent.trim())) || opts[0]);
-      }
+
     }
   }
 
@@ -3168,7 +3165,7 @@ async function temuPickSelectValue(sel, want) {
   opt.click();
   await temuSleep(350);
   const cur = temuSelectCurrent(sel);
-  return cur || opt.textContent.trim() ? 'set' : 'verify_failed';
+  return cur && cur.trim().toLowerCase() === opt.textContent.trim().toLowerCase() ? 'set' : 'verify_failed';
 }
 function temuFormItemsByLabel(scope, label) {
   const want = label.trim().toLowerCase();
@@ -3238,7 +3235,8 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   const fail = m => { report.push('✗ ' + m); return { success: false, report }; };
   if (expectStore) {
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
+    if (!mall) return fail('Store name unavailable ? draft changes blocked. Wait for Seller Center to load.');
+    if (mall.toLowerCase() !== String(expectStore).toLowerCase())
       return fail(`Ghalat store khula hai: Temu par "${mall}" hai, extension mein "${expectStore}" active hai.`);
   }
   // Support both products-excel-multiple-edit (TB_father) and product-action.html (beast-core table rows)
@@ -3253,7 +3251,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     return r.length ? r : null;
   }, 10000);
   if (!rows) return fail('Koi draft row nahi mili — "Product action required" ya "Complete product details" page khula hai?');
-  let changed = 0, stillEmpty = 0;
+  let changed = 0, stillEmpty = 0, submitted = 0;
   const pick = (attrs, label) => {
     const want = label.trim().toLowerCase();
     for (const k of Object.keys(attrs || {})) if (k.trim().toLowerCase() === want && attrs[k] !== '' && attrs[k] != null) return attrs[k];
@@ -3270,10 +3268,8 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const notes = [];
     if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — sab required fields bhare hain` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
-      let want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? TEMU_DRAFT_FALLBACKS[f.label.trim().toLowerCase()] ?? null;
-      if (want == null) {
-        want = 'Polishing';
-      }
+      let want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? null;
+      if (want == null) { notes.push(f.label + ': missing sourced/user-approved value'); stillEmpty++; continue; }
       if (f.sel) {
         const res = await temuPickSelectValue(f.sel, want);
         if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${temuSelectCurrent(f.sel) || want}`); }
@@ -3292,16 +3288,16 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     } else {
       await temuSleep(500);
       const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
-      if (bottomBtn && temuVisible(bottomBtn) && !bottomBtn.classList.contains('disable-2fw28')) {
-        bottomBtn.click();
+      if (bottomBtn && /^submit$/i.test((bottomBtn.textContent || '').trim()) && temuVisible(bottomBtn) && !bottomBtn.disabled && bottomBtn.getAttribute('aria-disabled') !== 'true' && !bottomBtn.classList.contains('disable-2fw28')) {
+        bottomBtn.click(); submitted++;
         ok('Main Submit button dabaya — Temu par result dekhein!');
       } else {
         let rowClicks = 0;
         for (const row of rows) {
           const btn = row.querySelector('.btn-3yOxL.primary-2pgGm, [class*="primary"][role="button"], button');
-          if (btn && temuVisible(btn) && !btn.classList.contains('disable-2fw28')) {
+          if (btn && /^submit$/i.test((btn.textContent || '').trim()) && temuVisible(btn) && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && !btn.classList.contains('disable-2fw28')) {
             btn.click();
-            rowClicks++;
+            rowClicks++; submitted++;
             await temuSleep(350);
           }
         }
@@ -3315,7 +3311,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     }
   }
   report.unshift(`${rows.length} drafts, ${changed} fields set, ${stillEmpty} still empty`);
-  return { success: true, report, changed, total: rows.length, stillEmpty };
+  return { success: stillEmpty === 0, report, changed, total: rows.length, stillEmpty, submitted, confirmed: false };
 }
 
 // ═══ v9.6.0 — "View failed details" popup parhna (upload-goods-multiple.html) ═══

@@ -226,3 +226,6 @@ Studio mein ek waqt **1 product** (‹ Prev / Next ›, ← → keys, progress b
 5. `grep` se jagah dhoondein, sirf woh hissa badlein. `node --check` + Playwright test + screenshot.
 6. Version badlein (`manifest.json`), `CHANGELOG.md` mein upar entry, **is file** ke section 3/4 update.
 7. Files seedha folder mein likhein (chat mein code nahi). Chhota Roman Urdu summary: kya badla, kaise check kiya, kya asli Temu par test nahi hua, Reload ka bolein.
+
+## Audit implementation - 5 October 2026
+Same manifest version 9.12.13. Audit fixes and remaining integration limits are recorded in EXTENSION_AUDIT_2026-10-04.md. Bundled Groq keys removed; saved profile credentials remain. Run tests/audit-storage.test.cjs and tests/audit-browser.test.cjs from repository root. No new ZIP.

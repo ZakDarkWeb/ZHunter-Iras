@@ -4,6 +4,7 @@
   if (!label) return;
   async function refresh() {
     const status = await msg({ action: 'SOURCING_STATUS' });
+    if (status?.connected) { if (!$('zhSourcingWorkbook').value) $('zhSourcingWorkbook').value = status.sheetUrl; if (!$('zhSourcingEndpoint').value) $('zhSourcingEndpoint').value = status.endpoint; }
     const summary = $('zhSourcingSummaryStatus');
     if (summary) summary.textContent = status?.success ? (status.connected ? 'Connected' : 'Setup required') : 'Connection';
     label.textContent = status?.success ? `${status.connected ? 'Connected' : 'Setup required'} · ${status.pending} uploads pending${status.error ? ' · ' + status.error : ''}` : 'Connection status unavailable';
@@ -14,6 +15,9 @@
     finally { button.disabled = false; }
   }
   $('zhSourcingOpen').addEventListener('click', e => run(e.currentTarget, async () => { const result = await msg({ action: 'SOURCING_OPEN' }); if (!result?.success) throw new Error(result?.error || 'Connect your workbook first'); }));
+  const disconnect = document.createElement('button'); disconnect.type = 'button'; disconnect.className = 'btn btn-secondary btn-xs'; disconnect.textContent = 'Disconnect';
+  $('zhSourcingRetry').after(disconnect);
+  disconnect.addEventListener('click', e => run(e.currentTarget, async () => { if (!confirm('Disconnect sourcing workbook? Pending records stay saved locally.')) return; const result = await msg({ action: 'SOURCING_DISCONNECT' }); if (!result?.success) throw new Error(result?.error || 'Disconnect failed'); $('zhSourcingWorkbook').value = ''; $('zhSourcingEndpoint').value = ''; await refresh(); }));
   $('zhSourcingNewKey').addEventListener('click', () => {
     $('zhSourcingKey').value = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
     // Reveal only on deliberate creation so the user can copy into Script Properties.

@@ -3,7 +3,7 @@
 // Handles storage operations, messaging, content script orchestration, and AI generation
 // ============================================================
 'use strict';
-importScripts('sourcing_sync.js');
+importScripts('sourcing_sync.js', 'audit_storage.js');
 
 // Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
 let _zhExportFolder = true;
@@ -57,6 +57,7 @@ const VID_CAP = 12;
 // (no secret settings since v7.12 — AI removed)
 const SECRET_SETTING_KEYS = new Set([]); // no secrets since v7.12 (AI removed)
 const PUBLIC_SETTING_KEYS = new Set([
+  'showTabHunt', 'showTabBulk', 'showTabLibrary', 'showTabSettings', 'maxHuntImages',
   'autoCategory', 'duplicateCheck', 'badgeEnabled', 'saveToCurrentFolder',
   'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup',
   'bulkSkipImageDownload', 'zhExportFolder', 'bulkParallelTabs', 'bulkAutoRetry',
@@ -260,6 +261,8 @@ function sanitizeSettingsPatch(patch) {
       if (typeof value === 'string' && value.length <= 500) clean[key] = value.trim();
       continue;
     }
+    if (key.startsWith('showTab')) { if (typeof value === 'boolean') clean[key] = value; continue; }
+    if (key === 'maxHuntImages') { const n = Number(value); if (Number.isInteger(n) && n >= 1 && n <= 15) clean[key] = n; continue; }
     if (key === 'temuTemplateB64') { if (typeof value === 'string' && value.length <= 3000000) clean[key] = value; continue; }
     if (key === 'temuStores') { if (value && typeof value === 'object' && !Array.isArray(value) && JSON.stringify(value).length <= 20000000) clean[key] = value; continue; }
     if (typeof value === 'string') clean[key] = value.slice(0, 5000);
@@ -305,8 +308,8 @@ async function getData() {
       history:  Array.isArray(stored.history) ? stored.history : [],
       settings
     };
-  } catch (_) {
-    return JSON.parse(JSON.stringify(DEFAULT_DATA));
+  } catch (e) {
+    throw new Error('Stored data unavailable: ' + e.message);
   }
 }
 
@@ -317,7 +320,7 @@ async function saveData(data) {
     return true;
   } catch (err) {
     console.warn('[ZHunter] Local storage write failed:', err?.message || 'storage_error');
-    return false;
+    throw new Error('Local storage write failed: ' + err.message);
   }
 }
 
@@ -1183,7 +1186,20 @@ function tabsSend(tabId, message) {
     } catch (e) { res({ __err: e?.message || String(e) }); }
   });
 }
-async function temuBgAutoUpload({ b64, filename, expectStore, background, sourcing }) {
+let ZhUploadTask = null;
+async function temuBgAutoUpload(input) {
+  if (ZhUploadTask) return { success: false, report: ['Upload already running; wait for its result'] };
+  ZhUploadTask = (async () => {
+    const previous = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
+    if (previous?.state === 'running') return { success: false, report: ['Previous upload needs verification. Check its Temu tab before retrying.'], recoveryRequired: true };
+    const job = { id: input.sourcing?.id || crypto.randomUUID(), state: 'running', t: Date.now(), store: input.expectStore, filename: input.filename, sourcing: input.sourcing };
+    await chrome.storage.local.set({ zhTemuUploadJob: job });
+    try { const result = await temuBgAutoUploadJob(input); await chrome.storage.local.set({ zhTemuUploadJob: { ...(await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob, ...job, state: result.confirmed ? 'processed' : 'needs-review', result } }); return result; }
+    catch (e) { await chrome.storage.local.set({ zhTemuUploadJob: { ...job, state: 'needs-review', error: e.message } }); throw e; }
+  })();
+  try { return await ZhUploadTask; } finally { ZhUploadTask = null; }
+}
+async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sourcing }) {
   const report = [];
   const bg = background !== false;
   let sourcingQueued = false;
@@ -1196,6 +1212,8 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background, sourci
     // background tab mein throttle ho kar bohat slow ho jati hai. bg=true ka matlab: kaam khatam hote hi
     // focus khud aap ke pichle tab par wapas.
     const tab = await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
+    const savedJob = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
+    if (savedJob) await chrome.storage.local.set({zhTemuUploadJob:{...savedJob,tabId:tab.id}});
     _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null;
     report.push(bg ? '✓ Temu tab khola (processing ke baad focus wapas aa jayega)' : '✓ Temu tab khola');
 
@@ -1215,7 +1233,7 @@ async function temuBgAutoUpload({ b64, filename, expectStore, background, sourci
     });
     if (!result || result.__err) { report.push('✗ ' + (result?.__err || 'no response from Temu tab')); return finish({ success: false, report }); }
     report.push(...(result.report || []));
-    return finish({ success: !!result.success, confirmed: !!result.confirmed, report, tabId: tab.id });
+    return finish({ success: !!result.success, confirmed: !!result.confirmed, processed: result.processed ?? null, added: result.added ?? null, errors: result.errors ?? null, ready: result.ready ?? null, status: result.status || '', uploadId: result.uploadId || '', report, tabId: tab.id });
   } catch (e) {
     report.push('✗ ' + (e?.message || e));
     return finish({ success: false, report });
@@ -1252,8 +1270,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-async function handleMessage(msg, sender) {
+async function handleMessage(msg, sender, queueLocked = false) {
+  if (!queueLocked && ['ADD_TO_BULK_QUEUE','ADD_BULK_QUEUE_ITEMS','REMOVE_FROM_BULK_QUEUE','UPDATE_BULK_QUEUE','CLEAR_BULK_QUEUE'].includes(msg.action)) return await withWriteLock(() => handleMessage(msg, sender, true));
   switch (msg.action) {
+    case 'MASTER_COMMIT': return await withWriteLock(() => zhMasterCommit(msg));
+    case 'MASTER_BATCH_ADD': return await withWriteLock(async () => {
+      const incoming = msg.batch; if (!incoming?.id || !Array.isArray(incoming.urls)) throw new Error('Invalid hunt batch');
+      const saved = await chrome.storage.local.get('zhunterMasterBatches'); const batches = saved.zhunterMasterBatches || [];
+      let batch = batches.find(b => b.id === incoming.id); if (!batch) { batch = { ...incoming, urls: [], platforms: [], count: 0 }; batches.unshift(batch); }
+      batch.urls = [...new Set([...(batch.urls || []), ...incoming.urls])]; batch.count = batch.urls.length;
+      batch.platforms = [...new Set([...(batch.platforms || []), ...incoming.platforms])]; await chrome.storage.local.set({ zhunterMasterBatches: batches.slice(0,50) }); return { success: true };
+    });
+    case 'MASTER_RESET': return await withWriteLock(() => zhMasterReset(!!msg.wipe));
+    case 'BACKUP_EXPORT': return await withWriteLock(zhBackupExport);
+    case 'BACKUP_RESTORE': return await withWriteLock(() => zhBackupRestore(msg.backup));
     // -- Read-only / non-storage actions (no lock needed) --
     case 'GET_DATA': {
       const data = await getData();
@@ -1262,10 +1292,17 @@ async function handleMessage(msg, sender) {
     case 'GET_LINK_IMAGES':    return { success: true, images: await getImagesFromIndexedDB(msg.id) };
     case 'START_KEEPALIVE':    startKeepAlive(); return { success: true };
     case 'SOURCING_CONNECT': return await zhSourcingConnect(msg.config);
+    case 'SOURCING_DISCONNECT': await zhSourcingSerial(() => chrome.storage.local.remove('zhSourcingConnection')); return { success: true };
     case 'SOURCING_STATUS': return await zhSourcingStatus();
     case 'SOURCING_RETRY': return await zhSourcingRetry(true);
     case 'SOURCING_QUEUE': return await zhSourcingQueue(msg.snapshot);
     case 'SOURCING_OPEN': await zhSourcingOpen(); return { success: true };
+    case 'TEMU_UPLOAD_REVIEWED': {
+      if (ZhUploadTask) throw new Error('Upload is still running');
+      const saved = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
+      if (saved) await chrome.storage.local.set({zhTemuUploadJob:{...saved,state:'reviewed',reviewedAt:Date.now()}});
+      return {success:true};
+    }
     case 'TEMU_AUTO_UPLOAD':   return await temuBgAutoUpload(msg);
     case 'TEMU_NEED_VISIBLE': {
       // content script (hidden Temu tab) says the page won't mount its upload box while hidden →
@@ -1471,8 +1508,11 @@ async function handleMessage(msg, sender) {
     case 'UPDATE_SETTINGS':    return await withWriteLock(async () => {
       const data = await getData();
       const patch = sanitizeSettingsPatch(msg.settings);
+      const dropped = Object.keys(msg.settings || {}).filter(k => !Object.prototype.hasOwnProperty.call(patch, k));
+      if (dropped.length) throw new Error('Unsupported settings: ' + dropped.join(', '));
       data.settings = { ...data.settings, ...patch };
-      await saveData(data);
+      if (['showTabHunt','showTabBulk','showTabLibrary','showTabSettings'].every(k => data.settings[k] === false)) throw new Error('At least one tab must remain visible');
+      if (!await saveData(data)) throw new Error('Settings could not be saved');
       return { success: true, settings: getPublicSettings(data.settings) };
     });
     case 'LOG_ACTION':         return await withWriteLock(async () => {

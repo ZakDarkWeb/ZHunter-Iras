@@ -314,3 +314,8 @@
 ## v8.9.x
 - Already-listed guard + clear history; banned-words title cleaner; skip-reason reporting; Temu product pages huntable.
 ## v8.8.x — multi-store. v8.7.x — auto-upload. v8.6.x — categories editor. v8.5.x — built-in Temu export.
+
+## 2026-10-05 - Audit safeguards (same v9.12.13)
+- Selected-only exports, source-price preservation, conflict-aware Library saves, truthful upload marking, strict store/template checks and interrupted-upload review.
+- Backup/reset fixes, profile-only AI credentials, supplier-scoped IDs, fact checks, larger content budgets, persisted settings and independent sourcing retries.
+- Local storage and headless browser regression fixtures; live integration checks remain pending. See EXTENSION_AUDIT_2026-10-04.md.

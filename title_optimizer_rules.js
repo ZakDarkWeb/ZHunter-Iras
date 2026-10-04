@@ -131,6 +131,7 @@ function zhContentWordRe(word, flags = 'i') {
   return new RegExp('(?<![a-z0-9])' + escaped + '(?![a-z0-9])', flags);
 }
 function zhProductEvidence(row) {
+  row = row?._sourceFacts || row;
   return [row?._rawTitle, row?.title, row?.description, ...(Array.isArray(row?.bullets) ? row.bullets : [row?.bullets]),
     row?.brand, row?.color, row?.size, row?.material, row?.weight, row?.variants,
     row?.brand ? 'Sourced brand: ' + String(row.brand).replace(/[\r\n]+/g, ' ') : ''].filter(Boolean).join('\n');
@@ -177,6 +178,9 @@ function zhCleanContentClaims(text, evidence = '', extraAvoid = []) {
 }
 function zhAssertProductContent(text, evidence = '', extraAvoid = []) {
   const issues = zhContentIssues(text, evidence, extraAvoid);
+  // Deterministic fact guard: quantities, common materials, audiences and functions.
+  for (const match of String(text).matchAll(/\b\d+(?:\.\d+)?\b/g)) if (!zhContentWordRe(match[0]).test(evidence)) issues.push('Unsupported quantity/specification: ' + match[0]);
+  for (const term of ['stainless steel','cotton','leather','silicone','plastic','wooden','waterproof','for kids','for children','for babies','for adults']) if (zhContentWordRe(term).test(text) && !zhContentWordRe(term).test(evidence)) issues.push('Unsupported feature: ' + term);
   if (issues.length) throw new Error('Claims/unsupported details hataein: ' + issues.join(', '));
   return text;
 }

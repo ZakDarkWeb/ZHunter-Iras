@@ -100,32 +100,6 @@
 
 
   // ── Quick settings (side panel) → same keys as the full settings page ──
-  const qs = $$('#tab-settings [data-setting]');
-  async function loadQuickSettings() {
-    try {
-      const d = await msg({ action: 'GET_DATA' });
-      const st = d?.settings || {};
-      qs.forEach(el => {
-        const k = el.dataset.setting;
-        if (el.type === 'checkbox') el.checked = st[k] !== undefined ? !!st[k] : true;
-        else if (st[k] !== undefined) el.value = st[k];
-      });
-    } catch (_) {}
-  }
-  qs.forEach(el => el.addEventListener('change', async () => {
-    const k = el.dataset.setting;
-    const v = el.type === 'checkbox' ? el.checked : el.value;
-    try {
-      const res = await msg({ action: 'UPDATE_SETTINGS', settings: { [k]: v } });
-      if (res?.success === false) throw new Error();
-      if (k === 'bulkAutoCloseTabs' && typeof BulkState !== 'undefined') { BulkState.AUTO_CLOSE_TABS = !!v; const c = $('bulkAutoCloseToggle'); if (c) c.checked = !!v; }
-      if (typeof State !== 'undefined' && State.data?.settings) State.data.settings[k] = v;
-      toast('Saved', 'ok');
-    } catch (_) { toast('Could not save setting', 'err'); }
-  }));
-  document.querySelector('#tab-btn-settings')?.addEventListener('click', loadQuickSettings);
-  loadQuickSettings();
-
   // ── Settings tab ────────────────────────────────────────────
   function syncThemeSeg() {
     const light = document.body.classList.contains('light-mode');
@@ -140,41 +114,6 @@
   new MutationObserver(syncThemeSeg).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   syncThemeSeg();
   // ── In-panel Data Management ──────────────────────────────
-  $('spBackupDataBtn')?.addEventListener('click', async () => {
-    try {
-      const d = await msg({ action: 'GET_DATA' });
-      const backup = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        masterSheet: d?.masterSheet || [],
-        batches: d?.batches || [],
-        queue: d?.queue || [],
-        settings: d?.settings || {}
-      };
-      if (!backup.masterSheet.length && !backup.queue.length) {
-        toast('Nothing to back up yet', 'warn');
-        return;
-      }
-      const json = JSON.stringify(backup, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `zhunter-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast(`Backup saved: ${backup.masterSheet.length} items`, 'ok');
-    } catch {
-      toast('Backup failed', 'err');
-    }
-  });
-
-  $('spResetLibraryBtn')?.addEventListener('click', () => {
-    $('masterResetBtn')?.click();
-  });
-
-
-  // ── Sliding tab indicator ───────────────────────────────────
   const nav = document.querySelector('.tab-nav');
   function moveIndicator() {
     const a = nav?.querySelector('.tab-btn.active:not(.hidden)');

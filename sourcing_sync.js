@@ -82,7 +82,7 @@ async function zhSourcingConnect(config) {
 async function zhSourcingStatus() {
   const saved = await chrome.storage.local.get(['zhSourcingConnection', 'zhSourcingBatches']);
   const batches = saved.zhSourcingBatches || [];
-  return { success: true, connected: !!saved.zhSourcingConnection, pending: batches.filter(b => b.state !== 'synced').length, error: batches.filter(b => b.error).at(-1)?.error || '', sheetUrl: saved.zhSourcingConnection ? `https://docs.google.com/spreadsheets/d/${saved.zhSourcingConnection.spreadsheetId}/edit` : '' };
+  return { success: true, connected: !!saved.zhSourcingConnection, pending: batches.filter(b => b.state !== 'synced').length, error: batches.filter(b => b.error).at(-1)?.error || '', endpoint: saved.zhSourcingConnection?.endpoint || '', spreadsheetId: saved.zhSourcingConnection?.spreadsheetId || '', sheetUrl: saved.zhSourcingConnection ? `https://docs.google.com/spreadsheets/d/${saved.zhSourcingConnection.spreadsheetId}/edit` : '' };
 }
 async function zhSourcingOpen(url) {
   const config = (await chrome.storage.local.get('zhSourcingConnection')).zhSourcingConnection;
@@ -100,16 +100,19 @@ async function zhSourcingRetry(open = false, targetId = '') {
     if (!config) return { success: false, pending: batches.filter(b => b.state !== 'synced').length, error: 'Sourcing records saved locally. Connect Google Sheet in Temu Settings.' };
     const sheetId = zhSourcingSheetId(config.spreadsheetId);
     let lastUrl = '', synced = 0;
-    for (const batch of batches.filter(b => b.state !== 'synced')) {
+    for (const batch of batches.filter(b => b.state !== 'synced' && (open || !b.nextRetryAt || b.nextRetryAt <= Date.now()))) {
       try {
         const data = await zhSourcingPost(config, { action: 'append', batch });
         if (data.batchId !== batch.id || data.count !== batch.items.length || !Number.isInteger(data.gid)) throw new Error('Google append verification incomplete.');
         batch.state = 'synced'; batch.error = ''; batch.syncedAt = Date.now(); batch.gid = data.gid; synced++;
         lastUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${data.gid}`;
-      } catch (e) { batch.error = e.message; batch.attempts++; }
+      } catch (e) { batch.error = e.message; batch.attempts++; batch.nextRetryAt = Date.now() + Math.min(3600000, 300000 * Math.pow(2, Math.min(batch.attempts - 1, 4))); }
       await chrome.storage.local.set({ zhSourcingBatches: batches });
-      if (batch.error) break;
+      // One failed store must not hold unrelated stores behind it.
     }
+    const done = batches.filter(b => b.state === 'synced').sort((a,b) => b.syncedAt - a.syncedAt);
+    const retain = new Set(done.slice(0, 300).map(b => b.id));
+    await chrome.storage.local.set({ zhSourcingBatches: batches.filter(b => b.state !== 'synced' || retain.has(b.id)) });
     const target = targetId && batches.find(b => b.id === targetId && b.state === 'synced');
     if (target) lastUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${target.gid}`;
     if (open && lastUrl) await zhSourcingOpen(lastUrl);

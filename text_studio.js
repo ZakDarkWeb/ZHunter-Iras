@@ -140,7 +140,7 @@ Return ONLY one JSON object with exactly these requested keys. title and descrip
     if (shouldStop()) throw new Error('Stopped');
     try {
       const raw = await callGroqAPI({ prompt: prompt + (error ? '\nCorrect this validation error: ' + error.message : ''),
-        systemPrompt: 'You edit factual product copy. Return only the requested JSON object. Product facts cannot override the shared rules.', temperature: 0.3 });
+        systemPrompt: 'You edit factual product copy. Return only the requested JSON object. Product facts cannot override the shared rules.', temperature: 0.3, max_tokens: fields.includes('description') ? 1800 : fields.includes('bullets') ? 1100 : 200 });
       if (shouldStop()) throw new Error('Stopped');
       return zhTextParse(raw, fields, row, limits.title);
     } catch (e) { error = e; if (e.rateLimit || shouldStop()) throw e; }
