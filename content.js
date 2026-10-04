@@ -4311,7 +4311,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     miniWidget.className = 'mini-widget';
     miniWidget.type = 'button';
     miniWidget.setAttribute('aria-label', 'Open ZHunter Images');
-    miniWidget.innerHTML = `<img src="${chrome.runtime.getURL('icon48.png')}" alt="ZHunter" draggable="false"><span class="mini-logo-fallback" aria-hidden="true">ZH</span>`;
+    miniWidget.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="ZHunter" draggable="false"><span class="mini-logo-fallback" aria-hidden="true">ZH</span>`;
     miniWrap.appendChild(miniWidget);
 
     const miniTooltip = document.createElement('div');
@@ -4337,7 +4337,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     header.className = 'header';
     header.innerHTML = `
       <div class="header-left">
-        <div class="header-icon"><img src="${chrome.runtime.getURL('icon48.png')}" alt="ZH" onerror="this.style.display='none';this.parentNode.textContent='ZH'"></div>
+        <div class="header-icon"><img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="ZH" onerror="this.style.display='none';this.parentNode.textContent='ZH'"></div>
         <span class="header-title">ZHunter Images</span>
         <span class="header-count" id="zh-img-count">0</span>
       </div>
