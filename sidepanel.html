@@ -12,7 +12,7 @@
     <div class="brand-logo-wrap"><div class="brand-logo-glow"></div><img src="icons/icon48.png" alt="" class="brand-logo-img" data-onerror="hide" /></div>
     <div class="brand-text">
       <div class="brand-name-row"><span class="brand-name">ZHunter</span><span class="brand-pro">IRAS</span></div>
-      <div class="brand-meta"><span class="brand-version" data-version>v9.8.0</span><span class="brand-sub">Ultimate Product Hunter</span></div>
+      <div class="brand-meta"><span class="brand-version" data-version>v9.12.13</span><span class="brand-sub">Ultimate Product Hunter</span></div>
     </div>
     <div class="sp"></div>
     <button id="topTemuStorePill" class="hdr-pill-btn temu-top-pill" type="button" title="Open Temu Export">
@@ -266,21 +266,26 @@
           </div>
         </div>
         <div class="notice warn hidden" id="masterWarning"><span><strong>Library is large.</strong> Over 200 rows — export and reset to keep things fast.</span></div>
-        <div class="master-search-wrap">
-          <svg class="i master-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="masterSearchInp" type="search" class="inp master-search-input" placeholder="Search title, store, or price…" autocomplete="off">
-        </div>
-        <div class="master-sort-row">
-          <svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px;opacity:.55;flex-shrink:0"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+        <!-- ── Library Toolbar (Search + Sort + View in one row) ── -->
+        <div class="master-toolbar-row">
+          <div class="master-search-wrap">
+            <svg class="i master-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="masterSearchInp" type="search" class="inp master-search-input" placeholder="Search title, store, or price…" autocomplete="off">
+          </div>
           <select id="masterSortSel" class="sel master-sort-sel">
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="price-desc">Price: High to Low</option>
-            <option value="price-asc">Price: Low to High</option>
-            <option value="platform">Platform A-Z</option>
-            <option value="images">Most images</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="price-desc">Price ▼</option>
+            <option value="price-asc">Price ▲</option>
+            <option value="platform">Platform</option>
+            <option value="images">Most imgs</option>
           </select>
+          <div class="zh-view-switcher" id="masterViewSwitcher">
+            <button type="button" class="zh-view-btn active" data-view="card" title="Visual Cards View">▦</button>
+            <button type="button" class="zh-view-btn" data-view="dense" title="Dense Excel Matrix View">▤</button>
+          </div>
         </div>
+        <!-- ── Platform + Tag filter chips ── -->
         <div class="master-filter-chips" id="masterFilterChips">
           <div class="filter-chips-scroll">
             <button type="button" class="filter-chip active" data-filter="all">All</button>
@@ -290,20 +295,16 @@
             <button type="button" class="filter-chip" data-filter="sam">Sam's Club</button>
             <button type="button" class="filter-chip" data-filter="ali">AliExpress</button>
             <button type="button" class="filter-chip filter-chip-star" data-filter="starred">★ Starred</button>
+            <button type="button" class="filter-chip filter-chip-tag" data-filter="tagged" id="masterFilterTagged" title="Show only products that have at least one tag">🏷 Tagged</button>
           </div>
           <div class="filter-chips-tools">
             <button type="button" class="filter-chip filter-chip-warn" data-filter="problems" id="masterFilterProblems" title="Show only items with errors, missing price, or warnings">⚠️ Problems (<span id="masterProblemCount">0</span>)</button>
             <button type="button" class="filter-chip filter-chip-toggle" id="compactModeToggle" title="Toggle ultra-compact row height">🗜️ Compact</button>
           </div>
         </div>
+        <!-- ── Row header: label + selection actions ── -->
         <div class="h" style="align-items:center;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="lbl" style="margin:0;">Saved products</span>
-            <div class="zh-view-switcher" id="masterViewSwitcher">
-              <button type="button" class="zh-view-btn active" data-view="card" title="Visual Cards View">▦ Cards</button>
-              <button type="button" class="zh-view-btn" data-view="dense" title="Dense Excel Matrix View">▤ Dense</button>
-            </div>
-          </div>
+          <span class="lbl" style="margin:0;">Saved products</span>
           <div class="h-actions">
             <button id="masterSelectAllBtn" class="btn btn-ghost btn-xs" type="button">All</button>
             <button id="masterSelectFailedBtn" class="btn btn-ghost btn-xs" type="button">Failed</button>
@@ -808,8 +809,8 @@
 
   <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- ── Keyboard Shortcuts Modal ── -->
-  <div id="shortcutsModal" class="modal-back hidden">
+  <!-- ── Keyboard Shortcuts Modal (legacy inline version — superseded by shortcutsModal lightbox below) ── -->
+  <div id="shortcutsModalLegacy" class="modal-back hidden" aria-hidden="true">
     <div class="modal-box shortcuts-modal-box">
       <div class="modal-head">
         <div class="modal-head-title" style="display:flex;align-items:center;gap:8px">
@@ -1105,7 +1106,7 @@
         <div class="temu-pane" data-tpane="settings">
 
           <!-- 1. Pricing & Stock -->
-          <details class="temu-card temu-settings-card" data-settings-fold="pricing"><summary class="temu-card-header temu-settings-summary">
+          <details class="temu-card temu-settings-card" data-settings-fold="pricing" open><summary class="temu-card-header temu-settings-summary">
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M17 6H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H6"/></svg>
                 <div>
@@ -1469,11 +1470,11 @@
             </div>
             <div id="temuProgressStatus" class="temu-prog-status">Aaj abhi kuch listed nahi</div>
 
-            <!-- Last 7 Days -->
-            <details class="temu-week-section" data-settings-fold="history-week">
-              <summary class="temu-week-title">Last 7 days</summary>
+            <!-- Last 7 Days — always visible mini sparkline -->
+            <div class="temu-week-section">
+              <div class="temu-week-title">Last 7 days</div>
               <div id="temuWeekDays" class="temu-week-days"></div>
-            </details>
+            </div>
           </div>
 
           <!-- History Records Card -->

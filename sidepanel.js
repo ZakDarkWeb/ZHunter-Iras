@@ -4593,7 +4593,10 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = [
+  "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",
+  "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"
+]; // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -8294,6 +8297,8 @@ function filterAndRenderMasterRows() {
     rows = rows.filter(isProblem);
   } else if (plat === 'starred') {
     rows = rows.filter(r => !!r.starred);
+  } else if (plat === 'tagged') {
+    rows = rows.filter(r => Array.isArray(r.tags) && r.tags.length > 0);
   } else if (plat !== 'all') {
     rows = rows.filter(r => {
       const p = (r.platform || '').toLowerCase();
@@ -12806,6 +12811,27 @@ function temuRenderProfiles() {
         <div class="temu-cat-chips">${chipsHtml}</div>
       </div>
     `;
+
+    // Inject keyword preview pills (visible when collapsed)
+    const kwPreview = document.createElement('div');
+    kwPreview.className = 'temu-cat-kw-preview';
+    (p.match || []).slice(0, 4).forEach(kw => {
+      const label = String(kw).split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      const pill = document.createElement('span');
+      pill.className = 'temu-cat-kw-pill';
+      pill.textContent = label;
+      kwPreview.appendChild(pill);
+    });
+    if ((p.match || []).length > 4) {
+      const more = document.createElement('span');
+      more.className = 'temu-cat-kw-pill';
+      more.style.color = 'var(--ink-4)';
+      more.textContent = `+${(p.match || []).length - 4} more`;
+      kwPreview.appendChild(more);
+    }
+    const head = item.querySelector('.temu-cat-head');
+    const body = item.querySelector('.temu-cat-body');
+    if (head && body) item.insertBefore(kwPreview, body);
 
     item.querySelector('.temu-cat-head').addEventListener('click', (e) => {
       if (e.target.closest('.temu-cat-actions')) return;

@@ -1686,7 +1686,7 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 .temu-inline-msg.ok { color: var(--ok); font-weight: 600; }
 .temu-inline-msg.bad { color: var(--bad); font-weight: 600; }
 
-/* ── Temu Categories Tab UI/UX ────────────────────────────── */
+/* ── Temu Categories Tab UI/UX (Modern Professional Redesign) ────── */
 .temu-cat-header-banner {
   display: flex;
   align-items: center;
@@ -2095,6 +2095,28 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 .temu-cat-item.collapsed .temu-cat-body {
   display: none;
 }
+/* Collapsed keyword preview row — visible under header when collapsed */
+.temu-cat-kw-preview {
+  display: none;
+  padding: 3px 12px 6px 38px;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.temu-cat-item.collapsed .temu-cat-kw-preview {
+  display: flex;
+}
+.temu-cat-kw-pill {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.18);
+  color: var(--ink-3);
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .temu-cat-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2289,7 +2311,33 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 @keyframes popIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* ── Library Sort Row ────────────────────────────────────── */
+/* ── Library Toolbar (combined search + sort + view) ─────── */
+.master-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.master-toolbar-row .master-search-wrap {
+  flex: 1;
+  margin-bottom: 0;
+}
+.master-toolbar-row .master-sort-sel {
+  width: 96px;
+  flex-shrink: 0;
+  height: 34px;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 6px;
+}
+.master-toolbar-row .zh-view-switcher {
+  flex-shrink: 0;
+  margin: 0;
+}
+.master-search-wrap { position: relative; display: flex; align-items: center; margin-bottom: 8px; }
+.master-search-ico { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--ink-3); pointer-events: none; }
+.master-search-input { width: 100%; padding-left: 32px; height: 34px; font-size: 12px; }
+/* Legacy sort row (kept for fallback) */
 .master-sort-row { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
 .master-sort-sel { height: 28px; font-size: 11.5px; flex: 1; padding: 0 8px; border-radius: 6px; }
 
@@ -2307,6 +2355,8 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 .filter-chip.active { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #050816; border-color: transparent; font-weight: 700; box-shadow: 0 0 8px var(--accent-glow); }
 .filter-chip-star { border-color: rgba(251,191,36,.3) !important; }
 .filter-chip-star.active { background: rgba(251,191,36,.15) !important; color: #FBBF24 !important; border-color: rgba(251,191,36,.5) !important; }
+.filter-chip-tag { border-color: rgba(168,85,247,.3) !important; }
+.filter-chip-tag.active { background: rgba(168,85,247,.15) !important; color: #A855F7 !important; border-color: rgba(168,85,247,.5) !important; }
 .filter-chip-warn { border-color: rgba(245,158,11,.35); color: #F59E0B; }
 .filter-chip-warn.active { background: rgba(245,158,11,.2) !important; color: #F59E0B !important; border-color: #F59E0B !important; }
 .filter-chip-toggle { border-color: var(--line-2); }
@@ -4607,9 +4657,10 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 [data-tpane="settings"] .temu-settings-card { display: block; padding: 0; background: var(--surface); border-radius: var(--r-lg); margin-bottom: 9px; }
 [data-tpane="settings"] .temu-settings-card:hover { border-color: var(--accent-line); }
 .temu-settings-summary { list-style: none; cursor: pointer; gap: 10px; padding: 13px 14px; }
-.temu-settings-summary::-webkit-details-marker, .tg-dept-head::-webkit-details-marker, .temu-week-title::-webkit-details-marker { display: none; }
-.temu-settings-summary::after, .tg-dept-head::after, .temu-week-title::after { content: '\203A'; flex-shrink: 0; margin-left: auto; color: var(--accent-ink); font-size: 18px; line-height: 1; transition: transform var(--dur); }
-.temu-settings-card[open] > summary::after, .tg-dept-wrap[open] > summary::after, .temu-week-section[open] > summary::after { transform: rotate(90deg); }
+.temu-settings-summary::-webkit-details-marker, .tg-dept-head::-webkit-details-marker { display: none; }
+.temu-settings-summary::after, .tg-dept-head::after { content: '\203A'; flex-shrink: 0; margin-left: auto; color: var(--accent-ink); font-size: 18px; line-height: 1; transition: transform var(--dur); }
+/* temu-week-title is now a div, not summary — no arrow needed */
+.temu-settings-card[open] > summary::after, .tg-dept-wrap[open] > summary::after { transform: rotate(90deg); }
 .temu-settings-card[open] > summary { border-bottom: 1px solid var(--line-2); background: var(--accent-soft); }
 .temu-settings-summary > div { flex: 1; min-width: 0; }.temu-settings-summary .temu-card-title-group { min-width: 0; }.temu-settings-icon { width: 18px !important; height: 18px !important; color: var(--accent-ink); }
 .temu-settings-summary .temu-card-subtitle { line-height: 1.45; color: var(--ink-2); }.temu-setting-content { display: flex; flex-direction: column; gap: 12px; padding: 13px 14px; }
