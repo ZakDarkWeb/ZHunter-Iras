@@ -46,6 +46,8 @@ Chrome MV3 side-panel extension. Amazon, Walmart, Sam's Club, Temu, Alibaba wagh
 | `manifest.json` | – | MV3, name "ZHunter Iras", version, permissions, content scripts |
 | `sidepanel.html` | ~1840 | Poora UI: tabs Hunt / Bulk / Library / Settings, Temu Export modal, bulk progress popup, Edit Studio, mode chooser |
 | `sidepanel.js` | ~15200 | Saari UI logic, bulk hunt, Library, Temu export (module `const TEMU_DEFAULT_CONFIG` se neeche), AI Image Studio, Edit Studio |
+| `text_studio.js` | ~350 | Bulk Content Studio: titles, bullet points, description; staged drafts, manual preview, field-only saves and persistent `zhTextEdits` recovery |
+| `title_optimizer_rules.js` | ~180 | Shared title structure and contextual claim rules used by all AI title/copy paths and export cleaning |
 | `style.css` | ~3920 | Sab styles; naye versions ke styles file ke aakhir mein |
 | `background.js` | ~1900 | Service worker: storage, settings (`PUBLIC_SETTING_KEYS` allowlist!), image fetch, CDP click, Temu upload (`temuBgAutoUpload`) |
 | `content.js` | ~5300 | Har page par scraper (`SCRAPE_PAGE`, `PING`, `extractProductDetails`) + Temu page automation (`temuPageAutoUpload`, `TEMU_FIX_DRAFTS`) |

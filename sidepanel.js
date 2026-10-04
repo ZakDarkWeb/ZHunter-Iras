@@ -4779,6 +4779,7 @@ async function runGroqBatchOptimization(actionOrInstruction) {
   const progressText = $('aiProgressText');
   if (progressStrip) progressStrip.classList.remove('hidden');
 
+  const changes = [];
   const total = selected.length;
   let processed = 0;
   const batchSize = 4;
@@ -4787,9 +4788,13 @@ async function runGroqBatchOptimization(actionOrInstruction) {
 
   for (let i = 0; i < total; i += batchSize) {
     const batch = selected.slice(i, i + batchSize);
-    const batchInput = batch.map(b => ({ id: b.id, title: b.title || '(untitled)' }));
+    const batchInput = batch.map(b => ({ id: b.id, title: b.title || '(untitled)', facts: zhProductEvidence(b) }));
 
-    const prompt = `Instruction: ${instruction}
+    const prompt = `Shared factual title and contextual claim rules:
+${JSON.stringify(ZH_TITLE_OPTIMIZER_RULES.title_optimization)}
+${JSON.stringify(ZH_TITLE_OPTIMIZER_RULES.restricted_content)}
+${JSON.stringify(ZH_TITLE_OPTIMIZER_RULES.context_rule)}
+Instruction (subject to the shared rules): ${instruction}
 
 Input JSON list of products:
 ${JSON.stringify(batchInput, null, 2)}
@@ -4812,8 +4817,13 @@ Do not wrap in markdown quotes if possible, return raw JSON array only.`;
       if (Array.isArray(results)) {
         results.forEach(item => {
           if (item?.id && item?.new_title) {
-            const target = MasterUIState.allRows.find(r => r.id === item.id);
-            if (target) target.title = item.new_title.trim();
+            const target = batch.find(r => r.id === item.id);
+            if (target) {
+              const title = cleanTemuTitleResult(item.new_title);
+              zhAssertProductContent(title, zhProductEvidence(target), temuGetCfg().title_remove_words || []);
+              changes.push({ id: target.id, url: target.url, old: target.title, title });
+              target.title = title;
+            }
           }
         });
       }
@@ -4828,7 +4838,7 @@ Do not wrap in markdown quotes if possible, return raw JSON array only.`;
     if (progressText) progressText.textContent = `Optimized ${processed}/${total} products (${pct}%)`;
   }
 
-  await setMasterRows(MasterUIState.allRows);
+  if (changes.length) await temuSaveTitles(changes);
   filterAndRenderMasterRows();
 
   if (progressText) progressText.textContent = `✓ Done! Optimized ${total} products.`;
@@ -5011,7 +5021,7 @@ function initGroqStudio() {
       const target = MasterUIState.allRows.find(r => r.id === snap.id);
       if (target) target.title = snap.title;
     });
-    await setMasterRows(MasterUIState.allRows);
+    await temuSaveTitles(MasterUIState.lastAiUndo.map(snap => ({ id: snap.id, url: MasterUIState.allRows.find(r => r.id === snap.id)?.url, title: snap.title })));
     filterAndRenderMasterRows();
     $('aiUndoBtn')?.classList.add('hidden');
     toast('Reverted AI changes', 'ok');
@@ -11266,12 +11276,17 @@ function temuShorten(t, max) {
 }
 
 // strip platform/store + title-remove words; drop sentences with avoid words
-function temuScrubText(t, cfg, extraBrand) {
+function temuScrubText(t, cfg, extraBrand, evidence = t) {
   const strip = [...(cfg.title_remove_words || [])];
   if (extraBrand) strip.push(extraBrand);
-  const avoid = [...new Set([...TEMU_PLATFORM_WORDS, ...TEMU_DESC_AVOID_DEFAULT, ...(cfg.desc_avoid_words || [])])].map(w => String(w || '').trim()).filter(Boolean).map(temuWordRe);
-  const keep = temuSentences(t).filter(sn => !TEMU_JUNK_SENT_RE.test(sn) && !avoid.some(re => re.test(sn)));
-  let out = keep.join(' ');
+  const normalize = w => String(w).toLowerCase().replace(/[ -]+/g, ' ');
+  const restricted = new Set(Object.values(ZH_TITLE_OPTIMIZER_RULES.restricted_content.categories).flat().map(normalize));
+  const legacy = new Set(TEMU_DESC_AVOID_DEFAULT.map(normalize));
+  const avoid = [...new Set([...TEMU_PLATFORM_WORDS,
+    ...TEMU_DESC_AVOID_DEFAULT.filter(w => !restricted.has(normalize(w))),
+    ...(cfg.desc_avoid_words || []).filter(w => !legacy.has(normalize(w)))])];
+  let out = temuSentences(t).filter(sn => !TEMU_JUNK_SENT_RE.test(sn)).join(' ');
+  out = zhCleanContentClaims(out, evidence, avoid);
   strip.forEach(w => { w = String(w || '').trim(); if (w) out = out.replace(new RegExp(temuWordRe(w).source, 'gi'), ' '); });
   out = out.replace(/\(\s*\)/g, '').replace(/\s+([,.;:!?])/g, '$1').replace(/([,;:])\1+/g, '$1')
            .replace(/^[\s,.;:\-–]+/, '').replace(/\s{2,}/g, ' ').trim();
@@ -11291,7 +11306,7 @@ function temuBuildCopy(r, title, cfg, brandOk) {
   for (const b0 of raw) {
     let b = temuCleanText(b0);
     if (!b || TEMU_JUNK_LINE_RE.test(b)) continue;
-    b = temuScrubText(b, cfg, brandStrip);
+    b = temuScrubText(b, cfg, brandStrip, zhProductEvidence(r));
     b = b.replace(/^[a-z]/, c => c.toUpperCase());
     if (b.length < 15 || !/[a-z]{3}/i.test(b)) continue;
     b = temuShorten(b, BULLET_MAX);
@@ -11302,10 +11317,10 @@ function temuBuildCopy(r, title, cfg, brandOk) {
     if (bullets.length >= 6) break;
   }
   // description: cleaned hunted description, else built from the bullets
-  let desc = descClean ? temuScrubText(descClean, cfg, brandStrip) : '';
+  let desc = descClean ? temuScrubText(descClean, cfg, brandStrip, zhProductEvidence(r)) : '';
   if (desc.length < 60) desc = bullets.map(b => b.replace(/^[^:]{2,40}:\s*/, '')).join(' ');
   desc = temuShorten(desc.replace(/\s{2,}/g, ' ').trim(), DESC_MAX);
-  if (desc && title && desc.length < 120) desc = temuShorten(title.replace(/[.\s]+$/, '') + '. ' + desc, DESC_MAX);
+  if (desc && title && desc.length < 120) desc = temuShorten(zhCleanContentClaims(title, zhProductEvidence(r), cfg.title_remove_words || []).replace(/[.\s]+$/, '') + '. ' + desc, DESC_MAX);
   return { bullets, description: desc };
 }
 
@@ -11454,7 +11469,7 @@ function temuGetCfg() {
   return { ...base, ...saved, category_profiles: mergedProfiles, defaults: { ...base.defaults, ...saved.defaults } };
 }
 
-function temuCleanTitle(t, cfg) {
+function temuCleanTitle(t, cfg, row = null) {
   t = String(t || '').replace(/\s+/g, ' ').trim();
   ['Amazon.com :', 'Amazon.com:', 'Walmart.com:'].forEach(p => { if (t.toLowerCase().startsWith(p.toLowerCase())) t = t.slice(p.length).trim(); });
   // v8.9.0: remove banned/violation words (case-insensitive whole phrases)
@@ -11465,7 +11480,8 @@ function temuCleanTitle(t, cfg) {
     t = t.replace(re, ' ');
   });
   t = t.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!])/g, '$1').replace(/^[\s,.;:\-–]+|[\s,.;:\-–]+$/g, '');
-  return t.slice(0, 500);
+  const cleaned = zhCleanContentClaims(t, row ? zhProductEvidence(row) : t, cfg.title_remove_words || []);
+  return cleaned.length > 180 ? cleanTemuTitleResult(cleaned) : cleaned;
 }
 
 function temuSourceId(url) {
@@ -11640,7 +11656,7 @@ function temuEnrich(rows, cfg) {
   const items = [], usedSku = new Set(), seenSrc = new Set(), skipped = [];
   const d = cfg.defaults;
   rows.forEach(r => {
-    const title = temuCleanTitle(r.title, cfg);
+    const title = temuCleanTitle(r.title, cfg, r);
     const url = r.url || '';
     if (!title || !url) { skipped.push((!url ? 'no url: ' : 'no title: ') + String(r.title || r.url || '?').slice(0, 40)); return; } // v9.7.2: chup-chaap drop nahi
     let uhost = ''; try { uhost = new URL(url).hostname; } catch (_) {}
@@ -11837,6 +11853,7 @@ async function temuRunExport(opts = {}) {
     } else {
       rows = await getMasterRows();
     }
+    if (typeof zhApplyTextEdits === 'function') await zhApplyTextEdits(rows);
     if (!rows.length) { say('✗ Export ke liye koi product nahi mila.\n→ Bulk tab → "Hunt all open tabs" chalayen (ya data source "Library" karein), phir dobara try karein.'); toast('No products — pehle hunt karein', 'warn'); return; }
     say('Checking images & converting ' + rows.length + ' products…');
 
@@ -13597,36 +13614,7 @@ function temuRefreshReviewPrices() {
 const ECOM_JUNK_RE = /\b(add to cart|add to list|add to registry|buy now|in stock|out of stock|free shipping|free delivery|pickup today|popular pick|best seller|sold & shipped by|sponsored|ratings?|reviews?)\b/gi;
 
 function getTemuOptimizerInstruction(userPrompt) {
-  let base = `Role: Temu Product Title Optimization Engine.
-Objective: Create a descriptive, professional, relevant, search-friendly Temu product title.
-
-Recommended Structure:
-Quantifier + Core Feature + Short Product Keywords + Additional Feature + Alternative Keyword + Target Market / Audience + Size / Color (if applicable) + Product Category
-Use commas between relevant keyword groups.
-
-Rules:
-1. Make the title descriptive rather than unnecessarily short. Target length: 130 to 170 characters (never exceed 180).
-2. Retain factual details provided in the product: brand, product type, flavor, color, size, pack count/quantity.
-3. Do not use keyword stuffing or repeat keywords unnecessarily.
-4. Do not invent specifications, materials, certifications, or intended uses.
-5. NEVER include website/e-commerce button phrases ("Add to cart", "Free shipping", "In stock", "Pickup today", "Best seller").
-
-CRITICAL - RESTRICTED CONTENT AVOIDANCE (Zero Tolerance on Temu):
-Strictly avoid unsupported or restricted claims across all these categories:
-- Health & Medical: medical, medicine, therapeutic, treatment, cure, healing, disease, illness, clinical, therapy, pain relief, anti-inflammatory, infection, antibacterial, antiviral, antifungal, orthopedic, medical-grade.
-- Allergy: allergy-free, allergy relief, anti-allergy, hypoallergenic, allergen-free, prevents allergies.
-- Environmental: eco-friendly, sustainable, biodegradable, compostable, recyclable, carbon-neutral, non-toxic, chemical-free, organic, environmentally safe.
-- Safety & Performance: safe, safer, harmless, guaranteed, protective, effective, highly effective, professional-grade, risk-free, 100% safe, 100% effective.
-- Certification & Authority: FDA approved, CE certified, certified, approved, clinically tested, laboratory tested, doctor recommended, official.
-- Context Rule: If a restricted claim appears in the source, remove it or replace it with a neutral factual description (e.g. mention the factual material or color instead of "100% safe non-toxic").
-
-Output Control:
-Output ONLY the final optimized title text. No quotation marks, no explanation, no labels, no bullet points, no markdown.`;
-
-  if (userPrompt?.trim()) {
-    base += `\nAdditional user preferences: ${userPrompt.trim()}`;
-  }
-  return base;
+  return zhTitleRulesPrompt(userPrompt || '');
 }
 
 function buildProductAiPrompt(r, currentTitle, instruction) {
@@ -13634,6 +13622,7 @@ function buildProductAiPrompt(r, currentTitle, instruction) {
 
   const parts = [];
   parts.push(`Original Product Base: "${rawBase}"`);
+  if (currentTitle && currentTitle !== rawBase) parts.push(`Current product title / pack details: "${currentTitle}"`);
   if (r.brand && !rawBase.toLowerCase().includes(r.brand.toLowerCase())) {
     parts.push(`Brand: ${r.brand}`);
   }
@@ -13684,10 +13673,11 @@ function cleanTemuTitleResult(raw, currentTitle, useDefaultLength) {
   // Strip unwanted markdown, newlines, and surrounding quotes
   title = title.replace(/^#+\s*/, '').replace(/^\*+|\*+$/g, '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
   title = title.replace(/^["'`]|["'`]$/g, '').trim();
+  title = title.replace(/^(?:optimized\s+(?:product\s+)?title|product\s+title|title)\s*:\s*/i, '').trim();
   // Clean up any double commas or leading/trailing commas
   title = title.replace(/,\s*,+/g, ',').replace(/^,\s*|,\s*$/g, '').trim();
 
-  if (!title) throw new Error('AI ne valid title return nahi kiya');
+  if (!title || /^(?:DONE|TITLE ONLY|\[object Object\])$/i.test(title)) throw new Error('AI ne valid product title return nahi kiya');
 
   // Enforce Temu maximum title limit of 180 characters gracefully without cutting words awkwardly
   if (title.length > 180) {
@@ -13708,12 +13698,15 @@ async function rewriteValidatedTemuTitle(r, currentTitle, instruction, useDefaul
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const raw = await callGroqAPI({
-        prompt: base + `\nTarget length: 130-165 characters (max 180). Return ONLY the single final optimized title text. No quotes, no markdown, no explanations.`,
+        prompt: base + (lastErr ? '\nCorrect this error: ' + lastErr.message : '') + `\nTarget length: 130-165 characters (max 180). Return ONLY the single final optimized title text. No quotes, no markdown, no explanations.`,
         systemPrompt: 'You are an expert Temu Product Title Optimization Engine. Return ONLY the single final optimized title text without conversational filler, markdown formatting, or quotes.',
         temperature: 0.3
       });
       const cleaned = cleanTemuTitleResult(raw, currentTitle, useDefaultLength);
-      if (cleaned) return cleaned;
+      if (cleaned) {
+        zhAssertProductContent(cleaned, zhProductEvidence(r), temuGetCfg().title_remove_words || []);
+        return cleaned;
+      }
     } catch (e) {
       lastErr = e;
       if (e.rateLimit) throw e;
@@ -13946,35 +13939,12 @@ function temuJumpToCard(id) {
 // Save new titles everywhere WITHOUT overwriting the Library with a stale in-memory copy.
 // changes: [{ id, url, title }]. Returns { inFile, inLib, savedLib } (verified by reading back).
 async function temuSaveTitles(changes) {
-  const pick = (arr, c) => (arr || []).find(x => x && x.id && x.id === c.id) || (c.url ? (arr || []).find(x => x && x.url === c.url) : null);
-  // 1. in-memory copies (Last hunt / Library view / sheet / studio)
-  for (const c of changes) {
-    for (const p of _productRowsById(c.id)) p.title = c.title;
-    const m = pick(MasterUIState?.allRows, c); if (m) m.title = c.title;
-    if (Array.isArray(BulkState?.results)) { const b = pick(BulkState.results, c); if (b) b.title = c.title; }
+  if (typeof zhSaveTextChanges === 'function') {
+    const result = await zhSaveTextChanges(changes.map(c => ({ id: c.id, url: c.url, before: c.old ? { title: c.old } : undefined, patch: { title: c.title } })));
+    try { if (MasterUIState?.allRows?.length) filterAndRenderMasterRows(); } catch (_) {}
+    return result;
   }
-  // 2. Library storage: read fresh, change only these rows
-  let inLib = 0, savedLib = 0;
-  try {
-    const stored = await getMasterRows();
-    let changed = false;
-    for (const c of changes) {
-      const p = pick(stored, c);
-      if (p) { inLib++; if (p.title !== c.title) { p.title = c.title; changed = true; } }
-    }
-    if (changed) await setMasterRows(stored);
-    const again = await getMasterRows();
-    savedLib = changes.filter(c => { const p = pick(again, c); return p && p.title === c.title; }).length;
-  } catch (e) { console.warn('[ZHunter] title save (Library) failed:', e); }
-  try { if (typeof filterAndRenderMasterRows === 'function' && MasterUIState?.allRows?.length) filterAndRenderMasterRows(); } catch (_) {}
-  // 3. verify: the rows the Temu file will be built from
-  let inFile = 0;
-  try {
-    const q = await temuGetQueuedRows();
-    inFile = changes.filter(c => { const p = pick(q, c); return p && p.title === c.title; }).length;
-  } catch (_) {}
-  TemuLast = null; // next export rebuilds with the new titles
-  return { inFile, inLib, savedLib };
+  throw new Error('Content save module load nahi hua; extension reload karein');
 }
 
 // Global review toggle
@@ -14695,7 +14665,8 @@ async function temuGetQueuedRows() {
   else if (source === 'library_sel' && TemuLibPick?.ids) rows = _ensureRowIds((await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id)));
   else if (source === 'sheet' && TemuSheetRows) rows = _ensureRowIds(TemuSheetRows);
   else rows = _ensureRowIds(await getMasterRows());
-  return zhApplyImgEdits(rows);   // v9.12.8 — edited images always come back
+  await zhApplyImgEdits(rows);
+  return typeof zhApplyTextEdits === 'function' ? zhApplyTextEdits(rows) : rows;
 }
 
 // ── Auto Detect & Sync Store from Temu Seller Tab ─────────────────
@@ -15399,7 +15370,7 @@ async function zhStudioOpen(startProductId = null) {
 function zhStudioClose() {
   ZhStudio.open = false;
   $('zhStudioModal')?.classList.add('hidden');
-  if (MasterUIState?.allRows) setMasterRows(MasterUIState.allRows).catch(() => {});
+  temuSaveTitles(ZhStudio.items.map(it => ({ id: it.product.id, url: it.product.url, title: it.product.title }))).catch(e => toast(e.message, 'warn'));
   temuRenderReview().catch(() => {});
 }
 
@@ -15515,15 +15486,12 @@ async function zsAiRewriteTitle(it) {
     const cur = it.product.title || '';
     const base = cur.replace(PACK_PREFIX_RE, '').trim();
     const instruction = getTemuOptimizerInstruction($('temuAiPromptInp')?.value?.trim());
-    const out = await callGroqAPI({
-      prompt: buildProductAiPrompt(it.product, base, instruction),
-      systemPrompt: 'You are a Temu Product Title Optimization Specialist. Return ONLY the new optimized title text, no quotes, no explanation.',
-      temperature: 0.7
-    });
-    let t = String(out || '').trim().replace(/^["'`]|["'`]$/g, '').replace(PACK_PREFIX_RE, '');
+    const out = await rewriteValidatedTemuTitle(it.product, base, instruction);
+    let t = out.replace(PACK_PREFIX_RE, '');
     if (!t) throw new Error('khali jawab');
-    t = packTitle(t, it.pack);
+    t = cleanTemuTitleResult(packTitle(t, it.pack));
     zsSetTitle(it, t);
+    await temuSaveTitles([{ id: it.product.id, url: it.product.url, title: t }]);
     zhStudioRender();
     toast('✨ Title rewrite ho gaya', 'ok');
   } catch (e) {
@@ -15655,7 +15623,8 @@ async function zsPasteInFlow(it) {
 function zsGo(delta) {
   const n = ZhStudio.items.length;
   const p = ZhStudio.page + delta;
-  if (MasterUIState?.allRows) setMasterRows(MasterUIState.allRows).catch(() => {});
+  const current = zsCur();
+  if (current) temuSaveTitles([{ id: current.product.id, url: current.product.url, title: current.product.title }]).catch(e => toast(e.message, 'warn'));
   if (p >= n) { zhStudioClose(); const { done, total } = zsStats(); toast(`🎉 Studio done: ${done}/${total} images replaced`, 'ok'); return; }
   if (p < 0) return;
   ZhStudio.page = p;
