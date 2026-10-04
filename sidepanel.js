@@ -4899,20 +4899,20 @@ function initGroqStudio() {
           headers: { 'Authorization': `Bearer ${k}` }
         });
         if (res.ok) {
-          results.push(`<div style="color:#10b981;">✓ Key #${i + 1} (${masked}): <b>Active (200 OK)</b></div>`);
+          results.push(`<div style="color:var(--ok);">✓ Key #${i + 1} (${masked}): <b>Active (200 OK)</b></div>`);
           activeKeys.push(k);
         } else if (res.status === 401) {
-          results.push(`<div style="color:#ef4444;">✗ Key #${i + 1} (${masked}): <b>Invalid / Expired (401)</b></div>`);
+          results.push(`<div style="color:var(--bad);">✗ Key #${i + 1} (${masked}): <b>Invalid / Expired (401)</b></div>`);
           deadKeys.push(k);
         } else if (res.status === 429) {
-          results.push(`<div style="color:#f59e0b;">⏳ Key #${i + 1} (${masked}): <b>Rate limit / Cooldown (429)</b></div>`);
+          results.push(`<div style="color:var(--warn);">⏳ Key #${i + 1} (${masked}): <b>Rate limit / Cooldown (429)</b></div>`);
           activeKeys.push(k);
         } else {
-          results.push(`<div style="color:#f59e0b;">! Key #${i + 1} (${masked}): HTTP ${res.status}</div>`);
+          results.push(`<div style="color:var(--warn);">! Key #${i + 1} (${masked}): HTTP ${res.status}</div>`);
           activeKeys.push(k);
         }
       } catch (err) {
-        results.push(`<div style="color:#ef4444;">✗ Key #${i + 1} (${masked}): Network error (${err.message})</div>`);
+        results.push(`<div style="color:var(--bad);">✗ Key #${i + 1} (${masked}): Network error (${err.message})</div>`);
       }
     }
 
@@ -4935,7 +4935,7 @@ function initGroqStudio() {
         if ($('groqApiKeyInput')) $('groqApiKeyInput').value = finalKeys[0] || '';
         if ($('groqApiKeysInput')) $('groqApiKeysInput').value = finalKeys.join('\n');
         if ($('groqKeyStatus')) $('groqKeyStatus').textContent = `${finalKeys.length} active keys`;
-        out.innerHTML = `<div style="color:#10b981;font-weight:600;">✓ Dead keys remove ho gayin! Ab ${finalKeys.length} active key(s) hain.</div>`;
+        out.innerHTML = `<div style="color:var(--ok);font-weight:600;">✓ Dead keys remove ho gayin! Ab ${finalKeys.length} active key(s) hain.</div>`;
         toast(`${deadKeys.length} dead keys remove ho gayin!`, 'ok');
       });
     }
