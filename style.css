@@ -23,19 +23,48 @@
   --font: Inter, -apple-system, "Segoe UI", system-ui, Roboto, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --dur: 180ms;
+  /* Semantic theme aliases; all palettes live in this block. */
+  color-scheme: dark;
+  --ink-1: var(--ink); --text-dim: var(--ink-3); --text-sec: var(--ink-2);
+  --surface-1: var(--surface); --surface-4: #162545; --bg-1: #131C2E; --bg-2: #0B1221;
+  --line-3: #324765; --accent-mid: var(--accent-dark);
+  --ai: #8B5CF6; --ai-ink: #C4B5FD; --ai-hover: #6D28D9; --ai-soft: rgba(139,92,246,.12); --ai-line: rgba(139,92,246,.4); --ai-fg: #FFFFFF;
+  --on-image: #FFFFFF; --image-canvas: #020610; --image-overlay: rgba(3,6,15,.7);
+  --disabled-ink: #64748B; --disabled-bg: var(--surface-2); --focus-ring: var(--accent-soft);
+  --panel-shade: rgba(0,0,0,.25); --panel-track: rgba(2,6,23,.55); --panel-inset: rgba(2,6,23,.6);
+  --panel-highlight: rgba(255,255,255,.04); --panel-edge: rgba(255,255,255,.12);
+  --empty-bg: radial-gradient(circle at 50% 25%, rgba(0,229,255,.05) 0%, rgba(10,18,36,.6) 80%);
+  --empty-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 24px rgba(0,0,0,.35);
+  --setup-bg: linear-gradient(135deg, rgba(10,18,35,.6), rgba(10,18,35,.8));
+  --heading-strong: #FFFFFF; --hero-bg: rgba(11,18,33,.92);
+  --stepper-bg: #0B1020; --stepper-edge: rgba(0,229,255,.25);
+  --tab-x: 0px; --tab-w: 0px; --i: 0; --d: 0ms; --x: 0px; --y: 0px;
+
 }
 body.light-mode, html.light-mode {
-  --accent: #0891B2; --accent-hover: #0E7490; --accent-dark: #0369A1; --accent-soft: rgba(8,145,178,.10); --accent-line: rgba(8,145,178,.35); --accent-ink: #0369A1; --accent-fg: #FFFFFF; --accent-glow: rgba(8,145,178,.30);
+  --accent: #0E7490; --accent-hover: #0E7490; --accent-dark: #0369A1; --accent-soft: rgba(8,145,178,.10); --accent-line: rgba(8,145,178,.35); --accent-ink: #0369A1; --accent-fg: #FFFFFF; --accent-glow: rgba(8,145,178,.30);
   --bg: #F3F6FA; --surface: #FFFFFF; --surface-2: #F5F7FA; --surface-3: #EAF0F6; --hover: #E8F4F8; --input: #FFFFFF;
-  --line: #E1E7EF; --line-2: #CBD5E1;
-  --ink: #0F172A; --ink-2: #475569; --ink-3: #64748B; --ink-4: #CBD5E1;
-  --ok: #059669; --ok-soft: rgba(5,150,105,.10); --ok-line: rgba(5,150,105,.3);
+  --line: #D6DEE8; --line-2: #B9C5D4;
+  --ink: #0F172A; --ink-2: #3F4D60; --ink-3: #52637A; --ink-4: #5F7086;
+  --ok: #047857; --ok-soft: rgba(5,150,105,.10); --ok-line: rgba(5,150,105,.3);
   --warn: #B45309; --warn-soft: rgba(180,83,9,.10); --warn-line: rgba(180,83,9,.3);
   --bad: #DC2626; --bad-soft: rgba(220,38,38,.08); --bad-line: rgba(220,38,38,.3);
   --run: #2563EB; --run-soft: rgba(37,99,235,.10);
   --shadow: 0 1px 2px rgba(15,23,42,.06);
   --shadow-pop: 0 16px 40px rgba(15,23,42,.18);
   --glow: 0 4px 14px rgba(8,145,178,.28), inset 0 1px 0 rgba(255,255,255,.2);
+  color-scheme: light;
+  --surface-4: #E2EAF3; --bg-1: var(--surface-2); --bg-2: var(--surface);
+  --line-3: #8A9BB1;
+  --ai: #7C3AED; --ai-ink: #6D28D9; --ai-hover: #5B21B6; --ai-soft: rgba(109,40,217,.08); --ai-line: rgba(109,40,217,.3);
+  --disabled-ink: #64748B; --disabled-bg: #EAF0F6;
+  --panel-shade: var(--surface-2); --panel-track: var(--surface-3); --panel-inset: var(--input);
+  --panel-highlight: var(--hover); --panel-edge: var(--line-2);
+  --empty-bg: linear-gradient(135deg, var(--surface), var(--surface-2)); --empty-shadow: var(--shadow);
+  --setup-bg: linear-gradient(135deg, var(--surface-2), var(--surface-3));
+  --heading-strong: var(--ink); --hero-bg: var(--surface-2);
+  --stepper-bg: var(--surface); --stepper-edge: var(--line-2);
+
 }
 html[data-fx="off"] { --dur: 0ms; }
 @media (prefers-reduced-motion: reduce) { :root { --dur: 0ms; } }
@@ -1058,7 +1087,6 @@ html[data-fx="full"] .app-header::before { content: ""; position: absolute; left
 .empty-ico, .img-tab-empty-ico { background: linear-gradient(135deg, var(--surface-3), var(--surface-2)); box-shadow: inset 0 0 0 1px var(--accent-line), 0 0 16px rgba(0,229,255,.15); }
 
 /* Light mode contrast */
-body.light-mode { --line: #D6DEE8; --line-2: #B9C5D4; --ink-2: #3F4D60; }
 body.light-mode .card, body.light-mode .tbl, body.light-mode .set { box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px -18px rgba(15,23,42,.25); }
 body.light-mode .toast-item::before { color: #fff; }
 
