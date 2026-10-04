@@ -63,6 +63,23 @@ function applyDynamicVersion() {
   document.querySelectorAll('.brand-version, [data-version]').forEach(el => { el.textContent = version; });
 }
 
+function updateStatusLine() {
+  const textEl  = $('statusLineText');
+  const rightEl = $('statusLineRight');
+  if (!textEl) return;
+  // Count items in MasterData (library)
+  const count = (typeof MasterData !== 'undefined' && Array.isArray(MasterData)) ? MasterData.length : 0;
+  if (count > 0) {
+    textEl.textContent = `Library \u2014 ${count} product${count !== 1 ? 's' : ''}`;
+  } else {
+    textEl.textContent = 'Library \u2014 empty';
+  }
+  if (rightEl) {
+    const now = new Date();
+    rightEl.textContent = `Synced ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+}
+
 // ── DOM Helper ───────────────────────────────────────────────
 function $(id) { return document.getElementById(id); }
 
@@ -5047,6 +5064,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initImagesTab();
   initGroqStudio();
   initSettingsPanel();
+  updateStatusLine();
 
   // ── Check for pending image hunt from right-click context menu ──
   setTimeout(async () => {
@@ -10337,12 +10355,15 @@ function renderImgGrid() {
 
   grid.innerHTML = '';
 
+  const actionsBar = $('imgActionsBar');
   const images = ImgState.images;
   if (!images.length) {
     showImgEmpty();
     if (countEl) countEl.textContent = '0 images';
+    if (actionsBar) actionsBar.style.display = 'none';
     return;
   }
+  if (actionsBar) actionsBar.style.display = 'flex';
 
   let visible = 0;
   const total = images.length;

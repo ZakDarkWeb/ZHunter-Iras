@@ -54,7 +54,7 @@
 
       <!-- ── Images pane ── -->
       <div id="hunt-images-pane" class="hunt-sub-pane" role="tabpanel">
-        <div class="h-actions h-actions-inline" style="justify-content:flex-end; margin-bottom:6px">
+        <div class="h-actions h-actions-inline hunt-img-actions" id="imgActionsBar" style="justify-content:flex-end; margin-bottom:6px; display:none">
           <button id="imgSelectAllBtn" class="btn btn-ghost btn-xs" type="button">All</button>
           <button id="imgDeselectAllBtn" class="btn btn-ghost btn-xs" type="button">None</button>
           <button id="imgRefreshBtn" class="btn btn-ghost btn-xs" type="button" title="Re-scan page"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8M3 4v4h4M21 12a9 9 0 0 1-15.5 6.4L3 16M21 20v-4h-4"/></svg></button>
@@ -65,9 +65,16 @@
         </button>
         <div id="imgGrid" class="img-grid">
           <div class="empty" id="imgEmptyState">
-            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
+            <div class="hunt-empty-anim">
+              <svg class="hunt-empty-svg" viewBox="0 0 80 80" fill="none">
+                <rect class="hea-bg" x="8" y="8" width="64" height="64" rx="12"/>
+                <circle class="hea-dot" cx="26" cy="28" r="6"/>
+                <polyline class="hea-arrow" points="8,72 30,44 50,58 72,28"/>
+                <circle class="hea-pulse" cx="40" cy="40" r="30"/>
+              </svg>
+            </div>
             <h3 class="img-tab-empty-title">No product images yet</h3>
-            <p class="img-tab-empty-sub">Open a product page, then press Hunt images.</p>
+            <p class="img-tab-empty-sub">Open a product page, then press <b>Hunt images</b>.</p>
           </div>
         </div>
         <div id="imgScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
@@ -127,14 +134,17 @@
       <!-- Stats bar -->
       <div class="bulk-stats-bar">
         <div class="bulk-stat-item">
+          <span class="bulk-stat-ico"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
           <span class="bulk-stat-num" id="bulkStatTabs">0</span>
           <span class="bulk-stat-lbl">Tabs</span>
         </div>
         <div class="bulk-stat-item stat-done">
+          <span class="bulk-stat-ico"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>
           <span class="bulk-stat-num" id="bulkStatDone">0</span>
           <span class="bulk-stat-lbl">Done</span>
         </div>
         <div class="bulk-stat-item stat-fail">
+          <span class="bulk-stat-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
           <span class="bulk-stat-num" id="bulkStatFail">0</span>
           <span class="bulk-stat-lbl">Failed</span>
         </div>
@@ -313,10 +323,24 @@
           </div>
         </div>
         <div id="masterRowsList" class="tbl">
-          <div class="empty">
-            <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></div>
-            <h3>Library is empty</h3>
-            <p>Nothing saved yet. Run a bulk hunt to start building your catalog.</p>
+          <div class="empty lib-empty-onboard">
+            <div class="lib-empty-steps">
+              <div class="lib-empty-step">
+                <span class="lib-step-num">1</span>
+                <span class="lib-step-txt">Open any product page on Amazon, Walmart, or AliExpress</span>
+              </div>
+              <div class="lib-empty-arrow">↓</div>
+              <div class="lib-empty-step">
+                <span class="lib-step-num">2</span>
+                <span class="lib-step-txt">Go to <b>Bulk tab</b> → select tabs → press <b>Hunt all</b></span>
+              </div>
+              <div class="lib-empty-arrow">↓</div>
+              <div class="lib-empty-step">
+                <span class="lib-step-num">3</span>
+                <span class="lib-step-txt">Products appear here — export XLSX or upload to Temu</span>
+              </div>
+            </div>
+            <p class="lib-empty-hint">Your catalog is empty. Complete the steps above to start.</p>
           </div>
         </div>
         <div class="batch-bar hidden" id="masterBulkBar">
@@ -340,7 +364,10 @@
         <div id="masterBatchList" class="batch-list"><div class="empty"><p>No hunts yet.</p></div></div>
         <div class="card-actions">
           <div class="dd" style="flex:1">
-            <button id="masterExportMenuBtn" class="btn btn-primary btn-lg" type="button" aria-haspopup="menu">Export <svg class="i i-xs" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button id="masterExportMenuBtn" class="btn btn-primary btn-lg" type="button" aria-haspopup="menu">
+              <svg class="i i-xs" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              XLSX <svg class="i i-xs" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
             <div class="menu" id="masterExportMenu" role="menu" style="width:100%">
               <div class="mh">Sheet</div>
               <button id="masterDlXlsxBtn" type="button" disabled>XLSX</button>
@@ -408,22 +435,22 @@
           <div class="l"><b>Border Thickness &amp; Glow</b><span>Frame thickness, brightness and moving animation</span></div>
           <div class="zh-frame-controls-stack">
             <div class="zh-frame-sub-row">
-              <span class="zh-sub-lbl">⚡ Moving / Animated Border:</span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m13 2-8 12h6l-1 8 9-13h-6z"/></svg> Moving / Animated Border:</span>
               <label class="sw-wrap">
                 <input type="checkbox" id="zhFrameMovingToggle">
                 <span class="sw"></span>
               </label>
             </div>
             <div class="zh-frame-sub-row" id="zhFrameMovingStyleRow">
-              <span class="zh-sub-lbl">🎆 Moving Style:</span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> Moving Style:</span>
               <div class="seg zh-seg-sm">
-                <button type="button" class="zh-style-btn active" data-style="laser">⚡ Laser</button>
-                <button type="button" class="zh-style-btn" data-style="dual">💫 Dual</button>
-                <button type="button" class="zh-style-btn" data-style="wave">🌊 Wave</button>
+                <button type="button" class="zh-style-btn active" data-style="laser">Laser</button>
+                <button type="button" class="zh-style-btn" data-style="dual">Dual</button>
+                <button type="button" class="zh-style-btn" data-style="wave">Wave</button>
               </div>
             </div>
             <div class="zh-frame-sub-row" id="zhFrameSpeedRow">
-              <span class="zh-sub-lbl">⏱️ Speed: <b id="zhFrameSpeedVal" class="mono">3.5s</b></span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Speed: <b id="zhFrameSpeedVal" class="mono">3.5s</b></span>
               <div class="zh-slider-wrap">
                 <span class="zh-slider-lbl">Fast</span>
                 <input type="range" id="zhFrameSpeedSlider" min="1.0" max="8.0" step="0.5" value="3.5">
@@ -431,15 +458,15 @@
               </div>
             </div>
             <div class="zh-frame-sub-row">
-              <span class="zh-sub-lbl">📐 Corners:</span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/></svg> Corners:</span>
               <div class="seg zh-seg-sm">
-                <button type="button" class="zh-corner-btn active" data-corner="square">⏹️ Square</button>
-                <button type="button" class="zh-corner-btn" data-corner="round">🔲 Round</button>
-                <button type="button" class="zh-corner-btn" data-corner="curved">⚪ Curved</button>
+                <button type="button" class="zh-corner-btn active" data-corner="square">Square</button>
+                <button type="button" class="zh-corner-btn" data-corner="round">Round</button>
+                <button type="button" class="zh-corner-btn" data-corner="curved">Curved</button>
               </div>
             </div>
             <div class="zh-frame-sub-row">
-              <span class="zh-sub-lbl">📏 Thickness: <b id="zhFrameWidthVal" class="mono">5.5px</b></span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16"/></svg> Thickness: <b id="zhFrameWidthVal" class="mono">5.5px</b></span>
               <div class="zh-slider-wrap">
                 <span class="zh-slider-lbl">Thin</span>
                 <input type="range" id="zhFrameWidthSlider" min="2" max="10" step="0.5" value="5.5">
@@ -447,7 +474,7 @@
               </div>
             </div>
             <div class="zh-frame-sub-row">
-              <span class="zh-sub-lbl">✨ Glow: <b id="zhFrameBrightVal" class="mono">100%</b></span>
+              <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Glow: <b id="zhFrameBrightVal" class="mono">100%</b></span>
               <div class="zh-slider-wrap">
                 <span class="zh-slider-lbl">Soft</span>
                 <input type="range" id="zhFrameBrightSlider" min="30" max="150" step="5" value="100">
@@ -494,16 +521,16 @@
           </div>
         </div>
         <div class="it">
-          <div class="l"><b>AI Model</b><span>Ultra-fast inference (Qwen 3.8 27B recommended)</span></div>
+          <div class="l"><b>AI Model</b><span>Ultra-fast inference via Groq</span></div>
           <select id="groqModelSel" class="sel" style="width:160px">
             <option value="qwen/qwen3.8-27b" selected>Qwen 3.8 27B (Fast & Accurate)</option>
-            <option value="openai/gpt-oss-20b">GPT OSS 20B</option>
-            <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
-            <option value="groq/compound-mini">Compound Mini</option>
+            <option value="openai/gpt-oss-20b">GPT OSS 20B � Balanced</option>
+            <option value="openai/gpt-oss-120b">GPT OSS 120B � ? Accurate</option>
+            <option value="groq/compound-mini">Compound Mini � Compact</option>
           </select>
         </div>
       </div>
-      <p class="hint">ZHunter <span data-version>v9.8.0</span> · Everything stays on this computer.</p>
+      <p class="hint">ZHunter <span data-version>v9.12.13</span> · Everything stays on this computer.</p>
     </div>
   </section>
 
@@ -1084,7 +1111,7 @@
           </div>
 
           <!-- 5. Activity Console -->
-          <details class="temu-activity" id="temuActivityWrap">
+          <details class="temu-activity" id="temuActivityWrap" open>
             <summary class="temu-activity-sum">
               <div class="temu-activity-sum-left">
                 <span class="temu-activity-dot"></span>
@@ -1443,22 +1470,30 @@
             <!-- 4 Metric Cards -->
             <div class="temu-metrics-grid">
               <div class="temu-metric-card temu-metric-ok">
-                <div class="temu-metric-badge">✓</div>
+                <div class="temu-metric-badge">
+                  <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </div>
                 <div id="temuMetricListed" class="temu-metric-val">0</div>
                 <div class="temu-metric-lbl">LISTED</div>
               </div>
               <div class="temu-metric-card temu-metric-up">
-                <div class="temu-metric-badge">📥</div>
+                <div class="temu-metric-badge">
+                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </div>
                 <div id="temuMetricUploads" class="temu-metric-val">0</div>
                 <div class="temu-metric-lbl">UPLOADS</div>
               </div>
               <div class="temu-metric-card temu-metric-err">
-                <div class="temu-metric-badge">⚠️</div>
+                <div class="temu-metric-badge">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                </div>
                 <div id="temuMetricErrors" class="temu-metric-val">0</div>
                 <div class="temu-metric-lbl">ERRORS</div>
               </div>
               <div class="temu-metric-card temu-metric-rem">
-                <div class="temu-metric-badge">🎯</div>
+                <div class="temu-metric-badge">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
                 <div id="temuMetricRemaining" class="temu-metric-val">50</div>
                 <div class="temu-metric-lbl">REMAINING</div>
               </div>
