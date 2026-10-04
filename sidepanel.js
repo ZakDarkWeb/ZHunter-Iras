@@ -4593,7 +4593,7 @@ function initSettingsPanel() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ UPGRADE B: Groq AI Studio Engine ═══
 // ═════════════════════════════════════════════════════════════════
-const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials.
+const GROQ_API_KEYS = []; // Configure private API keys in Settings; never publish credentials. // Configure private API keys in Settings; never publish credentials.
 let _groqKeyIdx = 0;
 const DEFAULT_GROQ_API_KEY = GROQ_API_KEYS[0];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
@@ -13172,7 +13172,7 @@ function temuUpdateReviewCount(rows) {
   countEl.textContent = `${included} / ${rows.length}`;
   const bulkBtn = $('temuAiBulkRewriteBtn');
   if (bulkBtn && !bulkBtn.disabled) {
-    bulkBtn.innerHTML = `⚡ Rewrite Checked Titles (${included})`;
+    bulkBtn.textContent = `Rewrite titles (${included})`;
   }
   temuUpdateImgEditCount(rows);
 }
@@ -13414,7 +13414,7 @@ async function temuRenderReview() {
       aiBtn.textContent = '⏳';
       aiBtn.disabled = true;
       try {
-        const userPrompt = $('temuAiPromptInp')?.value?.trim();
+        const userPrompt = temuTitlePreferences();
         const instruction = getTemuOptimizerInstruction(userPrompt);
         const currentTitle = titleInp?.value || r.title || '';
         const cleaned = await rewriteValidatedTemuTitle(r, currentTitle, instruction, !userPrompt);
@@ -13694,15 +13694,16 @@ function selectTemuTitleCandidate(raw) {
 
 async function rewriteValidatedTemuTitle(r, currentTitle, instruction, useDefaultLength = true) {
   const base = buildProductAiPrompt(r, currentTitle, instruction);
+  const maxLength = temuTitleMaxLength(instruction);
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const raw = await callGroqAPI({
-        prompt: base + (lastErr ? '\nCorrect this error: ' + lastErr.message : '') + `\nTarget length: 130-165 characters (max 180). Return ONLY the single final optimized title text. No quotes, no markdown, no explanations.`,
+        prompt: base + (lastErr ? '\nCorrect this error: ' + lastErr.message : '') + `\nMaximum length: ${maxLength} characters. Return ONLY the single final optimized title text. No quotes, no markdown, no explanations.`,
         systemPrompt: 'You are an expert Temu Product Title Optimization Engine. Return ONLY the single final optimized title text without conversational filler, markdown formatting, or quotes.',
         temperature: 0.3
       });
-      const cleaned = cleanTemuTitleResult(raw, currentTitle, useDefaultLength);
+      const cleaned = temuLimitTitle(cleanTemuTitleResult(raw, currentTitle, useDefaultLength), maxLength);
       if (cleaned) {
         zhAssertProductContent(cleaned, zhProductEvidence(r), temuGetCfg().title_remove_words || []);
         return cleaned;
@@ -13715,35 +13716,54 @@ async function rewriteValidatedTemuTitle(r, currentTitle, instruction, useDefaul
   throw lastErr || new Error('Title rewrite complete nahi hua');
 }
 
-// v9.10.2 — Send button / Enter / preset chips for the Title Optimizer instruction
-(function initTemuAiPromptSend() {
+// Structured title preferences; a single rewrite action, no accumulating prompt chips.
+function temuTitlePreferences() {
+  const style = $('temuTitleStyle')?.value || 'standard';
+  const parts = [];
+  if (style === 'seo') parts.push('Use relevant search keywords naturally; keep the recommended title structure.');
+  if (style === 'short') parts.push('Short and clear title, maximum 60 characters.');
+  if ($('temuTitleNoBrand')?.checked) parts.push('Remove brand names; use a generic product title.');
+  if ($('temuTitleAudience')?.checked) parts.push('Include only explicitly sourced intended use or target audience.');
+  if ($('temuAiPromptInp')?.value?.trim()) parts.push($('temuAiPromptInp').value.trim());
+  return parts.join(' ');
+}
+function temuTitleMaxLength(instruction = '') {
+  const match = String(instruction).match(/(?:max(?:imum)?|up to|under|at most)\s*(\d{2,3})\s*(?:characters?|chars?)/i);
+  return match ? Math.max(10, Math.min(180, Number(match[1]))) : 180;
+}
+function temuLimitTitle(title, max = 180) {
+  if (title.length <= max) return title;
+  const cut = title.slice(0, max), boundary = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf(','));
+  return (boundary > 0 ? cut.slice(0, boundary) : cut).replace(/[\s,;:.-]+$/, '');
+}
+(function initTemuTitleOptions() {
   const inp = $('temuAiPromptInp');
-  const send = $('temuAiPromptSendBtn');
-  const saveInstruction = () => {
-    if (inp) chrome.storage.local.set({ zhunterTitleOptimizerInstruction: inp.value }).catch(() => {});
-  };
-  if (inp) chrome.storage.local.get('zhunterTitleOptimizerInstruction').then(saved => {
-    if (!inp.value.trim() && typeof saved.zhunterTitleOptimizerInstruction === 'string') {
-      inp.value = saved.zhunterTitleOptimizerInstruction;
-      send?.classList.toggle('ready', !!inp.value.trim());
+  const save = () => chrome.storage.local.set({
+    zhunterTitleOptimizerInstruction: inp?.value || '',
+    zhunterTitleOptimizerOptions: { style: $('temuTitleStyle')?.value || 'standard', noBrand: !!$('temuTitleNoBrand')?.checked, audience: !!$('temuTitleAudience')?.checked }
+  }).catch(() => {});
+  chrome.storage.local.get(['zhunterTitleOptimizerInstruction', 'zhunterTitleOptimizerOptions']).then(saved => {
+    if (inp && !inp.value.trim()) inp.value = saved.zhunterTitleOptimizerInstruction || '';
+    const options = saved.zhunterTitleOptimizerOptions;
+    if (options) {
+      if (['standard','seo','short'].includes(options.style)) $('temuTitleStyle').value = options.style;
+      $('temuTitleNoBrand').checked = !!options.noBrand;
+      $('temuTitleAudience').checked = !!options.audience;
+    } else if (inp) {
+      const presets = [
+        ['Brand name hata do, generic Temu style title', () => $('temuTitleNoBrand').checked = true],
+        ['Short aur clear title, max 60 characters', () => $('temuTitleStyle').value = 'short'],
+        ['SEO keywords add karo, brand + product type + size shuru mein', () => { if ($('temuTitleStyle').value !== 'short') $('temuTitleStyle').value = 'seo'; }],
+        ['Target audience aur use case add karo', () => $('temuTitleAudience').checked = true]
+      ];
+      for (const [phrase, apply] of presets) if (inp.value.includes(phrase)) { apply(); inp.value = inp.value.split(phrase).join(''); }
+      inp.value = inp.value.replace(/^[\s;]+|[\s;]+$/g, '').replace(/;\s*;/g, ';');
+      save();
     }
   }).catch(() => {});
-  const go = () => {
-    if (!inp?.value.trim()) { inp?.focus(); toast('Pehle AI ko instruction likhein (ya chip chunein)', 'info'); return; }
-    saveInstruction();
-    temuAiBulkRewrite();
-  };
-  send?.addEventListener('click', go);
-  inp?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
-  inp?.addEventListener('input', () => { saveInstruction(); send?.classList.toggle('ready', !!inp.value.trim()); });
-  document.querySelectorAll('.temu-ai-preset').forEach(b => b.addEventListener('click', () => {
-    if (!inp) return;
-    const add = b.dataset.p || '';
-    inp.value = inp.value.trim() ? (inp.value.includes(add) ? inp.value : inp.value.trim() + '; ' + add) : add;
-    saveInstruction();
-    send?.classList.add('ready');
-    inp.focus();
-  }));
+  for (const id of ['temuTitleStyle','temuTitleNoBrand','temuTitleAudience']) $(id)?.addEventListener('change', save);
+  inp?.addEventListener('input', save);
+  inp?.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); temuAiBulkRewrite(); } });
 })();
 
 // Bulk AI Rewrite for checked products only
@@ -13764,7 +13784,7 @@ async function temuAiBulkRewrite() {
       toast('Koi checked product select nahi he! Pehle checkbox select karein.', 'warn');
       return;
     }
-    const userPrompt = $('temuAiPromptInp')?.value?.trim();
+    const userPrompt = temuTitlePreferences();
     const instruction = getTemuOptimizerInstruction(userPrompt);
 
     for (let i = 0; i < targetRows.length; i++) {
@@ -15485,7 +15505,7 @@ async function zsAiRewriteTitle(it) {
   try {
     const cur = it.product.title || '';
     const base = cur.replace(PACK_PREFIX_RE, '').trim();
-    const instruction = getTemuOptimizerInstruction($('temuAiPromptInp')?.value?.trim());
+    const instruction = getTemuOptimizerInstruction(temuTitlePreferences());
     const out = await rewriteValidatedTemuTitle(it.product, base, instruction);
     let t = out.replace(PACK_PREFIX_RE, '');
     if (!t) throw new Error('khali jawab');

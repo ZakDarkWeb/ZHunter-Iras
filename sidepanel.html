@@ -967,24 +967,16 @@
                   <span class="temu-ai-bar-badge">AI</span>
                   <span>Title Optimizer</span>
                 </button>
-                <button id="temuContentStudioBtn" class="btn btn-secondary btn-xs" type="button" title="Bulk edit titles, bullet points and descriptions with preview and save">Content Studio</button>
-                <button id="temuAiBulkRewriteBtn" class="btn btn-primary btn-xs temu-ai-bulk-btn" type="button" title="Rewrite titles of all checked products">
-                  ⚡ Rewrite Checked Titles
-                </button>
+                <button id="temuContentStudioBtn" class="btn btn-secondary btn-xs" type="button" title="Bulk edit titles, bullet points and descriptions with preview and save">Open studio</button>
               </div>
               <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
-                <div class="temu-ai-send-wrap">
-                  <input type="text" id="temuAiPromptInp" class="inp temu-ai-prompt-inp" placeholder="AI ko batayein… (e.g. keywords add karo, 60 chars)" />
-                  <button id="temuAiPromptSendBtn" class="temu-ai-send-btn" type="button" title="Checked titles ko is instruction se rewrite karo (Enter)" aria-label="Send to AI">
-                    <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-                  </button>
+                <div class="temu-title-options">
+                  <label class="temu-title-style">Title style<select id="temuTitleStyle" class="sel"><option value="standard">Standard · descriptive</option><option value="seo">Search-friendly</option><option value="short">Short · up to 60 characters</option></select></label>
+                  <label class="temu-title-check"><input id="temuTitleNoBrand" type="checkbox">Remove brand name</label>
+                  <label class="temu-title-check"><input id="temuTitleAudience" type="checkbox">Include intended use</label>
                 </div>
-                <div class="temu-ai-presets">
-                  <button type="button" class="temu-ai-preset" data-p="SEO keywords add karo, brand + product type + size shuru mein">🔍 SEO</button>
-                  <button type="button" class="temu-ai-preset" data-p="Short aur clear title, max 60 characters">✂️ Short</button>
-                  <button type="button" class="temu-ai-preset" data-p="Brand name hata do, generic Temu style title">🏷️ No brand</button>
-                  <button type="button" class="temu-ai-preset" data-p="Target audience aur use case add karo">🎯 Audience</button>
-                </div>
+                <details class="temu-title-advanced"><summary>Custom instructions <span>Optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="Extra preferences for titles…" aria-label="Custom title instructions"></textarea></details>
+                <div class="temu-title-run"><small>Updates checked products only</small><button id="temuAiBulkRewriteBtn" class="btn btn-primary btn-xs temu-ai-bulk-btn" type="button" title="Rewrite checked product titles with the selected options">Rewrite titles</button></div>
               </div>
             </div>
 

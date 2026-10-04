@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Cleaner Content Studio:** Product dropdown, one Generate action, optional instructions, and collapsible bullet/description editors. Title Optimizer now has named style options and explicit brand/use controls; legacy presets migrate and Short respects 60 characters. Version remains 9.12.13; no new ZIP.
 - **Bulk Content Studio:** Checked products ke titles, up to 6 bullet points aur description ke AI drafts, original comparison, manual editing, Stop, per-product / checked Save aur restore. Sirf edited text fields Library aur export queue mein persist hoti hain.
 - **Shared copy rules:** Title format aur all six contextual avoid-word categories ek shared source se single/bulk/image Studio/content Studio mein apply hoti hain. Factual Green/USB/LED specs preserve; claims/unsupported restricted details validated before accepting AI output. Export description/bullets bhi same contextual filter use karte hain.
 - **Image editing:** Edited main image stays first; original main moves to second. Repeated edits do not add another original. Secondary edits replace their own slot; Library save, edit recovery, queues and Studio undo preserve ordering.
