@@ -281,14 +281,14 @@ async function zhTextOpen(productId = null) {
   }
   if (productId) { const i = rows.findIndex(r => r.id === productId); if (i >= 0) ZhTextStudio.page = i; }
   $('ztPreferences').value = typeof temuTitlePreferences === 'function' ? temuTitlePreferences() : $('temuAiPromptInp')?.value || '';
-  $('ztProgress').textContent = temuGetCfg().fill_description === false
-    ? 'Description/bullets export OFF hai — Settings mein enable karein. Drafts review karke Save karein.'
-    : 'Ready — AI drafts ko review karke Save karein.';
+  $('ztProgress').innerHTML = temuGetCfg().fill_description === false
+    ? '<svg class="zt-progress-ico zt-prog-warn" viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Description/Bullets export is OFF — enable in Settings before saving.'
+    : '<svg class="zt-progress-ico zt-prog-ok" viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Ready — Review AI drafts, then click Save.';
   $('zhTextStudioModal').classList.remove('hidden');
   zhTextRender(); $('ztGenerate').focus();
 }
 function zhTextClose() {
-  if (ZhTextStudio.busy || ZhTextStudio.saving) { toast('Pehle Stop karein aur current request finish hone dein', 'info'); return; }
+  if (ZhTextStudio.busy || ZhTextStudio.saving) { toast('Stop the process first before closing', 'info'); return; }
   $('zhTextStudioModal')?.classList.add('hidden');
   $('temuContentStudioBtn')?.focus();
 }
@@ -303,7 +303,7 @@ function zhTextRender() {
   $('ztSelectAll').checked = selected === items.length;
   $('ztSelectAll').indeterminate = selected > 0 && selected < items.length;
   $('ztCount').textContent = `${selected} selected`;
-  $('ztPosition').textContent = `Product ${page + 1} of ${items.length}`;
+  $('ztPosition').textContent = `PRODUCT ${page + 1} OF ${items.length}`;
   $('ztProduct').innerHTML = items.map((item, i) => `<option value="${i}" ${i === page ? 'selected' : ''}>${i + 1}. ${esc(item.draft.title || 'Product')}</option>`).join('');
   $('ztSelectionLabel').textContent = `Select products · ${selected} of ${items.length}`;
   $('ztScope').options[0].textContent = `Selected products (${selected})`;
@@ -314,8 +314,20 @@ function zhTextRender() {
     ${it.error ? `<div class="zt-error" role="alert">${esc(it.error)}</div>` : ''}
     ${ZH_TEXT_FIELDS.map(field => {
       const label = field === 'title' ? 'Title' : field === 'bullets' ? 'Bullet points' : 'Description';
-      const content = `<div class="zt-field-content"><div class="zt-field-head"><label for="ztEdit-${field}">${field === 'bullets' ? 'One bullet point per line' : label}</label><small data-counter="${field}">${zhTextCounter(field, it.draft[field])}</small></div>${field === 'title' ? `<div class="zt-title-tools" role="group" aria-label="Edit current product title"><button type="button" class="btn btn-primary btn-xs" data-title-action="rewrite">AI Rewrite</button><button type="button" class="btn btn-secondary btn-xs" data-title-action="shorten">Shorten</button><button type="button" class="btn btn-secondary btn-xs" data-title-action="removeBrand">Remove Brand</button></div>` : ''}<textarea class="inp inp-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 2 : 4}" ${ZhTextStudio.busy || ZhTextStudio.saving ? 'disabled' : ''}>${esc(field === 'bullets' ? it.draft[field].join('\n') : it.draft[field])}</textarea><details class="zt-original"><summary>Compare original</summary><pre>${esc(field === 'bullets' ? it.before[field].join('\n') : it.before[field]) || 'No source content'}</pre></details></div>`;
-      return field === 'title' ? `<section class="zt-field zt-title-field">${content}</section>` : `<details class="zt-field zt-fold" data-section="${field}" ${ZhTextStudio.sections[field] ? 'open' : ''}><summary><b>${label}</b><span>${field === 'bullets' ? it.draft[field].length + (it.draft[field].length === 1 ? ' point' : ' points') : it.draft[field] ? it.draft[field].length + ' characters' : 'Not added'}</span></summary>${content}</details>`;
+      const content = `<div class="zt-field-content"><div class="zt-field-head"><label for="ztEdit-${field}">${field === 'bullets' ? 'One bullet point per line' : label}</label><small data-counter="${field}">${zhTextCounter(field, it.draft[field])}</small></div>${field === 'title' ? `<div class="zt-title-tools" role="group" aria-label="Title quick actions"><button type="button" class="zt-ta-btn zt-ta-ai" data-title-action="rewrite"><svg viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>AI Rewrite</button><button type="button" class="zt-ta-btn zt-ta-ghost" data-title-action="shorten"><svg viewBox="0 0 24 24"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="21" y2="3"/><line x1="3" y1="21" x2="14" y2="10"/></svg>Shorten</button><button type="button" class="zt-ta-btn zt-ta-ghost" data-title-action="removeBrand"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Remove Brand</button></div>` : ''}<textarea class="inp inp-ta zt-field-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 2 : 4}" ${ZhTextStudio.busy || ZhTextStudio.saving ? 'disabled' : ''}>${esc(field === 'bullets' ? it.draft[field].join('\n') : it.draft[field])}</textarea><details class="zt-original"><summary>Compare original</summary><pre>${esc(field === 'bullets' ? it.before[field].join('\n') : it.before[field]) || 'No source content'}</pre></details></div>`;
+      return field === 'title'
+        ? `<section class="zt-field zt-title-field">${content}</section>`
+        : `<details class="zt-field zt-fold" data-section="${field}" ${ZhTextStudio.sections[field] ? 'open' : ''}>
+            <summary>
+              <span class="zt-fold-ico zt-fold-ico-${field}">${field === 'bullets'
+                ? '<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'
+                : '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
+              }</span>
+              <b>${label}</b>
+              <span>${field === 'bullets' ? it.draft[field].length + (it.draft[field].length === 1 ? ' point' : ' points') : it.draft[field] ? it.draft[field].length + ' characters' : 'Not added'}</span>
+            </summary>
+            ${content}
+          </details>`;
     }).join('')}`;
   zhTextUpdateControls();
 }
