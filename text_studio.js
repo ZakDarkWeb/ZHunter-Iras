@@ -154,7 +154,7 @@ function zhTextEnsureModal() {
   modal.id = 'zhTextStudioModal';
   modal.className = 'modal-back hidden';
   modal.innerHTML = `<section class="zt-modal" role="dialog" aria-modal="true" aria-labelledby="ztHeading">
-    <header class="zt-head"><div><h2 id="ztHeading">Content Studio</h2><p>Edit product copy in one place</p></div><button type="button" id="ztClose" class="modal-close" aria-label="Close">×</button></header>
+    <header class="zt-head"><span class="zt-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/><path d="M19 3v4M17 5h4"/></svg></span><div><span class="zt-eyebrow">AI WORKSPACE</span><h2 id="ztHeading">Content Studio</h2><p>Titles, bullet points &amp; descriptions</p></div><button type="button" id="ztClose" class="modal-close" aria-label="Close">×</button></header>
     <div class="zt-nav"><button type="button" id="ztPrev" class="btn btn-ghost btn-xs" aria-label="Previous product">‹</button><label class="zt-product-picker"><span id="ztPosition">Product 1 of 1</span><select id="ztProduct" class="sel" aria-label="Choose product"></select></label><button type="button" id="ztNext" class="btn btn-ghost btn-xs" aria-label="Next product">›</button></div>
     <details class="zt-selection"><summary id="ztSelectionLabel">Select products</summary><div class="zt-sidebar"><label class="zt-all"><input type="checkbox" id="ztSelectAll" checked>Select all</label><div id="ztQueue"></div></div></details>
     <div class="zt-toolbar"><div class="zt-fields"><span>Generate</span>${ZH_TEXT_FIELDS.map(f => `<label><input type="checkbox" id="ztField-${f}" checked> ${f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description'}</label>`).join('')}</div>

@@ -4117,3 +4117,40 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .zt-error { color: var(--bad); background: var(--bad-soft); padding: 10px; border-radius: 8px; font-size: 11px; margin-bottom: 12px; overflow-wrap: anywhere; }
 .zt-footer { display: flex; align-items: center; gap: 8px; padding: 12px 17px; border-top: 1px solid var(--line-2); }.zt-footer span { flex: 1; font-size: 10px; color: var(--ink-3); }.zt-footer .btn-primary { background: var(--accent); color: var(--accent-fg); }
 @media (max-width: 500px) { #zhTextStudioModal { padding: 6px; }.zt-modal { height: calc(100dvh - 12px); border-radius: 11px; }.zt-head { padding: 14px; }.zt-nav { padding: 11px 13px 8px; }.zt-selection { margin: 0 13px 8px; }.zt-toolbar { padding: 11px 13px 8px; }.zt-progress { padding: 9px 13px; }.zt-editor { padding: 14px 13px; }.zt-footer { padding: 11px 13px; }.zt-fields { gap: 8px; }.zt-modal .btn { font-size: 11px; padding: 6px 9px; }.zt-actions { gap: 6px; } }
+
+/* Content workspace polish ? retain the extension accent palette. */
+#temuReviewAiBar { background: linear-gradient(135deg, var(--accent-soft), var(--surface) 72%); border-top: 1px solid var(--accent-line); }
+.temu-ai-bar-top { padding-bottom: 8px; }
+#temuContentStudioBtn { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
+.temu-title-style { letter-spacing: .2px; }
+.temu-title-style .sel { height: 40px; border-color: var(--accent-line); background: linear-gradient(120deg, var(--accent-soft), var(--input)); }
+.temu-title-check { padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); flex: 1; white-space: nowrap; }
+.temu-title-check:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
+.temu-title-run { border-top: 1px solid var(--line-2); padding-top: 12px; }
+.temu-title-run .temu-ai-bulk-btn { background: linear-gradient(110deg, var(--accent), #42e5f5) !important; box-shadow: 0 4px 15px var(--accent-soft) !important; min-height: 34px; }
+.zt-modal { border-color: var(--accent-line); box-shadow: var(--shadow-pop), 0 0 32px var(--accent-soft); }
+.zt-head { background: radial-gradient(ellipse at top left, var(--accent-soft), transparent 80%), var(--surface-2); border-bottom-color: var(--accent-line); }
+.zt-head > div { flex: 1; }.zt-head h2 { font-size: 20px; letter-spacing: -.5px; }.zt-head p { color: var(--ink-2); }
+.zt-eyebrow { display: block; font-size: 9px; font-weight: 750; letter-spacing: 1.6px; color: var(--accent); margin-bottom: 4px; }
+.zt-brand-mark { display: grid; place-items: center; width: 43px; height: 43px; flex-shrink: 0; border: 1px solid var(--accent-line); border-radius: 12px; background: var(--accent-soft); box-shadow: inset 0 0 16px var(--accent-soft); }
+.zt-brand-mark svg { width: 25px; height: 25px; stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.zt-product-picker > span { text-transform: uppercase; letter-spacing: .8px; font-weight: 650; }.zt-product-picker select { height: 38px; }
+.zt-toolbar { background: linear-gradient(110deg, var(--accent-soft), var(--surface-2) 75%); }
+.zt-fields { gap: 7px; }.zt-fields > span { text-transform: uppercase; letter-spacing: .8px; }
+.zt-fields label { border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 8px; background: var(--surface); }
+.zt-fields label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
+.zt-actions .btn-primary, .zt-footer .btn-primary { background: linear-gradient(110deg, var(--accent), #42e5f5); box-shadow: 0 3px 12px var(--accent-soft); font-weight: 750; }
+.zt-progress { background: var(--surface-2); color: var(--ink-2); border-left: 3px solid var(--accent); }
+.zt-product { padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; background: linear-gradient(125deg, var(--accent-soft), var(--surface-2) 70%); margin-bottom: 17px; }
+.zt-product img { width: 54px; height: 54px; border: 1px solid var(--line-2); }.zt-product small { display: inline-block; color: var(--accent); padding: 2px 7px; background: var(--accent-soft); border-radius: 5px; }
+.zt-field textarea { background: var(--input); border-color: var(--line-2); box-shadow: inset 0 2px 5px #00000012; }
+.zt-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); outline: none; }
+.zt-fold { background: linear-gradient(110deg, var(--surface-2), var(--surface)); border-left: 3px solid var(--accent-line); border-radius: 11px; }
+.zt-fold > summary { padding: 14px 12px; }.zt-fold > summary::before { content: '\2261'; display: grid; place-items: center; color: var(--accent); font-size: 16px; line-height: 1; width: 18px; height: 18px; border-radius: 5px; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.zt-fold > summary b { letter-spacing: .1px; }.zt-fold > summary span { padding: 3px 7px; border-radius: 5px; background: var(--surface-2); }.zt-fold[open] { border-color: var(--accent-line); }
+.zt-fold:hover, .zt-more summary:hover { border-color: var(--accent-line); }
+.zt-footer { background: linear-gradient(100deg, var(--surface-2), var(--accent-soft)); }
+.zt-footer .btn { min-height: 35px; }.zt-footer .btn:disabled { box-shadow: none; }
+@media (max-width: 360px) { .zt-fields label { padding: 5px; }.zt-brand-mark { width: 34px; height: 34px; }.zt-head h2 { font-size: 18px; }.temu-title-check { white-space: normal; } }
+
+.zt-fold[data-section="description"] > summary::before { content: "T"; font-size: 11px; font-weight: 700; }
