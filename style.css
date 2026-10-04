@@ -550,6 +550,10 @@ select.inp, .sel { appearance: none; padding-right: 26px; background-image: url(
 .master-batch-row .mb-status-pill { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; }
 .master-batch-row .mb-status-pill.ok { background: rgba(34, 197, 94, 0.12); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
 .master-batch-row .mb-filter-btn { font-size: 10.5px; padding: 3px 8px; border-radius: 5px; }
+.mb-latest-badge { font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 999px; background: linear-gradient(90deg, rgba(0,229,255,0.18), rgba(0,229,255,0.08)); color: var(--accent); border: 1px solid rgba(0,229,255,0.35); }
+.mb-is-latest { border-left: 2px solid var(--accent) !important; }
+.mb-label-row { margin-top: 1px; }
+.mb-label { font-size: 11px; font-weight: 600; color: var(--accent-ink); font-style: italic; }
 
 /* ── Dropdown menu ───────────────────────────────────────── */
 .dd { position: relative; }

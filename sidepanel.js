@@ -67,12 +67,13 @@ function updateStatusLine() {
   const textEl  = $('statusLineText');
   const rightEl = $('statusLineRight');
   if (!textEl) return;
-  // Count items in MasterData (library)
-  const count = (typeof MasterData !== 'undefined' && Array.isArray(MasterData)) ? MasterData.length : 0;
+  // Use MasterUIState.allRows — the live in-memory library array
+  const count = (typeof MasterUIState !== 'undefined' && Array.isArray(MasterUIState.allRows))
+    ? MasterUIState.allRows.length : 0;
   if (count > 0) {
     textEl.textContent = `Library \u2014 ${count} product${count !== 1 ? 's' : ''}`;
   } else {
-    textEl.textContent = 'Library \u2014 empty';
+    textEl.textContent = 'Local storage';
   }
   if (rightEl) {
     const now = new Date();
@@ -7962,6 +7963,8 @@ async function finishBulkHunt() {
   updateMasterStats();
   updateBulkSummary();
   updateQueueExportButtons();
+  // Update status footer with new library count
+  setTimeout(updateStatusLine, 800);
 
   // v8.3.2: no automatic download — the result modal is where the user picks what to save.
 }
@@ -8525,6 +8528,7 @@ function renderMasterRows(rows) {
   updateMasterBulkBar();
   if (panel) panel.scrollTop = prevPanelScroll;
   if (list) list.scrollTop = prevListScroll;
+  updateStatusLine();
 }
 
 function updateMasterBulkBar() {
@@ -8772,20 +8776,25 @@ function renderMasterBatches(batches) {
     return;
   }
   list.innerHTML = '';
-  batches.slice(0, 20).forEach(b => {
+  batches.slice(0, 20).forEach((b, idx) => {
     const d = new Date(b.date);
     const dateFormatted = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const timeFormatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const plats = (b.platforms || []).filter(Boolean).map(p => esc(p)).join(', ') || 'Mixed';
+    const isLatest = (idx === 0);
+    const labelHtml = b.label ? `<span class="mb-label">${esc(b.label)}</span>` : '';
+    const latestHtml = isLatest ? `<span class="mb-latest-badge">Latest</span>` : '';
 
     const row = document.createElement('div');
-    row.className = 'master-batch-row';
+    row.className = 'master-batch-row' + (isLatest ? ' mb-is-latest' : '');
     row.innerHTML = `
       <div class="mb-left">
         <div class="mb-title-row">
           <span class="mb-time">${dateFormatted} · ${timeFormatted}</span>
+          ${latestHtml}
           <span class="mb-plat-badge">${plats}</span>
         </div>
+        ${labelHtml ? `<div class="mb-label-row">${labelHtml}</div>` : ''}
         <div class="mb-sub">
           <span class="mb-count-pill">${b.count} products</span>
           <span class="mb-status-pill ok">✓ Completed</span>
