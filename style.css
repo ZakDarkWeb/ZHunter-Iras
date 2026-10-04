@@ -4658,3 +4658,17 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 [data-tpane="history"] .temu-hist-foot > .btn:hover, [data-tpane="history"] .temu-history-manage > summary:hover { border-color: var(--accent-line); color: var(--accent-ink); background: var(--hover); }
 [data-tpane="history"] .temu-history-manage[open] > .btn { width: 100%; min-height: 30px; }
 [data-tpane="history"] :is(.temu-hist-fbtn,.temu-hist-store-sel,.temu-hist-acts .btn,.temu-hist-foot > .btn,.temu-history-manage > summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* v9.12.13 Compact History records. */
+[data-tpane="history"] .temu-hist { padding: 10px; }
+[data-tpane="history"] .temu-hist-card-inner { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 6px 8px; }
+[data-tpane="history"] .temu-hist-info-col { display: contents; }
+[data-tpane="history"] .temu-hist-header-line { grid-column: 1; grid-row: 1; gap: 5px; min-width: 0; }
+[data-tpane="history"] .temu-hist-header-line .temu-hist-store-pill { overflow-wrap: anywhere; max-width: 100%; }
+[data-tpane="history"] .temu-hist-meta-line { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+[data-tpane="history"] .temu-hist-date { flex-basis: auto; font-size: 10px; }
+[data-tpane="history"] .temu-hist-qty-badge { background: transparent; padding: 0; color: var(--ink-2); }
+[data-tpane="history"] .temu-hist-details { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+[data-tpane="history"] .temu-hist-details summary { padding: 1px 0; font-size: 10px; }
+[data-tpane="history"] .temu-hist-acts { grid-column: 2; grid-row: 1; width: auto; padding: 0; border: 0; gap: 5px; }
+[data-tpane="history"] .temu-hist-acts .btn { height: 25px; min-height: 25px; min-width: 0; padding: 0 7px !important; font-size: 10px !important; border-radius: 5px; }

@@ -12347,6 +12347,8 @@ async function temuRenderHistory() {
           <div class="temu-hist-header-line">
             ${statusBadge}
             <span class="temu-hist-store-pill">${esc(h.store || 'Default')}</span>
+          </div>
+          <div class="temu-hist-meta-line">
             <span class="temu-hist-date">${esc(when)}</span>
             <span class="temu-hist-qty-badge">${h.n} items</span>
           </div>
