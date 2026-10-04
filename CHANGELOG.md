@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
+- **Compact Studio editor:** Smaller title box and panels, aligned footer, clearer AI Rewrite label, and current-title Rewrite/Shorten/Remove Brand toolbar; previews still require Save.
 - **Title actions restored:** AI Title Rewrite uses the shared user format; separate Shorten Title (60 max) and Remove Brand actions edit checked products without sticky presets. Content Studio uses existing extension background/button theme.
 - **Workspace visual polish:** Cyan themed gradients, SVG studio mark, selectable option cards, product preview card and styled collapsible editors; existing generation/save behavior retained.
 - **Cleaner Content Studio:** Product dropdown, one Generate action, optional instructions, and collapsible bullet/description editors. Title Optimizer now has named style options and explicit brand/use controls; legacy presets migrate and Short respects 60 characters. Version remains 9.12.13; no new ZIP.

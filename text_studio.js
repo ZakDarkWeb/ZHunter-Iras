@@ -157,8 +157,8 @@ function zhTextEnsureModal() {
     <header class="zt-head"><span class="zt-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/><path d="M19 3v4M17 5h4"/></svg></span><div><span class="zt-eyebrow">AI WORKSPACE</span><h2 id="ztHeading">Content Studio</h2><p>Titles, bullet points &amp; descriptions</p></div><button type="button" id="ztClose" class="modal-close" aria-label="Close">×</button></header>
     <div class="zt-nav"><button type="button" id="ztPrev" class="btn btn-ghost btn-xs" aria-label="Previous product">‹</button><label class="zt-product-picker"><span id="ztPosition">Product 1 of 1</span><select id="ztProduct" class="sel" aria-label="Choose product"></select></label><button type="button" id="ztNext" class="btn btn-ghost btn-xs" aria-label="Next product">›</button></div>
     <details class="zt-selection"><summary id="ztSelectionLabel">Select products</summary><div class="zt-sidebar"><label class="zt-all"><input type="checkbox" id="ztSelectAll" checked>Select all</label><div id="ztQueue"></div></div></details>
-    <div class="zt-toolbar"><div class="zt-fields"><span>Generate</span>${ZH_TEXT_FIELDS.map(f => `<label><input type="checkbox" id="ztField-${f}" checked> ${f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description'}</label>`).join('')}</div>
-      <div class="zt-actions"><select id="ztScope" class="sel" aria-label="Generation scope"><option value="checked">Selected products</option><option value="current">This product only</option></select><button type="button" id="ztGenerate" class="btn btn-primary btn-xs">Generate drafts</button><button type="button" id="ztStop" class="btn btn-ghost btn-xs" hidden disabled>Stop</button></div>
+    <div class="zt-toolbar"><div class="zt-fields"><span>Rewrite</span>${ZH_TEXT_FIELDS.map(f => `<label><input type="checkbox" id="ztField-${f}" checked> ${f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description'}</label>`).join('')}</div>
+      <div class="zt-actions"><select id="ztScope" class="sel" aria-label="Generation scope"><option value="checked">Selected products</option><option value="current">This product only</option></select><button type="button" id="ztGenerate" class="btn btn-primary btn-xs">AI Rewrite</button><button type="button" id="ztStop" class="btn btn-ghost btn-xs" hidden disabled>Stop</button></div>
       <details class="zt-preferences"><summary>Instructions <span>Optional</span></summary><textarea id="ztPreferences" class="inp" rows="3" placeholder="Extra preferences for the selected fields…" aria-label="AI instructions"></textarea></details>
     </div>
     <div class="zt-progress" id="ztProgress" role="status" aria-live="polite">Ready — AI drafts ko review karke Save karein.</div>
@@ -190,6 +190,8 @@ function zhTextEnsureModal() {
   });
   $('ztEditor').addEventListener('toggle', e => { if (e.target.dataset.section) ZhTextStudio.sections[e.target.dataset.section] = e.target.open; }, true);
   $('ztEditor').addEventListener('click', e => {
+    const titleAction = e.target.closest('[data-title-action]');
+    if (titleAction) { zhTextRun(true, titleAction.dataset.titleAction); return; }
     if (e.target.closest('#ztDiscard')) {
       const it = ZhTextStudio.items[ZhTextStudio.page];
       it.draft = zhTextSnapshot(it.row); it.touched.clear(); it.status = 'Ready'; it.error = '';
@@ -259,7 +261,7 @@ function zhTextRender() {
     ${it.error ? `<div class="zt-error" role="alert">${esc(it.error)}</div>` : ''}
     ${ZH_TEXT_FIELDS.map(field => {
       const label = field === 'title' ? 'Title' : field === 'bullets' ? 'Bullet points' : 'Description';
-      const content = `<div class="zt-field-content"><div class="zt-field-head"><label for="ztEdit-${field}">${field === 'bullets' ? 'One bullet point per line' : label}</label><small data-counter="${field}">${zhTextCounter(field, it.draft[field])}</small></div><textarea class="inp inp-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 3 : 5}" ${ZhTextStudio.busy || ZhTextStudio.saving ? 'disabled' : ''}>${esc(field === 'bullets' ? it.draft[field].join('\n') : it.draft[field])}</textarea><details class="zt-original"><summary>Compare original</summary><pre>${esc(field === 'bullets' ? it.before[field].join('\n') : it.before[field]) || 'No source content'}</pre></details></div>`;
+      const content = `<div class="zt-field-content"><div class="zt-field-head"><label for="ztEdit-${field}">${field === 'bullets' ? 'One bullet point per line' : label}</label><small data-counter="${field}">${zhTextCounter(field, it.draft[field])}</small></div>${field === 'title' ? `<div class="zt-title-tools" role="group" aria-label="Edit current product title"><button type="button" class="btn btn-primary btn-xs" data-title-action="rewrite">AI Rewrite</button><button type="button" class="btn btn-secondary btn-xs" data-title-action="shorten">Shorten</button><button type="button" class="btn btn-secondary btn-xs" data-title-action="removeBrand">Remove Brand</button></div>` : ''}<textarea class="inp inp-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 2 : 4}" ${ZhTextStudio.busy || ZhTextStudio.saving ? 'disabled' : ''}>${esc(field === 'bullets' ? it.draft[field].join('\n') : it.draft[field])}</textarea><details class="zt-original"><summary>Compare original</summary><pre>${esc(field === 'bullets' ? it.before[field].join('\n') : it.before[field]) || 'No source content'}</pre></details></div>`;
       return field === 'title' ? `<section class="zt-field zt-title-field">${content}</section>` : `<details class="zt-field zt-fold" data-section="${field}" ${ZhTextStudio.sections[field] ? 'open' : ''}><summary><b>${label}</b><span>${field === 'bullets' ? it.draft[field].length + (it.draft[field].length === 1 ? ' point' : ' points') : it.draft[field] ? it.draft[field].length + ' characters' : 'Not added'}</span></summary>${content}</details>`;
     }).join('')}`;
   zhTextUpdateControls();
@@ -267,6 +269,7 @@ function zhTextRender() {
 function zhTextUpdateControls() {
   const busy = ZhTextStudio.busy || ZhTextStudio.saving;
   for (const id of ['ztGenerate', 'ztScope', 'ztPreferences', 'ztReset', 'ztSelectAll', ...ZH_TEXT_FIELDS.map(f => 'ztField-' + f)]) if ($(id)) $(id).disabled = busy;
+  for (const button of $('ztEditor')?.querySelectorAll('[data-title-action]') || []) button.disabled = busy;
   for (const input of $('ztQueue')?.querySelectorAll('input') || []) input.disabled = busy;
   $('ztStop').disabled = !ZhTextStudio.busy;
   $('ztStop').hidden = !ZhTextStudio.busy;
@@ -278,9 +281,9 @@ function zhTextGo(delta) {
   ZhTextStudio.page = Math.max(0, Math.min(ZhTextStudio.items.length - 1, ZhTextStudio.page + delta));
   zhTextRender();
 }
-async function zhTextRun(one) {
+async function zhTextRun(one, titleAction = null) {
   if (ZhTextStudio.busy || ZhTextStudio.saving || TemuRewriteBusy) return;
-  const fields = zhTextFields();
+  const fields = titleAction ? ['title'] : zhTextFields();
   if (!fields.length) { toast('Titles, bullets ya description select karein', 'warn'); return; }
   const targets = one ? [ZhTextStudio.items[ZhTextStudio.page]] : ZhTextStudio.items.filter(it => it.selected);
   if (!targets.length) { toast('Products select karein', 'warn'); return; }
@@ -294,7 +297,9 @@ async function zhTextRun(one) {
       $('ztProgress').textContent = `AI rewrite ${done + failed + 1}/${targets.length} — ${fields.join(', ')}`;
       zhTextRender();
       try {
-        const output = await zhTextGenerate(it.source, fields, preferences, () => ZhTextStudio.stop);
+        const output = titleAction
+          ? { title: await rewriteValidatedTemuTitle(it.source, it.draft.title, titleAction === 'rewrite' ? getTemuOptimizerInstruction(preferences) : temuTitleActionInstruction(titleAction), titleAction === 'rewrite' && !preferences) }
+          : await zhTextGenerate(it.source, fields, preferences, () => ZhTextStudio.stop);
         if (ZhTextStudio.stop) { it.status = it.touched.size ? 'Draft' : 'Ready'; break; }
         Object.assign(it.draft, output);
         fields.forEach(f => it.touched.add(f)); it.status = 'Draft'; done++;
