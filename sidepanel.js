@@ -6602,6 +6602,7 @@ async function startBulkHunt(tabsOverride) {
   BulkState._flushActive = false;
   BulkState.currentBatchId = `batch_${Date.now()}`;
   BulkState.huntStartTime  = Date.now();
+  BulkState.batchLabel = ($('temuBatchNameInp')?.value?.trim()) || '';
 
   const selectedTabs = (Array.isArray(tabsOverride) ? tabsOverride : null)
     || BulkState.tabs.filter(t => BulkState.selectedIds.has(t.tabId));
@@ -8229,6 +8230,7 @@ async function appendToMasterSheet(rows) {
   } else {
     batches.unshift({
       id:        BulkState.currentBatchId,
+      label:     BulkState.batchLabel || '',
       date:      new Date().toISOString(),
       count:     newRows.length,
       platforms: [...new Set(newRows.map(r => r.platform))]
@@ -8398,6 +8400,10 @@ function renderMasterRows(rows) {
   list.innerHTML = '';
   // Order already determined by filterAndRenderMasterRows sorting
   const display = [...rows];
+  // ── Duplicate detection: find products sharing same URL across different rows
+  const urlCount = {};
+  display.forEach(r => { const key = r.url || r.id; urlCount[key] = (urlCount[key] || 0) + 1; });
+  const dupUrls = new Set(Object.keys(urlCount).filter(k => urlCount[k] > 1));
   display.forEach(r => {
     const sel = MasterUIState.selectedIds.has(r.id);
     const status = r.status || 'ok';
@@ -8415,8 +8421,9 @@ function renderMasterRows(rows) {
       ? `<img class="row-thumb-img" src="${esc(thumbUrl)}" alt="${esc(r.title || '')}" loading="lazy" data-onerror="thumb"><span class="row-thumb-fallback" style="display:none;">${esc(platName.slice(0, 2))}</span>`
       : `<span class="row-thumb-fallback">${esc(platName.slice(0, 2))}</span>`;
 
+    const isDup = dupUrls.has(r.url || r.id);
     const row = document.createElement('div');
-    row.className = 'master-row' + (sel ? ' selected' : '') + ' status-' + status;
+    row.className = 'master-row' + (sel ? ' selected' : '') + ' status-' + status + (isDup ? ' is-dup' : '');
     row.dataset.id = r.id;
 
     row.innerHTML = `
@@ -8427,6 +8434,7 @@ function renderMasterRows(rows) {
           <button class="star-btn ${r.starred ? 'starred' : ''}" data-id="${esc(r.id)}" title="${r.starred ? 'Unstar' : 'Star'}" type="button">${r.starred ? '★' : '☆'}</button>
           <span class="plat-pill" data-plat="${esc(platTag)}">${esc(platName)}</span>
           <span class="m-price">${esc(priceStr)}</span>
+          <span class="m-dup-badge">DUP</span>
           ${status !== 'ok' ? `<span class="m-status ${esc(status)}">${esc(status)}</span>` : ''}
           ${r.lastRehunted ? `<span class="m-rehunted" title="Re-fetched ${new Date(r.lastRehunted).toLocaleString()}">↻</span>` : ''}
         </div>
@@ -12606,6 +12614,15 @@ let TemuExpandedProfiles = new Set(['golf_balls']);
 let TemuCatPage = 1;
 const TEMU_CAT_PAGE_SIZE = 15;
 let TemuCatActiveDept = 'all';
+let TemuCatSelected = new Set(); // bulk-select tracking
+
+function temuCatUpdateBulkBar() {
+  const bar = $('temuCatBulkBar');
+  const countEl = $('temuCatBulkCount');
+  const n = TemuCatSelected.size;
+  if (bar) bar.classList.toggle('hidden', n === 0);
+  if (countEl) countEl.textContent = n;
+}
 
 function temuGetCategoryDept(p) {
   const path = (p?.full_path || '').toLowerCase();
@@ -12767,9 +12784,10 @@ function temuRenderProfiles() {
 
   pageItems.forEach(([name, p]) => {
     const isExpanded = TemuExpandedProfiles.has(name);
+    const isSel = TemuCatSelected.has(name);
     const item = document.createElement('div');
-    item.className = 'temu-cat-item' + (isExpanded ? ' expanded' : ' collapsed');
-    
+    item.className = 'temu-cat-item' + (isExpanded ? ' expanded' : ' collapsed') + (isSel ? ' cat-sel' : '');
+    item.dataset.catName = name;
     const displayName = p.name || name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const catBadge = p.category_keyword || 'Auto Category';
     const breadcrumb = p.full_path ? p.full_path.split(' / ').slice(0, -1).join(' › ') : '';
@@ -12806,6 +12824,9 @@ function temuRenderProfiles() {
     item.innerHTML = `
       <div class="temu-cat-head">
         <div class="temu-cat-head-left">
+          <button class="temu-cat-chk" type="button" title="Select for bulk action" aria-label="Select ${esc(displayName)}">
+            ${isSel ? '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="rgba(0,229,255,0.15)" stroke="var(--accent)" stroke-width="2"/><polyline points="6 12 10 16 18 8" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>' : '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="var(--ink-4)" stroke-width="1.5"/></svg>'}
+          </button>
           <span class="temu-cat-arrow" aria-hidden="true">
             <svg class="i" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </span>
@@ -14986,6 +15007,46 @@ function initTemuExport() {
     if (e.target.closest('#temuCatNextBtn')) {
       TemuCatPage++;
       temuRenderProfiles();
+      return;
+    }
+
+    // ── Category bulk bar buttons ──
+    if (e.target.closest('#temuCatBulkSelAll')) {
+      const cfg = temuGetCfg();
+      Object.keys(cfg.category_profiles || {}).forEach(n => TemuCatSelected.add(n));
+      temuCatUpdateBulkBar();
+      temuRenderProfiles();
+      return;
+    }
+    if (e.target.closest('#temuCatBulkCancel')) {
+      TemuCatSelected.clear();
+      temuCatUpdateBulkBar();
+      temuRenderProfiles();
+      return;
+    }
+    if (e.target.closest('#temuCatBulkDelete')) {
+      if (!TemuCatSelected.size) return;
+      const names = [...TemuCatSelected];
+      const cfg = temuGetCfg();
+      names.forEach(n => { delete cfg.category_profiles[n]; });
+      temuSaveCfg(cfg);
+      TemuCatSelected.clear();
+      temuCatUpdateBulkBar();
+      temuRenderProfiles();
+      toast(`${names.length} categor${names.length > 1 ? 'ies' : 'y'} deleted`, 'ok');
+      return;
+    }
+    // ── Category item checkbox toggle ──
+    const chk = e.target.closest('.temu-cat-chk');
+    if (chk) {
+      e.stopPropagation();
+      const catName = chk.closest('.temu-cat-item')?.dataset?.catName;
+      if (catName) {
+        if (TemuCatSelected.has(catName)) TemuCatSelected.delete(catName);
+        else TemuCatSelected.add(catName);
+        temuCatUpdateBulkBar();
+        temuRenderProfiles();
+      }
       return;
     }
 

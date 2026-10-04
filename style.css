@@ -1360,6 +1360,19 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
 
 /* ── UPLOAD ACTIONS ── */
 .temu-actions-wrap { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+/* Batch Name Input Row */
+.temu-batch-name-row { display: flex; align-items: center; gap: 7px; }
+.temu-batch-name-row svg { width: 13px; height: 13px; stroke: var(--ink-3); stroke-width: 2; flex-shrink: 0; }
+.temu-batch-name-inp { flex: 1; height: 30px; font-size: 12px; background: rgba(255,255,255,0.03); }
+.temu-batch-name-inp::placeholder { color: var(--ink-4); font-style: italic; }
+/* Category Bulk Action Bar */
+.temu-cat-bulk-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.18); margin-bottom: 6px; }
+.temu-cat-bulk-bar.hidden { display: none; }
+.temu-cat-bulk-info { font-size: 11.5px; font-weight: 600; color: var(--accent-ink); }
+.temu-cat-bulk-actions { display: flex; align-items: center; gap: 5px; }
+/* Library Duplicate Badge */
+.master-row.is-dup .m-dup-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; color: #F59E0B; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; padding: 1px 5px; margin-left: 4px; }
+.m-dup-badge { display: none; }
 
 /* Main Upload Button — animated shimmer gradient */
 .temu-btn-main-upload {
@@ -1987,6 +2000,11 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
   flex: 1;
   min-width: 0;
 }
+.temu-cat-chk { width: 20px; height: 20px; padding: 0; background: none; border: none; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.5; transition: opacity 0.15s; }
+.temu-cat-chk:hover { opacity: 1; }
+.temu-cat-chk svg { width: 16px; height: 16px; }
+.temu-cat-item.cat-sel { background: rgba(0,229,255,0.04); border-color: rgba(0,229,255,0.25); }
+.temu-cat-item.cat-sel .temu-cat-chk { opacity: 1; }
 .temu-cat-arrow {
   width: 16px;
   height: 16px;
