@@ -12588,7 +12588,7 @@ function temuUpdateTplStatus() {
     el.textContent = hasStore
       ? (hasTemplate ? `✓ ${name}` : `${n}: Select .xlsx template`)
       : 'Pehle store add karein';
-    el.style.color = hasTemplate ? '#4ade80' : '#e8a33d';
+    el.style.color = hasTemplate ? 'var(--ok)' : 'var(--warn)';
   }
 
   // Step 1 UI
