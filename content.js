@@ -2907,7 +2907,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
   // 0) Safety: make sure the right store is open in Seller Center
   if (expectStore) {
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (!mall) return fail('Store name unavailable ? upload blocked. Wait for Seller Center to load.');
+    if (!mall) return fail('Store name unavailable - upload blocked. Wait for Seller Center to load.');
     if (mall.toLowerCase() !== String(expectStore).toLowerCase()) {
       return fail(`Ghalat store khula hai: Temu par "${mall}" hai, magar file "${expectStore}" ke liye bani hai. Store switch kar ke dobara try karein.`);
     }
@@ -3235,7 +3235,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   const fail = m => { report.push('✗ ' + m); return { success: false, report }; };
   if (expectStore) {
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (!mall) return fail('Store name unavailable ? draft changes blocked. Wait for Seller Center to load.');
+    if (!mall) return fail('Store name unavailable - draft changes blocked. Wait for Seller Center to load.');
     if (mall.toLowerCase() !== String(expectStore).toLowerCase())
       return fail(`Ghalat store khula hai: Temu par "${mall}" hai, extension mein "${expectStore}" active hai.`);
   }
