@@ -1155,8 +1155,31 @@ const CONTENT_SCRIPT_ACTIONS = new Set([
   'FETCH_BASE64_BATCH', 'GET_PENDING_IMAGE_HUNT', 'CHECK_BULK_QUEUE',
   'ADD_TO_BULK_QUEUE',
   // v9.9.0 — Google Flow image studio (flow_automation.js / content.js lightbox)
-  'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS'
+  'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS', 'ZH_FLOW_CLAIM', 'ZH_FLOW_OWNER'
 ]);
+
+// Serialize ownership changes in the worker, rather than competing tab-local locks.
+let flowClaimChain = Promise.resolve();
+function claimFlowJob(message, sender) {
+  const operation = flowClaimChain.then(async () => {
+    const job = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+    if (!job || job.jobId !== message.jobId || job.processed) return { ok: false, error: 'job_inactive' };
+    if (message.action === 'ZH_FLOW_CANCEL') {
+      if (sender?.tab) return { ok: false, error: 'panel_only' };
+      await chrome.storage.local.set({ pendingFlowAction: { ...job, processed: true, status: 'cancelled', finishedAt: Date.now() } });
+      return { ok: true };
+    }
+    if (sender?.tab?.id !== job.tabId || !/^https:\/\/flow\.google\.com\//i.test(sender.tab.url || '')) return { ok: false, error: 'wrong_tab' };
+    const projectUrl = String(sender.tab.url || '').split('?')[0].split('#')[0];
+    if (job.projectUrl && job.projectUrl !== projectUrl) return { ok: false, error: 'wrong_project' };
+    if (!/\/project\//.test(projectUrl)) return { ok: false, error: 'open_project_first' };
+    if (job.status === 'running') return { ok: false, error: 'already_running' };
+    await chrome.storage.local.set({ pendingFlowAction: { ...job, projectUrl, status: 'running', startedAt: Date.now() } });
+    return { ok: true, projectUrl };
+  });
+  flowClaimChain = operation.catch(() => {});
+  return operation;
+}
 
 function isAuthorizedMessage(msg, sender) {
   if (!msg || typeof msg.action !== 'string' || msg.action.length > 80) return false;
@@ -1328,6 +1351,13 @@ async function handleMessage(msg, sender, queueLocked = false) {
       // v9.5.0 — side panel: {tabIds:[..]} ya {all:true, windowId}
       if (msg.all) return await bgGroupAllProductTabs(msg.windowId);
       return await bgGroupTabs(msg.tabIds || []);
+    }
+    case 'ZH_FLOW_CLAIM':
+    case 'ZH_FLOW_CANCEL':
+      return await claimFlowJob(msg, sender);
+    case 'ZH_FLOW_OWNER': {
+      const job = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+      return { ok: !!job && !job.processed && job.jobId === msg.jobId && job.tabId === sender?.tab?.id && /^https:\/\/flow\.google\.com\//i.test(sender.tab.url || '') };
     }
     case 'ZH_CDP_CLICK': {
       const tabId = sender?.tab?.id || msg.tabId;

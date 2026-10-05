@@ -23,6 +23,23 @@
   const log = (...a) => console.log(TAG, ...a);
   const warn = (...a) => console.warn(TAG, ...a);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  let activeJob = null;
+  let manualBusy = false;
+  class JobCancelled extends Error {}
+  function checkCurrentJob() {
+    if (activeJob && latestPending && (latestPending.jobId !== activeJob.jobId || latestPending.processed)) throw new JobCancelled('Job stopped');
+  }
+  async function checkpoint() {
+    if (!activeJob) return;
+    latestPending = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+    if (!latestPending) throw new JobCancelled('Job removed');
+    checkCurrentJob();
+  }
+  async function pace(min = 500, max = 1500) {
+    const until = Date.now() + min + Math.floor(Math.random() * (max - min + 1));
+    while (Date.now() < until) { checkCurrentJob(); await sleep(Math.min(100, until - Date.now())); }
+    await checkpoint();
+  }
 
   const ATTACH_TIMEOUT_MS = 60000;   // image upload into the chip
   const START_TIMEOUT_MS = 20000;    // generation must visibly start within this
@@ -41,8 +58,9 @@
   async function waitFor(fn, timeoutMs = 8000, intervalMs = 250) {
     const end = Date.now() + timeoutMs;
     for (;;) {
+      checkCurrentJob();
       let v = null;
-      try { v = fn(); } catch (_) { v = null; }
+      try { v = fn(); } catch (e) { if (e instanceof JobCancelled) throw e; v = null; }
       if (v) return v;
       if (Date.now() >= end) return null;
       await sleep(intervalMs);
@@ -64,6 +82,7 @@
 
   // Realistic human mouse & pointer event sequence — safe from Google BotGuard / CDP detection
   async function trustedClick(el, label = '') {
+    await checkpoint();
     if (!el || !el.isConnected) return false;
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
     await sleep(80);
@@ -301,6 +320,7 @@
     !!document.querySelector('flow-prompt-box flow-creative-agent-prompt-box');
 
   async function cdpClickEl(el) {
+    await checkpoint();
     if (!el || !el.isConnected) return false;
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
     await sleep(120);
@@ -557,8 +577,9 @@
   async function injectPrompt(text) {
     // ProseMirror renders line breaks as <br>/<p>, so compare with all whitespace removed
     const squash = (v) => String(v || '').replace(/\s+/g, '');
-    const probe = squash(text).slice(0, 40);
-    const has = () => squash(editorText(Q.promptRoot())).includes(probe);
+    const probe = squash(text);
+    if (!probe) throw new JobError('Prompt khali hai');
+    const has = () => squash(editorText(Q.promptRoot())) === probe;
     const ed = Q.editor(Q.promptRoot());
     if (!ed) throw new JobError('Prompt editor nahi mila');
     ed.focus();
@@ -579,11 +600,15 @@
 
   // ── Step 4 + 5: generate and capture the result ─────────────────
   async function generateAndCapture(job) {
+    await checkpoint();
     // Recheck immediately before submitting, including after image upload/paste.
     await ensureSettings();
     const root = Q.promptRoot();
     const gen = await waitFor(() => { const b = Q.genBtn(Q.promptRoot()); return b && !isDisabled(b) ? b : null; }, 10000);
     if (!gen) throw new JobError('Generate button enable nahi hua');
+    if (pendingCount() > 0) throw new JobError('Flow mein generation pehle se chal rahi hai — result ka wait karein, phir Send Again');
+    if (!chipReady(Q.promptRoot()) || editorText(Q.promptRoot()).replace(/\s+/g, '') !== String(job.prompt || '').replace(/\s+/g, '')) throw new JobError('Image ya poora prompt verify nahi hua');
+    await pace(1000, 3000);
 
     scrollGridTop();
     // Existing failures belong to previous jobs, even if Flow recreates their DOM.
@@ -606,6 +631,7 @@
     // Submit once with a real mouse click. Unconfirmed submissions must not be
     // retried through Enter or another click: Flow may already have accepted them.
     const cdpGenClick = async () => {
+      await checkpoint();
       // Resolve the button in the worker AFTER debugger attach changes the viewport.
       const selector = 'flow-base-prompt-box flow-generate-icon-button button[aria-label="Start generation"]';
       let res;
@@ -660,14 +686,16 @@
 
       // Only the first few tiles (grid is newest-first) — protects against old tiles
       // that the virtual scroller renders later.
-      const fresh = allTiles().slice(0, 8).find(t =>
+      const candidates = allTiles().slice(0, 8).filter(t =>
         t.mediaId && !before.has(t.mediaId) && !refIds.has(t.mediaId) && !t.pending &&
         /^https:\/\/flow-content\.google\//i.test(t.src) &&
         t.generated);
-      if (fresh) return fresh;
-      const fresh2 = gridImages().slice(0, 10).find(g =>
+      if (candidates.length > 1) return { error: 'Multiple new results — manual image select karein' };
+      if (candidates[0]) return candidates[0];
+      const fresh2 = gridImages().slice(0, 10).filter(g =>
         !before.has(g.mediaId) && !refIds.has(g.mediaId) && g.loaded && g.generated);
-      if (fresh2) { log('Result found via image scan:', fresh2.mediaId); return { mediaId: fresh2.mediaId, src: fresh2.src }; }
+      if (fresh2.length > 1) return { error: 'Multiple new results — manual image select karein' };
+      if (fresh2[0]) return { mediaId: fresh2[0].mediaId, src: fresh2[0].src };
       const s = snackText();
       if (s && s !== lastSnack) { lastSnack = s; log('Flow says:', s); }
       if (s && /(couldn.?t|could not|failed|unable|violat|policy|try again|error)/i.test(s) && Date.now() - t0 > 3000) {
@@ -690,7 +718,8 @@
     job.shortTitle = (job.productTitle || 'Product').slice(0, 30);
     log('Job start', job.jobId, job.productTitle, 'img#', job.imageIndex);
     try {
-      await chrome.storage.local.set({ pendingFlowAction: { ...job, status: 'running', startedAt: Date.now() } });
+      activeJob = job;
+      await checkpoint();
 
       reportStatus(job, 'prepare', `ZHunter: prompt box tayyar · ${job.shortTitle}`);
       // Agent panel open = no normal prompt box, so turn Agent off first.
@@ -700,12 +729,15 @@
       if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
       await ensureSettings();
       await clearPromptBox();
+      await pace();
 
       reportStatus(job, 'image', `ZHunter: image attach · ${job.shortTitle}`);
       await attachImage(job);
+      await pace();
 
       reportStatus(job, 'prompt', 'ZHunter: prompt paste');
       await injectPrompt(job.prompt);
+      await checkpoint();
 
       const res = await generateAndCapture(job);
       if (res.cancelled) {
@@ -715,6 +747,9 @@
       }
       log('Generated media', res.mediaId, res.src);
 
+      await checkpoint();
+      // Persist the verified result before notifying a panel that may be closed.
+      await finishJob(job, 'done', { mediaId: res.mediaId, newImgUrl: res.src });
       await sendBg({
         action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
         jobId: job.jobId,
@@ -724,9 +759,9 @@
         mediaId: res.mediaId,
         newImgUrl: res.src
       });
-      await finishJob(job, 'done', { mediaId: res.mediaId, newImgUrl: res.src });
       updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
     } catch (e) {
+      if (e instanceof JobCancelled) { log('Job cancelled', job.jobId); return; }
       const msg = e instanceof JobError ? e.message : `Unexpected error: ${e?.message || e}`;
       // v9.12.7 — expected Flow failures (unusual activity, policy, timeout…) are handled by the
       // side panel; log them quietly so Chrome's Errors page doesn't show a false alarm.
@@ -735,6 +770,7 @@
       reportStatus(job, 'error', msg, true);
       await finishJob(job, 'error', { error: msg });
     } finally {
+      activeJob = null;
       runningJobId = null;
       // A newer job (e.g. "Send Again") may have arrived while this one was running.
       setTimeout(handlePendingFlowAction, 300);
@@ -747,7 +783,7 @@
   let checking = false;
 
   async function handlePendingFlowAction() {
-    if (runningJobId || checking) return;
+    if (runningJobId || checking || manualBusy) return;
     if (!chrome?.storage?.local) return;
     checking = true;
     try {
@@ -762,7 +798,7 @@
     try {
       job = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
     } catch (_) { return; }
-    if (!job || job.processed || job.status === 'running' && job.startedAt && Date.now() - job.startedAt < RESULT_TIMEOUT_MS + 60000) return;
+    if (!job || job.processed || job.status === 'running') return;
     if (!job.jobId || !job.imgBase64) return;
     if (Date.now() - (job.timestamp || 0) > STALE_JOB_MS) {
       await finishJob(job, 'stale');
@@ -770,6 +806,15 @@
     }
 
     const insideProject = /\/project\/[\w-]+/i.test(location.pathname);
+    if (job.projectUrl && job.projectUrl !== location.href.split('?')[0].split('#')[0]) return;
+    if (insideProject) {
+      const claim = await sendBg({ action: 'ZH_FLOW_CLAIM', jobId: job.jobId });
+      if (!claim?.ok) return;
+      job.projectUrl = claim.projectUrl;
+    } else {
+      const owner = await sendBg({ action: 'ZH_FLOW_OWNER', jobId: job.jobId });
+      if (!owner?.ok) return;
+    }
     if (!insideProject) {
       updateFlowHUD(`ZHunter: naya project bana raha hoon · ${(job.productTitle || '').slice(0, 30)}`, 'info');
       const btn = await waitFor(() => Q.newProjectBtn(), 8000);

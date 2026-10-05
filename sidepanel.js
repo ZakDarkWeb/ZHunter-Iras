@@ -2935,11 +2935,12 @@ function newFlowJobId() {
   return 'fj_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-async function focusOrOpenFlowTab() {
+async function focusOrOpenFlowTab(tabId = null) {
   const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
   if (tabs && tabs.length > 0) {
     // Reuse the project already open so all images land in one Flow project
-    const targetTab = tabs.find(t => t.url && t.url.includes('/project/')) || tabs[0];
+    const targetTab = tabId ? tabs.find(t => t.id === tabId) : tabs.find(t => t.url && t.url.includes('/project/')) || tabs[0];
+    if (!targetTab) throw new Error('Selected Flow tab was closed');
     await chrome.tabs.update(targetTab.id, { active: true });
     if (targetTab.windowId) chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
     try {
@@ -2998,7 +2999,7 @@ function flowPrefetchImage(src) {
 // still ONE generation at a time so results can never land on the wrong product)
 const FLOW_SPEEDS = {
   safe:   { min: 4000, max: 9000, label: 'Safe' },
-  normal: { min: 2000, max: 4000, label: 'Normal' },
+  normal: { min: 2000, max: 6000, label: 'Normal' },
   fast:   { min: 800,  max: 1600, label: 'Fast' }
 };
 function flowSpeedKey() {
@@ -3030,6 +3031,13 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
   }
 
   const id = jobId || newFlowJobId();
+  const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+  const boundId = source === 'stepper' ? TemuImgStepper.flowTabId : null;
+  let target = boundId ? tabs.find(t => t.id === boundId) : tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
+  if (boundId && !target) throw new Error('Batch ka Flow tab band hai — usi tab ko restore karein');
+  if (!target) target = await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+  if (source === 'stepper') TemuImgStepper.flowTabId = target.id;
+  const projectUrl = /\/project\//.test(target.url || '') ? target.url.split('?')[0].split('#')[0] : null;
   FlowJobs.set(id, {
     productId: productId || null,
     imageIndex: imageIndex ?? null,
@@ -3049,11 +3057,14 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
       imageIndex: imageIndex ?? null,
       timestamp: Date.now(),
       processed: false,
-      status: 'queued'
+      status: 'queued',
+      tabId: target.id,
+      projectUrl,
+      sessionId: source === 'stepper' ? TemuImgStepper.sessionId : null
     }
   });
 
-  const how = await focusOrOpenFlowTab();
+  const how = await focusOrOpenFlowTab(target.id);
   toast(how === 'focused' ? '✓ Flow tab — image job bheja gaya' : '✓ Google Flow khul raha hai…', 'ok');
   return id;
 }
@@ -3571,7 +3582,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
     FlowHandledResults.add(TemuImgStepper.activeJobId);
     _markFlowJobDone(TemuImgStepper.activeJobId, /^https?:/i.test(src) ? src : null);
   }
-  temuStepCancelActiveJob();
+  await temuStepCancelActiveJob();
   temuStepSetStatus(`⏳ ${how}: image laga raha hoon…`);
 
   // v9.11.0 — local copy first (fast); the public Temu link is made in the background below,
@@ -14366,7 +14377,7 @@ async function temuStartBulkImageEdit(opts = {}) {
   if (TemuImgStepper.running) {
     // v9.10.1 — an old (often stuck) session used to re-open here with its old products.
     // Now: stop it and start fresh with what is selected right now.
-    temuStepCancelActiveJob();
+    await temuStepCancelActiveJob();
     TemuImgStepper.running = false;
     toast('Purana session band — naye selected products se shuru', 'info');
   }
@@ -14414,11 +14425,17 @@ async function temuStartBulkImageEdit(opts = {}) {
   await temuStepProcessCurrent();
 }
 
-function temuStepCancelActiveJob() {
-  if (TemuImgStepper.activeJobId) FlowJobs.delete(TemuImgStepper.activeJobId);
-  TemuImgStepper.activeJobId = null;
-  TemuImgStepper.npToken = null;   // v9.12.6 — stops a running "naya project" countdown
+async function temuStepCancelActiveJob() {
+  const session = TemuImgStepper;
+  const id = session.activeJobId;
+  session.activeJobId = null;
+  session.npToken = null;
+  session.pauseToken = null;
   temuStepManualAttn(false);
+  if (id) {
+    FlowJobs.delete(id);
+    await msg({ action: 'ZH_FLOW_CANCEL', jobId: id });
+  }
 }
 
 // ═══ v9.12.6 — "unusual activity": wait, open a NEW Flow project, resend the same image ═══
@@ -14488,7 +14505,7 @@ async function temuStepManualAction(act) {
   } else if (act === 'prompt') {
     if (await zhCopyText(prompt)) toast('📝 Prompt copied', 'ok'); else toast('Prompt copy nahi hua', 'warn');
   } else if (act === 'flow') {
-    temuStepCancelActiveJob();   // auto stops for this step; result comes via Ctrl+V / "Flow se latest"
+    await temuStepCancelActiveJob();   // auto stops for this step; result comes via Ctrl+V / "Flow se latest"
     const btn = $('temuStepPasteFlowBtn');
     if (btn) btn.disabled = true;
     try {
@@ -14514,7 +14531,7 @@ async function temuStepManualAction(act) {
     } finally { if (btn) btn.disabled = false; }
   } else if (act === 'studio') {
     const pid = cur.product?.id;
-    temuStepCancelActiveJob();
+    await temuStepCancelActiveJob();
     S.running = false;
     $('temuImgStepperModal')?.classList.add('hidden');
     await zhStudioOpen(pid);
@@ -14541,8 +14558,8 @@ function temuStepOpenModal() {
   // Close = stop the session (a late Flow result is ignored, nothing gets overwritten)
   const closeBtn = $('temuStepCloseBtn');
   if (closeBtn) {
-    closeBtn.onclick = () => {
-      temuStepCancelActiveJob();
+    closeBtn.onclick = async () => {
+      await temuStepCancelActiveJob();
       TemuImgStepper.running = false;
       modal.classList.add('hidden');
       temuGetQueuedRows().then(temuUpdateImgEditCount);
@@ -14570,7 +14587,7 @@ function temuStepOpenModal() {
   }
   if (skipBtn) {
     skipBtn.onclick = async () => {
-      temuStepCancelActiveJob();
+      await temuStepCancelActiveJob();
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
       if (current) current.continueStage = false;
       TemuImgStepper.stats.skipped++;
@@ -14623,6 +14640,15 @@ async function temuStepProcessCurrent() {
 }
 
 async function temuStepSendCurrent() {
+  const session = TemuImgStepper;
+  if (session.sending || session.applying) return;
+  session.sending = true;
+  try { await temuStepSendCurrentUnlocked(); }
+  catch (error) { temuStepSetStatus(error.message || String(error), 'error'); }
+  finally { session.sending = false; }
+}
+
+async function temuStepSendCurrentUnlocked() {
   const { queue, currentIndex, engine, prompt } = TemuImgStepper;
   const current = queue[currentIndex];
   if (!current) return;
@@ -14631,7 +14657,7 @@ async function temuStepSendCurrent() {
 
   if (engine === 'flow') {
     // New job for this exact product/image slot; any earlier job of this step is dropped
-    temuStepCancelActiveJob();
+    await temuStepCancelActiveJob();
     const jobId = newFlowJobId();
     TemuImgStepper.activeJobId = jobId;
     current.jobId = jobId;
@@ -14818,7 +14844,7 @@ async function temuStepHandlePasteNext() {
 }
 
 async function temuStepFinish() {
-  temuStepCancelActiveJob();
+  await temuStepCancelActiveJob();
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
   if (TemuImgStepper.engine === 'flow') {
