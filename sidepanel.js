@@ -3008,8 +3008,20 @@ function flowSpeedKey() {
 }
 
 // Flow smart editor automation helper — returns the jobId (or null if nothing was sent)
-async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
+let flowDispatchBusy = false;
+async function triggerFlowEdit(options) {
+  if (flowDispatchBusy) { toast('Flow image dispatch chal raha hai — wait karein', 'info'); return null; }
+  flowDispatchBusy = true;
+  try { return await triggerFlowEditUnlocked(options); }
+  finally { flowDispatchBusy = false; }
+}
+
+async function triggerFlowEditUnlocked({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
   const session = source === 'stepper' ? TemuImgStepper : null;
+  if (source !== 'stepper' && productId != null) {
+    const failed = [...FlowJobs.entries()].find(([, job]) => job.phase === 'apply_failed' && job.productId === productId && job.imageIndex === imageIndex && job.originalUrl === src);
+    if (failed) { await onFlowResult({ jobId: failed[0], newImgUrl: failed[1].resultUrl, retrySave: true }); return failed[0]; }
+  }
   if (!src) return null;
   const cleanTitle = (title || 'Product')
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
@@ -3187,7 +3199,7 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, requireS
     changed = true;
   }
   if (changed && productId) {
-    await _zhEditsChain;
+    await _zhEditsChain.catch(() => {});
     // v9.12.8 — fresh read-modify-write of ONLY this image, one write at a time.
     // (Pehle purani in-memory Library poori likh di jati thi, aur do saves ek saath hon to
     //  doosra pehle wale ki image mita deta tha — is liye edit hui images wapas purani ho jati thin.)
@@ -3207,7 +3219,7 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, requireS
     } catch (e) { if (requireSaved) throw e; console.warn('[ZHunter] Library save after replace failed:', e); }
     await zhEditsRecord(productId, idx, oldUrl, newUrl, pUrl, requireSaved);
     if (shift) {
-      const edits = await zhEditsLoad();
+      const edits = structuredClone(await zhEditsLoad());
       const shifted = [];
       for (const [key, edit] of Object.entries(edits)) {
         if (edit.idx > 0 && ((edit.id && edit.id === productId) || (pUrl && edit.url === pUrl))) {
@@ -3219,6 +3231,7 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, requireS
       }
       for (const edit of shifted) edits[`${edit.url || edit.id}#${edit.idx}`] = edit;
       await chrome.storage.local.set({ [ZH_EDITS_KEY]: edits });
+      ZhEdits = edits;
       zhShiftImageEditors(productId, shift);
     }
   }
@@ -3409,7 +3422,7 @@ const FlowGenInfo = new Map();
 const FlowSendSnap = new Map(); // jobId -> { ids:Set, at } grid snapshot taken right before sending // jobId -> { before:Set, ref:Set, at } (ids present when generation started)
 function onFlowStatus(m) {
   if (!m?.jobId || !FlowJobs.has(m.jobId)) return;
-  if (isActiveStepperJob(m.jobId) && m.projectUrl) {
+  if (isActiveStepperJob(m.jobId) && m.projectUrl && !TemuImgStepper.flowProjectUrl) {
     TemuImgStepper.flowProjectUrl = m.projectUrl;
     persistFlowSession().catch(error => console.warn('[ZHunter] Flow session save failed', error));
   }
@@ -3431,8 +3444,9 @@ function onFlowStatus(m) {
     if (isActiveStepperJob(m.jobId)) {
       TemuImgStepper.activeJobId = null;
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
-      if (current) current.sentAt = null;
-      if (unusual && TemuImgStepper.engine === 'flow') flowAutoNewProject();   // v9.12.6
+      if (current) { current.sentAt = null; current.phase = 'generation_failed'; current.applyError = m.text || 'Flow error'; }
+      persistFlowSession().catch(error => console.warn('[ZHunter] Flow failure state save failed', error));
+      if (unusual && TemuImgStepper.engine === 'flow') flowAutoNewProject().catch(error => { temuStepSetStatus(error.message || 'Recovery stopped', 'error'); temuStepManualAttn(true); });
       else { toast('Flow: ' + (m.text || 'error') + ' — "Send Again", "Skip" ya neeche Manual buttons', 'warn'); temuStepManualAttn(true); }
     } else {
       toast('Flow: ' + (m.text || 'error'), 'warn');
@@ -3477,78 +3491,45 @@ async function onFlowResult(m) {
     await temuStepApplyManualImage(m.newImgUrl, 'Auto');
     return;
   }
-  FlowHandledResults.add(m.jobId);
-  FlowGenInfo.delete(m.jobId);
-  console.log('[ZHunter] Flow result received', m.jobId, m.newImgUrl);
-  _markFlowJobDone(m.jobId, m.newImgUrl);
-  if (job.source === 'stepper' && !isActiveStepperJob(m.jobId)) {
-    console.warn('[ZHunter] Flow result is not for the current step — ignored:', m.jobId);
-    FlowJobs.delete(m.jobId);
-    return;
-  }
-  FlowJobs.delete(m.jobId);
-
-  // Always trust the job record, never ids echoed back from the page
-  let { productId, imageIndex, originalUrl, title } = job;
-  const isStep = job.source === 'stepper';
-  if (isStep && !productId) {
-    const sc = (TemuImgStepper.queue || []).find(q => q.jobId === m.jobId);
-    if (sc?.product) productId = _ensureRowIds([sc.product])[0].id;
-  }
-
-  if (!productId || imageIndex == null) {
-    toast('✓ Flow image ban gayi (yeh image kisi product se linked nahi thi)', 'ok');
-    return;
-  }
-
-  // v9.10.1 — the same product can exist twice (Library copy + Bulk/Sheet copy) with different
-  // image links. Check the stepper's own product object first, then any copy.
-  let cur = currentProductImage(productId, imageIndex);
-  const stepCur = isStep ? (TemuImgStepper.queue || []).find(q => q.jobId === m.jobId) : null;
-  if (stepCur) cur = _imgEntryUrl(stepCur.product?.images?.[imageIndex]);
-  else if (cur !== originalUrl && _productRowsById(productId).some(r => _imgEntryUrl(r.images?.[imageIndex]) === originalUrl)) cur = originalUrl;
-  if (cur === null || cur !== originalUrl) {
-    const why = cur === null ? 'product ab list mein nahi' : 'us jagah image pehle hi badal chuki hai';
-    toast(`⚠️ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replace nahi ki — ${why}`, 'warn');
-    if (isStep) {
-      TemuImgStepper.stats.skipped++;
-      temuStepSetStatus(`⚠️ Replace skip: ${why}. Agle step pe ja raha hoon…`, 'error');
-      TemuImgStepper.activeJobId = null;
-      setTimeout(() => temuStepAdvance(), 1500);
+  if (job.applying || (job.phase === 'apply_failed' && !m.retrySave)) return;
+  job.applying = true;
+  job.resultUrl = m.newImgUrl;
+  const { productId, imageIndex, originalUrl, title } = job;
+  const backups = _productRowsById(productId).map(row => ({ row, images: row.images.slice(), original: row.zhOriginalMainUrl }));
+  let candidateUrl = null;
+  try {
+    if (!productId || imageIndex == null) {
+      FlowHandledResults.add(m.jobId); FlowJobs.delete(m.jobId);
+      toast('Flow image ready - not linked to a product', 'ok');
+      return;
     }
-    return;
-  }
+    if (!_productRowsById(productId).some(row => _imgEntryUrl(row.images?.[imageIndex]) === originalUrl)) throw new Error('Image slot changed; manual review required');
+    let finalUrl = await uploadImageToPublicHost(m.newImgUrl);
+    if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) {
+      const response = await msg({ action: 'FETCH_FLOW_IMAGE', url: m.newImgUrl });
+      if (response?.success && response.base64) finalUrl = response.base64;
+    }
+    if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) throw new Error('Generated image download failed; retry save');
+    candidateUrl = finalUrl;
+    const saved = await replaceProductImage(productId, imageIndex, finalUrl, originalUrl, true);
+    if (!saved) throw new Error('Image slot changed; manual review required');
+    FlowHandledResults.add(m.jobId); FlowJobs.delete(m.jobId); FlowGenInfo.delete(m.jobId);
+    await _markFlowJobDone(m.jobId, m.newImgUrl);
+    try { await temuRenderReview(); } catch (error) { console.warn('[ZHunter] Saved image review refresh failed', error); }
+    toast((title || 'Product') + ' - edited image saved', 'ok');
+  } catch (error) {
+    job.phase = 'apply_failed';
+    job.resultUrl = candidateUrl || m.newImgUrl;
+    if (candidateUrl) for (const backup of backups) {
+      const candidate = { images: backup.images, zhOriginalMainUrl: backup.original };
+      zhSetEditedImage(candidate, imageIndex, candidateUrl);
+      if (JSON.stringify(backup.row.images) !== JSON.stringify(candidate.images)) continue;
+      backup.row.images = backup.images;
+      if (backup.original === undefined) delete backup.row.zhOriginalMainUrl; else backup.row.zhOriginalMainUrl = backup.original;
+    }
+    toast((error.message || 'Image save failed') + ' - same edit button se Retry Save; generation dobara nahi', 'warn');
+  } finally { job.applying = false; }
 
-  if (isStep) temuStepSetStatus('✓ Image mili — Temu ke liye public link bana raha hoon…', 'ok');
-
-  // Re-host (Flow link expires) — the product only gets the new image once we have a stable copy
-  let finalUrl = await uploadImageToPublicHost(m.newImgUrl);
-  if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) {
-    // Couldn't download or re-host: keep a local copy so nothing expires under the user
-    try {
-      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: m.newImgUrl });
-      if (r?.success && r.base64) finalUrl = r.base64;
-    } catch (_) {}
-  }
-  if (!finalUrl) finalUrl = m.newImgUrl;
-  const isPublic = /^https?:\/\//i.test(finalUrl) && !/flow-content\.google/i.test(finalUrl);
-
-  const ok = await replaceProductImage(productId, imageIndex, finalUrl, originalUrl);
-  if (!ok) {
-    if (isStep) TemuImgStepper.stats.skipped++;
-    toast(`⚠️ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replace nahi hui`, 'warn');
-  } else {
-    if (isStep) TemuImgStepper.stats.done++;
-    await temuRenderReview();
-    toast(isPublic
-      ? `✓ ${trunc(title || 'Product', 30)} · Image #${imageIndex + 1} replaced · Temu link ready`
-      : `✓ Image #${imageIndex + 1} replaced — public link nahi bana (export se pehle dobara try hoga)`, isPublic ? 'ok' : 'warn');
-  }
-
-  if (isStep && isActiveStepperJob(m.jobId)) {
-    TemuImgStepper.activeJobId = null;
-    temuStepScheduleNext();
-  }
 }
 
 // v9.10.1 — human-like pacing between Flow jobs (random 4–9 s) so the account doesn't
@@ -3627,12 +3608,19 @@ async function temuStepApplyManualImage(src, how = 'manual') {
       if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) throw new Error('Result download nahi hui ? Retry Save karein');
     }
     if (!stillCurrent()) return false;
-    if (_imgEntryUrl(current.product?.images?.[idx]) !== expected) throw new Error('Image slot badal chuka hai ? manual review karein');
     current.savedCandidate = finalUrl;
     await persistFlowSession();
     if (!stillCurrent()) return false;
+    const expectedAtSave = current.imgUrl;
+    if (expectedAtSave !== expected) {
+      const equivalent = Object.values(await zhEditsLoad()).some(edit =>
+        (edit.id === pid || edit.url === current.product.url) && edit.idx === idx && edit.newUrl === expectedAtSave &&
+        (edit.orig === expected || (edit.via || []).includes(expected)));
+      if (!equivalent) throw new Error('Image source changed - manual review karein');
+    }
+    if (_imgEntryUrl(current.product?.images?.[idx]) !== expectedAtSave) throw new Error('Image slot changed - manual review karein');
     saveStarted = true;
-    const ok = await replaceProductImage(pid, idx, finalUrl, expected, true);
+    const ok = await replaceProductImage(pid, idx, finalUrl, expectedAtSave, true);
     if (!ok) throw new Error('Product image save nahi hui');
     if (!stillCurrent()) return false;
     current.done = true;
@@ -3679,10 +3667,16 @@ async function temuStepApplyManualImage(src, how = 'manual') {
       const pub = await uploadImageToPublicHost(finalUrl);
       if (pub && /^https?:\/\//i.test(pub)) {
         await replaceProductImage(pid, idx, pub, finalUrl);
-        zhEditsRecord(pid, idx, finalUrl, pub, current.product?.url || '');
         const e = current.product?.images?.[idx];
         if (e === finalUrl) current.product.images[idx] = pub;
         else if (e && e.url === finalUrl) current.product.images[idx] = { ...e, url: pub };
+        for (const q of session.queue) {
+          if (q.product.id === pid && q.imgIndex === idx && q.imgUrl === finalUrl) q.imgUrl = pub;
+        }
+        for (const job of FlowJobs.values()) {
+          if (job.productId === pid && job.imageIndex === idx && job.originalUrl === finalUrl) job.originalUrl = pub;
+        }
+        await persistFlowSession();
       }
     })().catch(error => console.warn('[ZHunter] Public image link failed; local image retained', error));
   }
@@ -13435,7 +13429,7 @@ function persistFlowSession() {
     stats: { ...s.stats }, paused: !!s.paused, npCount: s.npCount || 0,
     breakAt: s.breakAt || 0, pauseUntil: s.pauseUntil || 0, updatedAt: Date.now(),
     queue: s.queue.map(q => ({
-      product: { id: q.product.id, url: q.product.url, title: q.product.title, images: q.product.images, zhOriginalMainUrl: q.product.zhOriginalMainUrl },
+      product: { ...q.product }, // Preserve price/currency, sourcing and listing metadata too.
       imgUrl: q.imgUrl, imgIndex: q.imgIndex, jobId: q.jobId, done: q.done,
       stages: q.stages, stageIndex: q.stageIndex, prompt: q.prompt, continueStage: q.continueStage,
       phase: q.phase, resultUrl: q.resultUrl, savedCandidate: q.savedCandidate, applyError: q.applyError, sentAt: q.sentAt
@@ -13460,8 +13454,10 @@ async function resumeFlowSession() {
         (edit.id === fresh.id || edit.url === fresh.url) && edit.idx === q.imgIndex &&
         edit.newUrl === q.savedCandidate && (edit.orig === q.imgUrl || (edit.via || []).includes(q.imgUrl)) &&
         _imgEntryUrl(fresh.images?.[q.imgIndex]) === q.savedCandidate);
-      if (q.resultUrl && applied) {
+      const candidateAlreadySaved = q.savedCandidate && _imgEntryUrl(fresh.images?.[q.imgIndex]) === q.savedCandidate;
+      if (q.resultUrl && candidateAlreadySaved) {
         // A reload between durable image save and session update must not regenerate.
+        if (!applied) await zhEditsRecord(fresh.id, q.imgIndex, q.imgUrl, q.savedCandidate, fresh.url, true);
         q.imgUrl = q.savedCandidate;
         q.resultUrl = q.savedCandidate;
       } else if (!q.done && _imgEntryUrl(fresh.images?.[q.imgIndex]) !== q.imgUrl) {
@@ -13488,6 +13484,11 @@ async function resumeFlowSession() {
     } else {
       temuStepSetStatus('Resumed — existing job ka wait. Status unclear ho to Flow check karein; Send Again automatic nahi chalega.', 'info');
     }
+    return;
+  }
+  if (q.jobId && !q.done) {
+    temuStepSetStatus('Previous job stopped — Flow mein result/status check karein. Send Again sirf manual confirmation par chalega.', 'info');
+    temuStepManualAttn(true);
     return;
   }
   await temuStepProcessCurrent();
@@ -14493,7 +14494,15 @@ function temuUpdateImgEditCount(rows) {
   if (btn && !TemuImgStepper.running) btn.disabled = !sel.length;
 }
 
+let flowBatchStarting = false;
 async function temuStartBulkImageEdit(opts = {}) {
+  if (flowBatchStarting || TemuImgStepper.applying) { toast('Current image action khatam hone dein', 'info'); return; }
+  flowBatchStarting = true;
+  try { await temuStartBulkImageEditUnlocked(opts); }
+  finally { flowBatchStarting = false; }
+}
+
+async function temuStartBulkImageEditUnlocked(opts = {}) {
   if (TemuImgStepper.running) {
     // v9.10.1 — an old (often stuck) session used to re-open here with its old products.
     // Now: stop it and start fresh with what is selected right now.
@@ -14543,6 +14552,7 @@ async function temuStartBulkImageEdit(opts = {}) {
   };
 
   await persistFlowSession();
+  $('zhFlowResume')?.remove();
   temuStepOpenModal();
   await temuStepProcessCurrent();
 }
@@ -14573,6 +14583,7 @@ async function flowAutoNewProject() {
     return;
   }
   S.npCount = (S.npCount || 0) + 1;
+  await persistFlowSession();
   const n = S.npCount, token = {};
   S.npToken = token;
   temuStepManualAttn(true);
@@ -14585,7 +14596,11 @@ async function flowAutoNewProject() {
   S.npToken = null;
   temuStepManualAttn(false);
   temuStepSetStatus('🆕 Naya Flow project ban raha hai…');
-  await flowGoHomeForNewProject();
+  if (!(await flowGoHomeForNewProject())) {
+    temuStepSetStatus('Flow home ready nahi hua — recovery stopped; manual project kholein', 'error');
+    temuStepManualAttn(true);
+    return;
+  }
   if (!temuStepModalOpen() || S !== TemuImgStepper) return;
   toast(`🆕 Naya Flow project (${n}/${FLOW_NP_MAX}) — yahi image dobara bhej raha hoon`, 'info');
   await temuStepSendCurrent();   // Flow home → content script clicks "+ New project" → job runs there
@@ -14604,10 +14619,9 @@ async function flowGoHomeForNewProject() {
       await sleep(400);
       const t = await new Promise(r => chrome.tabs.get(tab.id, x => r(chrome.runtime.lastError ? null : x)));
       if (!t) return false;
-      if (t.status === 'complete' && !/\/project\//.test(t.url || '')) break;
+      if (t.status === 'complete' && !/\/project\//.test(t.url || '')) return true;
     }
-    await sleep(1500);
-    return true;
+    return false;
   } catch (e) { console.warn('[ZHunter] Flow new project nav failed', e); return false; }
 }
 
@@ -14726,6 +14740,7 @@ function temuStepOpenModal() {
   $('temuStepManualRow')?.querySelectorAll('button[data-m]').forEach(b => { b.onclick = () => temuStepManualAction(b.dataset.m); });
   const againBtn = $('temuStepSendAgainBtn');
   if (againBtn) {
+    againBtn.textContent = TemuImgStepper.queue[TemuImgStepper.currentIndex]?.resultUrl ? 'Retry Save' : 'Send Again';
     againBtn.onclick = async () => {
       const q = TemuImgStepper.queue[TemuImgStepper.currentIndex];
       if (q?.resultUrl) await temuStepApplyManualImage(q.resultUrl, 'Retry Save');
@@ -14740,6 +14755,7 @@ function temuStepOpenModal() {
     againBtn.after(pause);
   }
   if (pause) {
+    pause.hidden = TemuImgStepper.engine !== 'flow';
     pause.textContent = TemuImgStepper.paused ? 'Resume' : 'Pause after image';
     pause.onclick = async () => {
       const s = TemuImgStepper;
@@ -14748,6 +14764,7 @@ function temuStepOpenModal() {
       pause.textContent = s.paused ? 'Resume' : 'Pause after image';
       await persistFlowSession();
       if (!s.paused && s.queue[s.currentIndex]?.done) temuStepScheduleNext();
+      else if (!s.paused && !s.activeJobId && !s.queue[s.currentIndex]?.jobId) await temuStepSendCurrent();
       else if (s.paused) temuStepSetStatus('Pause requested — current image save hone ke baad rukega');
     };
   }
@@ -14790,7 +14807,7 @@ async function temuStepProcessCurrent() {
 
 async function temuStepSendCurrent() {
   const session = TemuImgStepper;
-  if (session.sending || session.applying) return;
+  if (!session.running || session.paused || session.sending || session.applying) return;
   session.sending = true;
   try { await temuStepSendCurrentUnlocked(); }
   catch (error) { temuStepSetStatus(error.message || String(error), 'error'); }

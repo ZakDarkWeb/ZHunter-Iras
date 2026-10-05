@@ -1,5 +1,13 @@
 # ZHunter Iras — CHANGELOG
 
+## 2026-10-05 - Flow automation reliability (same v9.12.13)
+- Bound Flow jobs to one tab/project with worker claims, guarded Generate clicks, Stop/Skip cancellation and resend/dispatch locks.
+- Save results before completion; retain failed results for apply-only retry, preserve original main images, and recover journal-write failures.
+- Persist batch/stage progress; explicit Resume, Pause after image and recovery without automatic uncertain-job resubmission.
+- Verify full prompts and ready image chips; reject ambiguous results and partial manual attachment.
+- Normal pacing 2-6 seconds, stage action pacing 0.5-1.5 seconds / pre-Generate 1-3 seconds, and an interruptible 10-30 second break after every 10 saved images when more work remains.
+- Chrome lifecycle/component fixture tests and existing core regressions pass. Live Google Flow UI/account validation remains pending; no detection guarantee. No version bump or ZIP.
+
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
 - **Recent Hunt filter fix:** Library rows retain batch IDs; older batches recover only with matching timestamps/counts. Hunt selection clears conflicting searches, repeated clicks reset the filter, and unmatched hunts keep the current list visible.
 - **Compact History records:** Reduced card spacing, top-right CSV/Delete actions, and one metadata line for date/item count.

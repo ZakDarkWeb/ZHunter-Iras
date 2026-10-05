@@ -81,7 +81,7 @@
     });
   }
 
-  // Realistic human mouse & pointer event sequence — safe from Google BotGuard / CDP detection
+  // DOM pointer events for ordinary controls; Generate uses the worker's guarded CDP click.
   async function trustedClick(el, label = '') {
     await checkpoint();
     if (!el || !el.isConnected) return false;
@@ -305,7 +305,7 @@
   async function finishJob(job, status, extra = {}) {
     try {
       const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
-      if (cur && cur.jobId === job.jobId) {
+      if (cur && cur.jobId === job.jobId && cur.status !== 'cancelled') {
         await chrome.storage.local.set({ pendingFlowAction: { ...cur, processed: true, status, finishedAt: Date.now(), ...extra } });
       }
     } catch (_) {}
@@ -641,7 +641,7 @@
       // Resolve the button in the worker AFTER debugger attach changes the viewport.
       const selector = 'flow-base-prompt-box flow-generate-icon-button button[aria-label="Start generation"]';
       let res;
-      try { res = await sendBg({ action: 'ZH_CDP_CLICK', selector }); }
+      try { res = await sendBg({ action: 'ZH_CDP_CLICK', selector, jobId: job.jobId }); }
       finally { await sendBg({ action: 'ZH_CDP_DETACH' }); }
       if (!res?.ok) throw new JobError('Send click nahi hua: ' + (res?.error || 'Chrome debugger attach nahi hua'));
       return !!res?.ok;
@@ -767,7 +767,7 @@
       });
       updateFlowHUD(`✓ Image #${(job.imageIndex ?? 0) + 1} → ZHunter (${job.shortTitle})`, 'ok');
     } catch (e) {
-      if (e instanceof JobCancelled) { log('Job cancelled', job.jobId); return; }
+      if (e instanceof JobCancelled || latestPending?.status === 'cancelled') { log('Job cancelled', job.jobId); return; }
       const msg = e instanceof JobError ? e.message : `Unexpected error: ${e?.message || e}`;
       // v9.12.7 — expected Flow failures (unusual activity, policy, timeout…) are handled by the
       // side panel; log them quietly so Chrome's Errors page doesn't show a false alarm.
@@ -806,8 +806,12 @@
     } catch (_) { return; }
     if (!job || job.processed || job.status === 'running') return;
     if (!job.jobId || !job.imgBase64) return;
+    const owner = await sendBg({ action: 'ZH_FLOW_OWNER', jobId: job.jobId });
+    if (!owner?.ok) return;
     if (Date.now() - (job.timestamp || 0) > STALE_JOB_MS) {
-      await finishJob(job, 'stale');
+      const error = 'Queued job expired — Flow check karke Send Again karein';
+      reportStatus(job, 'error', error, true);
+      await finishJob(job, 'error', { error });
       return;
     }
 
@@ -817,11 +821,11 @@
       const claim = await sendBg({ action: 'ZH_FLOW_CLAIM', jobId: job.jobId });
       if (!claim?.ok) return;
       job.projectUrl = claim.projectUrl;
-    } else {
-      const owner = await sendBg({ action: 'ZH_FLOW_OWNER', jobId: job.jobId });
-      if (!owner?.ok) return;
     }
     if (!insideProject) {
+      activeJob = job;
+      try {
+      await checkpoint();
       updateFlowHUD(`ZHunter: naya project bana raha hoon · ${(job.productTitle || '').slice(0, 30)}`, 'info');
       const btn = await waitFor(() => Q.newProjectBtn(), 8000);
       if (!btn) {
@@ -830,6 +834,9 @@
       }
       await trustedClick(btn, 'new project');
       // URL watcher below resumes the job once we're inside /project/...
+      return;
+      } catch (e) { if (!(e instanceof JobCancelled)) throw e; }
+      finally { activeJob = null; }
       return;
     }
     runningJobId = job.jobId; // claim before any await so no second runner can start
@@ -911,8 +918,9 @@
       catch (e) { return { ok: false, added, total: images.length, ready: true, promptConfirmed: false, error: e.message }; }
     }
     Q.editor(Q.promptRoot())?.focus();
-    updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ab Generate dabayein`, added ? 'ok' : 'warn');
-    return { ok: added === images.length && added > 0, added, total: images.length, ready: true, promptConfirmed: true, error: added === images.length ? '' : 'Kuch images attach nahi huin — missing images check karein' };
+    const complete = added === images.length && added > 0;
+    updateFlowHUD(`${complete ? 'Ready' : 'Partial'}: ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ${complete ? 'ab Generate dabayein' : 'missing images check karein; Generate na karein'}`, complete ? 'ok' : 'warn');
+    return { ok: complete, added, total: images.length, ready: true, promptConfirmed: true, error: complete ? '' : 'Kuch images attach nahi huin — missing images check karein' };
   }
 
   chrome.runtime.onMessage?.addListener((msg, _sender, sendResponse) => {

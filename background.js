@@ -1367,7 +1367,7 @@ async function handleMessage(msg, sender, queueLocked = false) {
       }
       try {
         const ok = msg.selector
-          ? await cdpClickSelector(tabId, msg.selector)
+          ? await cdpClickSelector(tabId, msg.selector, msg.jobId)
           : await cdpClickAt(tabId, msg.x, msg.y);
         return { ok };
       } catch (e) {
@@ -1924,23 +1924,24 @@ async function cdpDetach(tabId) {
   try { await chrome.debugger.detach({ tabId }); } catch (_) {}
 }
 
-async function cdpMouseClick(tabId, x, y) {
+async function cdpMouseClick(tabId, x, y, jobId = null) {
   const base = { x: Math.round(x), y: Math.round(y), modifiers: 0, pointerType: 'mouse' };
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', button: 'none', buttons: 0 });
+  if (!(await isFlowClickCurrent(tabId, jobId))) return false;
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1 });
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1 });
+  return true;
 }
 
 // Trusted click at viewport CSS-pixel coordinates (computed by the content script).
-async function cdpClickAt(tabId, x, y) {
+async function cdpClickAt(tabId, x, y, jobId = null) {
   if (!(await cdpEnsureAttached(tabId))) return false;
   try {
-    await cdpMouseClick(tabId, x, y);
-    return true;
+    return await cdpMouseClick(tabId, x, y, jobId);
   } catch (e) {
     const m = String(e?.message || e);
     // Stale attachment (e.g. user closed the debugging bar) — re-attach once and retry.
-    if (/not attached|detached/i.test(m)) {
+    if (!jobId && /not attached|detached/i.test(m)) {
       _cdpAttached.delete(tabId);
       if (await cdpEnsureAttached(tabId)) {
         try { await cdpMouseClick(tabId, x, y); return true; } catch (_) {}
@@ -1951,7 +1952,15 @@ async function cdpClickAt(tabId, x, y) {
   }
 }
 
-async function cdpClickSelector(tabId, selector) {
+async function isFlowClickCurrent(tabId, jobId) {
+  if (!jobId) return true;
+  const job = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+  if (!job || job.jobId !== jobId || job.processed || job.status !== 'running' || job.tabId !== tabId) return false;
+  const tab = await chrome.tabs.get(tabId);
+  return job.projectUrl === String(tab.url || '').split('?')[0].split('#')[0];
+}
+
+async function cdpClickSelector(tabId, selector, jobId = null) {
   if (!selector) return false;
   if (!(await cdpEnsureAttached(tabId))) return false;
   try {
@@ -1977,7 +1986,7 @@ async function cdpClickSelector(tabId, selector) {
     });
     const coords = evalResult?.result?.value;
     if (!coords) return false;
-    return await cdpClickAt(tabId, coords.x, coords.y);
+    return await cdpClickAt(tabId, coords.x, coords.y, jobId);
   } catch (e) {
     console.warn('[ZHunter CDP] Selector click error:', e?.message || e);
     return false;
