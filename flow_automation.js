@@ -612,7 +612,8 @@
     const root = Q.promptRoot();
     const gen = await waitFor(() => { const b = Q.genBtn(Q.promptRoot()); return b && !isDisabled(b) ? b : null; }, 10000);
     if (!gen) throw new JobError('Generate button enable nahi hua');
-    if (pendingCount() > 0) throw new JobError('Flow mein generation pehle se chal rahi hai — result ka wait karein, phir Send Again');
+    // A pending component can remain in an existing tile; its presence alone
+    // does not prove an active generation. Track changes from the baseline below.
     if (!chipReady(Q.promptRoot()) || editorText(Q.promptRoot()).replace(/\s+/g, '') !== String(job.prompt || '').replace(/\s+/g, '')) throw new JobError('Image ya poora prompt verify nahi hua');
     await pace(1000, 3000);
 

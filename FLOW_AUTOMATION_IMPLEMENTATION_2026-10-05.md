@@ -60,3 +60,9 @@ Browser tests load actual source in isolated Chrome. Storage/download error inje
 Reload the unpacked extension on chrome://extensions. Use two products in one Flow project first; test original-image retention, Pause/Resume and Stop. Reload the side panel and use Resume Flow batch. Then test an 11-image batch to see the every-10 break before image 11. If Flow UI differs or shows errors, collect the current DOM/error text rather than guessing new selectors.
 
 Commits: 77f6aac (ownership/cancellation), 2c4c381 (durable saves/session/pacing), followed by a separate guarded-click/component/recovery validation commit. Main remains unmerged.
+
+## Follow-up: false busy message
+
+Removed the pre-submit veto based solely on the presence of `flow-pending-tile`. This component's existence is insufficient evidence that generation is running. Existing pending tiles still form the baseline used to detect changes after submission. Job ownership, prompt/chip readiness, single-click submission and ambiguous-result rejection remain intact.
+
+Validation: real Chrome with controlled Flow DOM PASS (8 checks), including an existing tile containing a hidden pending component: the ready prompt submits exactly once and multiple new results are rejected. Worker ownership/cancellation tests, JavaScript syntax and diff checks PASS. The initial sandboxed Chrome launch failed before loading the fixture; the permitted isolated Chrome rerun passed. Live-account validation remains pending. No new selectors or timing changes.
