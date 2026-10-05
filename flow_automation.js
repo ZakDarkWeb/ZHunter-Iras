@@ -25,6 +25,7 @@
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   let activeJob = null;
   let manualBusy = false;
+  let attachmentRetry = null;
   class JobCancelled extends Error {}
   function checkCurrentJob() {
     if (activeJob && latestPending && (latestPending.jobId !== activeJob.jobId || latestPending.processed)) throw new JobCancelled('Job stopped');
@@ -466,6 +467,21 @@
     return c.getAttribute('aria-busy') === 'false' && c.querySelector('img.chip-image') ? c : null;
   }
 
+  function attachmentState() {
+    const chips = Q.chips(Q.promptRoot());
+    return { count: chips.length, busy: chips.map(c => c.getAttribute('aria-busy')),
+      imagePresent: chips.map(c => !!c.querySelector('img.chip-image')) };
+  }
+
+  function reusableAttachment(job) {
+    const r = attachmentRetry;
+    const chip = chipReady(Q.promptRoot());
+    return !!(r && chip && r.chip === chip && chip.isConnected &&
+      r.project === location.href.split('?')[0].split('#')[0] &&
+      r.productId === job.productId && r.imageIndex === job.imageIndex &&
+      r.imgBase64 === job.imgBase64 && r.imgUrl === job.imgUrl);
+  }
+
   async function tryPaste(file) {
     await checkpoint();
     const root = Q.promptRoot();
@@ -574,7 +590,20 @@
     }
     const ready = await waitFor(() => chipReady(Q.promptRoot()) || (flowErrorEl() ? 'err' : null), ATTACH_TIMEOUT_MS, 250);
     if (ready === 'err') await failIfFlowError();
-    if (!ready) throw new JobError('Image upload poora nahi hua (chip ready nahi)');
+    if (!ready) {
+      // Recheck at the deadline before declaring a timeout. Retain only the exact
+      // chip created for this source, never an arbitrary existing ingredient.
+      if (chipReady(Q.promptRoot())) { attachmentRetry = null; return; }
+      const state = attachmentState();
+      job.attachmentDiagnostics = state;
+      log('Attachment timeout state', state);
+      const chip = Q.chips(Q.promptRoot());
+      attachmentRetry = chip.length === 1 ? { chip: chip[0], productId: job.productId,
+        imageIndex: job.imageIndex, imgBase64: job.imgBase64, imgUrl: job.imgUrl,
+        project: location.href.split('?')[0].split('#')[0] } : null;
+      throw new JobError(`Image upload poora nahi hua (chip ready nahi) — chips=${state.count}, busy=${state.busy.join(',') || 'missing'}, image=${state.imagePresent.join(',') || 'missing'}`);
+    }
+    attachmentRetry = null;
   }
 
   // ── Step 3: prompt text ─────────────────────────────────────────
@@ -735,11 +764,13 @@
       await waitFor(() => Q.promptRoot(), 8000);
       if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
       await ensureSettings();
-      await clearPromptBox();
+      const reuse = reusableAttachment(job);
+      if (!reuse) { attachmentRetry = null; await clearPromptBox(); }
       await pace();
 
-      reportStatus(job, 'image', `ZHunter: image attach · ${job.shortTitle}`);
-      await attachImage(job);
+      reportStatus(job, 'image', `ZHunter: ${reuse ? 'ready image reuse' : 'image attach'} · ${job.shortTitle}`);
+      if (!reuse) await attachImage(job);
+      else { await checkpoint(); attachmentRetry = null; }
       await pace();
 
       reportStatus(job, 'prompt', 'ZHunter: prompt paste');
@@ -775,7 +806,7 @@
       if (e instanceof JobError) log('Job failed (handled):', msg);
       else warn('Job failed:', msg, e);
       reportStatus(job, 'error', msg, true);
-      await finishJob(job, 'error', { error: msg });
+      await finishJob(job, 'error', { error: msg, attachmentDiagnostics: job.attachmentDiagnostics || null });
     } finally {
       activeJob = null;
       runningJobId = null;
