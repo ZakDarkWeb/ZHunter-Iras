@@ -13,7 +13,11 @@ document.addEventListener('error', e => {
   const mode = img.dataset.onerror;
   if (!mode) return;
   const parent = img.parentElement;
-  if (mode === 'hide') {
+  if (mode === 'fallback') {
+    img.style.display = 'none';
+    const fallback = img.nextElementSibling;
+    if (fallback?.classList.contains('row-thumb-fallback')) fallback.style.display = 'block';
+  } else if (mode === 'hide') {
     img.style.display = 'none';
   } else if (mode === 'thumb' && parent) {
     parent.classList.add('thumb-err');
@@ -6460,7 +6464,7 @@ function renderBulkTabsList() {
     const dupBadge = isDup ? `<span class="bulk-tab-dup-badge" title="Already in Master Sheet">🔁</span>` : '';
 
     const favIcon = t.favIconUrl
-      ? `<img class="row-thumb-img row-fav-img" src="${esc(t.favIconUrl)}" alt="${platName}" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><span class="row-thumb-fallback" style="display:none;">${esc(platName.slice(0, 2))}</span>`
+      ? `<img class="row-thumb-img row-fav-img" src="${esc(t.favIconUrl)}" alt="${platName}" data-onerror="fallback"><span class="row-thumb-fallback" style="display:none;">${esc(platName.slice(0, 2))}</span>`
       : `<span class="row-thumb-fallback">${esc(platName.slice(0, 2))}</span>`;
 
     row.innerHTML = `
