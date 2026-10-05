@@ -49,6 +49,7 @@
   --upload-bg: linear-gradient(105deg,#00C4DB 0%,#00E5FF 35%,#60F4FF 50%,#00E5FF 65%,#00C4DB 100%); --upload-ink: #0A1628; --upload-motion: temu-upload-glow 2.5s ease-in-out infinite, temu-btn-shimmer 3s linear infinite; --row-hover-rgb: 20,32,58;
   --ai-button-bg: linear-gradient(180deg,#7C3AED,#6D28D9); --stepper-shadow: 0 16px 48px rgba(0,0,0,.85),0 0 24px rgba(0,229,255,.2); --modal-header-bg: linear-gradient(135deg,rgba(15,23,42,.95),rgba(30,58,95,.4));
   --studio-primary-bg: linear-gradient(135deg,#00E5FF,#0284C7);
+  --title-action-bg: linear-gradient(110deg,var(--accent),#42E5F5); --upload-hover-motion: temu-upload-glow 1.2s ease-in-out infinite, temu-btn-shimmer 1.5s linear infinite; --upload-shimmer: temu-btn-shimmer 2s linear infinite;
   --text1: var(--ink); --text2: var(--ink-2); --text3: var(--ink-3); --text4: var(--ink-4);
   --supplier-amazon: #FF9900; --supplier-walmart: #38BDF8; --supplier-sams: #3DDC84; --supplier-temu: #FB923C; --supplier-ali: #F97316; --supplier-etsy: #F472B6; --supplier-shein: #E2E8F0; --supplier-ebay: #FBBF24;
 }
@@ -82,7 +83,7 @@ body.light-mode, html.light-mode {
   --panel-shadow: var(--shadow); --header-action-ink: var(--accent-ink);
 
   --accent-rgb: 14,116,144; --selected-ink: #FFFFFF; --deep-rgb: 255,255,255;
-  --upload-bg: linear-gradient(135deg,var(--accent),var(--accent-dark)); --upload-ink: var(--accent-fg); --upload-motion: none; --row-hover-rgb: 232,244,248;
+  --upload-bg: linear-gradient(135deg,var(--accent),var(--accent-dark)); --upload-ink: var(--accent-fg); --upload-motion: none; --upload-hover-motion: none; --upload-shimmer: none; --title-action-bg: linear-gradient(110deg,var(--accent),var(--accent-dark)); --row-hover-rgb: 232,244,248;
   --ai-button-bg: linear-gradient(180deg,#7C3AED,#5B21B6); --stepper-shadow: var(--shadow-pop); --modal-header-bg: linear-gradient(135deg,var(--surface),var(--surface-3));
   --studio-primary-bg: linear-gradient(135deg,var(--accent),var(--accent-dark));
   --supplier-amazon: #9A4B05; --supplier-walmart: #0369A1; --supplier-sams: #047857; --supplier-temu: #9A3412; --supplier-ali: #9A3412; --supplier-etsy: #9D174D; --supplier-shein: #334155; --supplier-ebay: #92400E;
@@ -1558,14 +1559,14 @@ html[data-theme="light"] .temu-modal-head { background: linear-gradient(135deg, 
   inset: 0;
   background: linear-gradient(105deg, transparent 30%, var(--panel-highlight) 50%, transparent 70%);
   background-size: 200% 100%;
-  animation: temu-btn-shimmer 2s linear infinite;
+  animation: var(--upload-shimmer);
   border-radius: 9px;
   pointer-events: none;
 }
 .temu-btn-main-upload:hover {
   filter: brightness(1.08);
   transform: translateY(-2px);
-  animation: temu-upload-glow 1.2s ease-in-out infinite, temu-btn-shimmer 1.5s linear infinite;
+  animation: var(--upload-hover-motion);
 }
 .temu-btn-main-upload:active { transform: translateY(0); filter: brightness(0.97); }
 
@@ -4885,7 +4886,7 @@ button.temu-ai-bar-title { color: var(--ink-1, #f1f5f9); }
 .temu-title-check { padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); flex: 1; white-space: nowrap; }
 .temu-title-check:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
 .temu-title-run { border-top: 1px solid var(--line-2); padding-top: 12px; }
-.temu-title-run .temu-ai-bulk-btn { background: linear-gradient(110deg, var(--accent), #42e5f5) !important; box-shadow: 0 4px 15px var(--accent-soft) !important; min-height: 34px; }
+.temu-title-run .temu-ai-bulk-btn { background: var(--title-action-bg) !important; box-shadow: 0 4px 15px var(--accent-soft) !important; min-height: 34px; }
 .zt-modal { border-color: var(--accent-line); box-shadow: var(--shadow-pop), 0 0 32px var(--accent-soft); }
 .zt-head { border-bottom-color: var(--accent-line); }
 .zt-head > div { flex: 1; }.zt-head h2 { letter-spacing: -.5px; }.zt-head p { color: var(--ink-2); }
