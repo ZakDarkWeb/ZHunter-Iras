@@ -28,6 +28,7 @@
   class JobCancelled extends Error {}
   function checkCurrentJob() {
     if (activeJob && latestPending && (latestPending.jobId !== activeJob.jobId || latestPending.processed)) throw new JobCancelled('Job stopped');
+    if (activeJob?.projectUrl && activeJob.projectUrl !== location.href.split('?')[0].split('#')[0]) throw new JobError('Flow project changed — batch stopped for manual review');
   }
   async function checkpoint() {
     if (!activeJob) return;
@@ -294,7 +295,7 @@
   // ── Job reporting ────────────────────────────────────────────────
   function reportStatus(job, phase, text, isError = false, extra = {}) {
     updateFlowHUD(text, isError ? 'warn' : 'info');
-    sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, phase, text, error: isError, ...extra });
+    sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, projectUrl: location.href.split('?')[0].split('#')[0], phase, text, error: isError, ...extra });
   }
 
   // v9.10.1 — latest job record seen in storage: lets a running job stop waiting as soon as
@@ -466,6 +467,7 @@
   }
 
   async function tryPaste(file) {
+    await checkpoint();
     const root = Q.promptRoot();
     const ed = Q.editor(root);
     if (!ed) return false;
@@ -477,6 +479,7 @@
   }
 
   async function tryDrop(file) {
+    await checkpoint();
     const target = Q.promptRoot()?.querySelector('.base-prompt-box') || Q.promptRoot();
     if (!target) return false;
     const dt = new DataTransfer();
@@ -493,6 +496,7 @@
 
   // Fallback: upload to the project, then "+" menu → the uploaded asset → "Add to prompt".
   async function tryUploadThenAddMenu(file, idsBefore) {
+    await checkpoint();
     // Reuse an upload that the paste/drop attempts may already have started.
     let up = allTiles().find(t => t.mediaId && !idsBefore.has(t.mediaId) && !t.generated);
     if (!up) {
@@ -575,6 +579,7 @@
 
   // ── Step 3: prompt text ─────────────────────────────────────────
   async function injectPrompt(text) {
+    await checkpoint();
     // ProseMirror renders line breaks as <br>/<p>, so compare with all whitespace removed
     const squash = (v) => String(v || '').replace(/\s+/g, '');
     const probe = squash(text);
@@ -591,6 +596,7 @@
     } catch (_) {}
     if (await waitFor(has, 1500)) return;
 
+    await checkpoint();
     ed.focus();
     try { document.execCommand('insertText', false, text); } catch (_) {}
     if (await waitFor(has, 1500)) return;
@@ -898,17 +904,23 @@
       if (await pasteOneImage(file, n + 1)) { n++; added++; }
       else { await dismissFlowError(); }
     }
-    await waitFor(() => Q.chips(Q.promptRoot()).every(c => c.getAttribute('aria-busy') !== 'true'), ATTACH_TIMEOUT_MS, 250);
-    if (prompt) { try { await injectPrompt(prompt); } catch (_) {} }
+    const ready = await waitFor(() => Q.chips(Q.promptRoot()).length === n && Q.chips(Q.promptRoot()).every(c => c.getAttribute('aria-busy') === 'false' && c.querySelector('img.chip-image')), ATTACH_TIMEOUT_MS, 250);
+    if (!ready) return { ok: false, added, total: images.length, ready: false, error: 'Images attach huin lekin ready nahi — Generate na karein' };
+    if (prompt) {
+      try { await injectPrompt(prompt); }
+      catch (e) { return { ok: false, added, total: images.length, ready: true, promptConfirmed: false, error: e.message }; }
+    }
     Q.editor(Q.promptRoot())?.focus();
     updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ab Generate dabayein`, added ? 'ok' : 'warn');
-    return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images prompt box mein nahi lagin' };
+    return { ok: added === images.length && added > 0, added, total: images.length, ready: true, promptConfirmed: true, error: added === images.length ? '' : 'Kuch images attach nahi huin — missing images check karein' };
   }
 
   chrome.runtime.onMessage?.addListener((msg, _sender, sendResponse) => {
     if (msg?.action === 'ZH_FLOW_EXECUTE') handlePendingFlowAction();
     if (msg?.action === 'ZH_FLOW_MANUAL_ATTACH') {
-      manualAttach(msg).then(sendResponse, e => sendResponse({ ok: false, error: e?.message || String(e) }));
+      if (manualBusy || runningJobId || checking) { sendResponse({ ok: false, error: 'Flow busy — current action khatam hone dein' }); return; }
+      manualBusy = true;
+      manualAttach(msg).then(sendResponse, e => sendResponse({ ok: false, error: e?.message || String(e) })).finally(() => { manualBusy = false; handlePendingFlowAction(); });
       return true;
     }
   });

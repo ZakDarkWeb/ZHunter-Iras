@@ -3009,6 +3009,7 @@ function flowSpeedKey() {
 
 // Flow smart editor automation helper — returns the jobId (or null if nothing was sent)
 async function triggerFlowEdit({ src, title, prompt, productId = null, imageIndex = null, source = 'single', jobId = null }) {
+  const session = source === 'stepper' ? TemuImgStepper : null;
   if (!src) return null;
   const cleanTitle = (title || 'Product')
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
@@ -3038,6 +3039,11 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
   if (!target) target = await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
   if (source === 'stepper') TemuImgStepper.flowTabId = target.id;
   const projectUrl = /\/project\//.test(target.url || '') ? target.url.split('?')[0].split('#')[0] : null;
+  if (session?.flowProjectUrl && projectUrl !== session.flowProjectUrl) throw new Error('Batch ka Flow project badal gaya — original project restore karein');
+  if (session && projectUrl) session.flowProjectUrl = projectUrl;
+  const pending = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+  if (pending && !pending.processed) throw new Error('Flow job already active — stop or finish it first');
+  if (session && (TemuImgStepper !== session || !session.running || session.activeJobId !== id)) return null;
   FlowJobs.set(id, {
     productId: productId || null,
     imageIndex: imageIndex ?? null,
@@ -3064,6 +3070,10 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
     }
   });
 
+  if (session && (TemuImgStepper !== session || !session.running || session.activeJobId !== id)) {
+    await msg({ action: 'ZH_FLOW_CANCEL', jobId: id });
+    return null;
+  }
   const how = await focusOrOpenFlowTab(target.id);
   toast(how === 'focused' ? '✓ Flow tab — image job bheja gaya' : '✓ Google Flow khul raha hai…', 'ok');
   return id;
@@ -3164,7 +3174,7 @@ function zhShiftImageEditors(productId, delta) {
 }
 
 // Replace ONLY if the slot still holds `expectedUrl`. Returns true if anything changed.
-async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
+async function replaceProductImage(productId, idx, newUrl, expectedUrl, requireSaved = false) {
   let changed = false, oldUrl = null, pUrl = '', shift = 0;
   for (const row of new Set(_productRowsById(productId))) {
     if (!Array.isArray(row.images) || idx == null || idx < 0 || idx >= row.images.length) continue;
@@ -3187,13 +3197,16 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
         if (!row || !Array.isArray(row.images) || idx < 0 || idx >= row.images.length) return false;
         const cur = _imgEntryUrl(row.images[idx]);
         if (cur === newUrl) return false;
-        if (expectedUrl && cur !== expectedUrl && cur !== oldUrl) return false;
+        if (expectedUrl && cur !== expectedUrl && cur !== oldUrl) {
+          if (requireSaved) throw new Error('Saved product image changed — manual review required');
+          return false;
+        }
         zhSetEditedImage(row, idx, newUrl);
         return true;
       });
-    } catch (e) { console.warn('[ZHunter] Library save after replace failed:', e); }
+    } catch (e) { if (requireSaved) throw e; console.warn('[ZHunter] Library save after replace failed:', e); }
+    await zhEditsRecord(productId, idx, oldUrl, newUrl, pUrl, requireSaved);
     if (shift) {
-      zhShiftImageEditors(productId, shift);
       const edits = await zhEditsLoad();
       const shifted = [];
       for (const [key, edit] of Object.entries(edits)) {
@@ -3205,8 +3218,9 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl) {
         }
       }
       for (const edit of shifted) edits[`${edit.url || edit.id}#${edit.idx}`] = edit;
+      await chrome.storage.local.set({ [ZH_EDITS_KEY]: edits });
+      zhShiftImageEditors(productId, shift);
     }
-    await zhEditsRecord(productId, idx, oldUrl, newUrl, pUrl);
   }
   return changed;
 }
@@ -3233,9 +3247,9 @@ async function zhEditsLoad() {
   try { ZhEdits = (await chrome.storage.local.get([ZH_EDITS_KEY]))?.[ZH_EDITS_KEY] || {}; } catch (_) { ZhEdits = {}; }
   return ZhEdits;
 }
-function zhEditsRecord(productId, idx, oldUrl, newUrl, productUrl) {
+function zhEditsRecord(productId, idx, oldUrl, newUrl, productUrl, throwOnError = false) {
   if ((!productId && !productUrl) || idx == null || !newUrl) return _zhEditsChain;
-  _zhEditsChain = _zhEditsChain.then(async () => {
+  _zhEditsChain = _zhEditsChain.catch(() => {}).then(async () => {
     const E = await zhEditsLoad();
     const key = `${productUrl || productId}#${idx}`;
     const prev = E[key];
@@ -3250,7 +3264,7 @@ function zhEditsRecord(productId, idx, oldUrl, newUrl, productUrl) {
     const keys = Object.keys(E);
     if (keys.length > 600) keys.sort((a, b) => E[a].at - E[b].at).slice(0, keys.length - 600).forEach(k => delete E[k]);
     await chrome.storage.local.set({ [ZH_EDITS_KEY]: E });
-  }).catch(e => console.warn('[ZHunter] edit journal save failed', e));
+  }).catch(e => { console.warn('[ZHunter] edit journal save failed', e); if (throwOnError) throw e; });
   return _zhEditsChain;
 }
 async function zhApplyImgEdits(rows) {
@@ -3395,6 +3409,10 @@ const FlowGenInfo = new Map();
 const FlowSendSnap = new Map(); // jobId -> { ids:Set, at } grid snapshot taken right before sending // jobId -> { before:Set, ref:Set, at } (ids present when generation started)
 function onFlowStatus(m) {
   if (!m?.jobId || !FlowJobs.has(m.jobId)) return;
+  if (isActiveStepperJob(m.jobId) && m.projectUrl) {
+    TemuImgStepper.flowProjectUrl = m.projectUrl;
+    persistFlowSession().catch(error => console.warn('[ZHunter] Flow session save failed', error));
+  }
   if (m.phase === 'generating' && Array.isArray(m.beforeIds)) {
     FlowGenInfo.set(m.jobId, { before: new Set(m.beforeIds), ref: new Set(m.refIds || []), at: Date.now() });
   }
@@ -3453,8 +3471,9 @@ async function onFlowResult(m) {
     // Only the runner that submitted this job can deliver its verified result.
     const cur = TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
     if (!isActiveStepperJob(m.jobId) || !cur || cur.done || !m.newImgUrl) return;
-    FlowHandledResults.add(m.jobId);
-    cur.done = true;
+    if (cur.phase === 'apply_failed' || TemuImgStepper.applying) return;
+    cur.resultUrl = m.newImgUrl;
+    cur.phase = 'received';
     await temuStepApplyManualImage(m.newImgUrl, 'Auto');
     return;
   }
@@ -3535,23 +3554,34 @@ async function onFlowResult(m) {
 // v9.10.1 — human-like pacing between Flow jobs (random 4–9 s) so the account doesn't
 // fire generations back-to-back like a bot.
 function temuStepScheduleNext() {
-  if (!TemuImgStepper.running) return;
-  const more = TemuImgStepper.queue[TemuImgStepper.currentIndex]?.continueStage || TemuImgStepper.currentIndex + 1 < TemuImgStepper.queue.length;
-  if (!more) {
-    const session = TemuImgStepper, idx = session.currentIndex;
-    setTimeout(() => {
-      if (TemuImgStepper === session && session.running && session.currentIndex === idx && !session.activeJobId) temuStepAdvance();
-    }, 800);
-    return;
-  }
-  const sp = FLOW_SPEEDS[flowSpeedKey()];
-  const wait = sp.min + Math.floor(Math.random() * (sp.max - sp.min));
-  temuStepSetStatus(`✓ Replaced — agla image ${Math.round(wait / 1000)}s mein…`, 'ok');
-  const idx = TemuImgStepper.currentIndex;
   const session = TemuImgStepper;
-  setTimeout(() => {
-    if (TemuImgStepper === session && session.running && session.currentIndex === idx && !session.activeJobId) temuStepAdvance();
-  }, wait);
+  if (!session.running || session.paused || session.pauseToken) return;
+  const current = session.queue[session.currentIndex];
+  const more = current?.continueStage || session.currentIndex + 1 < session.queue.length;
+  const completed = session.stats.done || 0;
+  const breakNumber = Math.floor(completed / 10);
+  const longBreak = more && breakNumber > (session.breakAt || 0);
+  const speed = FLOW_SPEEDS[flowSpeedKey()];
+  const duration = longBreak ? 10000 + Math.floor(Math.random() * 20001) : more ? speed.min + Math.floor(Math.random() * (speed.max - speed.min + 1)) : 0;
+  if (longBreak) session.breakAt = breakNumber;
+  if (!session.pauseUntil) session.pauseUntil = Date.now() + duration;
+  const token = {}; session.pauseToken = token;
+  const index = session.currentIndex;
+  (async () => {
+    try {
+      await persistFlowSession();
+      while (Date.now() < session.pauseUntil) {
+        if (TemuImgStepper !== session || !session.running || session.paused || session.pauseToken !== token || session.currentIndex !== index || session.activeJobId) return;
+        const remaining = Math.ceil((session.pauseUntil - Date.now()) / 1000);
+        temuStepSetStatus((longBreak ? 'Batch break - ' : 'Next image - ') + remaining + 's', 'ok');
+        await sleep(Math.min(250, session.pauseUntil - Date.now()));
+      }
+      if (TemuImgStepper !== session || !session.running || session.paused || session.pauseToken !== token || session.currentIndex !== index || session.activeJobId) return;
+      session.pauseToken = null; session.pauseUntil = 0;
+      await temuStepAdvance();
+    } catch (e) { session.pauseToken = null; temuStepSetStatus(e.message || 'Batch save failed', 'error'); }
+    finally { if (session.pauseToken === token) session.pauseToken = null; }
+  })();
 }
 
 // v9.10.1 — watchdog: while a step waits on Flow, read the job record from storage.
@@ -3573,38 +3603,63 @@ setInterval(async () => {
 
 // v9.10.1 — manual image for the current step (paste / drop / "Flow se latest")
 async function temuStepApplyManualImage(src, how = 'manual') {
-  if (!TemuImgStepper?.running) return false;
-  const current = TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
-  if (!current || !src) return false;
-  current.done = true;
-  // A late automatic result for this step must not overwrite the manual one
-  if (TemuImgStepper.activeJobId) {
-    FlowHandledResults.add(TemuImgStepper.activeJobId);
-    _markFlowJobDone(TemuImgStepper.activeJobId, /^https?:/i.test(src) ? src : null);
-  }
-  await temuStepCancelActiveJob();
-  temuStepSetStatus(`⏳ ${how}: image laga raha hoon…`);
-
-  // v9.11.0 — local copy first (fast); the public Temu link is made in the background below,
-  // so the next step no longer waits for the upload.
-  let finalUrl = src;
-  if (/^https:\/\/flow-content\.google\//i.test(src)) {
-    try {
-      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src });
-      if (r?.success && r.base64) finalUrl = r.base64;
-    } catch (_) {}
-    if (finalUrl === src) finalUrl = (await uploadImageToPublicHost(src)) || src;
-  }
+  const session = TemuImgStepper;
+  if (!session?.running || session.applying) return false;
+  const current = session.queue?.[session.currentIndex];
+  if (!current || !src || current.done) return false;
+  const jobId = session.activeJobId;
   const pid = current.product?.id, idx = current.imgIndex;
-  const oldImg = _imgEntryUrl(current.product?.images?.[idx]);
-  let ok = await replaceProductImage(pid, idx, finalUrl, null);
-  if (Array.isArray(current.product?.images)) {
-    const e = current.product.images[idx];
-    current.product.images[idx] = typeof e === 'string' || e == null ? finalUrl : { ...e, url: finalUrl };
-    ok = true;
-  }
-  if (ok) zhEditsRecord(pid, idx, oldImg, finalUrl, current.product?.url || '');   // v9.12.8
-  if (!ok) { temuStepSetStatus('⚠️ Image nahi lagi — product list mein nahi mila', 'error'); return false; }
+  const expected = current.imgUrl;
+  const stillCurrent = () => TemuImgStepper === session && session.running && session.queue[session.currentIndex] === current && session.activeJobId === jobId;
+  const backups = _productRowsById(pid).map(row => ({ row, images: row.images.slice(), original: row.zhOriginalMainUrl }));
+  let saveStarted = false;
+  session.applying = true;
+  current.resultUrl = src;
+  current.phase = 'applying';
+  let finalUrl = src;
+  try {
+    await persistFlowSession();
+    if (/^https:\/\/flow-content\.google\//i.test(src)) {
+      const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src });
+      if (!stillCurrent()) return false;
+      if (r?.success && r.base64) finalUrl = r.base64;
+      else finalUrl = await uploadImageToPublicHost(src);
+      if (!finalUrl || /^https:\/\/flow-content\.google\//i.test(finalUrl)) throw new Error('Result download nahi hui ? Retry Save karein');
+    }
+    if (!stillCurrent()) return false;
+    if (_imgEntryUrl(current.product?.images?.[idx]) !== expected) throw new Error('Image slot badal chuka hai ? manual review karein');
+    current.savedCandidate = finalUrl;
+    await persistFlowSession();
+    if (!stillCurrent()) return false;
+    saveStarted = true;
+    const ok = await replaceProductImage(pid, idx, finalUrl, expected, true);
+    if (!ok) throw new Error('Product image save nahi hui');
+    if (!stillCurrent()) return false;
+    current.done = true;
+    current.phase = 'saved';
+    current.resultUrl = null;
+    if (jobId) {
+      FlowHandledResults.add(jobId);
+      await _markFlowJobDone(jobId, /^https?:/i.test(src) ? src : null);
+    }
+    await temuStepCancelActiveJob();
+  } catch (error) {
+    // Restore in-memory galleries if durable save failed; retain result for apply-only retry.
+    if (saveStarted) for (const backup of backups) {
+      const candidate = { images: backup.images, zhOriginalMainUrl: backup.original };
+      zhSetEditedImage(candidate, idx, finalUrl);
+      if (JSON.stringify(backup.row.images) !== JSON.stringify(candidate.images)) continue;
+      backup.row.images = backup.images;
+      if (backup.original === undefined) delete backup.row.zhOriginalMainUrl; else backup.row.zhOriginalMainUrl = backup.original;
+    }
+    current.done = false;
+    current.phase = 'apply_failed';
+    if ($('temuStepSendAgainBtn')) $('temuStepSendAgainBtn').textContent = 'Retry Save';
+    current.applyError = error.message || String(error);
+    if (stillCurrent()) { temuStepSetStatus(current.applyError + ' ? Retry Save (generation dobara nahi)', 'error'); temuStepManualAttn(true); }
+    await persistFlowSession();
+    return false;
+  } finally { session.applying = false; }
   const moreStages = current.stages && current.stageIndex + 1 < current.stages.length;
   if (moreStages) {
     current.imgUrl = finalUrl;
@@ -3629,8 +3684,9 @@ async function temuStepApplyManualImage(src, how = 'manual') {
         if (e === finalUrl) current.product.images[idx] = pub;
         else if (e && e.url === finalUrl) current.product.images[idx] = { ...e, url: pub };
       }
-    })();
+    })().catch(error => console.warn('[ZHunter] Public image link failed; local image retained', error));
   }
+  await persistFlowSession();
   temuStepScheduleNext();
   return true;
 }
@@ -3671,7 +3727,7 @@ document.addEventListener('paste', async (e) => {
 // v9.10.1 — list every Flow media image in the project grid (DOM order = newest first)
 async function flowScanImages() {
   const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
-  const tab = tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
+  const tab = TemuImgStepper.running && TemuImgStepper.flowTabId ? tabs.find(t => t.id === TemuImgStepper.flowTabId) : tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
   if (!tab) return null;
   try {
     const [r] = await chrome.scripting.executeScript({
@@ -3708,31 +3764,8 @@ const _flowUploadTitle = (t) => /\.(png|jpe?g|webp|gif|avif|heic)$/i.test(t || '
 // v9.10.1 — ONE auto path, identical to the working "Flow se latest" button:
 // per step, remember which Flow images existed when the step was sent; the first new
 // (non-upload) image in the grid is this step's result → temuStepApplyManualImage.
-let _flowPollBusy = false;
-setInterval(async () => {
-  if (_flowPollBusy) return;
-  const S = TemuImgStepper;
-  if (!S?.running || S.engine !== 'flow') return;
-  const cur = S.queue?.[S.currentIndex];
-  if (!cur || cur.done || !cur.sentAt) return;
-  _flowPollBusy = true;
-  try {
-    const list = await flowScanImages();
-    if (!Array.isArray(list)) { temuStepSetStatus('⚠️ Flow tab nahi mila / scan nahi hua — Flow tab khula rakhein', 'error'); return; }
-    if (!cur.snap) { cur.snap = new Set(list.map(g => g.id)); return; }
-    const info = FlowGenInfo.get(S.activeJobId);
-    const hit = info && list.find(g => g.generated && g.loaded && !info.before.has(g.id) && !info.ref.has(g.id));
-    if (hit && !cur.done && S.queue[S.currentIndex] === cur) {
-      console.log('[ZHunter] Auto: new Flow image', hit.id, hit.title);
-      await onFlowResult({ jobId: S.activeJobId, newImgUrl: hit.src });
-    } else if (!hit) {
-      const secs = Math.round((Date.now() - cur.sentAt) / 1000);
-      const el = $('temuStepStatus');
-      if (el && !/⚠️|✓|✅/.test(el.textContent)) el.textContent = `⏳ Generating… ${secs}s (Flow mein ${list.length} images, nayi abhi nahi)`;
-    }
-  } catch (e) { console.warn('[ZHunter] Auto poll error:', e); }
-  finally { _flowPollBusy = false; }
-}, 1500);
+// Results are delivered by the bound runner (message + durable storage backup).
+// A generic newest-grid scan cannot establish ownership; it is manual-only.
 
 // Newest generated image in the open Flow project (skips uploads and prompt-box chips)
 async function temuStepGrabLatestFromFlow() {
@@ -13391,6 +13424,93 @@ let TemuImgStepper = {
   stats: { done: 0, skipped: 0 }
 };
 
+const FLOW_SESSION_KEY = 'zhunterFlowSession';
+let flowSessionWrites = Promise.resolve();
+function persistFlowSession() {
+  const s = TemuImgStepper;
+  if (s.engine !== 'flow' || !s.sessionId) return Promise.resolve();
+  const snapshot = {
+    version: 1, sessionId: s.sessionId, currentIndex: s.currentIndex, engine: s.engine,
+    prompt: s.prompt, activeJobId: s.activeJobId, flowTabId: s.flowTabId, flowProjectUrl: s.flowProjectUrl,
+    stats: { ...s.stats }, paused: !!s.paused, npCount: s.npCount || 0,
+    breakAt: s.breakAt || 0, pauseUntil: s.pauseUntil || 0, updatedAt: Date.now(),
+    queue: s.queue.map(q => ({
+      product: { id: q.product.id, url: q.product.url, title: q.product.title, images: q.product.images, zhOriginalMainUrl: q.product.zhOriginalMainUrl },
+      imgUrl: q.imgUrl, imgIndex: q.imgIndex, jobId: q.jobId, done: q.done,
+      stages: q.stages, stageIndex: q.stageIndex, prompt: q.prompt, continueStage: q.continueStage,
+      phase: q.phase, resultUrl: q.resultUrl, savedCandidate: q.savedCandidate, applyError: q.applyError, sentAt: q.sentAt
+    }))
+  };
+  const value = structuredClone(snapshot);
+  flowSessionWrites = flowSessionWrites.catch(() => {}).then(() => chrome.storage.local.set({ [FLOW_SESSION_KEY]: value }));
+  return flowSessionWrites;
+}
+
+async function resumeFlowSession() {
+  if (TemuImgStepper.running) return;
+  const saved = (await chrome.storage.local.get(FLOW_SESSION_KEY))[FLOW_SESSION_KEY];
+  if (!saved || saved.version !== 1 || !saved.queue?.length || saved.currentIndex >= saved.queue.length) return;
+  const rows = await temuGetQueuedRows();
+  const edits = Object.values(await zhEditsLoad());
+  for (const q of saved.queue) {
+    const fresh = rows.find(r => r.id === q.product.id);
+    if (fresh) {
+      q.product = fresh;
+      const applied = q.savedCandidate && edits.some(edit =>
+        (edit.id === fresh.id || edit.url === fresh.url) && edit.idx === q.imgIndex &&
+        edit.newUrl === q.savedCandidate && (edit.orig === q.imgUrl || (edit.via || []).includes(q.imgUrl)) &&
+        _imgEntryUrl(fresh.images?.[q.imgIndex]) === q.savedCandidate);
+      if (q.resultUrl && applied) {
+        // A reload between durable image save and session update must not regenerate.
+        q.imgUrl = q.savedCandidate;
+        q.resultUrl = q.savedCandidate;
+      } else if (!q.done && _imgEntryUrl(fresh.images?.[q.imgIndex]) !== q.imgUrl) {
+        const moved = (fresh.images || []).findIndex(image => _imgEntryUrl(image) === q.imgUrl);
+        if (moved >= 0) q.imgIndex = moved;
+      }
+    }
+  }
+  TemuImgStepper = { ...saved, running: true, sending: false, applying: false, paused: false };
+  const q = saved.queue[saved.currentIndex];
+  if (saved.activeJobId) FlowJobs.set(saved.activeJobId, { productId: q.product.id, imageIndex: q.imgIndex, originalUrl: q.imgUrl, source: 'stepper', title: q.product.title });
+  temuStepOpenModal();
+  if (q.resultUrl) {
+    q.phase = 'apply_failed';
+    if ($('temuStepSendAgainBtn')) $('temuStepSendAgainBtn').textContent = 'Retry Save';
+    temuStepSetStatus('Saved result available — Retry Save, generation dobara nahi', 'info');
+    return;
+  }
+  if (q.done) { temuStepScheduleNext(); return; }
+  if (saved.activeJobId) {
+    const pending = (await chrome.storage.local.get('pendingFlowAction')).pendingFlowAction;
+    if (pending?.jobId === saved.activeJobId && pending.status === 'done' && pending.newImgUrl) {
+      await onFlowResult({ jobId: saved.activeJobId, newImgUrl: pending.newImgUrl });
+    } else {
+      temuStepSetStatus('Resumed — existing job ka wait. Status unclear ho to Flow check karein; Send Again automatic nahi chalega.', 'info');
+    }
+    return;
+  }
+  await temuStepProcessCurrent();
+}
+
+async function initFlowResumeButton() {
+  const anchor = $('temuAiBulkImgBtn');
+  if (!anchor || $('zhFlowResume')) return;
+  const saved = (await chrome.storage.local.get(FLOW_SESSION_KEY))[FLOW_SESSION_KEY];
+  if (!saved?.queue?.length || saved.currentIndex >= saved.queue.length) return;
+  const button = document.createElement('button');
+  button.id = 'zhFlowResume'; button.type = 'button'; button.className = 'btn btn-ghost btn-sm';
+  button.textContent = 'Resume Flow batch';
+  button.onclick = async () => {
+    button.disabled = true;
+    try { await resumeFlowSession(); button.remove(); }
+    catch (e) { toast(e.message || 'Resume failed', 'warn'); button.disabled = false; }
+  };
+  anchor.after(button);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => initFlowResumeButton().catch(console.warn), { once: true });
+else setTimeout(() => initFlowResumeButton().catch(console.warn), 0);
+
 // v9.9.0 — image-edit selection, independent from "Include in upload"
 const TemuImgEditSelected = new Set(); // product IDs picked for AI image editing (default: none)
 const TemuImgPick = new Map();         // productId -> Set(image indexes) chosen with the per-image "AI" boxes
@@ -14413,6 +14533,7 @@ async function temuStartBulkImageEdit(opts = {}) {
 
   TemuImgStepper = {
     queue,
+    sessionId: newFlowJobId(),
     currentIndex: 0,
     engine,
     prompt,
@@ -14421,6 +14542,7 @@ async function temuStartBulkImageEdit(opts = {}) {
     stats: { done: 0, skipped: 0 }
   };
 
+  await persistFlowSession();
   temuStepOpenModal();
   await temuStepProcessCurrent();
 }
@@ -14472,8 +14594,9 @@ async function flowAutoNewProject() {
 async function flowGoHomeForNewProject() {
   try {
     const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
-    const tab = tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
-    if (!tab) return false;   // focusOrOpenFlowTab() will open Flow home
+    const tab = TemuImgStepper.flowTabId ? tabs.find(t => t.id === TemuImgStepper.flowTabId) : tabs.find(t => /\/project\//.test(t.url || '')) || tabs[0];
+    if (!tab) return false;
+    TemuImgStepper.flowProjectUrl = null; // Explicit, bounded new-project recovery only.
     const home = (tab.url || '').split('/project/')[0] || 'https://flow.google.com';
     await chrome.tabs.update(tab.id, { url: home });
     const end = Date.now() + 25000;
@@ -14540,10 +14663,13 @@ async function temuStepManualAction(act) {
 }
 
 async function temuStepAdvance() {
+  TemuImgStepper.pauseToken = null;
+  TemuImgStepper.pauseUntil = 0;
   const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
   if (current?.continueStage) current.continueStage = false;
   else TemuImgStepper.currentIndex++;
   if (TemuImgStepper.currentIndex < TemuImgStepper.queue.length) {
+    await persistFlowSession();
     await temuStepProcessCurrent();
   } else {
     await temuStepFinish();
@@ -14562,6 +14688,8 @@ function temuStepOpenModal() {
       await temuStepCancelActiveJob();
       TemuImgStepper.running = false;
       modal.classList.add('hidden');
+      await persistFlowSession();
+      await initFlowResumeButton();
       temuGetQueuedRows().then(temuUpdateImgEditCount);
       const d = TemuImgStepper.stats?.done || 0;
       toast(d ? `Image editing band — ${d} badli hui image${d > 1 ? 's' : ''} save hain ✓` : 'Image editing band — dobara "Edit Images" se shuru karein', 'info');
@@ -14589,7 +14717,7 @@ function temuStepOpenModal() {
     skipBtn.onclick = async () => {
       await temuStepCancelActiveJob();
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
-      if (current) current.continueStage = false;
+      if (current) { current.continueStage = false; current.resultUrl = null; current.phase = 'skipped'; }
       TemuImgStepper.stats.skipped++;
       await temuStepAdvance();
     };
@@ -14599,7 +14727,28 @@ function temuStepOpenModal() {
   const againBtn = $('temuStepSendAgainBtn');
   if (againBtn) {
     againBtn.onclick = async () => {
-      await temuStepSendCurrent();
+      const q = TemuImgStepper.queue[TemuImgStepper.currentIndex];
+      if (q?.resultUrl) await temuStepApplyManualImage(q.resultUrl, 'Retry Save');
+      else await temuStepSendCurrent();
+    };
+  }
+
+  let pause = $('zhFlowPause');
+  if (!pause && againBtn) {
+    pause = document.createElement('button');
+    pause.id = 'zhFlowPause'; pause.type = 'button'; pause.className = 'btn btn-ghost btn-sm';
+    againBtn.after(pause);
+  }
+  if (pause) {
+    pause.textContent = TemuImgStepper.paused ? 'Resume' : 'Pause after image';
+    pause.onclick = async () => {
+      const s = TemuImgStepper;
+      s.paused = !s.paused;
+      if (s.paused) s.pauseToken = null;
+      pause.textContent = s.paused ? 'Resume' : 'Pause after image';
+      await persistFlowSession();
+      if (!s.paused && s.queue[s.currentIndex]?.done) temuStepScheduleNext();
+      else if (s.paused) temuStepSetStatus('Pause requested — current image save hone ke baad rukega');
     };
   }
 
@@ -14671,6 +14820,9 @@ async function temuStepSendCurrentUnlocked() {
       if (Array.isArray(snap)) current.snap = new Set(snap.map(g => g.id));
     } catch (_) {}
     current.sentAt = Date.now();
+    current.phase = 'queued';
+    if ($('temuStepSendAgainBtn')) $('temuStepSendAgainBtn').textContent = 'Send Again';
+    await persistFlowSession();
     const sent = await triggerFlowEdit({
       src: current.imgUrl,
       title: current.product.title,
@@ -14689,6 +14841,7 @@ async function temuStepSendCurrentUnlocked() {
       temuStepSetStatus('⏳ Flow: image attach → prompt → generate. Result khud aa jayega aur agla step shuru hoga.');
     }
     // v9.11.0 — download the next step's image while this one generates
+    await persistFlowSession();
     const nxt = queue[currentIndex + 1];
     if (nxt?.imgUrl) flowPrefetchImage(nxt.imgUrl);
   } else if (engine === 'gemini') {
@@ -14847,6 +15000,8 @@ async function temuStepFinish() {
   await temuStepCancelActiveJob();
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
+  await persistFlowSession();
+  $('zhFlowResume')?.remove();
   if (TemuImgStepper.engine === 'flow') {
     const sk = stats?.skipped || 0;
     temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}`, 'ok');
