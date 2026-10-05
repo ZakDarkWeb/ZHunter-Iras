@@ -27,6 +27,12 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));let ws;
  manual.open=true;recovery.open=true;check(manual.contains(document.getElementById('temuStepDeviceBtn'))&&manual.contains(document.getElementById('temuStepPasteFlowBtn'))&&recovery.contains(again),'tool placement');
  const actions=document.getElementById('temuStepMainActions');check(actions.children.length===2&&actions.contains(document.getElementById('zhFlowPause'))&&actions.contains(document.getElementById('temuStepSkipBtn')),'main controls');pass.push('collapsible tools and two main controls');
  await document.getElementById('zhFlowPause').onclick();check(TemuImgStepper.paused,'pause handler');await document.getElementById('zhFlowPause').onclick();check(!TemuImgStepper.paused,'resume handler');pass.push('pause/resume handler');
+ const q=TemuImgStepper.queue[0];q.batchMode='pack_background';q.packQty=2;q.stages=temuBatchStages('pack_background',2,'Background');q.stageIndex=1;q.packReview=true;q.done=true;q.continueStage=true;
+ temuStepRefreshPresentation();check(!document.getElementById('temuStepPackReview').hidden&&again.disabled,'pack review shown and resend blocked');
+ const schedule=temuStepScheduleNext;temuStepScheduleNext();check(!TemuImgStepper.pauseToken,'review must not schedule background');let scheduled=0;temuStepScheduleNext=()=>scheduled++;
+ await document.getElementById('temuStepApprovePack').onclick();check(!q.packReview&&scheduled===1&&q.stageIndex===1,'approval continues background');
+ q.packReview=true;await document.getElementById('temuStepRetryPack').onclick();check(!q.packReview&&q.stageIndex===0&&q.prompt===q.stages[0]&&!q.done,'retry returns to pack');
+ check(q.prompt.includes('complete identical product sets')&&q.prompt.includes('every component'),'complete set prompt');pass.push('pack review, approval and retry');temuStepScheduleNext=schedule;
  manual.open=false;recovery.open=false;
  for(const theme of ['light','dark']){document.body.classList.toggle('light-mode',theme==='light');await new Promise(r=>requestAnimationFrame(r));const box=document.querySelector('.temu-stepper-box'),r=box.getBoundingClientRect();check(r.width>0&&r.right<=innerWidth&&r.left>=0,'fits '+theme);check(box.scrollWidth<=box.clientWidth,'no horizontal overflow '+theme);pass.push(theme+' layout');}
  return pass;

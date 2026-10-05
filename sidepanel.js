@@ -3426,10 +3426,13 @@ function temuStepRefreshPresentation() {
   if (title) title.textContent = `AI Image Studio · Step ${s.currentIndex + 1}/${s.queue.length}`;
   const sub = $('temuStepSub');
   if (sub) sub.textContent = `Image #${q.imgIndex + 1}${q.stages ? ' · Stage ' + (q.stageIndex + 1) + '/' + q.stages.length : ''}`;
+  if (sub && q.batchMode === 'pack_background') sub.textContent = `Image #${q.imgIndex + 1} · ${q.packReview ? 'Review Pack ' + q.packQty : q.stageIndex === 0 ? 'Pack ' + q.packQty : 'Background'} · ${q.packReview ? 1 : q.stageIndex + 1}/2`;
+  const review = $('temuStepPackReview');
+  if (review) review.hidden = !q.packReview;
   const again = $('temuStepSendAgainBtn');
   if (again) {
     again.textContent = q.resultUrl ? 'Retry Save' : 'Send Again';
-    again.disabled = !!(s.sending || s.applying || s.activeJobId || s.npToken);
+    again.disabled = !!(s.sending || s.applying || s.activeJobId || s.npToken || q.packReview);
   }
 }
 
@@ -3556,6 +3559,7 @@ async function onFlowResult(m) {
 // v9.10.1 — human-like pacing between Flow jobs (random 4–9 s) so the account doesn't
 // fire generations back-to-back like a bot.
 function temuStepScheduleNext() {
+  if (TemuImgStepper.queue[TemuImgStepper.currentIndex]?.packReview) return;
   const session = TemuImgStepper;
   if (!session.running || session.paused || session.pauseToken) return;
   const current = session.queue[session.currentIndex];
@@ -3676,6 +3680,11 @@ async function temuStepApplyManualImage(src, how = 'manual') {
     current.prompt = current.stages[current.stageIndex];
     current.continueStage = true;
     current.sentAt = null;
+    if (current.batchMode === 'pack_background') {
+      current.packReview = true;
+      current.phase = 'pack_review';
+      temuStepSetStatus('Pack sahi bana? Preview check karke Approve ya Retry Pack karein.');
+    }
   } else {
     TemuImgStepper.stats.done++;
   }
@@ -13453,6 +13462,7 @@ function persistFlowSession() {
       product: { ...q.product }, // Preserve price/currency, sourcing and listing metadata too.
       imgUrl: q.imgUrl, imgIndex: q.imgIndex, jobId: q.jobId, done: q.done,
       stages: q.stages, stageIndex: q.stageIndex, prompt: q.prompt, continueStage: q.continueStage,
+      batchMode: q.batchMode, packQty: q.packQty, packReview: q.packReview,
       phase: q.phase, resultUrl: q.resultUrl, savedCandidate: q.savedCandidate, applyError: q.applyError, sentAt: q.sentAt
     }))
   };
@@ -13491,6 +13501,10 @@ async function resumeFlowSession() {
   const q = saved.queue[saved.currentIndex];
   if (saved.activeJobId) FlowJobs.set(saved.activeJobId, { productId: q.product.id, imageIndex: q.imgIndex, originalUrl: q.imgUrl, source: 'stepper', title: q.product.title });
   temuStepOpenModal();
+  if (q.packReview) {
+    temuStepSetStatus('Pack sahi bana? Preview check karke Approve ya Retry Pack karein.');
+    return;
+  }
   if (q.resultUrl) {
     q.phase = 'apply_failed';
     if ($('temuStepSendAgainBtn')) $('temuStepSendAgainBtn').textContent = 'Retry Save';
@@ -14396,7 +14410,7 @@ function temuBatchStages(mode, quantity, backgroundPrompt) {
   if (!['background', 'pack', 'pack_background'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity 2 se 24 honi chahiye');
   const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.`;
-  const pack = `Create exactly ${n} identical units of the reference product together. Preserve the exact packaging, logo, colors and text. Keep the original background and scene style; do not replace it. No extra text or badges.`;
+  const pack = `Create exactly ${n} complete identical product sets together in one image. Treat ALL items and accessories in the reference as ONE complete set. Repeat that entire set ${n} times, including every component, accessory and container. Show each complete set separately and clearly; do not merely duplicate one accessory or leave only one set. Keep the same product design, packaging, logo, colors and text. Keep the original background and scene style; do not replace it. No extra text or badges. The final image must show exactly ${n} complete sets, no more and no fewer.`;
   return mode === 'background' ? [background] : mode === 'pack' ? [pack] : [pack, background];
 }
 
@@ -14583,6 +14597,8 @@ async function temuStepCancelActiveJob() {
   const id = session.activeJobId;
   session.activeJobId = null;
   temuStepRefreshPresentation();
+
+
   session.npToken = null;
   session.pauseToken = null;
   temuStepManualAttn(false);
@@ -14718,6 +14734,23 @@ function temuStepOpenModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   temuStepRefreshPresentation();
+  $('temuStepApprovePack').onclick = async () => {
+    const q = TemuImgStepper.queue[TemuImgStepper.currentIndex];
+    if (!q?.packReview) return;
+    q.packReview = false;
+    await persistFlowSession();
+    temuStepRefreshPresentation();
+    temuStepScheduleNext();
+  };
+  $('temuStepRetryPack').onclick = async () => {
+    const q = TemuImgStepper.queue[TemuImgStepper.currentIndex];
+    if (!q?.packReview || TemuImgStepper.sending || TemuImgStepper.applying) return;
+    q.packReview = false; q.stageIndex = 0; q.prompt = q.stages[0];
+    q.continueStage = false; q.done = false; q.jobId = null; q.phase = 'queued';
+    await persistFlowSession();
+    temuStepRefreshPresentation();
+    await temuStepSendCurrent();
+  };
 
   // Close = stop the session (a late Flow result is ignored, nothing gets overwritten)
   const closeBtn = $('temuStepCloseBtn');
@@ -14755,7 +14788,7 @@ function temuStepOpenModal() {
     skipBtn.onclick = async () => {
       await temuStepCancelActiveJob();
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
-      if (current) { current.continueStage = false; current.resultUrl = null; current.phase = 'skipped'; }
+      if (current) { current.packReview = false; current.continueStage = false; current.resultUrl = null; current.phase = 'skipped'; }
       TemuImgStepper.stats.skipped++;
       await temuStepAdvance();
     };
