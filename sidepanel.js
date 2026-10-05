@@ -3471,11 +3471,31 @@ function onFlowStatus(m) {
       if (current) { current.sentAt = null; current.phase = 'generation_failed'; current.applyError = m.text || 'Flow error'; }
       persistFlowSession().catch(error => console.warn('[ZHunter] Flow failure state save failed', error));
       if (unusual && TemuImgStepper.engine === 'flow') flowAutoNewProject().catch(error => { temuStepSetStatus(error.message || 'Recovery stopped', 'error'); temuStepManualAttn(true); });
+      else if (/might violate our policies/i.test(m.text || '') && TemuImgStepper.engine === 'flow' && !current?.policyRetryCount) {
+        temuStepRetryPolicyOnce().catch(error => { temuStepSetStatus(error.message || 'Retry stopped', 'error'); temuStepManualAttn(true); });
+      }
       else { toast('Flow: ' + (m.text || 'error') + ' — "Send Again", "Skip" ya neeche Manual buttons', 'warn'); temuStepManualAttn(true); }
     } else {
       toast('Flow: ' + (m.text || 'error'), 'warn');
     }
   }
+}
+
+async function temuStepRetryPolicyOnce() {
+  const s = TemuImgStepper, q = s.queue[s.currentIndex];
+  if (!q || q.policyRetryCount) return;
+  q.policyRetryCount = 1;
+  const token = s.npToken = {};
+  temuStepSetStatus('Flow policy error — same project mein ek retry; dobara failure par manual check.');
+  await persistFlowSession();
+  await sleep(2000);
+  if (s !== TemuImgStepper || s.npToken !== token || !s.running || s.paused || s.queue[s.currentIndex] !== q || !temuStepModalOpen()) {
+    if (s.npToken === token) s.npToken = null;
+    temuStepRefreshPresentation();
+    return;
+  }
+  s.npToken = null;
+  await temuStepSendCurrent();
 }
 
 // Generated image from the Flow tab
@@ -3677,10 +3697,11 @@ async function temuStepApplyManualImage(src, how = 'manual') {
   if (moreStages) {
     current.imgUrl = finalUrl;
     current.stageIndex++;
+    current.policyRetryCount = 0;
     current.prompt = current.stages[current.stageIndex];
     current.continueStage = true;
     current.sentAt = null;
-    if (current.batchMode === 'pack_background') {
+    if (current.batchMode === 'pack_background' && current.reviewPack === true) {
       current.packReview = true;
       current.phase = 'pack_review';
       temuStepSetStatus('Pack sahi bana? Preview check karke Approve ya Retry Pack karein.');
@@ -13463,6 +13484,7 @@ function persistFlowSession() {
       imgUrl: q.imgUrl, imgIndex: q.imgIndex, jobId: q.jobId, done: q.done,
       stages: q.stages, stageIndex: q.stageIndex, prompt: q.prompt, continueStage: q.continueStage,
       batchMode: q.batchMode, packQty: q.packQty, packReview: q.packReview,
+      reviewPack: q.reviewPack, policyRetryCount: q.policyRetryCount || 0,
       phase: q.phase, resultUrl: q.resultUrl, savedCandidate: q.savedCandidate, applyError: q.applyError, sentAt: q.sentAt
     }))
   };
@@ -14410,7 +14432,7 @@ function temuBatchStages(mode, quantity, backgroundPrompt) {
   if (!['background', 'pack', 'pack_background'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity 2 se 24 honi chahiye');
   const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.`;
-  const pack = `Create exactly ${n} complete identical product sets together in one image. Treat ALL items and accessories in the reference as ONE complete set. Repeat that entire set ${n} times, including every component, accessory and container. Show each complete set separately and clearly; do not merely duplicate one accessory or leave only one set. Keep the same product design, packaging, logo, colors and text. Keep the original background and scene style; do not replace it. No extra text or badges. The final image must show exactly ${n} complete sets, no more and no fewer.`;
+  const pack = `Create a product pack image showing exactly ${n} complete identical product sets, arranged side by side with clear separation. Identify the actual product being sold and every accessory belonging to that product. Repeat only that complete product set ${n} times, including every component and product container. Do NOT repeat background props, food, drinks, furniture, plants or scenery. If the reference already contains multiple sets, the final TOTAL must still be exactly ${n} sets, not ${n} times the existing count. Each set must be fully visible and individually countable; do not overlap or merge them. Keep the same product design, packaging, logo, colors and text. Keep the existing background style. No extra text or badges. Do not produce an image containing only one set.`;
   return mode === 'background' ? [background] : mode === 'pack' ? [pack] : [pack, background];
 }
 
@@ -14437,6 +14459,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       </div>`).join('')}<p class="batch-empty" hidden>No matching products</p></div>
       <div class="batch-footer"><p class="batch-summary"></p>
       <p class="batch-help">No pack? Choose Background only. No edits? Choose Skip. Pack → Background uses 2 generations.</p>
+      <label class="batch-help"><input class="batch-review-pack" type="checkbox"> Review pack before background (optional)</label>
       <p class="batch-error" role="alert"></p>
       <div class="batch-footer-actions"><button type="button" class="btn btn-ghost batch-cancel">Cancel</button><button type="button" class="btn btn-primary batch-start">Start batch</button></div></div>
     </div>`;
@@ -14497,7 +14520,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
           const qty = Number(row.querySelector('.batch-qty').value);
           return { index: Number(row.dataset.batch), mode, qty, stages: temuBatchStages(mode, qty, backgroundPrompt) };
         });
-        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, stages: s.stages, stageIndex: 0, prompt: s.stages[0] }));
+        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, stages: s.stages, stageIndex: 0, prompt: s.stages[0], reviewPack: modal.querySelector('.batch-review-pack').checked }));
         queue.splice(0, queue.length, ...activeQueue);
         modal.remove(); resolve(true);
       } catch (e) { modal.querySelector('.batch-error').textContent = e.message; }
