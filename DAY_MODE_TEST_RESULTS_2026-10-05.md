@@ -77,3 +77,9 @@ The theme test writes screenshots and the detailed sampled results to ignored tm
 - d4131d0: light action hover and gradient consistency
 
 Merge requires explicit user approval. Main has not been changed after the backup commit.
+
+## Follow-up: Border Thickness & Glow
+
+Replaced frame panel, segmented track/hover and custom picker border colors with palette variables. Light mode uses shared surfaces/borders; custom picker has a rounded 24 px swatch matching preset dimensions. Dark palette retains the exact previous RGBA values; native dark picker styles are unchanged.
+
+Added explicit Settings frame-control scroll coverage. Updated suite: 144 fixtures PASS. Dark before/after comparison: every body element matched 18 computed properties at 360 and 500 px. Light 500 px screenshot inspected: panel, inactive labels and custom swatch are consistent and readable. Main remains unmerged.
