@@ -2451,8 +2451,6 @@ function copyText(text, btn) {
     setTimeout(() => { btn.textContent = btn.dataset.orig || '📋'; }, 2000);
   });
 }
-</script>
-<script>
 function removeCard(id) {
   const card = document.getElementById('card-' + id);
   if (!card) return;
@@ -2623,7 +2621,7 @@ function collectAllImages() {
     const id = card.id.replace('card-', '');
     const titleEl = card.querySelector('.card-title');
     const safeTitle = (titleEl ? titleEl.textContent : 'product')
-      .replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 30).replace(/\s+/g, '_') || 'product';
+      .replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 30).replace(/\\s+/g, '_') || 'product';
     const imgs = card.querySelectorAll('img.img-main, img.img-thumb-exp');
     const seen = new Set();
     let n = 1;
@@ -2641,7 +2639,7 @@ function extFromSrc(src) {
   if (src.startsWith('data:image/png')) return '.png';
   if (src.startsWith('data:image/webp')) return '.webp';
   if (src.startsWith('data:image/gif')) return '.gif';
-  const m = src.match(/\.(jpg|jpeg|png|webp|gif|avif)(?:\?|#|$)/i);
+  const m = src.match(/\\.(jpg|jpeg|png|webp|gif|avif)(?:\\?|#|$)/i);
   return m ? '.' + m[1].toLowerCase() : '.jpg';
 }
 
