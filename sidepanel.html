@@ -1768,27 +1768,37 @@
           <div id="temuStepStatus" style="font-size:11px; color:#00E5FF; font-weight:500;">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
         </div>
       </div>
+      <details id="temuStepManualTools" style="border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:8px; background:var(--surface-2);">
+      <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--ink);">Manual tools</summary>
       <div id="temuStepPasteZone" tabindex="0" title="Generated image copy karke yahan Ctrl+V karein, ya file drop karein"
         style="border:1.5px dashed rgba(0,229,255,0.45); border-radius:8px; padding:9px 10px; margin-bottom:10px; font-size:11px; color:var(--text-dim); text-align:center; cursor:pointer; outline:none;">
         📋 <b style="color:#fff;">Manual:</b> image copy karke yahan <b style="color:#00E5FF;">Ctrl+V</b> karein ya file drop karein — isi product image ki jagah lag jayegi
       </div>
       <!-- v9.12.6 — manual tools for this step -->
       <div id="temuStepManualRow" class="temu-step-manual">
-        <span class="temu-step-manual-lbl">✋ Manual</span>
         <button type="button" data-m="img" title="Is product ki image copy — Flow mein Ctrl+V">📋 Image</button>
         <button type="button" data-m="prompt" title="Prompt copy">📝 Prompt</button>
         <button type="button" id="temuStepPasteFlowBtn" data-m="flow" title="Image + prompt khule Flow project ke prompt box mein laga do (Generate aap dabayein)">⚡ Paste in Flow</button>
         <button type="button" data-m="studio" class="studio" title="Auto band karke isi product se Edit Studio (manual) kholo">✋ Manual Studio</button>
       </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
-        <button id="temuStepGrabFlowBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Flow project ki sab se nayi generated image utha kar is product mein laga do">⬇ Flow se latest</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
         <button id="temuStepDeviceBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Device se image</button>
         <input id="temuStepDeviceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-        <button id="temuStepSkipBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Skip ⏩</button>
-        <button id="temuStepSendAgainBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Re-open tab with this image & prompt">Send Again 🔄</button>
         <button id="temuStepPasteNextBtn" class="btn btn-primary btn-sm" type="button" style="font-size:11.5px; font-weight:600; background:linear-gradient(135deg,#00E5FF,#0284c7); border:none;">
           📋 Paste &amp; Next
         </button>
+      </div>
+      </details>
+      <details id="temuStepRecoveryTools" style="border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:12px; background:var(--surface-2);">
+        <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--ink);">Recovery tools</summary>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+          <button id="temuStepGrabFlowBtn" class="btn btn-ghost btn-sm" type="button" title="Latest generated Flow image use karein">Flow se latest</button>
+          <button id="temuStepSendAgainBtn" class="btn btn-ghost btn-sm" type="button">Send Again</button>
+        </div>
+      </details>
+      <div id="temuStepMainActions" style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="zhFlowPause" class="btn btn-primary btn-sm" type="button">Pause after image</button>
+        <button id="temuStepSkipBtn" class="btn btn-ghost btn-sm" type="button">Skip</button>
       </div>
     </div>
   </div>

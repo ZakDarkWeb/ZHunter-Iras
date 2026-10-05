@@ -3406,11 +3406,31 @@ async function uploadImageToPublicHost(source) {
 window.uploadImageToPublicHost = uploadImageToPublicHost;
 
 function temuStepSetStatus(text, kind = 'info') {
+  temuStepRefreshPresentation();
   const el = $('temuStepStatus');
   if (!el) return;
   el.textContent = text;
   el.classList.toggle('is-error', kind === 'error');
   el.classList.toggle('is-ok', kind === 'ok');
+}
+
+function temuStepRefreshPresentation() {
+  const s = TemuImgStepper;
+  const q = s?.queue?.[s.currentIndex];
+  if (!q) return;
+  const image = $('temuStepImg');
+  if (image && image.getAttribute('src') !== q.imgUrl) image.src = q.imgUrl || '';
+  const name = $('temuStepProdName');
+  if (name) { name.textContent = q.product?.title || 'Product'; name.title = name.textContent; }
+  const title = $('temuStepTitle');
+  if (title) title.textContent = `AI Image Studio · Step ${s.currentIndex + 1}/${s.queue.length}`;
+  const sub = $('temuStepSub');
+  if (sub) sub.textContent = `Image #${q.imgIndex + 1}${q.stages ? ' · Stage ' + (q.stageIndex + 1) + '/' + q.stages.length : ''}`;
+  const again = $('temuStepSendAgainBtn');
+  if (again) {
+    again.textContent = q.resultUrl ? 'Retry Save' : 'Send Again';
+    again.disabled = !!(s.sending || s.applying || s.activeJobId || s.npToken);
+  }
 }
 
 function isActiveStepperJob(jobId) {
@@ -3443,6 +3463,7 @@ function onFlowStatus(m) {
     FlowJobs.delete(m.jobId);
     if (isActiveStepperJob(m.jobId)) {
       TemuImgStepper.activeJobId = null;
+      temuStepRefreshPresentation();
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
       if (current) { current.sentAt = null; current.phase = 'generation_failed'; current.applyError = m.text || 'Flow error'; }
       persistFlowSession().catch(error => console.warn('[ZHunter] Flow failure state save failed', error));
@@ -3647,7 +3668,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
     if (stillCurrent()) { temuStepSetStatus(current.applyError + ' ? Retry Save (generation dobara nahi)', 'error'); temuStepManualAttn(true); }
     await persistFlowSession();
     return false;
-  } finally { session.applying = false; }
+  } finally { session.applying = false; temuStepRefreshPresentation(); }
   const moreStages = current.stages && current.stageIndex + 1 < current.stages.length;
   if (moreStages) {
     current.imgUrl = finalUrl;
@@ -14561,6 +14582,7 @@ async function temuStepCancelActiveJob() {
   const session = TemuImgStepper;
   const id = session.activeJobId;
   session.activeJobId = null;
+  temuStepRefreshPresentation();
   session.npToken = null;
   session.pauseToken = null;
   temuStepManualAttn(false);
@@ -14627,6 +14649,7 @@ async function flowGoHomeForNewProject() {
 
 function temuStepManualAttn(on) {
   $('temuStepManualRow')?.classList.toggle('attn', !!on);
+  if (on && $('temuStepManualTools')) $('temuStepManualTools').open = true;
 }
 
 // Manual tools for the current step
@@ -14694,6 +14717,7 @@ function temuStepOpenModal() {
   const modal = $('temuImgStepperModal');
   if (!modal) return;
   modal.classList.remove('hidden');
+  temuStepRefreshPresentation();
 
   // Close = stop the session (a late Flow result is ignored, nothing gets overwritten)
   const closeBtn = $('temuStepCloseBtn');
@@ -14752,7 +14776,7 @@ function temuStepOpenModal() {
   if (!pause && againBtn) {
     pause = document.createElement('button');
     pause.id = 'zhFlowPause'; pause.type = 'button'; pause.className = 'btn btn-ghost btn-sm';
-    againBtn.after(pause);
+    $('temuStepMainActions')?.prepend(pause);
   }
   if (pause) {
     pause.hidden = TemuImgStepper.engine !== 'flow';
@@ -14811,7 +14835,7 @@ async function temuStepSendCurrent() {
   session.sending = true;
   try { await temuStepSendCurrentUnlocked(); }
   catch (error) { temuStepSetStatus(error.message || String(error), 'error'); }
-  finally { session.sending = false; }
+  finally { session.sending = false; temuStepRefreshPresentation(); }
 }
 
 async function temuStepSendCurrentUnlocked() {
