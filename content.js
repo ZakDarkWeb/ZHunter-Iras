@@ -1023,9 +1023,11 @@ function readWalmartPriceInfo() {
       const whole = wrapper?.querySelector('.price-characteristic');
       const fraction = wrapper?.querySelector('.price-mantissa');
       if (whole && fraction && (element === wrapper || element === whole) && !element.getAttribute('aria-label')) {
-        const dollars = (whole.getAttribute('content') || whole.textContent || '').replace(/[^0-9,]/g, '');
+        const declaredAmount = whole.getAttribute('content') || '';
+        const dollars = (declaredAmount || whole.textContent || '').replace(/[^0-9,]/g, '');
         const cents = (fraction.textContent || '').replace(/[^0-9]/g, '');
-        if (dollars && cents) raw = dollars + '.' + cents;
+        if (/^\d+(?:,\d{3})*\.\d+$/.test(declaredAmount)) raw = declaredAmount;
+        else if (dollars && cents) raw = dollars + '.' + cents;
       }
       const info = walmartPriceInfo(raw, element);
       if (info.priceAmount) return info;
@@ -1036,7 +1038,7 @@ function readWalmartPriceInfo() {
   if (wholeElement) {
     const whole = wholeElement.getAttribute('content') || (wholeElement.innerText || '').replace(/[^0-9,]/g, '');
     const fraction = fractionElement ? (fractionElement.innerText || '').replace(/[^0-9]/g, '') : '00';
-    if (whole) return walmartPriceInfo(whole + (fraction ? '.' + fraction : ''), wholeElement);
+    if (whole) return walmartPriceInfo(whole + (!whole.includes('.') && fraction ? '.' + fraction : ''), wholeElement);
   }
   return { price: '', priceAmount: '', priceCurrency: '', priceSymbol: '' };
 }
