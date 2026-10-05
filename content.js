@@ -987,34 +987,61 @@ function readSamsClubPrice() {
 
 
 // ── ISSUE 1 FIX: Walmart precise price reader ────────────────
-function readWalmartPrice() {
-  // Prefer aria-label on the price wrapper (has the full formatted price)
-  const ariaSelectors = [
+function walmartPriceInfo(raw, element = null) {
+  const cleaned = cleanPriceText(String(raw || ''));
+  const number = cleaned.match(/\d+(?:,\d{3})*(?:\.\d+)?/);
+  if (!number) return { price: '', priceAmount: '', priceCurrency: '', priceSymbol: '' };
+  const amount = number[0].replace(/,/g, '');
+  const wrapper = element?.closest?.('[data-automation-id="product-price"], [itemprop="offers"]') || element?.parentElement;
+  const evidence = [raw, element?.getAttribute?.('aria-label'), element?.innerText, element?.textContent, wrapper?.textContent].filter(Boolean).join(' ');
+  const codeInText = evidence.match(/\b(USD|CAD|AUD|GBP|EUR|JPY|CNY|INR|KRW|PKR|CHF)\b/i)?.[1];
+  const scopedCurrency = element?.closest?.('[itemscope]')?.querySelector?.('[itemprop="priceCurrency"]');
+  const pageCurrency = document.querySelector('meta[property="product:price:currency"], meta[itemprop="priceCurrency"], [data-automation-id="product-price"] [itemprop="priceCurrency"]');
+  const declared = codeInText || element?.getAttribute?.('data-currency') || scopedCurrency?.getAttribute?.('content') || scopedCurrency?.textContent || pageCurrency?.getAttribute?.('content') || pageCurrency?.textContent || '';
+  const currency = /^[A-Z]{3}$/i.test(String(declared).trim()) ? String(declared).trim().toUpperCase() : '';
+  const symbol = evidence.match(/US\$|CA\$|AU\$|[$\u00a3\u20ac\u00a5\u20b9\u20a9]/)?.[0] || '';
+  const knownSymbols = { USD: '$', CAD: 'CA$', AUD: 'AU$', GBP: '\u00a3', EUR: '\u20ac', JPY: '\u00a5', INR: '\u20b9', KRW: '\u20a9' };
+  const displaySymbol = symbol || knownSymbols[currency] || '';
+  // A bare amount stays bare when neither the page nor its price supplies currency.
+  return { price: displaySymbol ? displaySymbol + amount : currency ? currency + ' ' + amount : amount,
+    priceAmount: amount, priceCurrency: currency, priceSymbol: displaySymbol };
+}
+
+function readWalmartPriceInfo() {
+  const selectors = [
     '[itemprop="price"]',
     '[data-automation-id="product-price"] [itemprop="price"]',
     '[data-automation-id="product-price"]',
     'span[aria-label*="$"]',
-    'span[aria-label*="£"]',
-    'span[aria-label*="€"]'
+    'span[aria-label*="\u00a3"]',
+    'span[aria-label*="\u20ac"]'
   ];
-  for (const sel of ariaSelectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      const raw = el.getAttribute('aria-label') || el.getAttribute('content') || el.innerText || '';
-      const c = cleanPriceText(raw);
-      if (c && /\d/.test(c)) return c;
+  for (const selector of selectors) {
+    for (const element of document.querySelectorAll(selector)) {
+      let raw = element.getAttribute('aria-label') || element.getAttribute('content') || element.innerText || element.textContent || '';
+      const wrapper = element.closest('[data-automation-id="product-price"]');
+      const whole = wrapper?.querySelector('.price-characteristic');
+      const fraction = wrapper?.querySelector('.price-mantissa');
+      if (whole && fraction && (element === wrapper || element === whole) && !element.getAttribute('aria-label')) {
+        const dollars = (whole.getAttribute('content') || whole.textContent || '').replace(/[^0-9,]/g, '');
+        const cents = (fraction.textContent || '').replace(/[^0-9]/g, '');
+        if (dollars && cents) raw = dollars + '.' + cents;
+      }
+      const info = walmartPriceInfo(raw, element);
+      if (info.priceAmount) return info;
     }
   }
-
-  // Reconstruct from characteristic + mantissa
-  const charEl = document.querySelector('.price-characteristic, [itemprop="price"]');
-  const mantEl = document.querySelector('.price-mantissa');
-  if (charEl) {
-    const whole = charEl.getAttribute('content') || charEl.innerText.replace(/[^0-9,]/g, '');
-    const frac  = mantEl ? mantEl.innerText.replace(/[^0-9]/g, '') : '00';
-    if (whole) return `$${whole}${frac ? '.' + frac : ''}`;
+  const wholeElement = document.querySelector('.price-characteristic');
+  const fractionElement = document.querySelector('.price-mantissa');
+  if (wholeElement) {
+    const whole = wholeElement.getAttribute('content') || (wholeElement.innerText || '').replace(/[^0-9,]/g, '');
+    const fraction = fractionElement ? (fractionElement.innerText || '').replace(/[^0-9]/g, '') : '00';
+    if (whole) return walmartPriceInfo(whole + (fraction ? '.' + fraction : ''), wholeElement);
   }
-  return '';
+  return { price: '', priceAmount: '', priceCurrency: '', priceSymbol: '' };
 }
+
+function readWalmartPrice() { return readWalmartPriceInfo().price; }
 
 // ── ISSUE 3 FIX: Universal e-commerce price reader ──────────
 // Reads price from any e-commerce page using a priority waterfall.
@@ -1329,7 +1356,7 @@ function scrapeWalmart() {
   );
   if (titleEl) r.title = titleEl.innerText.trim();
 
-  r.price = readWalmartPrice();
+  Object.assign(r, readWalmartPriceInfo());
 
   // Helper: strip Walmart CDN size-capping parameters to get full-resolution image
   // Walmart uses i5.walmartimages.com with params like ?odnWidth=180&odnHeight=180 that cap quality
@@ -2837,9 +2864,14 @@ async function scrapePageData() {
   data.title = BAD_TITLE.test(candidateTitle) ? '' : candidateTitle;
 
   // ISSUE 1 FIX: Ensure price has a currency symbol — detect from page
-  if (data.price && !/[$£€¥₹₩]/.test(data.price) && !/^(USD|CAD|AUD|GBP|EUR|PKR|INR)/i.test(data.price)) {
+  if (!/(^|\.)walmart\.com$/i.test(location.hostname) && data.price && !/[$£€¥₹₩]/.test(data.price) && !/^(USD|CAD|AUD|GBP|EUR|PKR|INR)/i.test(data.price)) {
     const sym = detectPageCurrencySymbol();
     data.price = `${sym}${data.price}`;
+  }
+
+  if (/(^|\.)walmart\.com$/i.test(location.hostname) && data.price) {
+    const info = walmartPriceInfo(data.price);
+    Object.assign(data, { ...info, priceCurrency: info.priceCurrency || data.priceCurrency || '', priceSymbol: info.priceSymbol || data.priceSymbol || '' });
   }
 
   data.images   = dedupeImages(data.images).slice(0, IMG_CAP);
@@ -5445,4 +5477,3 @@ function zhFrameIdle() {
 })();
 
 } // end __zhunterContentLoaded guard
-

@@ -4204,6 +4204,7 @@ async function handleSaveEdit() {
       rows[idx].url   = url;
       rows[idx].title = $('editTitle')?.value.trim() || url;
       rows[idx].price = $('editPrice')?.value.trim() || rows[idx].price || '';
+      Object.assign(rows[idx], zhLibraryPriceFields(rows[idx]));
     }
     await setMasterRows(rows);
     btn.disabled = false;
@@ -6254,6 +6255,7 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
     url: scraped?.url || queueItem.url,
     title: scraped?.title || queueItem.title || queueItem.url,
     price: scraped?.price || sMeta?.price || '',
+    ...zhLibraryPriceFields(scraped?.price ? scraped : { price: sMeta?.price || '' }),
     copy: sMeta?.copy ? sMeta : null,
     platform: typeof queueItem.platform === 'string' ? queueItem.platform : (queueItem.platform?.name || 'Other'),
     images: (Array.isArray(scraped?.images) ? scraped.images : []).slice(0, getMaxHuntImages()), imagesBase64: [],
@@ -7401,6 +7403,7 @@ async function scrapeOneTab(tabInfo) {
     url:      tabInfo.url,
     title:    scraped?.title || '',
     price:    scraped?.price || '',
+    ...zhLibraryPriceFields(scraped || {}),
     platform: tabInfo.platform?.name || 'Other',
     images:   cappedImages,
     imagesBase64,
@@ -7427,6 +7430,7 @@ async function scrapeOneTab(tabInfo) {
     url:         result.url,
     title:       result.title,
     price:       result.price,
+    ...zhLibraryPriceFields(result),
     platform:    result.platform,
     status:      result.status,
     error:       result.error,
@@ -8112,6 +8116,36 @@ async function huntRetryAll() {
 
 // ── Master Sheet storage ─────────────────────────────────────
 function zhCaptureSourceFacts(row) { return JSON.parse(JSON.stringify({ title: row.title, description: row.description, bullets: row.bullets, brand: row.brand, color: row.color, size: row.size, material: row.material, weight: row.weight, variants: row.variants, images: row.images })); }
+// Currency metadata is explicit evidence only; never infer USD from a bare price/platform.
+function zhLibraryPriceFields(row = {}) {
+  const raw = String(row.price ?? '').trim();
+  const scalar = raw.match(/^(?:([A-Z]{3}|US\$|CA\$|AU\$|[$\u00a3\u20ac\u00a5\u20b9\u20a9])\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)(?:\s*([A-Z]{3}|[$\u00a3\u20ac\u00a5\u20b9\u20a9]))?$/i);
+  const token = scalar?.[1] || scalar?.[3] || '';
+  const currencyInPrice = /^[A-Z]{3}$/i.test(token) ? token.toUpperCase() : '';
+  const symbolInPrice = token && !currencyInPrice ? token : '';
+  const symbolCodes = { 'US$': 'USD', 'CA$': 'CAD', 'AU$': 'AUD' };
+  let currency = currencyInPrice || symbolCodes[symbolInPrice] || (/^[A-Z]{3}$/i.test(row.priceCurrency || '') ? row.priceCurrency.toUpperCase() : '');
+  const knownSymbols = { USD: '$', CAD: 'CA$', AUD: 'AU$', GBP: '\u00a3', EUR: '\u20ac', JPY: '\u00a5', INR: '\u20b9', KRW: '\u20a9' };
+  if (!currencyInPrice && !symbolCodes[symbolInPrice] && symbolInPrice && knownSymbols[currency] && symbolInPrice !== knownSymbols[currency] && !(symbolInPrice === '$' && ['CAD','AUD'].includes(currency))) currency = '';
+  const storedAmount = String(row.priceAmount ?? '');
+  const amount = scalar ? scalar[2].replace(/,/g, '') : !raw && /^\d+(?:\.\d+)?$/.test(storedAmount) ? storedAmount : '';
+  return { priceAmount: amount, priceCurrency: amount ? currency : '',
+    priceSymbol: amount ? (symbolInPrice || knownSymbols[currency] || row.priceSymbol || '') : '' };
+}
+
+function formatLibraryPrice(row) {
+  const info = zhLibraryPriceFields(row);
+  if (info.priceAmount && info.priceCurrency) {
+    try {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: info.priceCurrency,
+        maximumFractionDigits: Math.min(20, Math.max(2, info.priceAmount.split('.')[1]?.length || 0)) }).format(Number(info.priceAmount));
+    } catch (_) { return info.priceCurrency + ' ' + info.priceAmount; }
+  }
+  // Keep legacy/unknown currency text intact, including bare numbers and ranges.
+  const raw = String(row.price ?? '').trim();
+  return raw || (info.priceAmount ? info.priceSymbol + info.priceAmount : '\u2014');
+}
+
 const ZhMasterBaselines = new WeakMap();
 async function getMasterRows() {
   const saved = await chrome.storage.local.get([MASTER_KEY, 'zhTextEdits']);
@@ -8160,6 +8194,7 @@ async function appendToMasterSheet(rows) {
       Object.assign(ex, {
         title: ex.title,
         price: r.price || ex.price,
+        ...zhLibraryPriceFields(r.price ? r : ex),
         platform: r.platform || ex.platform,
         description: ex.description,
         variants: (r.variants || []).length ? r.variants.join(', ') : ex.variants,
@@ -8190,6 +8225,7 @@ async function appendToMasterSheet(rows) {
     url:          r.url,
     platform:     r.platform,
     price:        r.price,
+    ...zhLibraryPriceFields(r),
     labelCost:    '',                                     // empty — user fills
     listPrice:    '',                                     // empty — user fills
     description:  r.description,
@@ -8411,7 +8447,7 @@ function renderMasterRows(rows) {
     const status = r.status || 'ok';
     const date = r.scrapedAt ? new Date(r.scrapedAt) : null;
     const dateStr = date ? `${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}` : '—';
-    const priceStr = r.price ? r.price : '—';
+    const priceStr = formatLibraryPrice(r);
     const tagInfo = (PLATFORM_PATTERNS[(Object.keys(PLATFORM_PATTERNS).find(k => (r.platform || '').toLowerCase().includes(k.split('.')[0])) || '')]) || null;
     const platName = tagInfo?.name || r.platform || 'Other';
     const platTag = tagInfo?.tag ? tagInfo.tag.toLowerCase() : (r.platform ? r.platform.slice(0, 3).toLowerCase() : 'oth');
@@ -8749,6 +8785,7 @@ async function reHuntMasterRow(rowId) {
       ...r,
       title:        r.title,
       price:        scraped.price || r.price,
+      ...zhLibraryPriceFields(scraped.price ? scraped : r),
       description:  r.description,
       variants:     Array.isArray(scraped.variants) ? scraped.variants.join(', ') : r.variants,
       imageCount:   Array.isArray(scraped.images) ? scraped.images.length : r.imageCount,
@@ -9428,6 +9465,7 @@ async function parseImportFile(file) {
       weight: pick('weight', 'Weight'), dimL: pick('dimL', 'Length'), dimW: pick('dimW', 'Width'), dimH: pick('dimH', 'Height'),
       bullets: Array.isArray(r.bullets) ? r.bullets : String(pick('bullets', 'Bullet Points')).split(' | ').filter(Boolean),
       price: pick('price', 'Price', 'Scraped Price') || basePx,
+      ...zhLibraryPriceFields({ price: pick('price', 'Price', 'Scraped Price') || basePx, priceAmount: r.priceAmount, priceCurrency: r.priceCurrency, priceSymbol: r.priceSymbol }),
       temuBase: basePx,
       sourcingPrice: pick('sourcingPrice', 'Sourcing Price') || pick('price', 'Price', 'Scraped Price'),
       labelCost: pick('labelCost', 'Sourcing Price', 'Label Cost'), listPrice: pick('listPrice', 'List Price'),
