@@ -12,7 +12,7 @@
     <div class="brand-logo-wrap"><div class="brand-logo-glow"></div><img src="icons/icon48.png" alt="" class="brand-logo-img" data-onerror="hide" /></div>
     <div class="brand-text">
       <div class="brand-name-row"><span class="brand-name">ZHunter</span><span class="brand-pro">IRAS</span></div>
-      <div class="brand-meta"><span class="brand-version" data-version>v9.15.0</span><span class="brand-sub">Ultimate Product Hunter</span></div>
+      <div class="brand-meta"><span class="brand-version" data-version>v9.15.0</span></div>
     </div>
     <div class="sp"></div>
     <button id="topTemuStorePill" class="hdr-pill-btn temu-top-pill" type="button" title="Open Temu Export">
@@ -180,6 +180,7 @@
           </div>
         </div>
         <div id="bulkTabsList" class="tbl"><div class="skel"><i></i><i></i><i></i></div><div class="skel"><i></i><i></i><i></i></div><div class="skel"><i></i><i></i><i></i></div></div>
+        <div class="bulk-speed"><span class="bs-l">Tabs at once</span><select class="sel" data-setting="bulkParallelTabs" title="How many tabs are hunted together"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="12">12</option></select></div>
         <div class="summary" id="bulkSummary"><span id="bulkSelectedCount">0 selected</span><span id="bulkTimeEstimate"></span></div>
         <div class="card-actions">
           <button id="bulkHuntStartBtn" class="btn btn-primary btn-lg rainbow" type="button" disabled><span class="bulk-main-text">Hunt all open tabs</span></button>
@@ -233,6 +234,7 @@
             <p>Paste product links above or browse pages with Auto-capture on.</p>
           </div>
         </div>
+        <div class="bulk-speed"><span class="bs-l">Links at once</span><select class="sel" data-setting="queueParallelTabs" title="2 is fast and safe; 1 is gentlest"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
         <div class="summary" id="bulkQueueSummary"><span id="bulkQueueCount">0 queued</span><span id="bulkQueueEta"></span></div>
         <div class="card-actions">
           <button id="bulkQueueHuntBtn" class="btn btn-primary btn-lg rainbow" type="button" disabled><span class="bulk-main-text">Hunt these links</span></button>
@@ -349,6 +351,7 @@
             <span id="masterBulkSelCount">0 selected</span>
           </div>
           <div class="batch-bar-actions">
+            <button id="masterBulkTemuBtn" class="btn btn-primary btn-xs" type="button" title="Upload selected to Temu">Temu upload</button>
             <button id="masterBulkZipBtn" class="btn btn-ghost btn-xs" type="button" title="Download ZIP of selected">
               <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               ZIP
@@ -385,7 +388,6 @@
           <button id="masterImportBtn" class="btn btn-ghost" type="button" title="Import CSV, XLSX or JSON">Import</button>
           <input id="masterImportFile" type="file" accept=".csv,.xlsx,.json" style="display:none">
         </div>
-        <button id="masterResetBtn" class="btn btn-ghost btn-xs btn-danger" type="button" style="align-self:flex-start">Reset Library…</button>
       </div>
     </div>
   </section>
@@ -393,6 +395,7 @@
   <!-- ═══ SETTINGS ═══ -->
   <section id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-settings">
     <div class="body">
+      <div class="set-search"><svg class="i i-xs" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="setSearchInp" type="search" class="inp" placeholder="Search settings…" autocomplete="off"></div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Appearance</span>
       <div class="set">
         <div class="it"><div class="l"><b>Theme</b></div><div class="seg" id="themeSeg"><button type="button" data-theme="dark">Dark</button><button type="button" data-theme="light">Light</button></div></div>
@@ -503,6 +506,7 @@
       <div class="set">
         <div class="it"><div class="l"><b>Storage used</b><span id="spStorageDesc">Calculating…</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRefreshStorageBtn">Refresh</button></div>
         <div class="it"><div class="l"><b>Backup everything</b><span>Download full data & settings JSON</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
+        <div class="it"><div class="l"><b>Restore backup</b><span>Load a ZHunter backup file (.json). Replaces products, queue and history</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRestoreBtn">Restore</button><input id="spRestoreFile" type="file" accept=".json" style="display:none"></div>
         <div class="it"><div class="l"><b>Reset Library</b><span>Deletes hunted items & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
         <div class="it"><div class="l"><b>Wipe everything</b><span>Products, queue & history</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spWipeAllBtn">Wipe all</button></div>
       </div>
@@ -1577,7 +1581,7 @@
               <div class="temu-hist-filters">
                 <button type="button" class="temu-hist-fbtn active" data-hfilter="all">All</button>
                 <button type="button" class="temu-hist-fbtn" data-hfilter="success"><span class="temu-dot-ok"></span> Success</button>
-                <button type="button" class="temu-hist-fbtn" data-hfilter="errors"><span class="temu-dot-bad"></span> Errors</button>
+                <button type="button" class="temu-hist-fbtn" data-hfilter="errors"><span class="temu-dot-bad"></span> Needs fix</button>
                 <button type="button" class="temu-hist-fbtn" data-hfilter="file"><span class="temu-dot-file"></span> File</button>
               </div>
             </div>
@@ -1785,46 +1789,46 @@
 
   <!-- ═══ BULK IMAGE EDIT STEPPER MODAL ═══ -->
   <div id="temuImgStepperModal" class="modal-back hidden" style="z-index:2500;">
-    <div class="modal-box temu-stepper-box" style="max-width:440px; padding:18px;">
-      <div class="modal-head" style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:18px;">✨</span>
-          <div>
-            <b style="font-size:13px; color:#fff;" id="temuStepTitle">AI Image Generator · Step 1/40</b>
-            <div style="font-size:10.5px; color:var(--text-dim);" id="temuStepSub">Product 1 of 40 · Image 1 of 2</div>
-          </div>
-        </div>
+    <div class="modal-box temu-stepper-box tsp">
+      <div class="tsp-head">
+        <span class="tsp-ic">✨</span>
+        <div class="tsp-ttl"><b id="temuStepTitle">AI Image Studio · Step 1/1</b><div class="tsp-sub" id="temuStepSub">Product 1 of 1 · Image 1</div></div>
+        <span class="tsp-badge" id="temuStepBadge">1 / 1</span>
         <button id="temuStepCloseBtn" class="modal-close" type="button" aria-label="Close">✕</button>
       </div>
-      <div style="display:flex; gap:12px; align-items:center; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px; margin-bottom:12px;">
-        <img id="temuStepImg" src="" alt="Current image" style="width:70px; height:70px; object-fit:cover; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#111; flex-shrink:0;" />
-        <div style="min-width:0; flex:1;">
-          <div id="temuStepProdName" style="font-size:11.5px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:4px;">Product Title</div>
-          <div id="temuStepStatus" style="font-size:11px; color:#00E5FF; font-weight:500;">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
+      <div class="tsp-prog"><i id="temuStepProg"></i></div>
+      <div class="tsp-card">
+        <img id="temuStepImg" src="" alt="Current image" class="tsp-img" />
+        <div class="tsp-info">
+          <div id="temuStepProdName" class="tsp-name">Product Title</div>
+          <div id="temuStepStatus" class="tsp-status">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
         </div>
       </div>
-      <div id="temuStepPasteZone" tabindex="0" title="Copy the generated image and press Ctrl+V here, or drop a file"
-        style="border:1.5px dashed rgba(0,229,255,0.45); border-radius:8px; padding:9px 10px; margin-bottom:10px; font-size:11px; color:var(--text-dim); text-align:center; cursor:pointer; outline:none;">
-        📋 <b style="color:#fff;">Manual:</b> copy the image and press <b style="color:#00E5FF;">Ctrl+V</b> here or drop a file — it replaces this product image
+      <div class="tsp-actions">
+        <button id="temuStepSkipBtn" class="btn btn-ghost" type="button">Skip ⏩</button>
+        <button id="temuStepSendAgainBtn" class="btn btn-ghost" type="button" title="Re-open tab with this image & prompt">Send again 🔄</button>
+        <button id="temuStepPasteNextBtn" class="btn btn-primary" type="button">📋 Paste &amp; Next</button>
       </div>
-      <!-- v9.12.6 — manual tools for this step -->
-      <div id="temuStepManualRow" class="temu-step-manual">
-        <span class="temu-step-manual-lbl">✋ Manual</span>
-        <button type="button" data-m="img" title="Copy this product's image — Ctrl+V in Flow">📋 Image</button>
-        <button type="button" data-m="prompt" title="Prompt copy">📝 Prompt</button>
-        <button type="button" id="temuStepPasteFlowBtn" data-m="flow" title="Put the image + prompt into the open Flow project's prompt box (you press Generate)">⚡ Paste in Flow</button>
-        <button type="button" data-m="studio" class="studio" title="Stop auto and open Edit Studio (manual) from this product">✋ Manual Studio</button>
-      </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
-        <button id="temuStepGrabFlowBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Take the newest generated image from the Flow project and put it in this product">⬇ Flow se latest</button>
-        <button id="temuStepDeviceBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Device se image</button>
-        <input id="temuStepDeviceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-        <button id="temuStepSkipBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;">Skip ⏩</button>
-        <button id="temuStepSendAgainBtn" class="btn btn-ghost btn-sm" type="button" style="font-size:11px;" title="Re-open tab with this image & prompt">Send Again 🔄</button>
-        <button id="temuStepPasteNextBtn" class="btn btn-primary btn-sm" type="button" style="font-size:11.5px; font-weight:600; background:linear-gradient(135deg,#00E5FF,#0284c7); border:none;">
-          📋 Paste &amp; Next
-        </button>
-      </div>
+      <details class="tsp-more" id="temuStepMore">
+        <summary>More options <span>manual tools</span><svg class="i i-xs chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <div class="tsp-more-body">
+          <div id="temuStepPasteZone" tabindex="0" class="tsp-drop" title="Copy the generated image and press Ctrl+V here, or drop a file">
+            📋 <b>Manual:</b> copy the image and press <b class="tsp-key">Ctrl+V</b> here or drop a file — it replaces this product image
+          </div>
+          <div id="temuStepManualRow" class="temu-step-manual">
+            <span class="temu-step-manual-lbl">✋ Manual</span>
+            <button type="button" data-m="img" title="Copy this product's image — Ctrl+V in Flow">📋 Image</button>
+            <button type="button" data-m="prompt" title="Prompt copy">📝 Prompt</button>
+            <button type="button" id="temuStepPasteFlowBtn" data-m="flow" title="Put the image + prompt into the open Flow project's prompt box (you press Generate)">⚡ Paste in Flow</button>
+            <button type="button" data-m="studio" class="studio" title="Stop auto and open Edit Studio (manual) from this product">✋ Manual Studio</button>
+          </div>
+          <div class="tsp-row2">
+            <button id="temuStepGrabFlowBtn" class="btn btn-ghost" type="button" title="Take the newest generated image from the Flow project and put it in this product">⬇ Flow se latest</button>
+            <button id="temuStepDeviceBtn" class="btn btn-ghost" type="button">Device se image</button>
+            <input id="temuStepDeviceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 

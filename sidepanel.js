@@ -4274,6 +4274,21 @@ function toast(message, type = 'info') {
   }, 3200);
 }
 
+function toastUndo(message, onUndo) {
+  const stack = $('toastStack');
+  if (!stack) return;
+  const item = document.createElement('div');
+  item.className = 'toast-item ok';
+  item.innerHTML = `<span class="toast-icon">✅</span><span>${esc(message)}</span><button type="button" class="toast-undo">Undo</button>`;
+  stack.appendChild(item);
+  item.getBoundingClientRect();
+  item.classList.add('visible');
+  let done = false;
+  const close = () => { item.classList.add('leaving'); setTimeout(() => item.remove(), 320); };
+  item.querySelector('.toast-undo').addEventListener('click', async () => { if (done) return; done = true; try { await onUndo(); } catch (e) { toast('Undo failed', 'err'); } close(); });
+  setTimeout(() => { if (!done) { done = true; close(); } }, 7000);
+}
+
 // ── Header Buttons ────────────────────────────────────────────
 function initHeaderButtons() {
   $('settingsBtn')?.addEventListener('click', () => {
@@ -4311,11 +4326,58 @@ function applyTabVisibility() {
   setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
 }
 
+
+// ── Settings: collapsible groups + search ─────────────────────
+function initSettingsGroups() {
+  const body = document.querySelector('#tab-settings .body');
+  if (!body || body.dataset.grouped) return;
+  body.dataset.grouped = '1';
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('zh_set_groups') || '{}'); } catch {}
+  const defaultOpen = new Set(['Appearance', 'Hunt', 'Visible Tabs']);
+  body.querySelectorAll(':scope > .settings-lbl').forEach(lbl => {
+    const set = lbl.nextElementSibling;
+    if (!set || !set.classList.contains('set')) return;
+    const name = lbl.textContent.trim();
+    const det = document.createElement('details');
+    det.className = 'set-group';
+    det.dataset.name = name;
+    det.open = name in saved ? !!saved[name] : defaultOpen.has(name);
+    const sum = document.createElement('summary');
+    lbl.classList.add('in-group');
+    sum.appendChild(lbl);
+    sum.insertAdjacentHTML('beforeend', '<svg class="i i-xs chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>');
+    body.insertBefore(det, set);
+    det.appendChild(sum);
+    det.appendChild(set);
+    det.addEventListener('toggle', () => {
+      if (body.classList.contains('searching')) return;
+      saved[name] = det.open;
+      try { localStorage.setItem('zh_set_groups', JSON.stringify(saved)); } catch {}
+    });
+  });
+  const inp = $('setSearchInp');
+  inp?.addEventListener('input', () => {
+    const q = inp.value.trim().toLowerCase();
+    body.classList.toggle('searching', !!q);
+    body.querySelectorAll('.set-group').forEach(det => {
+      let any = false;
+      det.querySelectorAll('.it').forEach(it => {
+        const hit = !q || it.textContent.toLowerCase().includes(q);
+        it.style.display = hit ? '' : 'none';
+        if (hit) any = true;
+      });
+      det.style.display = any ? '' : 'none';
+      if (q) det.open = any; else det.open = !!(det.dataset.name in saved ? saved[det.dataset.name] : defaultOpen.has(det.dataset.name));
+    });
+  });
+}
+
 // ── Sidepanel Settings Panel ──────────────────────────────────
 function initSettingsPanel() {
   const syncSettingsUI = () => {
     const s = State.data?.settings || {};
-    document.querySelectorAll('#tab-settings [data-setting]').forEach(el => {
+    document.querySelectorAll('#tab-settings [data-setting], #tab-bulk [data-setting]').forEach(el => {
       const k = el.dataset.setting;
       if (el.type === 'checkbox') {
         el.checked = s[k] !== undefined ? !!s[k] : el.checked;
@@ -4349,7 +4411,7 @@ function initSettingsPanel() {
     });
   });
 
-  document.querySelectorAll('#tab-settings [data-setting]').forEach(el => {
+  document.querySelectorAll('#tab-settings [data-setting], #tab-bulk [data-setting]').forEach(el => {
     const handler = async () => {
       const k = el.dataset.setting;
       let val;
@@ -4379,6 +4441,7 @@ function initSettingsPanel() {
         const result = await msg({ action: 'UPDATE_SETTINGS', settings: patch });
         if (!result?.success) throw new Error(result?.error || 'Setting save failed');
         State.data.settings[k] = val;
+        document.querySelectorAll('[data-setting="' + k + '"]').forEach(o => { if (o !== el && o.type !== 'checkbox') o.value = val; });
         if (k === 'bulkSkipImageDownload') {
           toast(val ? 'Fast mode ON — skip image downloads' : 'Fast mode OFF — download images', 'ok');
         } else {
@@ -4573,6 +4636,9 @@ function initSettingsPanel() {
     try { const result = await msg({ action: 'BACKUP_EXPORT' }); if (!result?.success) throw new Error(result?.error || 'Backup failed'); zhSaveBlob(new Blob([JSON.stringify(result.backup, null, 2)], { type: 'application/json' }), 'zhunter_backup_' + new Date().toISOString().slice(0, 10) + '.json'); toast('Complete backup downloaded', 'ok'); } catch (e) { toast(e.message, 'err'); }
   });
   $('spResetLibraryBtn')?.addEventListener('click', resetMasterSheet);
+  $('spRestoreBtn')?.addEventListener('click', () => $('spRestoreFile')?.click());
+  $('spRestoreFile')?.addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) doImport(f); });
+  initSettingsGroups();
   $('spWipeAllBtn')?.addEventListener('click', async () => {
     if (!confirm('Delete all products, queue, history, edits and pending sourcing records? Store configuration and connection keys remain.')) return;
     try { const result = await msg({ action: 'MASTER_RESET', wipe: true }); if (!result?.success) throw new Error(result?.error || 'Wipe failed'); MasterUIState.allRows = []; MasterUIState.selectedIds.clear(); BulkState.results = []; TemuLast = null; await updateMasterStats(); await loadBulkQueue(); await refresh(); toast('Data cleared', 'ok'); } catch (e) { toast(e.message, 'err'); }
@@ -5384,6 +5450,7 @@ function initBulkTab() {
   });
   $('masterDlPdfBtn')?.addEventListener('click', () => downloadMasterSheet('pdf'));
   $('masterResetBtn')?.addEventListener('click', resetMasterSheet);
+  $('masterBulkTemuBtn')?.addEventListener('click', () => $('masterTemuBtn')?.click());
   $('masterImportBtn')?.addEventListener('click', () => $('masterImportFile')?.click());
   $('masterImportFile')?.addEventListener('change', e => {
     const file = e.target.files?.[0];
@@ -5545,9 +5612,8 @@ function renderBulkQueueList() {
     const isChecked = !!item.checked;
     const isHunted  = !!item.hunted;
     const status = item.status || (isHunted ? 'complete' : 'queued');
-    const platLabel = item.platform
-      ? `<span class="bulk-tab-platform">${esc(item.platform.substring(0,3).toUpperCase())}</span>`
-      : `<span class="bulk-tab-platform unknown">?</span>`;
+    const favSrc = getFav(item.url);
+    const platLabel = `<div class="pq-plat">${favSrc ? `<img class="pq-fav" src="${esc(favSrc)}" alt="" data-onerror="hide">` : ''}<span class="bulk-tab-platform${item.platform ? '' : ' unknown'}">${item.platform ? esc(item.platform.substring(0,3).toUpperCase()) : '?'}</span></div>`;
     const huntedBadge = isHunted ? `<span class="bulk-tab-dup-badge" title="Already hunted">✅</span>` : '';
     const shortUrl = (() => { try { const u = new URL(item.url); return u.hostname.replace(/^www\./, '') + u.pathname.slice(0,35); } catch { return item.url.slice(0,50); } })();
     const row = document.createElement('div');
@@ -5573,7 +5639,7 @@ function renderBulkQueueList() {
     const heroImg = Array.isArray(item.images) && item.images.length
       ? `<img class="pq-hero-thumb" src="${esc(typeof item.images[0]==='string'?item.images[0]:item.images[0]?.url||'')}" alt="" data-onerror="hide">`
       : '';
-    row.innerHTML = `<div class="bulk-tab-checkbox"></div>${platLabel}<div class="bulk-tab-info">${heroImg}<div class="bulk-tab-platform-lbl">${esc(item.title ? trunc(item.title,50) : shortUrl)}${huntedBadge}</div><div class="bulk-tab-title">${esc(shortUrl)}</div>${stageBar}<div class="pq-stage-label">${stageLabel}</div>${item.error && (status === 'needs_retry' || status === 'error') ? `<div class="pq-error-msg">&#9888; ${esc(item.error)}</div>` : ''}</div>${retryButton}<button class="queue-remove-btn" data-id="${esc(item.id)}" title="Remove from queue">&#10005;</button>`;
+    row.innerHTML = `<div class="bulk-tab-checkbox"></div>${platLabel}<div class="bulk-tab-info">${heroImg}<div class="bulk-tab-platform-lbl">${esc(item.title ? trunc(item.title,50) : shortUrl)}${huntedBadge}</div><div class="bulk-tab-title">${esc(shortUrl)}</div>${stageBar}<div class="pq-stage-label pq-chip pq-${esc(isHunted ? 'complete' : status)}">${stageLabel}</div>${item.error && (status === 'needs_retry' || status === 'error') ? `<div class="pq-error-msg">&#9888; ${esc(item.error)}</div>` : ''}</div>${retryButton}<button class="queue-remove-btn" data-id="${esc(item.id)}" title="Remove from queue">&#10005;</button>`;
     row.addEventListener('click', e => {
       if (e.target.closest('.queue-remove-btn')) return;
       item.checked = !item.checked;
@@ -8941,7 +9007,7 @@ function renderMasterRows(rows) {
       MasterUIState.selectedIds.delete(r.id);
       renderMasterRows(filtered);
       await updateMasterStats();
-      toast('Product deleted', 'ok');
+      toastUndo('Product deleted', async () => { const cur = await getMasterRows(); await setMasterRows([...cur, ...existing.filter(x => x.id === r.id)], cur); await updateMasterStats(); });
     });
     row.querySelector('.row-thumb-wrap')?.addEventListener('click', (e) => {
       if (thumbUrl) {
@@ -9104,14 +9170,14 @@ async function bulkDeleteMasterRows() {
 
   showConfirm(
     'Delete from Master Sheet',
-    `Delete ${ids.length} product${ids.length === 1 ? '' : 's'} from Master Sheet?\n\n${preview}${more}\n\nThis cannot be undone.`,
+    `Delete ${ids.length} product${ids.length === 1 ? '' : 's'} from Master Sheet?\n\n${preview}${more}\n\nYou can undo right after.`,
     'Delete',
     async () => {
       const remaining = rows.filter(r => !ids.includes(r.id));
       await setMasterRows(remaining, rows);
       MasterUIState.selectedIds.clear();
       await updateMasterStats();
-      toast(`Deleted ${ids.length} product${ids.length === 1 ? '' : 's'}`, 'ok');
+      toastUndo(`Deleted ${ids.length} product${ids.length === 1 ? '' : 's'}`, async () => { const cur = await getMasterRows(); await setMasterRows([...cur, ...rows.filter(x => ids.includes(x.id))], cur); await updateMasterStats(); });
     }
   );
 }
@@ -12673,6 +12739,19 @@ async function temuFixDrafts() {
       { action: 'TEMU_FIX_DRAFTS', rules, defaults, autoSubmit: cfg.draft_auto_submit !== false, expectStore: temuActiveStoreName() },
       r => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : r)));
     say((result?.report || []).join('\n'));
+    if (result?.success && !result.stillEmpty) {
+      try {
+        const hl = await temuHistGet(); const store = temuActiveStoreName() || '';
+        const rec = hl.find(h => h.kind === 'upload' && !h.fixedAt && (!store || (h.store || '') === store) && (h.errors > 0 || h.uploadId || !h.confirmed));
+        if (rec) {
+          rec.fixedAt = Date.now(); rec.errors = 0; rec.confirmed = true;
+          await new Promise(r => chrome.storage.local.set({ temuUploadHistory: hl }, r));
+          const its = (rec.items || []).filter(it => it && it.url);
+          if (its.length) await temuMarkListed(its, rec.store || undefined, 'listed');
+          temuRenderHistory(); temuUpdateSrcInfo();
+        }
+      } catch (_) {}
+    }
     toast(result?.success ? (result.stillEmpty ? `${result.stillEmpty} field(s) still empty — see the report` : `Drafts: ${result.changed ?? 0} fields set; ${result.submitted ?? 0} submit clicks — verify the result on Temu`) : 'Fix drafts failed — see the report', result?.success && !result.stillEmpty ? 'ok' : 'warn');
   } catch (e) {
     say('✗ ' + (e?.message || e));
@@ -12857,10 +12936,11 @@ async function temuRenderHistory() {
 
   const filtered = list.filter(h => {
     if (selectedStore && (h.store || '') !== selectedStore) return false;
+    const okRec = h.kind === 'upload' && (h.fixedAt || (h.confirmed && !(h.errors > 0)));
     if (TemuHistFilter === 'success') {
-      if (h.kind !== 'upload' || !h.confirmed || (h.errors && h.errors > 0)) return false;
+      if (!okRec) return false;
     } else if (TemuHistFilter === 'errors') {
-      if (!h.errors && h.confirmed) return false;
+      if (h.kind !== 'upload' || okRec) return false;
     } else if (TemuHistFilter === 'file') {
       if (h.kind !== 'export') return false;
     }
@@ -12888,12 +12968,16 @@ async function temuRenderHistory() {
       statusBadge = '<span class="temu-hist-badge temu-hist-badge-file">📁 Export File</span>';
     } else if (h.kind === 'manual') {
       statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok">✓ Listed</span>';
+    } else if (h.fixedAt) {
+      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok" title="Drafts were fixed and submitted">✓ Fixed &amp; listed</span>';
     } else if (h.confirmed && !h.errors) {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok">✓ Confirmed</span>';
+      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok">✓ Uploaded</span>';
     } else if (h.confirmed && h.errors) {
-      statusBadge = `<span class="temu-hist-badge temu-hist-badge-warn">⚠️ ${h.errors} Errors</span>`;
+      statusBadge = `<span class="temu-hist-badge temu-hist-badge-warn" title="Uploaded to Temu as drafts — use Fix drafts on Temu">⚠ ${h.errors} need fix</span>`;
+    } else if (h.uploadId) {
+      statusBadge = '<span class="temu-hist-badge temu-hist-badge-warn" title="Temu received the file but the result was not confirmed — check the Temu upload history">⏳ Sent — check Temu</span>';
     } else {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-bad">✗ Failed</span>';
+      statusBadge = '<span class="temu-hist-badge temu-hist-badge-bad">✗ Not uploaded</span>';
     }
 
     let chipsHtml = '';
@@ -13931,6 +14015,10 @@ async function temuRenderReview() {
               <button class="btn btn-ghost btn-xs temu-rv-ai-btn" title="AI Rewrite this title">⚡ AI</button>
             </div>
           </div>
+          <div class="temu-rv-field-group temu-rv-packrow">
+            <label class="temu-lbl">Pack</label>
+            <div class="temu-rv-packs">${ZS_PACKS.map(p => `<button type="button" class="temu-rv-pk${packFromTitle(title) === p ? ' on' : ''}" data-pk="${p}" title="${p === 1 ? 'Single (remove pack)' : p + ' Pack - title + marks this product for image edit'}">${p === 1 ? '1' : p + '×'}</button>`).join('')}<button type="button" class="temu-rv-pk studio" data-pk="studio" title="Open Edit Studio for this product">✨ Studio</button></div>
+          </div>
           <div class="temu-rv-field-group temu-rv-price-group">
             <label class="temu-lbl">Temu Price ($)</label>
             <input type="text" class="inp temu-rv-price-inp" value="${calcBase !== null ? displayPrice : esc(String(r.price || ''))}" placeholder="0.00" inputmode="decimal" />
@@ -13961,6 +14049,32 @@ async function temuRenderReview() {
       card.classList.toggle('img-edit-on', editChk.checked);
       temuUpdateImgEditCount(rows);
     });
+    // v9.15 — one-click pack per product (title + marks the product for image edit)
+    card.querySelectorAll('.temu-rv-pk').forEach(b => b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (b.dataset.pk === 'studio') {
+        TemuImgEditSelected.add(r.id);
+        if (editChk) editChk.checked = true;
+        card.classList.add('img-edit-on');
+        temuUpdateImgEditCount(rows);
+        await zhStudioOpen(r.id);
+        return;
+      }
+      const n = parseInt(b.dataset.pk, 10);
+      const inp = card.querySelector('.temu-rv-title-inp');
+      const t = packTitle(inp?.value || r.title || '', n);
+      r.title = t;
+      for (const x of _productRowsById(r.id)) x.title = t;
+      if (inp) inp.value = t;
+      const snip = card.querySelector('.temu-rv-title-snippet'); if (snip) snip.textContent = t;
+      const bd = card.querySelector('.temu-ai-char-badge'); if (bd) { bd.textContent = `${t.length}/500`; bd.className = 'temu-ai-char-badge ' + (t.length <= 240 ? 'ok' : t.length <= 500 ? 'warn' : 'over'); }
+      card.querySelectorAll('.temu-rv-pk[data-pk]').forEach(x => x.classList.toggle('on', x.dataset.pk === String(n)));
+      if (n > 1) { TemuImgEditSelected.add(r.id); if (editChk) editChk.checked = true; card.classList.add('img-edit-on'); }
+      else { TemuImgEditSelected.delete(r.id); if (editChk) editChk.checked = false; card.classList.remove('img-edit-on'); }
+      temuUpdateImgEditCount(rows);
+      try { await temuSaveTitles([{ id: r.id, url: r.url, title: t }]); } catch (err) { toast(err.message, 'warn'); }
+      toast(n > 1 ? `📦 ${n} Pack set — product marked for image edit` : 'Pack removed', 'ok');
+    }));
     card.querySelectorAll('.temu-rv-img-chk').forEach(ic => {
       ic.addEventListener('change', () => {
         const set = new Set();
@@ -14767,8 +14881,9 @@ function temuBatchStages(mode, quantity, backgroundPrompt) {
   const n = Number(quantity);
   if (!['background', 'pack', 'pack_background'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity must be between 2 and 24');
-  const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.`;
-  const pack = `Create exactly ${n} identical units of the reference product together. Preserve the exact packaging, logo, colors and text. Keep the original background and scene style; do not replace it. No extra text or badges.`;
+  const keepLabel = mode === 'pack_background' ? ` Keep the large "${n} PACK" text label exactly as it is (same text, size, colors and position); do not remove or change it.` : '';
+  const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.${keepLabel}`;
+  const pack = mode === 'background' ? '' : packMasterPrompt(n);
   return mode === 'background' ? [background] : mode === 'pack' ? [pack] : [pack, background];
 }
 
@@ -14802,6 +14917,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
     const entries = [...modal.querySelectorAll('[data-batch]')];
     entries.forEach(row => {
       row.querySelector('.batch-mode').add(new Option('Skip / keep original', 'skip'));
+      { const pk = packFromTitle(queue[Number(row.dataset.batch)].product.title); if (pk > 1) { row.querySelector('.batch-mode').value = Number(row.dataset.batch) >= 0 && queue[Number(row.dataset.batch)].imgIndex === 0 ? 'pack_background' : 'background'; if (row.querySelector('.batch-mode').value === 'pack_background') row.querySelector('.batch-qty').value = String(pk); } }
       row.querySelector('.batch-product').onclick = () => {
         const pid = queue[Number(row.dataset.batch)].product.id;
         const on = !row.querySelector('.batch-pick').checked;
@@ -15135,6 +15251,7 @@ async function temuStepProcessCurrent() {
   const nameEl = $('temuStepProdName');
 
   if (titleEl) titleEl.textContent = `AI Image Studio · Step ${currentIndex + 1}/${total}`;
+  { const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round((currentIndex / Math.max(1, total)) * 100) + '%'; const bd = $('temuStepBadge'); if (bd) bd.textContent = `${currentIndex + 1} / ${total}`; }
   if (subEl) subEl.textContent = `Product: ${trunc(current.product.title, 40)} · Image #${current.imgIndex + 1}`;
   if (subEl && current.stages) subEl.textContent += ` · ${current.batchMode === 'background' || current.stageIndex === 1 ? 'Background' : 'Pack ' + current.packQty} · ${current.stageIndex + 1}/${current.stages.length}`;
   if (imgEl) imgEl.src = current.imgUrl;
@@ -16095,9 +16212,362 @@ function packFromTitle(title) {
   const m = String(title || '').match(/^\s*(\d+)\s*[- ]?\s*pack\b/i) || String(title || '').match(/^\s*pack\s+of\s+(\d+)/i);
   return m ? parseInt(m[1], 10) : 1;
 }
-function packImagePrompt(n) {
-  return `Create a ${n} pack of this product. Show ${n} identical units of this exact product together on a clean white background. Keep the packaging, logo, colors and all text exactly the same as the reference. No extra text or badges.`;
-}
+const PACK_MASTER_PROMPT = `Create a professional marketplace-ready [PACK COUNT]-PACK product image
+from the provided product image.
+
+==================================================
+CORE OBJECTIVE
+==================================================
+
+Transform the provided image into a professional [PACK COUNT]-PACK presentation.
+
+The input image is the ONLY source of truth for the product.
+
+First identify ONE complete original product unit/set.
+
+Then create exactly [PACK COUNT] complete and identical units/sets of that product
+inside ONE realistic professional product photograph.
+
+IMPORTANT:
+
+DUPLICATE THE PRODUCT, NOT THE ORIGINAL PHOTOGRAPH.
+
+Do NOT simply copy, mirror, tile, or repeat the entire original image.
+
+Do NOT place multiple copies of the original photograph together.
+
+Instead, reconstruct the actual product and create [PACK COUNT] physical units
+inside one shared realistic scene.
+
+The final image MUST visibly communicate that the customer receives
+[PACK COUNT] COMPLETE UNITS / SETS.
+
+==================================================
+COMPLETE PRODUCT UNIT
+==================================================
+
+First determine exactly what ONE complete sellable unit/set consists of.
+
+If the original contains multiple components that belong together,
+treat all of them as ONE complete set.
+
+Examples:
+
+1 knife block + all knives = ONE COMPLETE SET
+
+1 utensil holder + all utensils = ONE COMPLETE SET
+
+1 bottle + its included accessories = ONE COMPLETE SET
+
+1 box + included products = ONE COMPLETE SET
+
+1 package containing multiple items = ONE COMPLETE SET
+
+Then recreate that COMPLETE SET [PACK COUNT] TIMES.
+
+Every important component belonging to the original set must be represented
+appropriately in every duplicated set.
+
+Do NOT duplicate only the main object.
+
+Do NOT create incomplete sets.
+
+Do NOT leave the original quantity unchanged.
+
+==================================================
+EXACT PRODUCT ACCURACY
+==================================================
+
+Every duplicated unit must remain visually identical to the original.
+
+Preserve exactly:
+
+- product design
+- shape
+- proportions
+- dimensions
+- colors
+- materials
+- textures
+- patterns
+- logos
+- branding
+- printed text
+- labels
+- handles
+- openings
+- buttons
+- edges
+- components
+- small details
+
+Do NOT redesign the product.
+
+Do NOT change colors.
+
+Do NOT change branding.
+
+Do NOT change text.
+
+Do NOT invent features.
+
+Do NOT remove features.
+
+Do NOT improve or stylize the product.
+
+The ONLY intentional change is increasing the quantity from ONE COMPLETE UNIT
+to exactly [PACK COUNT] COMPLETE UNITS.
+
+==================================================
+SMART MULTI-PACK POSITIONING
+==================================================
+
+Do NOT use one fixed layout for every product.
+
+Analyze the physical shape, dimensions, structure and number of units first.
+
+Then automatically choose the most professional arrangement.
+
+For products where depth positioning looks natural, such as bottles,
+boxes, containers, bags and similar solid products:
+
+Prefer a professional depth composition where appropriate:
+
+- one or more units in the foreground
+- other units slightly behind
+- subtle size difference caused by realistic perspective
+- controlled overlap
+- clear visibility of each unit
+
+The front/hero units can appear slightly larger because they are closer
+to the camera.
+
+Do NOT dramatically resize products.
+
+Do NOT change their actual proportions.
+
+For flat, wide or multi-piece products where front/back positioning would
+hide important components:
+
+Do NOT force a depth composition.
+
+Instead use the most natural arrangement, such as:
+
+- side-by-side
+- staggered
+- offset
+- rows
+- controlled diagonal arrangement
+- grouped composition
+
+Choose the layout that best communicates [PACK COUNT] complete units
+while keeping the product professional and recognizable.
+
+==================================================
+HIGHER PACK COUNTS
+==================================================
+
+For larger quantities such as 6, 8, 10 or 12 packs:
+
+Do NOT simply make every product extremely small.
+
+Instead create an organized, visually balanced composition.
+
+Use realistic grouping, depth and staggered positioning where appropriate.
+
+Keep the products large enough to remain recognizable.
+
+Do NOT create an overcrowded pile.
+
+Do NOT create excessive empty space.
+
+Do NOT hide most of the products behind the front products.
+
+The customer must be able to understand that the image represents
+exactly [PACK COUNT] complete units.
+
+If some overlap is necessary, keep enough of each unit visible to communicate
+the total quantity clearly.
+
+==================================================
+NO IMAGE DUPLICATION
+==================================================
+
+Never duplicate the source photograph itself.
+
+Create [PACK COUNT] physical product units within one shared photograph.
+
+They must look like they were physically arranged and photographed together.
+
+Do NOT make the image look like multiple screenshots were combined.
+
+Do NOT create repeated rectangular copies.
+
+Do NOT create a collage.
+
+Do NOT mirror the entire original composition.
+
+==================================================
+BACKGROUND
+==================================================
+
+Use a clean white or very light neutral marketplace background.
+
+Keep the background simple and professional.
+
+Do NOT add any new objects.
+
+Do NOT add:
+
+- people
+- hands
+- food
+- plants
+- furniture
+- kitchen props
+- decorative objects
+- lifestyle objects
+- unrelated accessories
+- promotional graphics
+
+Only show the actual product being duplicated.
+
+==================================================
+REALISTIC PRODUCT PHOTOGRAPHY
+==================================================
+
+All [PACK COUNT] units must look physically present in the same photograph.
+
+Use realistic:
+
+- perspective
+- scale
+- depth
+- lighting
+- shadows
+- contact shadows
+- reflections where appropriate
+- spacing
+- overlap
+
+Do not make products float.
+
+Do not create impossible geometry.
+
+Do not merge different products together.
+
+Do not create distorted components.
+
+==================================================
+MANDATORY PACK LABEL
+==================================================
+
+The final image MUST contain the exact text:
+
+[PACK COUNT] PACK
+
+This is REQUIRED.
+
+NEVER omit the pack label.
+
+NEVER make it tiny.
+
+NEVER hide it.
+
+NEVER crop it.
+
+NEVER replace it with different wording.
+
+TEXT STYLE:
+
+- [PACK COUNT] = bold RED
+- PACK = bold BLACK
+- uppercase
+- heavy modern sans-serif font
+- very large and highly readable
+- strong contrast
+- professional marketplace typography
+
+PLACEMENT:
+
+Place the "[PACK COUNT] PACK" label prominently in the
+UPPER-LEFT AREA whenever possible.
+
+Keep a safe margin from the top and left edges.
+
+Place it over clean white/light background whenever possible.
+
+The product always has priority.
+
+If the upper-left area is occupied by the product,
+intelligently move the label to the nearest clean area in the upper portion
+of the image while keeping it highly prominent.
+
+The label must NEVER cover important parts of the product.
+
+The label must be readable even when the image is viewed as a small thumbnail.
+
+Do NOT create a huge decorative sticker.
+
+Do NOT add a banner.
+
+Do NOT add price, discount, sale text or other marketing claims.
+
+The ONLY allowed wording is:
+
+[PACK COUNT] PACK
+
+==================================================
+FRAMING
+==================================================
+
+Create a balanced professional e-commerce composition.
+
+All [PACK COUNT] units should fit naturally within the square frame.
+
+Do not crop important product parts.
+
+Avoid excessive empty space.
+
+Keep products large enough to remain recognizable.
+
+Use the available square canvas efficiently.
+
+==================================================
+FINAL VERIFICATION
+==================================================
+
+Before finalizing, verify ALL of the following:
+
+1. What is ONE complete original product unit?
+2. Are there EXACTLY [PACK COUNT] complete units in the final image?
+3. Does every unit contain the necessary components?
+4. Has the product design remained unchanged?
+5. Does the image look like ONE real photograph?
+6. Does it NOT look like duplicated source images?
+7. Is the composition appropriate for this specific product?
+8. Are the products clearly visible?
+9. Is the "[PACK COUNT] PACK" label clearly visible?
+10. Is the label large and bold?
+11. Is the background clean?
+12. Were NO unrelated objects added?
+13. Is the output 1:1 square?
+
+If any requirement is incorrect, fix it before finalizing.
+
+FINAL GOAL:
+
+ONE ORIGINAL PRODUCT
+→ EXACTLY [PACK COUNT] COMPLETE IDENTICAL PRODUCTS
+→ ONE REALISTIC PROFESSIONAL PHOTOGRAPH
+→ CLEAN WHITE/LIGHT BACKGROUND
+→ LARGE BOLD "[PACK COUNT] PACK" LABEL
+→ 1:1 SQUARE
+→ NO EXTRA OBJECTS
+→ NO PRODUCT DESIGN CHANGES
+→ NO MISSING UNITS`;
+function packMasterPrompt(n) { return PACK_MASTER_PROMPT.split('[PACK COUNT]').join(String(n)); }
+function packImagePrompt(n) { return packMasterPrompt(n); }
 
 async function zhImageToPngBlob(src) {
   let dataUrl = src;
@@ -16168,6 +16638,7 @@ async function zhStudioOpen(startProductId = null) {
   const startPage = startProductId ? Math.max(0, items.findIndex(x => x.product.id === startProductId)) : 0;   // v9.12.6
   ZhStudio = { ...ZhStudio, items, page: startPage, open: true, basePrompt, usedFlowIds: new Set() };
   try { const st = await chrome.storage.local.get(['zhStudioWithPrompt']); if (typeof st?.zhStudioWithPrompt === 'boolean') ZhStudio.withPrompt = st.zhStudioWithPrompt; } catch (_) {}
+  try { const st2 = await chrome.storage.local.get(['zhStudioAutoNext']); ZhStudio.autoNext = st2?.zhStudioAutoNext !== false; } catch (_) {}
   $('zhStudioModal')?.classList.remove('hidden');
   zhStudioRender(startPage);
 }
@@ -16221,7 +16692,8 @@ function zhStudioRender(dir = 0) {
             <b>${p === 1 ? '1' : p + '×'}</b><small>${p === 1 ? 'Single' : 'Pack'}</small></button>`).join('')}
         </div>
       </div>
-      <div class="zs-sec">
+      <details class="zs-sec zs-fold"${ZhStudio.promptOpen ? ' open' : ''}>
+        <summary><span>📝 Prompt</span><small>${it.promptMode === 'pack' ? 'Pack prompt' + (it.pack > 1 ? ' (' + it.pack + ')' : '') : 'Image prompt'}</small><svg class="i i-xs chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
         <div class="zs-row">
           <div class="zs-seg">
             <button type="button" data-pm="image" class="${it.promptMode === 'image' ? 'on' : ''}">Image prompt</button>
@@ -16230,7 +16702,7 @@ function zhStudioRender(dir = 0) {
           <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>
         </div>
         <textarea id="zsPrompt" class="zs-prompt" rows="3" spellcheck="false">${esc(prompt)}</textarea>
-      </div>
+      </details>
       <div class="zs-sec">
         <div class="zs-row">
           <span class="zs-lbl" style="margin:0">Images · ${it.picked.length} for editing</span>
@@ -16246,7 +16718,7 @@ function zhStudioRender(dir = 0) {
                 <label class="zs-tick" title="For Paste in Flow"><input type="checkbox" data-paste="${i}" ${it.pasteSel.has(i) ? 'checked' : ''}/> #${i + 1}${i === 0 ? ' · Main' : ''}</label>
               </div>
               <div class="zs-pair">
-                <img class="zs-orig" src="${esc(all[i])}" alt="" />
+                <img class="zs-orig" data-act="zoom" title="Click to zoom" src="${esc(all[i])}" alt="" />
                 ${isPick || s.newUrl ? `<div class="zs-slot" data-act="select">
                   ${s.busy ? '<span class="zs-hint">⏳</span>'
                     : s.newUrl ? `<img src="${esc(s.newUrl)}" alt="" /><span class="zs-ok">✓</span>`
@@ -16266,9 +16738,11 @@ function zhStudioRender(dir = 0) {
       <div class="zs-flowbar">
         <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in Flow (${it.pasteSel.size})</button>
         <label class="zs-tick"><input type="checkbox" id="zsWithPrompt" ${ZhStudio.withPrompt ? 'checked' : ''}/> + prompt</label>
+        <label class="zs-tick" title="After the last picked image of a product is replaced, go to the next product"><input type="checkbox" id="zsAutoNext" ${ZhStudio.autoNext !== false ? 'checked' : ''}/> auto next</label>
         <button type="button" class="zs-btn" id="zsOpenFlow">↗ Open Flow</button>
       </div>
     </div>`;
+  body.querySelector('.zs-fold')?.addEventListener('toggle', e => { ZhStudio.promptOpen = e.target.open; });
 }
 
 // title edits → product rows + review card (saved when studio page changes / closes)
@@ -16341,6 +16815,7 @@ async function zsApply(it, i, src, how = 'Paste') {
   if (!src || s.busy) return;
   const all = _allImgUrls(it.product);
   if (!s.orig) s.orig = all[i];
+  let advance = false;
   s.busy = true; zhStudioRender();
   try {
     let finalUrl = src;
@@ -16370,12 +16845,14 @@ async function zsApply(it, i, src, how = 'Paste') {
     }
     const next = it.picked.find(x => x > i && !it.slots[x]?.newUrl) ?? it.picked.find(x => !it.slots[x]?.newUrl);
     if (next != null) it.active = next;
+    advance = next == null && ZhStudio.autoNext !== false && ZhStudio.page < ZhStudio.items.length - 1 && zsCur() === it;
   } catch (e) {
     toast('Image not applied: ' + (e?.message || e), 'warn');
   } finally {
     s.busy = false;
     zhStudioRender();
   }
+  if (advance) setTimeout(() => { if (ZhStudio.open && zsCur() === it) zsGo(1); }, 800);
 }
 
 async function zsUndo(it, i) {
@@ -16462,6 +16939,9 @@ function zsGo(delta) {
       const i = +e.target.dataset.paste;
       e.target.checked ? it.pasteSel.add(i) : it.pasteSel.delete(i);
       const b = $('zsPasteFlow'); if (b) b.textContent = `⚡ Paste in Flow (${it.pasteSel.size})`;
+    } else if (e.target.id === 'zsAutoNext') {
+      ZhStudio.autoNext = e.target.checked;
+      chrome.storage.local.set({ zhStudioAutoNext: e.target.checked });
     } else if (e.target.id === 'zsWithPrompt') {
       ZhStudio.withPrompt = e.target.checked;
       chrome.storage.local.set({ zhStudioWithPrompt: e.target.checked });
@@ -16499,6 +16979,7 @@ function zsGo(delta) {
       it.active = i;
       body.querySelectorAll('.zs-img').forEach(c => c.classList.toggle('active', +c.dataset.i === i));
     }
+    if (act === 'zoom') { openLightbox(_allImgUrls(it.product)[i], `P${it.pNo} · #${i + 1}`); return; }
     if (act === 'copy') {
       const src = _allImgUrls(it.product)[i];
       toast('📋 Copying…', 'info');

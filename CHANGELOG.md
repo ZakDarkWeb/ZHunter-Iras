@@ -1,6 +1,20 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu History: honest statuses — Uploaded / N need fix / Sent — check Temu / Not uploaded / Fixed & listed (after 'Fix drafts on Temu' succeeds the record's errors are cleared and its products are added to the Listed history, so they are skipped in the next export); filter 'Errors' renamed 'Needs fix' and now includes everything not yet listed.
+- Edit Studio: Original and Result shown big side-by-side (click original to zoom), image buttons in a tidy grid, 'auto next' option (moves to the next product after its last picked image is replaced), clearer Prompt fold.
+- Temu Review cards: one-click Pack buttons (1×–12×) set the title, mark the product for image edit, and a '✨ Studio' button opens Edit Studio for that product; Flow batch setup now defaults packed products' main image to 'Pack → Background' with the pack qty.
+- Temu Export: header subtitle removed; Review card full-width title field, larger image thumbs with tidy 3-column tool grid, clearer delete icon, Save bar no longer overlaps settings.
+- Header: subtitle hidden on narrow panel (no overlap with Temu Export button); Hunt images banner calm cyan (no rainbow); Bulk stats and banners compact.
+- Edit Studio: Prompt section folds (remembers open/closed), Paste in Flow bar sticks to the bottom; Flow batch setup: Qty only shows for pack tasks, tidier toolbar.
+- Image Studio: Universal Multi-Pack Master Prompt ([PACK COUNT] filled in) used in Manual studio AND Auto (Pack only / Pack → Background; the Background step keeps the 'N PACK' label); Auto popup redesigned: step badge + progress bar, main buttons (Skip / Send again / Paste & Next) up front, manual tools in a collapsible 'More options'.
+- Settings: fold-able groups (state remembered), search box, Restore backup button next to Backup.
+- Library Compact mode: one clean line per product (price, store, title), rows no longer overlap.
+- Library: filter chips wrap to a second line instead of hiding (works at any panel width); chips/status pills are rectangular (no round buttons).
+- Library: filter chips no longer hidden behind Problems/Compact (grid + fade); compact stats, rounded chips, tidier rows and Recent Hunts cards.
+- Library: filter chips + Problems/Compact on one line; sticky selection bar with 'Temu upload'; Undo (7s) after deleting products; Reset Library removed from Library tab (still in Settings → Data).
+- Bulk Hunt / Queue UI: 'Tabs at once' and 'Links at once' selectors right above the Hunt buttons (synced with Settings); queue rows show site favicon + platform and a coloured status chip (Done / Needs retry / Loading); light-mode row polish.
+- UI: main tabs (Hunt/Bulk/Library/Settings) and Temu Export tabs (Upload/Settings/Categories/History) now use the same segmented-button look as "Last hunt / Library / Import sheet" (dark + light).
 - Sourcing sync runs silently in the background (the Google Sheet tab is no longer opened/focused after upload; use "Open sheet" when you want to see it).
 - Light mode: bulk hunt progress + result popup (title, hero card, filter bar, result tiles, Done / Temu upload buttons) fixed.
 - Sourcing: one sheet for all Chrome profiles — "Copy connection code" / "Paste connection code" (URL + sheet + key) connects another Chrome in one paste; each store still gets its own tab automatically. Sheet link can be typed in step 1.
