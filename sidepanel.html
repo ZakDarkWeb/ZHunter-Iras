@@ -410,6 +410,10 @@
           <select class="sel" data-setting="bulkParallelTabs" style="width:auto;min-width:74px;">
             <option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="12">12</option>
           </select></div>
+        <div class="it"><div class="l"><b>Queue links at once</b><span>Queue hunt opens this many links together. 2 is fast and safe; 1 is slowest but gentlest. The link being loaded is brought to the front so it loads faster</span></div>
+          <select class="sel" data-setting="queueParallelTabs" style="width:auto;min-width:74px;">
+            <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
+          </select></div>
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Retries once with backoff on timeout/error</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Failed tabs always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>URLs only; Master ZIP won't include images. Hunt runs 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>

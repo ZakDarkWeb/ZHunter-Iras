@@ -6434,6 +6434,18 @@ async function huntPageGuard(tabId, expectUrl, rowId, nav) {
   return { ok: false, code: BulkState.isCancelled ? 'cancelled' : 'page_check_failed', ...flags };
 }
 
+// v9.15 — the link that is loading is brought to the front (Chrome loads background tabs slower). Only one tab can be in front.
+async function huntTakeFront(tabId) {
+  if (BulkState._front && BulkState._front !== tabId) {
+    const alive = await new Promise(r => chrome.tabs.get(BulkState._front, t => r(chrome.runtime.lastError ? null : t)));
+    if (alive) return false;
+  }
+  BulkState._front = tabId;
+  try { await chrome.tabs.update(tabId, { active: true }); } catch (_) {}
+  return true;
+}
+function huntReleaseFront(tabId) { if (BulkState._front === tabId) BulkState._front = null; }
+
 async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   const fakeId = queueItem.id;
   setBulkRowStatus(fakeId, 'active');
@@ -6442,6 +6454,7 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   let scraped = null;
   let errorCode = '';
   let guardFlags = null;
+  let fewStable = false;   // v9.15 — product really has fewer than 3 images (page fully loaded, count did not grow)
   try {
     await huntWaitWhileHeld();
     const curTab = await new Promise(res => chrome.tabs.get(workerTabId, t => res(chrome.runtime.lastError ? null : t)));
@@ -6450,12 +6463,22 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
       await chrome.tabs.update(workerTabId, { url: queueItem.url });
     }
     setBulkRowMeta(fakeId, 'Loading…');
-    const ready = await huntWaitComplete(workerTabId, opts.readyTimeout || 35000);
-    if (!ready) throw new Error(BulkState.isCancelled ? 'cancelled' : 'page_timeout');
+    if (opts.front !== false) await huntTakeFront(workerTabId);
+    const ready = await huntWaitComplete(workerTabId, opts.readyTimeout || 35000, opts.front !== false ? () => huntTakeFront(workerTabId) : null);
+    if (BulkState.isCancelled) throw new Error('cancelled');
+    // v9.15 — slow net: do NOT abandon / reload a page that is still loading. Scrape what is there; if incomplete it is retried at the end.
+    let loadTimedOut = false;
+    if (!ready) {
+      const st = await new Promise(res => chrome.tabs.get(workerTabId, t => res(chrome.runtime.lastError ? null : t)));
+      if (!st) throw new Error('tab_closed');
+      loadTimedOut = true;
+    }
 
     // Verification hold + redirect guard (does not reload after captcha solve)
     const navQueue = async () => {
       const cur = await new Promise(res => chrome.tabs.get(workerTabId, t => res(chrome.runtime.lastError ? null : t)));
+      // v9.15 — a page that is still loading is never reloaded: wait for it instead
+      if (cur && cur.status === 'loading') { await huntWaitComplete(workerTabId, 15000); return; }
       await chrome.tabs.update(workerTabId, { url: queueItem.url });
       await huntWaitComplete(workerTabId, 35000);
     };
@@ -6463,29 +6486,33 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
     if (!guard.ok) throw new Error(guard.code || 'verification');
     guardFlags = guard;
 
-    // Settle delay
-    const settleDelay = opts.settleMs ?? (300 + Math.floor(Math.random() * 400));
-    await sleep(settleDelay);
-
+    // v9.15 — scrape the moment the page is loaded; if title/price/3 images are not there yet, look again every ~0.3s (up to a cap)
+    await sleep(opts.settleMs ?? 120);
     setBulkRowMeta(fakeId, 'Scraping…');
     try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, files: ['content.js'] }); }
     catch (_) { /* Content script may already be present */ }
-
-    scraped = await sendQueueScrape(workerTabId);
-
-    // Temu: direct fast in-page DOM scraper
-    if (/temu\./i.test(queueItem.url)) {
-      try {
-        const [mr] = await chrome.scripting.executeScript({ target: { tabId: workerTabId }, world: 'MAIN', func: zhHuntMainScrape });
-        const m = mr?.result;
-        if (m && Array.isArray(m.images) && m.images.length && (m.images.length >= 3 || !scraped?.images?.length)) {
-          scraped = scraped || { title: '', price: '', images: [], videos: [], variants: [] };
-          scraped.images = m.images;
-          if (!scraped.title && m.title) scraped.title = m.title;
-          if (!scraped.price && m.price) scraped.price = m.price;
-        }
-      } catch (_) {}
+    const isTemuItem = /temu\./i.test(queueItem.url);
+    const pollCap = opts.pollMs ?? (loadTimedOut ? 6000 : 9000);
+    const pollStart = Date.now();
+    for (let pass = 0; ; pass++) {
+      if (pass === 0 || !isTemuItem) scraped = await sendQueueScrape(workerTabId);
+      if (isTemuItem) {
+        try {
+          const [mr] = await chrome.scripting.executeScript({ target: { tabId: workerTabId }, world: 'MAIN', func: zhHuntMainScrape });
+          const m = mr?.result;
+          if (m && Array.isArray(m.images) && m.images.length && (m.images.length >= 3 || !scraped?.images?.length)) {
+            scraped = scraped || { title: '', price: '', images: [], videos: [], variants: [] };
+            scraped.images = m.images;
+          }
+          if (m) { scraped = scraped || { title: '', price: '', images: [], videos: [], variants: [] }; if (!scraped.title && m.title) scraped.title = m.title; if (!scraped.price && m.price) scraped.price = m.price; }
+        } catch (_) {}
+      }
+      if (!huntScrapeIncomplete(scraped)) break;
+      if (BulkState.isCancelled || Date.now() - pollStart > pollCap) break;
+      if (pass >= 1 && await huntDetectChallenge(workerTabId)) break;   // verification appeared — handled below
+      await sleep(300);
     }
+    fewStable = !loadTimedOut && !BulkState.isCancelled && Date.now() - pollStart > pollCap - 400 && !!scraped?.title && !!scraped?.price && (scraped.images || []).length >= 1;
 
     // If challenge appeared late, wait for user and scrape unlocked page directly (NO reload)
     if ((opts._vr || 0) < 4 && huntScrapeIncomplete(scraped) && await huntDetectChallenge(workerTabId)) {
@@ -6528,10 +6555,11 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
         }
       } catch (_) {}
     }
-    if (!scraped) throw new Error('no_response');
+    if (!scraped) throw new Error(loadTimedOut ? 'page_timeout' : 'no_response');
   } catch (error) {
     errorCode = error?.message || 'queue_worker_error';
   }
+  huntReleaseFront(workerTabId);
 
   // One quick retry here; slower strategies run later in the recovery rounds
   const shouldRetryQueue = State?.data?.settings?.bulkAutoRetry !== false;
@@ -6577,7 +6605,10 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   const realTitle = scraped?.title || (resultItem.copy ? resultItem.title : '');
   const realPrice = resultItem.price || resultItem.temuBase || '';
   const numImgs = Array.isArray(resultItem.images) ? resultItem.images.length : 0;
-  const isComplete = realTitle && realPrice && numImgs >= 3;
+  // v9.15 — a product with only 1–2 images is complete once the page was fully loaded and watched (or a second look gave the same count)
+  const fewOk = numImgs >= 1 && numImgs < 3 && (fewStable || Number(queueItem._fewSeen || 0) >= 1);
+  if (numImgs >= 1 && numImgs < 3 && realTitle && realPrice) queueItem._fewSeen = numImgs;
+  const isComplete = realTitle && realPrice && (numImgs >= 3 || fewOk);
   let status;
   if (scraped || realTitle) status = isComplete ? 'ok' : 'partial';
   else status = 'fail';
@@ -6603,30 +6634,38 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   updateBulkProgressBar();
 }
 
+// v9.15 — N links at once (Settings → Queue links at once, default 2). One tab per link; the loading link is in front.
+function queueParallelCount() {
+  const v = parseInt(State?.data?.settings?.queueParallelTabs, 10);
+  return v >= 1 && v <= 4 ? v : 2;
+}
 async function processQueueSequential(items) {
-  let processedCount = 0;
-  for (const item of items) {
-    while (huntHeld() && !BulkState.isCancelled) await sleep(300);
-    if (BulkState.isCancelled) break;
-
-    // Option 1: Clean tab for each link (just like natural browsing)
-    let tab = null;
-    try {
-      tab = await chrome.tabs.create({ url: item.url, active: false });
-      await scrapeQueueItem(item, tab.id);
-    } catch (err) {
-      console.warn('[ZHunter Queue] Item error:', err);
-    } finally {
-      if (tab?.id) {
-        try { await chrome.tabs.remove(tab.id); } catch (_) {}
+  const workers = Math.min(queueParallelCount(), Math.max(1, items.length));
+  let next = 0, processedCount = 0;
+  const runWorker = async (w) => {
+    if (w > 0) await sleep(w * (700 + Math.floor(Math.random() * 800)));   // stagger so tabs do not all open together
+    while (true) {
+      while (huntHeld() && !BulkState.isCancelled) await sleep(300);
+      if (BulkState.isCancelled) break;
+      const idx = next++;
+      if (idx >= items.length) break;
+      const item = items[idx];
+      let tab = null;
+      try {
+        tab = await chrome.tabs.create({ url: item.url, active: false });
+        await scrapeQueueItem(item, tab.id);
+      } catch (err) {
+        console.warn('[ZHunter Queue] Item error:', err);
+      } finally {
+        huntReleaseFront(tab?.id);
+        if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
       }
+      processedCount++;
+      // short natural pause between this worker's links (0.5s – 1.5s)
+      if (!BulkState.isCancelled) await sleep(500 + Math.floor(Math.random() * 1000));
     }
-    processedCount++;
-
-    // Natural pause between queue links (1.0s – 2.0s)
-    const linkDelay = 1000 + Math.floor(Math.random() * 1000);
-    if (!BulkState.isCancelled) await sleep(linkDelay);
-  }
+  };
+  await Promise.all(Array.from({ length: workers }, (_, w) => runWorker(w)));
 }
 
 function queueResultRows() {
@@ -6668,6 +6707,9 @@ async function startQueueHunt() {
     toast(`${notProduct.length} link${notProduct.length > 1 ? 's' : ''} ignored — not product pages (home / store / search / category).`, 'warn');
   }
   if (toHunt.length === 0) { toast('No product links selected in queue', 'warn'); return; }
+  let _zhUserTab = null;
+  try { const [at] = await chrome.tabs.query({ active: true, currentWindow: true }); _zhUserTab = at?.id ?? null; } catch (_) {}
+  BulkState._front = null;
   BulkState.isHunting = true; BulkState.isPaused = false; BulkState.isCancelled = false;
   { const cb = $('bulkCancelBtn'); if (cb) { cb.disabled = false; cb.textContent = 'Cancel'; } const pb = $('bulkPauseBtn'); if (pb) { pb.disabled = false; pb.textContent = 'Pause'; } }
   BulkState.results = []; BulkState.pendingFlush = []; BulkState._flushActive = false;
@@ -6701,6 +6743,7 @@ async function startQueueHunt() {
     if (!BulkState.isCancelled && !isBulkFastMode()) { bpSetPhase('download'); await imageDownloadPhase(); }
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
+  if (_zhUserTab != null) { try { await chrome.tabs.update(_zhUserTab, { active: true }); } catch (_) {} }
   const flushDeadline = Date.now() + 10000;
   while (BulkState._flushActive && Date.now() < flushDeadline) await sleep(100);
   BulkState._flushActive = false;
@@ -7061,10 +7104,11 @@ function toggleFailedList() {
 }
 
 // v9.11.0 — wait until a tab has really finished loading (sleeping tabs need a full load)
-async function huntWaitComplete(tabId, timeoutMs = 25000) {
+async function huntWaitComplete(tabId, timeoutMs = 25000, onTick = null) {
   const deadline = Date.now() + timeoutMs;
   let sawLoading = false;
   while (Date.now() < deadline && !BulkState.isCancelled) {
+    if (onTick) { try { await onTick(); } catch (_) {} }
     const t = await new Promise(r => chrome.tabs.get(tabId, x => r(chrome.runtime.lastError ? null : x)));
     if (!t) return false;
     if (t.status === 'loading') sawLoading = true;
@@ -7745,7 +7789,8 @@ async function scrapeOneTab(tabInfo) {
   let status;
   if (!scraped) {
     status = 'fail';
-  } else if (!scraped.title || !scraped.price || tabImgs < 3) {
+  } else if (!scraped.title || !scraped.price || (tabImgs < 3 && !(tabImgs >= 1 && tabInfo._fewSeen >= 1))) {
+    if (scraped.title && scraped.price && tabImgs >= 1 && tabImgs < 3) tabInfo._fewSeen = tabImgs;   // v9.15 — second look with 1–2 images = real single-image product
     status = 'partial';
     if (!error) error = huntMissingCode(scraped.title, scraped.price, tabImgs);
   } else {

@@ -5507,3 +5507,67 @@ html[data-fx="off"] #zhTextStudioModal .zt-spin { animation: none; }
 .temu-title-custom-run{flex:1 1 100%}
 .temu-title-custom-row select{flex:1;min-width:0}
 .zt-custom-mode{display:flex;gap:8px;align-items:flex-start;font-size:11px;margin:6px 0}
+
+/* ══════════════════════════════════════════════════════════════
+   v9.15g — LIGHT MODE fixes (dark-only panels → theme tokens) + shared main-button style
+   ══════════════════════════════════════════════════════════════ */
+body.light-mode .theme-btn .ico-sun, html.light-mode .theme-btn .ico-sun { display: block !important; }
+body.light-mode .theme-btn .ico-moon, html.light-mode .theme-btn .ico-moon { display: none !important; }
+body.light-mode .theme-btn { color: var(--ink); }
+body.light-mode .theme-btn svg { stroke: currentColor; }
+
+/* header: Temu Export / store pill */
+body.light-mode .temu-top-pill { background: var(--accent-soft) !important; border-color: var(--accent-line) !important; color: var(--ink) !important; box-shadow: none; backdrop-filter: none; }
+body.light-mode .temu-top-pill:hover { background: var(--accent-line) !important; color: var(--ink) !important; }
+body.light-mode .temu-pill-name { color: var(--ink) !important; }
+body.light-mode .temu-top-pill .temu-pill-ico svg { stroke: #fff; }
+body.light-mode .temu-pill-divider { background: var(--line-2); }
+body.light-mode .temu-pill-count { color: var(--accent-ink); }
+
+/* segmented controls / tracks */
+body.light-mode .hunt-subnav, body.light-mode .seg, body.light-mode .zh-seg-sm, body.light-mode .zh-view-switcher, body.light-mode .temu-src-seg {
+  background: var(--surface-2) !important; border: 1px solid var(--line-2) !important; box-shadow: none; }
+body.light-mode .hunt-sub-btn, body.light-mode .zh-seg-sm button, body.light-mode .zh-view-btn, body.light-mode .temu-src-seg button, body.light-mode .seg button { color: var(--ink-2); }
+body.light-mode .hunt-sub-btn:hover, body.light-mode .zh-seg-sm button:hover, body.light-mode .zh-view-btn:hover, body.light-mode .temu-src-seg button:hover, body.light-mode .seg button:hover { background: var(--accent-soft); color: var(--ink); }
+body.light-mode .hunt-sub-btn.active, body.light-mode .temu-src-seg button.on { background: var(--surface); color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent-line), 0 1px 4px rgba(15,23,42,.08); }
+body.light-mode .zh-seg-sm button.active, body.light-mode .zh-view-btn.active, body.light-mode .seg button.active { background: var(--accent) !important; color: var(--accent-fg) !important; box-shadow: none; }
+body.light-mode .hunt-sub-count { background: var(--surface-3); color: var(--ink-2); }
+body.light-mode .temu-src-seg button .src-cnt { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* empty states */
+body.light-mode .empty, body.light-mode .bulk-empty, body.light-mode .img-tab-empty {
+  background: var(--surface-2); border: 1px dashed var(--line-2); box-shadow: none; backdrop-filter: none; }
+body.light-mode .empty::before { opacity: .35; }
+body.light-mode .empty h3, body.light-mode .img-tab-empty-title { color: var(--ink); }
+body.light-mode .empty p, body.light-mode .bulk-empty p, body.light-mode .img-tab-empty-sub { color: var(--ink-2); }
+
+/* Temu export: setup card, step rows, settings stack */
+body.light-mode .temu-setup-card { background: var(--surface); border: 1px solid var(--line-2); }
+body.light-mode .temu-setup-card:hover { border-color: var(--accent-line); }
+body.light-mode .temu-step-row, body.light-mode .temu-step-row.is-complete { background: var(--surface-2); border-color: var(--line-2); }
+body.light-mode .temu-step-row:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+body.light-mode .temu-step-row.is-active { background: var(--accent-soft); border-color: var(--accent-line); }
+body.light-mode .zh-frame-controls-stack { background: var(--surface-2); border: 1px solid var(--line-2); }
+body.light-mode .zh-sub-lbl, body.light-mode .zh-slider-lbl { color: var(--ink-2); }
+body.light-mode .zh-slider-lbl { font-weight: 600; }
+
+/* ── shared MAIN button — same look as Temu "Export + Upload to Temu" ── */
+.btn-primary:not(.btn-xs):not(.btn-sm):not([disabled]),
+#imgDownloadBtn, #vidDownloadZipBtn, #bulkHuntStartBtn, #bulkQueueHuntBtn, #masterExportMenuBtn, #temuAiBulkRewriteBtn, #tgSaveBtn {
+  background: linear-gradient(105deg, #00c4db 0%, #00e5ff 35%, #60f4ff 50%, #00e5ff 65%, #00c4db 100%) !important;
+  background-size: 200% auto !important;
+  color: #0a1628 !important;
+  border: none !important;
+  border-radius: 9px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 18px rgba(0,229,255,.28);
+}
+.btn-primary:not(.btn-xs):not(.btn-sm):not([disabled]):hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0,229,255,.42); }
+#imgDownloadBtn, #vidDownloadZipBtn, #bulkHuntStartBtn, #bulkQueueHuntBtn, #masterExportMenuBtn, #temuAiBulkRewriteBtn, #tgSaveBtn {
+  animation: temu-upload-glow 2.5s ease-in-out infinite, temu-btn-shimmer 3s linear infinite;
+}
+#bulkHuntStartBtn, #bulkQueueHuntBtn, #masterExportMenuBtn { height: 44px; font-size: 13.5px; }
+.btn-primary.rainbow:not([disabled]) { border: none !important; }
+.btn-primary[disabled] { animation: none !important; }
+body.light-mode .btn-primary:not([disabled]) { color: #0a1628 !important; }
