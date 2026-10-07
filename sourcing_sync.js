@@ -93,14 +93,14 @@ async function zhSourcingOpen(url) {
   if (tabs.length) await chrome.tabs.update(tabs[0].id, { url, active: true });
   else await chrome.tabs.create({ url, active: true });
 }
-async function zhSourcingRetry(open = false, targetId = '') {
+async function zhSourcingRetry(open = false, targetId = '', force = false) {
   return zhSourcingSerial(async () => {
     const saved = await chrome.storage.local.get(['zhSourcingConnection', 'zhSourcingBatches']);
     const config = saved.zhSourcingConnection, batches = saved.zhSourcingBatches || [];
     if (!config) return { success: false, pending: batches.filter(b => b.state !== 'synced').length, error: 'Sourcing records saved locally. Connect Google Sheet in Temu Settings.' };
     const sheetId = zhSourcingSheetId(config.spreadsheetId);
     let lastUrl = '', synced = 0;
-    for (const batch of batches.filter(b => b.state !== 'synced' && (open || !b.nextRetryAt || b.nextRetryAt <= Date.now()))) {
+    for (const batch of batches.filter(b => b.state !== 'synced' && (open || force || !b.nextRetryAt || b.nextRetryAt <= Date.now()))) {
       try {
         const data = await zhSourcingPost(config, { action: 'append', batch });
         if (data.batchId !== batch.id || data.count !== batch.items.length || !Number.isInteger(data.gid)) throw new Error('Google append verification incomplete.');

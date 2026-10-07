@@ -1,5 +1,8 @@
 /** ZHunter sourcing connector. Fixed destination; authenticated append-only API. */
 // Destination is stored privately in Script Properties, never in repository code.
+// Filled automatically by the extension's "Copy script" button (kept empty in the repository).
+const ZH_DEFAULT_SHEET_ID = '';
+const ZH_DEFAULT_KEY = '';
 const ZH_HEADERS = ['Product Name', 'Sourcing Platform', 'Sourcing Link', 'Sourcing Price', 'List Price', 'Date'];
 
 function doPost(e) {
@@ -7,9 +10,9 @@ function doPost(e) {
   let lock;
   try {
     const request = JSON.parse(e.postData.contents);
-    const ZH_SHEET_ID = PropertiesService.getScriptProperties().getProperty('ZHUNTER_SPREADSHEET_ID');
+    const ZH_SHEET_ID = (PropertiesService.getScriptProperties().getProperty('ZHUNTER_SPREADSHEET_ID') || ZH_DEFAULT_SHEET_ID);
     if (!ZH_SHEET_ID || !/^[A-Za-z0-9_-]{20,}$/.test(ZH_SHEET_ID)) throw new Error('Set ZHUNTER_SPREADSHEET_ID in Script Properties.');
-    const token = PropertiesService.getScriptProperties().getProperty('ZHUNTER_SYNC_KEY');
+    const token = (PropertiesService.getScriptProperties().getProperty('ZHUNTER_SYNC_KEY') || ZH_DEFAULT_KEY);
     if (!token || !/^[a-f0-9]{64}$/i.test(token) || request.token !== token) throw new Error('Invalid connection key.');
     if (request.spreadsheetId !== ZH_SHEET_ID) throw new Error('Wrong spreadsheet.');
     const book = SpreadsheetApp.openById(ZH_SHEET_ID);

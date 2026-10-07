@@ -1,6 +1,10 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Sourcing sync runs silently in the background (the Google Sheet tab is no longer opened/focused after upload; use "Open sheet" when you want to see it).
+- Light mode: bulk hunt progress + result popup (title, hero card, filter bar, result tiles, Done / Temu upload buttons) fixed.
+- Sourcing: one sheet for all Chrome profiles — "Copy connection code" / "Paste connection code" (URL + sheet + key) connects another Chrome in one paste; each store still gets its own tab automatically. Sheet link can be typed in step 1.
+- Sourcing records quick setup: use open Google Sheet → copy ready script (key + sheet id inside) → paste Web app URL, connects by itself. Manual fields kept under Advanced.
 - Light mode: Hunt Images/Videos switch, empty states, Temu export setup/steps/source switch, Settings border panel + small switches, header Temu pill and theme (sun) button no longer dark/blank. All main action buttons now use the Temu "Export + Upload" cyan style.
 - Products with only 1–2 images are no longer retried forever: queue accepts them once the page finished loading and the count stayed the same; open-tabs mode accepts them on the second look.
 - Queue hunt speed: scraping starts the moment the page loads and re-checks every 0.3s until title+price+3 images are found (no fixed settle wait); a page that is still loading is never reloaded; after the 35s limit it is scraped as-is and, if incomplete, retried at the end. New setting "Queue links at once" (1-4, default 2); the loading link is brought to the front tab and your own tab is restored at the end.

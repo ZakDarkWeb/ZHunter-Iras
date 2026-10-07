@@ -5571,3 +5571,42 @@ body.light-mode .zh-slider-lbl { font-weight: 600; }
 .btn-primary.rainbow:not([disabled]) { border: none !important; }
 .btn-primary[disabled] { animation: none !important; }
 body.light-mode .btn-primary:not([disabled]) { color: #0a1628 !important; }
+
+.zh-src-quick{display:grid;gap:8px;padding:10px;border:1px solid var(--accent-line);border-radius:10px;background:var(--accent-soft)}
+.zh-src-quick p{margin:0}.zh-src-quick .btn{justify-self:start}.zh-src-info{font-size:11px;color:var(--ink-2)}
+
+/* ══════════════════════════════════════════════════════════════
+   v9.15h — LIGHT MODE: bulk hunt progress + result popup
+   ══════════════════════════════════════════════════════════════ */
+body.light-mode #bulkProgressModal .bp-head h3, body.light-mode #bulkProgressModal .bp-head-txt h3 { color: var(--ink); }
+body.light-mode #bulkProgressModal .bp-hero { background: linear-gradient(135deg, var(--accent-soft), var(--surface)) !important; border: 1px solid var(--accent-line); box-shadow: none; }
+body.light-mode #bulkProgressModal .bp-ring-track { stroke: var(--line-2); }
+body.light-mode #bulkProgressModal .bp-ring-pct, body.light-mode #bulkProgressModal .bp-count { color: var(--ink); text-shadow: none; }
+body.light-mode #bulkProgressModal .bp-count-of { color: var(--ink-3); }
+body.light-mode #bulkProgressModal .bp-count-lbl { color: var(--ink-2); }
+body.light-mode #bulkProgressModal .bp-eta { color: var(--accent-ink); }
+body.light-mode #bulkProgressModal .bp-filter { background: var(--surface-2); border-top: 1px solid var(--line-2); }
+body.light-mode #bulkProgressModal .bp-filter button { background: var(--surface); border: 1px solid var(--line-2); color: var(--ink-2); }
+body.light-mode #bulkProgressModal .bp-filter button:hover { color: var(--ink); border-color: var(--accent-line); }
+body.light-mode #bulkProgressModal .bp-filter button b { background: var(--surface-3); color: var(--ink-2); }
+body.light-mode #bulkProgressModal .bp-filter button.on { color: #04131a; }
+body.light-mode #bulkProgressModal .bp-filter button.on b { background: rgba(4,19,26,.18); color: #04131a; }
+body.light-mode #bulkProgressModal .bp-done-hero { background: var(--ok-soft); border-color: var(--ok-line); }
+body.light-mode #bulkProgressModal .bp-done-hero[data-state="warn"] { background: var(--warn-soft); border-color: var(--warn-line); }
+body.light-mode #bulkProgressModal .bp-done-hero[data-state="cancel"] { background: var(--surface-2); border-color: var(--line-2); }
+body.light-mode #bulkProgressModal .bp-done-txt b { color: var(--ink); }
+body.light-mode #bulkProgressModal .bp-done-txt small { color: var(--ink-2); }
+body.light-mode #bulkProgressModal .bp-done-bar { background: var(--surface-3); }
+body.light-mode #bulkProgressModal .bulk-rs-item.zero { filter: none; opacity: .55; }
+body.light-mode #bulkProgressModal .bp-chip { background: var(--surface); border: 1px solid var(--line-2); color: var(--ink); }
+body.light-mode #bulkProgressModal .bp-recover { background: var(--warn-soft); border-color: var(--warn-line); }
+body.light-mode #bulkProgressModal .bp-recover b, body.light-mode #bulkProgressModal .bp-rec-name { color: var(--ink); }
+body.light-mode #bulkProgressModal .bp-recover small, body.light-mode #bulkProgressModal .bp-rec-foot { color: var(--ink-2); }
+/* Done + Temu upload = the same cyan main button (both themes) */
+#bulkProgressModal .bp-done, #bulkProgressModal .bp-act-primary {
+  background: linear-gradient(105deg, #00c4db 0%, #00e5ff 35%, #60f4ff 50%, #00e5ff 65%, #00c4db 100%) !important;
+  background-size: 200% auto !important; color: #0a1628 !important; border: none !important;
+  font-weight: 700; letter-spacing: .02em; border-radius: 9px; box-shadow: 0 4px 18px rgba(0,229,255,.28); }
+#bulkProgressModal .bp-done { height: 40px; }
+#bulkProgressModal .bp-act-primary small, #bulkProgressModal .bp-act-primary b, #bulkProgressModal .bp-act-primary .bp-act-ico { color: #0a1628 !important; }
+#bulkProgressModal .bp-act-primary .bp-act-ico svg { stroke: #0a1628; }

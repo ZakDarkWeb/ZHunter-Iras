@@ -1448,7 +1448,21 @@
             <div class="zh-sourcing-controls">
               <div class="zh-sourcing-actions"><button type="button" id="zhSourcingOpen" class="btn btn-secondary btn-xs">Open sheet</button><button type="button" id="zhSourcingRetry" class="btn btn-secondary btn-xs">Retry pending</button></div>
               <p id="zhSourcingStatus" role="status">Checking connection?</p>
-              <details><summary>Connect Google Sheet</summary>
+              <div class="zh-src-quick" id="zhSrcQuick">
+                <p><b>Quick setup</b> (one time, about 1 minute, free)</p>
+                <label>1 · Your Google Sheet link (or open it and press the button)<input id="zhQuickSheetUrl" class="inp" type="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit"></label>
+                <button type="button" id="zhQuickSheetBtn" class="btn btn-secondary btn-xs">Use this sheet</button>
+                <p id="zhQuickSheetInfo" class="zh-src-info">No sheet chosen yet</p>
+                <button type="button" id="zhQuickCopyBtn" class="btn btn-secondary btn-xs">2 · Copy script &amp; open Apps Script</button>
+                <p class="zh-src-info">In Apps Script: select all → paste → Save → <b>Deploy → New deployment → Web app</b> (Execute as: Me · Access: Anyone) → Deploy → Authorize → copy the Web app URL.</p>
+                <label>3 · Paste the Web app URL (connects by itself)<input id="zhQuickUrl" class="inp" type="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+              </div>
+              <div class="zh-src-quick" id="zhSrcShare">
+                <p><b>Other Chrome / account?</b> The same sheet works everywhere — every store gets its own tab automatically.</p>
+                <button type="button" id="zhConnCopyBtn" class="btn btn-secondary btn-xs">Copy connection code (from a connected Chrome)</button>
+                <label>Paste connection code (in another Chrome)<input id="zhConnCode" class="inp" type="text" autocomplete="off" placeholder="ZHSRC1.…"></label>
+              </div>
+              <details><summary>Manual setup (advanced)</summary>
                 <p>One-time Apps Script setup. Your sheet stays private.</p>
                 <label>Sourcing spreadsheet<input id="zhSourcingWorkbook" class="inp" type="url" placeholder="https://docs.google.com/spreadsheets/d/?/edit"></label>
                 <label>Web App URL<input id="zhSourcingEndpoint" class="inp" type="url" placeholder="https://script.google.com/macros/s/?/exec"></label>

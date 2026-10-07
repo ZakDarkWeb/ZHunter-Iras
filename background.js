@@ -1270,7 +1270,7 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
     } catch (_) {}
     _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
     if (sourcingQueued) {
-      try { out.sourcing = await zhSourcingRetry(true, sourcing.id); out.report.push(out.sourcing.success ? 'Sourcing records saved to Google Sheet' : (out.sourcing.error || 'Sourcing sync pending')); }
+      try { out.sourcing = await zhSourcingRetry(false, sourcing.id, true); /* v9.15 silent: sheet tab not opened */ out.report.push(out.sourcing.success ? 'Sourcing records saved to Google Sheet' : (out.sourcing.error || 'Sourcing sync pending')); }
       catch (e) { out.report.push('Sourcing sync pending: ' + e.message); }
     }
     try { await chrome.storage.local.set({ temuLastUploadReport: { t: Date.now(), ...out } }); } catch (_) {}
@@ -1316,7 +1316,7 @@ async function handleMessage(msg, sender, queueLocked = false) {
     case 'SOURCING_CONNECT': return await zhSourcingConnect(msg.config);
     case 'SOURCING_DISCONNECT': await zhSourcingSerial(() => chrome.storage.local.remove('zhSourcingConnection')); return { success: true };
     case 'SOURCING_STATUS': return await zhSourcingStatus();
-    case 'SOURCING_RETRY': return await zhSourcingRetry(true);
+    case 'SOURCING_RETRY': return await zhSourcingRetry(false, '', true);
     case 'SOURCING_QUEUE': return await zhSourcingQueue(msg.snapshot);
     case 'SOURCING_OPEN': await zhSourcingOpen(); return { success: true };
     case 'TEMU_UPLOAD_REVIEWED': {
