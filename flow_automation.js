@@ -337,7 +337,7 @@
         await sleep(600);
       }
     }
-    if (agentOn()) throw new JobError('Agent mode band nahi hua — Flow mein Agent panel band karke "Agent" chip khud off kar dein');
+    if (agentOn()) throw new JobError('Agent mode did not turn off — close the Agent panel in Flow and turn the "Agent" chip off yourself');
   }
 
   function settingsSummary(root) {
@@ -401,14 +401,14 @@
     }
     const after = settingsSummary(Q.promptRoot());
     if (!settingsOk(after)) {
-      throw new JobError(`Flow settings set nahi huin (${after.replace('crop_square', '1:1')}) — khud "Nano Banana 2 · 1:1 · x1" select karke "Send Again" dabayein`);
+      throw new JobError(`Flow settings were not applied (${after.replace('crop_square', '1:1')}) — select "Nano Banana 2 · 1:1 · x1" yourself and press "Send Again"`);
     }
   }
 
   async function clearPromptBox() {
     for (let attempt = 0; attempt < 3; attempt++) {
       const root = Q.promptRoot();
-      if (!root) throw new JobError('Flow ka prompt box nahi mila');
+      if (!root) throw new JobError('Flow prompt box not found');
       if (!Q.chips(root).length && !editorText(root)) return;
       const clear = Q.clearBtn(root);
       if (clear) {
@@ -434,7 +434,7 @@
       document.execCommand('delete', false, null);
     }
     const r = Q.promptRoot();
-    if (Q.chips(r).length) throw new JobError('Pichhli image prompt box se nahi hati — "Clear prompt" khud daba dein');
+    if (Q.chips(r).length) throw new JobError('The previous image was not removed from the prompt box — press "Clear prompt" yourself');
   }
 
   // ── Step 2: attach image as ingredient ──────────────────────────
@@ -524,22 +524,22 @@
 
   async function attachImage(job) {
     const raw = dataUrlToFile(job.imgBase64, `zhunter_${job.productId || 'product'}_${(job.imageIndex ?? 0) + 1}.png`);
-    if (!raw) throw new JobError('Product image load nahi hui (base64 kharab)');
+    if (!raw) throw new JobError('Product image failed to load (bad base64)');
     const file = await ensureSupportedImage(raw);
-    if (!file) throw new JobError(`Image format (${raw.type || 'unknown'}) Flow ke liye convert nahi ho saka`);
+    if (!file) throw new JobError(`Image format (${raw.type || 'unknown'}) could not be converted for Flow`);
     await dismissFlowError(); // clear a leftover error card from an earlier attempt
     const idsBefore = mediaIdSet();
 
     const failIfFlowError = async () => {
       const e = flowErrorEl();
-      if (e) { await dismissFlowError(); throw new JobError('Flow ne image qubool nahi ki: ' + (e.text || 'upload error')); }
+      if (e) { await dismissFlowError(); throw new JobError('Flow rejected the image: ' + (e.text || 'upload error')); }
     };
 
     let attached = await tryPaste(file);
     await failIfFlowError();
     if (!attached) { log('Paste did not create a chip — trying drop'); attached = await tryDrop(file); await failIfFlowError(); }
     if (!attached) { log('Drop did not create a chip — upload + Add to prompt'); attached = await tryUploadThenAddMenu(file, idsBefore); await failIfFlowError(); }
-    if (!attached) throw new JobError('Image prompt box mein attach nahi hui');
+    if (!attached) throw new JobError('Image was not attached to the prompt box');
 
     const root = Q.promptRoot();
     if (Q.chips(root).length > 1) {
@@ -550,7 +550,7 @@
     }
     const ready = await waitFor(() => chipReady(Q.promptRoot()) || (flowErrorEl() ? 'err' : null), ATTACH_TIMEOUT_MS, 250);
     if (ready === 'err') await failIfFlowError();
-    if (!ready) throw new JobError('Image upload poora nahi hua (chip ready nahi)');
+    if (!ready) throw new JobError('Image upload did not complete (chip not ready)');
   }
 
   // ── Step 3: prompt text ─────────────────────────────────────────
@@ -560,7 +560,7 @@
     const probe = squash(text).slice(0, 40);
     const has = () => squash(editorText(Q.promptRoot())).includes(probe);
     const ed = Q.editor(Q.promptRoot());
-    if (!ed) throw new JobError('Prompt editor nahi mila');
+    if (!ed) throw new JobError('Prompt editor not found');
     ed.focus();
 
     try {
@@ -574,7 +574,7 @@
     try { document.execCommand('insertText', false, text); } catch (_) {}
     if (await waitFor(has, 1500)) return;
 
-    throw new JobError('Prompt editor mein text nahi gaya');
+    throw new JobError('Text did not enter the prompt editor');
   }
 
   // ── Step 4 + 5: generate and capture the result ─────────────────
@@ -583,7 +583,7 @@
     await ensureSettings();
     const root = Q.promptRoot();
     const gen = await waitFor(() => { const b = Q.genBtn(Q.promptRoot()); return b && !isDisabled(b) ? b : null; }, 10000);
-    if (!gen) throw new JobError('Generate button enable nahi hua');
+    if (!gen) throw new JobError('Generate button did not become enabled');
 
     scrollGridTop();
     // Existing failures belong to previous jobs, even if Flow recreates their DOM.
@@ -611,7 +611,7 @@
       let res;
       try { res = await sendBg({ action: 'ZH_CDP_CLICK', selector }); }
       finally { await sendBg({ action: 'ZH_CDP_DETACH' }); }
-      if (!res?.ok) throw new JobError('Send click nahi hua: ' + (res?.error || 'Chrome debugger attach nahi hua'));
+      if (!res?.ok) throw new JobError('Send click failed: ' + (res?.error || 'Chrome debugger did not attach'));
       return !!res?.ok;
     };
     const attempts = [
@@ -629,7 +629,7 @@
       const b = Q.genBtn(Q.promptRoot());
       warn('Gen button state:', b ? b.outerHTML.slice(0, 400) : 'NOT FOUND',
         '| agent chip:', Q.agentChip()?.getAttribute('aria-pressed'));
-      throw new JobError('Generate click ke baad generation shuru nahi hui');
+      throw new JobError('Generation did not start after clicking Generate');
     }
 
     const beforeIds = [...before], refIdList = [...refIds];
@@ -653,7 +653,7 @@
         const txt = failed;
         log('Detected failed tile:', txt);
         if (txt.toLowerCase().includes('unusual activity')) {
-          return { error: 'Google: "unusual activity" — ZHunter thora ruk kar naya project bana kar dobara try karega (side panel dekhein).' };
+          return { error: 'Google: "unusual activity" — ZHunter will wait, create a new project and try again (see the side panel).' };
         }
         return { error: txt.slice(0, 100) };
       }
@@ -676,7 +676,7 @@
       return null;
     }, RESULT_TIMEOUT_MS, 700);
 
-    if (!result) throw new JobError('Image 3 minute mein nahi bani');
+    if (!result) throw new JobError('Image was not created within 3 minutes');
     if (result.cancelled) return result;
     if (result.error) throw new JobError('Flow error: ' + result.error);
     return result;
@@ -697,7 +697,7 @@
       await waitFor(() => Q.promptRoot() || Q.agentPanel(), 15000);
       await ensureAgentOff();
       await waitFor(() => Q.promptRoot(), 8000);
-      if (!Q.promptRoot()) throw new JobError('Flow ka prompt box nahi mila');
+      if (!Q.promptRoot()) throw new JobError('Flow prompt box not found');
       await ensureSettings();
       await clearPromptBox();
 
@@ -771,10 +771,10 @@
 
     const insideProject = /\/project\/[\w-]+/i.test(location.pathname);
     if (!insideProject) {
-      updateFlowHUD(`ZHunter: naya project bana raha hoon · ${(job.productTitle || '').slice(0, 30)}`, 'info');
+      updateFlowHUD(`ZHunter: creating a new project · ${(job.productTitle || '').slice(0, 30)}`, 'info');
       const btn = await waitFor(() => Q.newProjectBtn(), 8000);
       if (!btn) {
-        updateFlowHUD(`"+ New project" dabayein — phir automation khud chalegi`, 'warn');
+        updateFlowHUD(`Press "+ New project" — then the automation continues by itself`, 'warn');
         return;
       }
       await trustedClick(btn, 'new project');
@@ -836,12 +836,12 @@
   }
 
   async function manualAttach({ images = [], prompt = '', clear = true }) {
-    if (runningJobId) return { ok: false, error: 'Auto job chal rahi hai — khatam hone dein' };
-    if (!/\/project\/[\w-]+/i.test(location.pathname)) return { ok: false, error: 'Flow mein pehle koi project kholein (+ New project)' };
+    if (runningJobId) return { ok: false, error: 'An auto job is running — let it finish' };
+    if (!/\/project\/[\w-]+/i.test(location.pathname)) return { ok: false, error: 'Open a project in Flow first (+ New project)' };
     await waitFor(() => Q.promptRoot() || Q.agentPanel(), 8000);
     // v9.11.0 — manual mode never uses the debugger (no "started debugging" banner)
-    if (agentOn()) return { ok: false, error: 'Flow mein "Agent" off karein (Agent panel band karein), phir dobara dabayein' };
-    if (!Q.promptRoot()) return { ok: false, error: 'Flow ka prompt box nahi mila' };
+    if (agentOn()) return { ok: false, error: 'Turn "Agent" off in Flow (close the Agent panel), then press again' };
+    if (!Q.promptRoot()) return { ok: false, error: 'Flow prompt box not found' };
     if (clear) await clearPromptBox();
     await dismissFlowError();
     let n = Q.chips(Q.promptRoot()).length, added = 0;
@@ -857,7 +857,7 @@
     if (prompt) { try { await injectPrompt(prompt); } catch (_) {} }
     Q.editor(Q.promptRoot())?.focus();
     updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ab Generate dabayein`, added ? 'ok' : 'warn');
-    return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images prompt box mein nahi lagin' };
+    return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images were not added to the prompt box' };
   }
 
   chrome.runtime.onMessage?.addListener((msg, _sender, sendResponse) => {

@@ -90,7 +90,7 @@ function ensureCurrency(p, symbol) {
   if (!p) return '';
   // Already has a currency symbol or code — return as-is
   if (/^[$£€¥₹₩]/.test(p)) return p;
-  if (/^(USD|CAD|AUD|GBP|EUR|PKR|INR)/i.test(p)) return p;
+  if (/^(USD|CAD|AUD|GBP|EUR|PKR|INR|AED|SAR|Rs\.?)/i.test(p)) return p;
   if (/[$£€¥₹₩]$/.test(p)) return p;
   // Use detected symbol from page, or fall back to $
   return `${symbol || '$'}${p}`;
@@ -828,6 +828,23 @@ function priceFromSelectors(selectors) {
   return '';
 }
 
+// v9.14 — price helpers verified against saved Walmart / Sam's Club product pages.
+// Elements inside recommendation tiles / carousels belong to OTHER products — never read their price.
+function zhInRecoTile(el) {
+  try { return !!el.closest('[data-testid^="product-tile"], [data-testid="carousel-container"], [data-testid*="item-stack"], [data-testid*="carousel" i], [class*="carousel" i], [id*="carousel" i]'); }
+  catch (_) { return false; }
+}
+// The real product price block: "Current price is USDNow $79.00 You save $50.99 was $129.99"
+function zhReadPriceWrap() {
+  for (const w of document.querySelectorAll('[data-testid="price-wrap"]')) {
+    if (zhInRecoTile(w)) continue;
+    const t = (w.innerText || w.textContent || '').replace(/\s+/g, ' ');
+    const m = t.match(/(?:now|price is)\s*(?:USD)?\s*([$£€]\s*[\d,]+(?:\.\d{1,2})?)/i) || t.match(/([$£€]\s*[\d,]+(?:\.\d{1,2})?)/);
+    if (m) return m[1].replace(/\s+/g, '');
+  }
+  return '';
+}
+
 // ── Sam's Club precise price reader (v2) ─────────────────────
 // Sam's Club 2024/2025: price can be in multiple formats.
 // Priority: aria-label → structured data → characteristic+mantissa → JSON-LD → script
@@ -837,6 +854,10 @@ function priceFromSelectors(selectors) {
 function readSamsClubPrice() {
   const sym = detectPageCurrencySymbol() || '$';
 
+  // ── 0. The product's own price block (never a recommendation tile) ──
+  const wrapPrice = zhReadPriceWrap();
+  if (wrapPrice) return ensureCurrency(wrapPrice, sym);
+
   // ── 1. aria-label on price wrapper elements ────────────────
   const ariaEls = document.querySelectorAll(
     'span[aria-label], [data-testid="product-price"], [data-automation-id="product-price"], ' +
@@ -844,6 +865,7 @@ function readSamsClubPrice() {
     '[class*="sc-price"] span[aria-label], [id*="price"] span[aria-label]'
   );
   for (const el of ariaEls) {
+    if (zhInRecoTile(el)) continue;
     const raw = el.getAttribute('aria-label') || '';
     if (!raw) continue;
     const c = cleanPriceText(raw);
@@ -976,6 +998,7 @@ function readSamsClubPrice() {
   ];
   for (const sel of genericSelectors) {
     for (const el of document.querySelectorAll(sel)) {
+      if (zhInRecoTile(el)) continue;
       const raw = el.getAttribute('content') || el.innerText || el.textContent || '';
       const c = cleanPriceText(raw);
       if (c && /\d/.test(c)) return ensureCurrency(c, sym);
@@ -988,6 +1011,9 @@ function readSamsClubPrice() {
 
 // ── ISSUE 1 FIX: Walmart precise price reader ────────────────
 function readWalmartPrice() {
+  // v9.14 — the product's own price block first (the old selectors below also matched "similar items" tiles)
+  const wrapPrice = zhReadPriceWrap();
+  if (wrapPrice) return wrapPrice;
   // Prefer aria-label on the price wrapper (has the full formatted price)
   const ariaSelectors = [
     '[itemprop="price"]',
@@ -999,6 +1025,7 @@ function readWalmartPrice() {
   ];
   for (const sel of ariaSelectors) {
     for (const el of document.querySelectorAll(sel)) {
+      if (zhInRecoTile(el)) continue;
       const raw = el.getAttribute('aria-label') || el.getAttribute('content') || el.innerText || '';
       const c = cleanPriceText(raw);
       if (c && /\d/.test(c)) return c;
@@ -1212,10 +1239,15 @@ function scrapeAmazon() {
 
   // ── DOM gallery fallback: one url per <img>, best candidate only ───────
   if (r.images.length === 0) {
-    document.querySelectorAll('#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img').forEach(img => {
+    // v9.14 — the big landing image always comes first (document order put it last on some pages)
+    const amzImgs = [...document.querySelectorAll('#landingImage, #imgTagWrapperId img, #altImages img, .a-button-thumbnail img, .imageThumbnail img')];
+    amzImgs.sort((a, b) => (b.id === 'landingImage') - (a.id === 'landingImage'));
+    amzImgs.forEach(img => {
       const hires = img.getAttribute('data-old-hires') || '';
       const cand = hires || pickAmazonDynamic(img) || img.getAttribute('data-zoom-image') || img.getAttribute('data-large-image') || img.src || img.getAttribute('data-src') || '';
       if (!cand || /play[-_]?button|video[-_]?thumbnail|pkplay/i.test(cand)) return;
+      // v9.14 — the MAIN thumbnail is the same picture as the big landing image (different image id): skip it, no duplicate
+      if (img.id !== 'landingImage' && document.getElementById('landingImage') && img.closest('li.variant-MAIN')) return;
       if (hires) addHiResImg(cand); else addFallbackImg(cand);
     });
   }
@@ -1858,89 +1890,20 @@ async function scrapeTemu() {
       .replace(/\?$/, '');                                     // clean trailing ?
   };
 
-  // ── Price + Images + Videos: Strategy 1 — Existing script parsing (CSP-Safe) ──
+  // ── Price: Strategy 1 — #goods_price (active on modern Temu DOM) ──
   try {
-    const priceKeys = ['sale_price', 'salePrice', 'price', 'promotion_price',
-                       'promotionPrice', 'actual_price', 'actualPrice',
-                       'original_price', 'originalPrice', 'min_price', 'minPrice'];
-    const imgKeys   = ['origin_url', 'original_img_url', 'img_url', 'thumbnail_url',
-                       'goods_img_url', 'product_img_url'];
-    const vidKeys   = ['video_url', 'videoUrl', 'video_src', 'goods_video_url',
-                       'product_video', 'media_url', 'mp4_url'];
-
-    const _imgSeen = new Set();
-    const _vidSeen = new Set();
-
-    function walkTemuInitData(obj, depth) {
-      if (!obj || typeof obj !== 'object' || depth > 18) return;
-
-      // ── Collect images ───────────────────────────────────
-      for (const k of imgKeys) {
-        if (k in obj && typeof obj[k] === 'string' && obj[k]) {
-          const clean = temuOriginUrl(obj[k]);
-          if (clean && !isBadImage(clean) && !_imgSeen.has(clean)) {
-            _imgSeen.add(clean);
-            r.images.push(clean);
-          }
-        }
-      }
-
-      // ── Collect videos ───────────────────────────────────
-      for (const k of vidKeys) {
-        if (k in obj && typeof obj[k] === 'string' && obj[k]) {
-          const v = obj[k].replace(/\\\//g, '/');
-          if (/\.(mp4|webm|m3u8)/i.test(v) && !_vidSeen.has(v)) {
-            _vidSeen.add(v);
-            r.videos.push(v);
-          }
-        }
-      }
-
-      // ── Capture price (first found, non-returning) ───────
-      if (!r.price) {
-        for (const k of priceKeys) {
-          if (k in obj) {
-            if (typeof obj[k] === 'number' && obj[k] > 0) {
-              const dollars = obj[k] >= 100 ? (obj[k] / 100).toFixed(2) : obj[k].toFixed(2);
-              r.price = sym + dollars;
-              break;
-            }
-            if (typeof obj[k] === 'string' && /\d/.test(obj[k])) {
-              const c = cleanPriceText(obj[k]);
-              if (c) { r.price = ensureCurrency(c, sym); break; }
-            }
-          }
-        }
-      }
-
-      // ── Recurse into children (always, no early exit) ────
-      if (Array.isArray(obj)) {
-        obj.forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
-      } else {
-        Object.values(obj).forEach(v => { if (v && typeof v === 'object') walkTemuInitData(v, depth + 1); });
-      }
-    }
-
-    // Safely scan existing inline script contents without DOM script injection (avoids CSP violation)
-    for (const s of document.querySelectorAll('script:not([src])')) {
-      const t = s.textContent || '';
-      if (!t.includes('__init_data__') && !t.includes('goods_gallery') && !t.includes('origin_url')) continue;
-      const m = t.match(/__init_data__\s*=\s*({[\s\S]+?});?\s*(?:<\/script>|window\.|var\s|let\s|const\s|$)/) ||
-                t.match(/rawData\s*=\s*({[\s\S]+?});?\s*(?:<\/script>|window\.|var\s|let\s|const\s|$)/);
-      if (m) {
-        try {
-          const parsed = JSON.parse(m[1]);
-          if (parsed) walkTemuInitData(parsed, 0);
-          if (r.images.length > 0) break;
-        } catch (_) {}
-      }
+    const gp = document.querySelector('#goods_price') || document.querySelector('[class*="goods-price"]');
+    if (gp) {
+      const spans = [...gp.querySelectorAll('._14At0Pe5, span, div')].map(e => (e.textContent || '').replace(/\s+/g, '')).filter(t => /\d/.test(t));
+      const pick = spans.length ? spans[spans.length - 1] : '';
+      const m = pick.match(/(?:Rs\.?|PKR|USD|US\$|\$|€|£|₹|AED)?\s*\d[\d,]*(?:\.\d+)?/i);
+      if (m) r.price = m[0];
     }
   } catch (_) {}
 
-  // ── Price: Strategy 2 — DOM selectors (specific → generic) ────────────
+  // ── Price: Strategy 2 — DOM price selectors ────────────────────────
   if (!r.price) {
     r.price = priceFromSelectors([
-      // Temu uses CSS modules — look for price-like classes avoiding strikethrough
       '._14At0Pe5', '[class*="_14At0Pe5"]', '[data-type="0"]',
       '[data-testid="price"]', '[data-testid="selling-price"]',
       '[data-testid*="current-price"]', '[data-testid*="sale-price"]',
@@ -1949,131 +1912,80 @@ async function scrapeTemu() {
       '[class*="price-actual"]', '[class*="priceActual"]',
       '[class*="selling-price"]', '[class*="sellingPrice"]',
       '[class*="current-price"]', '[class*="currentPrice"]',
-      // Avoid crossed-out / original prices
       '[class*="price"]:not([class*="origin"]):not([class*="Origin"]):not([class*="delete"]):not([class*="Delete"]):not([class*="slash"]):not([class*="Strike"]):not([class*="before"]):not([class*="through"]):not([class*="line-through"]):not([class*="Before"])',
       '[class*="Price"]:not([class*="Origin"]):not([class*="Before"]):not([class*="Cross"]):not([class*="Strike"])',
-      // aria-label price
       '[aria-label*="price" i]', '[aria-label*="Price" i]'
     ]);
     if (r.price) r.price = ensureCurrency(r.price, sym);
   }
 
-  // ── Price: Strategy 3 — inline script regex (multiple patterns) ───────
+  // ── Price: Strategy 3 — og:price meta tag ──────────────────────────
   if (!r.price) {
-    for (const s of document.querySelectorAll('script:not([src])')) {
-      const t = s.textContent || '';
-      if (t.length < 50 || t.length > 4_000_000) continue;
-      if (!/sale_price|actual_price|display_price|price_str|priceStr|promotionPrice/.test(t)) continue;
-
-      // Temu cents prices (integer, divide by 100)
-      const centsMatch = t.match(/"(?:sale_price|salePrice|actual_price|actualPrice|promotion_price|promotionPrice)"\s*:\s*(\d{2,6})(?![.\d])/);
-      if (centsMatch) {
-        const cents = parseInt(centsMatch[1]);
-        if (cents > 0) { r.price = `${sym}${(cents / 100).toFixed(2)}`; break; }
-      }
-      // String price with currency: "display_price":"$8.99"
-      const strMatch = t.match(/"(?:display_price|price_str|priceStr|formatted_price|formattedPrice)"\s*:\s*"([^"]+)"/);
-      if (strMatch) {
-        const c = cleanPriceText(strMatch[1]);
-        if (c) { r.price = ensureCurrency(c, sym); break; }
-      }
-      // Float prices: "price":8.99
-      const floatMatch = t.match(/"(?:price|salePrice|sale_price)"\s*:\s*(\d+\.\d{1,2})(?![\d])/);
-      if (floatMatch) {
-        const v = parseFloat(floatMatch[1]);
-        if (v > 0) { r.price = `${sym}${v.toFixed(2)}`; break; }
-      }
+    const ogPrice = document.querySelector('meta[property="og:price:amount"], meta[property="product:price:amount"]');
+    if (ogPrice?.content) {
+      const num = parseFloat(ogPrice.content.replace(/[^0-9.]/g, ''));
+      if (num > 0) r.price = `${sym}${num.toFixed(2)}`;
     }
   }
 
-  // ── Images: Strategy 2 — inline scripts (fallback when __init_data__ had no images) ──
-  // FIX A2: apply temuOriginUrl() so CDN thumbnail URLs become full-resolution
-  if (r.images.length === 0) {
-    const scriptTexts = [];
-    document.querySelectorAll('script:not([src])').forEach(s => {
-      const t = s.textContent || '';
-      if (t.includes('origin_url') || t.includes('original_img_url') || t.includes('img_url') || t.includes('goods_gallery')) {
-        scriptTexts.push(t);
-      }
-    });
-
-    for (const t of scriptTexts) {
-      for (const m of t.matchAll(/"origin_url"\s*:\s*"(https?:[^"]+)"/g)) {
-        const u = temuOriginUrl(m[1].replace(/\\/g, '').replace(/\//g, '/'));
-        if (!isBadImage(u) && !r.images.includes(u)) r.images.push(u);
-      }
-      if (r.images.length === 0) {
-        for (const m of t.matchAll(/"original_img_url"\s*:\s*"(https?:[^"]+)"/g)) {
-          const u = temuOriginUrl(m[1].replace(/\\/g, '').replace(/\//g, '/'));
-          if (!isBadImage(u) && !r.images.includes(u)) r.images.push(u);
-        }
-      }
-      if (r.images.length === 0) {
-        for (const m of t.matchAll(/"img_url"\s*:\s*"(https?:[^"]+)"/g)) {
-          const u = temuOriginUrl(m[1].replace(/\\/g, '').replace(/\//g, '/'));
-          if (!isBadImage(u) && !r.images.includes(u)) r.images.push(u);
-        }
-      }
-    }
-  }
-
-  // ── Images: Strategy 3 — application/json scripts ──
-  // FIX A2: apply temuOriginUrl() here too
-  if (r.images.length === 0) {
-    document.querySelectorAll('script[type="application/json"]').forEach(s => {
-      try {
-        const data = JSON.parse(s.textContent || '{}');
-        function walkTemuJson(obj, d) {
-          if (!obj || typeof obj !== 'object' || d > 12) return;
-          if (Array.isArray(obj)) { obj.forEach(v => walkTemuJson(v, d + 1)); return; }
-          const rawUrl = obj.origin_url || obj.original_img_url || obj.img_url || '';
-          if (typeof rawUrl === 'string' && rawUrl && /\.(jpg|jpeg|png|webp)/i.test(rawUrl) && !isBadImage(rawUrl)) {
-            const u = temuOriginUrl(rawUrl);
-            if (!r.images.includes(u)) r.images.push(u);
-          }
-          Object.values(obj).forEach(v => { if (v && typeof v === 'object') walkTemuJson(v, d + 1); });
-        }
-        walkTemuJson(data, 0);
-      } catch (_) {}
-    });
-  }
-
-  // ── Images: Strategy 4 — DOM gallery scan ──
-  // FIX A2: temuOriginUrl() already applied here (was the only working strategy before)
-  if (r.images.length === 0) {
-    const galleryScope = document.querySelector(
-      '._2AOclWz7, ._2xl9aIvl, [role="listbox"], ._1CQ4cRYC, ' +
-      '[class*="goods-gallery"], [class*="GoodsGallery"], [class*="image-view"], ' +
-      '[class*="swiper-wrapper"], [class*="gallery-container"], ' +
-      '[data-testid*="gallery"], [data-testid*="image"]'
-    ) || findProductGalleryContainer() || document;
-
-    galleryScope.querySelectorAll('img').forEach(img => {
-      if (isBadImageElement(img)) return;
-      if (img.closest('#goodsRecommend, [id*="Recommend"], .js-goods-list, [class*="Recommend"]')) return;
-      const src = pickImgSrc(img);
-      if (!src || isBadImage(src)) return;
-      if (/seller-public|upload_aimg|material-put|goods-icon|openingemail/i.test(src)) return;
-      const clean = temuOriginUrl(src);
+  // ── Images: Strategy 1 — DOM Gallery listbox (preserves exact gallery order) ──
+  const seenG = new Set();
+  const uid = (u) => ((String(u || '').match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})/i)) || [])[1] || String(u || '').split('?')[0];
+  const addImage = (src) => {
+    if (!src || typeof src !== 'string' || !src.startsWith('http')) return;
+    if (!/kwcdn\.com/i.test(src) || isBadImage(src)) return;
+    if (/seller-public|upload_aimg|material-put|goods-icon|openingemail|\/icon\/|\/logo\/|\/platform\/|\/badge\/|\/header\/|\/nav\//i.test(src)) return;
+    const clean = temuOriginUrl(src);
+    const k = uid(clean);
+    if (!seenG.has(k)) {
+      seenG.add(k);
       r.images.push(clean);
-    });
-  }
-
-  // ── Videos: Strategy 2 — inline script regex (A3 fallback) ──────────
-  if (r.videos.length === 0) {
-    for (const s of document.querySelectorAll('script:not([src])')) {
-      const t = s.textContent || '';
-      if (t.length < 50 || t.length > 4_000_000) continue;
-      if (!/video_url|videoUrl|video_src|goods_video|mp4_url|media_url/.test(t)) continue;
-
-      const vidMatches = t.matchAll(/"(?:video_url|videoUrl|video_src|goods_video_url|product_video|mp4_url|media_url)"\s*:\s*"(https?:[^"]+\.(?:mp4|webm|m3u8)[^"]*)"/gi);
-      for (const m of vidMatches) {
-        const v = m[1].replace(/\\\//g, '/');
-        if (!r.videos.includes(v)) r.videos.push(v);
-      }
-      if (r.videos.length > 0) break;
     }
+  };
+
+  try {
+    const lb = document.querySelector('#leftContent [role="listbox"]') || document.querySelector('[role="listbox"]');
+    if (lb) {
+      lb.querySelectorAll('[role="option"] img').forEach(img => {
+        if (img.closest('[role="radio"]')) return; // exclude colour swatches
+        const src = img.getAttribute('src') || img.dataset?.src || '';
+        addImage(src);
+      });
+    }
+  } catch (_) {}
+
+  // ── Images: Strategy 2 — DOM gallery scan if < 3 ────────────────────
+  if (r.images.length < 3) {
+    try {
+      const galleryScope = document.querySelector(
+        '#leftContent, ._2AOclWz7, ._2xl9aIvl, [class*="goods-gallery"], [class*="GoodsGallery"], ' +
+        '[class*="image-view"], [class*="swiper-wrapper"], [data-testid*="gallery"], [data-testid*="image"]'
+      ) || document;
+
+      galleryScope.querySelectorAll('img').forEach(img => {
+        if (isBadImageElement(img)) return;
+        if (img.closest('[role="radio"], #goodsRecommend, [id*="Recommend"], .js-goods-list, [class*="Recommend"]')) return;
+        const src = pickImgSrc(img);
+        addImage(src);
+      });
+    } catch (_) {}
   }
+
+  // ── Images: Strategy 3 — og:image fallback if < 3 ──────────────────
+  if (r.images.length < 3) {
+    const ogImg = document.querySelector('meta[property="og:image"]');
+    if (ogImg?.content) addImage(ogImg.content);
+  }
+
+  // ── Variants: Swatch names ─────────────────────────────────────────
+  try {
+    document.querySelectorAll('[role="radio"] img[alt]').forEach(im => {
+      const a = (im.getAttribute('alt') || '').trim();
+      if (a && !r.variants.includes(a)) r.variants.push(a);
+    });
+  } catch (_) {}
+
+  r.images = r.images.slice(0, 15);
 
   return r;
 }
@@ -2837,7 +2749,7 @@ async function scrapePageData() {
   data.title = BAD_TITLE.test(candidateTitle) ? '' : candidateTitle;
 
   // ISSUE 1 FIX: Ensure price has a currency symbol — detect from page
-  if (data.price && !/[$£€¥₹₩]/.test(data.price) && !/^(USD|CAD|AUD|GBP|EUR|PKR|INR)/i.test(data.price)) {
+  if (data.price && !/[$£€¥₹₩]/.test(data.price) && !/^(USD|CAD|AUD|GBP|EUR|PKR|INR|AED|SAR|Rs\.?)/i.test(data.price)) {
     const sym = detectPageCurrencySymbol();
     data.price = `${sym}${data.price}`;
   }
@@ -2909,7 +2821,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
     if (!mall) return fail('Store name unavailable ? upload blocked. Wait for Seller Center to load.');
     if (mall.toLowerCase() !== String(expectStore).toLowerCase()) {
-      return fail(`Ghalat store khula hai: Temu par "${mall}" hai, magar file "${expectStore}" ke liye bani hai. Store switch kar ke dobara try karein.`);
+      return fail(`Wrong store is open: Temu shows "${mall}", but the file was made for "${expectStore}". Switch the store and try again.`);
     }
     ok(`Store verified: ${mall || expectStore}`);
   }
@@ -2918,7 +2830,7 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
   const findTab = () => [...document.querySelectorAll('[class*="upload_page_tab_item_title"]')]
     .find(d => /general template/i.test(d.textContent));
   const tabTitle = await temuWait(findTab, 10000);
-  if (!tabTitle) return fail('General template tab nahi mila — page load check karein');
+  if (!tabTitle) return fail('General template tab not found — check that the page loaded');
   // NOTE: title element ki class "upload_page_tab_item_title-…" bhi "[class*=upload_page_tab_item]" se match ho jati thi,
   // is liye hyphen wala selector: parent item "upload_page_tab_item-336ly" (active class isi par lagti hai)
   const tabItem = tabTitle.closest('[class*="upload_page_tab_item-"]') || tabTitle.parentElement || tabTitle;
@@ -2960,15 +2872,15 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
   }
   if (!input && hiddenMode && document.visibilityState === 'hidden') {
     // Hidden tab: Temu ne general upload box mount nahi kiya → 1-2 sec ke liye tab saamne mangwao
-    report.push('• Background tab mein general upload box nahi bana — tab ko thori der ke liye saamne la raha hoon');
+    report.push('• The general upload box did not render in the background tab — bringing the tab to the front for a moment');
     try { await new Promise(res => chrome.runtime.sendMessage({ action: 'TEMU_NEED_VISIBLE' }, () => { void chrome.runtime.lastError; res(); })); } catch (_) {}
     await new Promise(r => setTimeout(r, 600));
     if (!generalTabActive()) { const t = findTab(); const item = t && (t.closest('[class*="upload_page_tab_item-"]') || t.parentElement || t); if (item) { item.click(); t.click(); } }
     input = await temuWait(pickInput, 10000);
   }
-  if (!input) return fail('General template ka upload box nahi mila (visibility=' + document.visibilityState + ') — file GALAT box mein nahi bheji. Page reload kar ke dobara try karein.');
-  if (!input.closest('[class*="importUploadBoxWrap"]')) report.push('• Note: importUploadBoxWrap nahi mila, section text se pehchana');
-  ok('General template upload box mila (tab ' + (document.visibilityState === 'hidden' ? 'background mein' : 'saamne') + ')');
+  if (!input) return fail('General template upload box not found (visibility=' + document.visibilityState + ') — the file was NOT sent to a wrong box. Reload the page and try again.');
+  if (!input.closest('[class*="importUploadBoxWrap"]')) report.push('• Note: importUploadBoxWrap not found, identified by section text');
+  ok('General template upload box found (tab ' + (document.visibilityState === 'hidden' ? 'background' : 'foreground') + ')');
 
   // Disclaimer checkbox in the SAME section as the chosen input
   const section = input.closest('[class*="sectionWrap"]') || input.closest('[class*="importUploadBoxWrap"]')?.parentElement || document;
@@ -3043,9 +2955,9 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
       uploadId = newId();
       if (progressText() !== null || uploadId || cancelVisible() || temuTopHistorySignature() !== beforeSig) { accepted = true; break; }
       progress('uploading');
-      if (Date.now() - lastNote > 30000) { lastNote = Date.now(); report.push(`• File upload ho rahi hai… (${Math.round((Date.now() - t0) / 1000)}s)`); }
+      if (Date.now() - lastNote > 30000) { lastNote = Date.now(); report.push(`• Uploading file… (${Math.round((Date.now() - t0) / 1000)}s)`); }
     }
-    if (!accepted) { report.push('• 90s mein Temu ne file uthai nahi (na progress, na Upload ID) — Temu tab par dekh lein'); return { success: true, confirmed: false, report }; }
+    if (!accepted) { report.push('• Temu did not pick up the file within 90s (no progress, no Upload ID) — check the Temu tab'); return { success: true, confirmed: false, report }; }
     progress('accepted', { uploadId });
     ok(`File Temu ne uthaa li (${Math.round((Date.now() - t0) / 1000)}s)` + (uploadId ? ` — Upload ID ${uploadId}` : ''));
     // phase 2: processing complete — "Processing data" gayab + section mein Completed/records count (ya nayi history row) — max 200s
@@ -3064,14 +2976,14 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
         if (uploadId && temuTopHistorySignature() !== beforeSig && temuTopHistorySignature() === 'id:' + uploadId) { finished = true; break; }
       }
     }
-    if (!finished) { report.push(`• Processing 200s mein poori nahi hui (last ${lastPct}%) — Temu tab saamne chhod diya; complete hone par "Mark as listed" daba dein`); return { success: true, confirmed: false, uploadId, report }; }
+    if (!finished) { report.push(`• Processing did not finish within 200s (last ${lastPct}%) — left the Temu tab in front; press "Mark as listed" when it completes`); return { success: true, confirmed: false, uploadId, report }; }
     const secs = Math.round((Date.now() - t1) / 1000);
     if (info && info.processed != null) {
       ok(`Processing mukammal (${secs}s) — ${info.status}: ${info.processed} records processed, ${info.added} added, ${info.errors} errors` + (uploadId ? ` (ID ${uploadId})` : ''));
-      if (info.errors > 0) report.push(`• ${info.errors} record(s) mein error — Temu par "View processing results" dekh lein`);
+      if (info.errors > 0) report.push(`• ${info.errors} record(s) with errors — see "View processing results" on Temu`);
       return { success: true, confirmed: true, uploadId, processed: info.processed, added: info.added, errors: info.errors, ready: info.ready, status: info.status, report };
     }
-    ok(`Processing mukammal (${secs}s)` + (uploadId ? ` — Upload ID ${uploadId}` : ' — Upload history mein nayi entry aa gayi'));
+    ok(`Processing mukammal (${secs}s)` + (uploadId ? ` — Upload ID ${uploadId}` : ' — a new entry appeared in Upload history'));
     return { success: true, confirmed: true, uploadId, report };
   }
   return { success: true, confirmed: true, report };
@@ -3124,6 +3036,34 @@ function temuDropdownOptions() {
   });
   return out;
 }
+// v9.15 — human-like pacing: random waits + a real pointer/mouse event sequence (no instant robotic clicks)
+const temuRand = (a, b) => Math.round(a + Math.random() * (b - a));
+async function temuHumanClick(el) {
+  if (!el) return;
+  try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+  await temuSleep(temuRand(350, 800));
+  const r = el.getBoundingClientRect();
+  const x = Math.round(r.left + r.width * (0.3 + Math.random() * 0.4));
+  const y = Math.round(r.top + r.height * (0.3 + Math.random() * 0.4));
+  const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+  const fire = (type, Ctor = MouseEvent) => { try { el.dispatchEvent(new Ctor(type, { ...base, pointerType: 'mouse', isPrimary: true })); } catch (_) {} };
+  fire('pointerover', PointerEvent); fire('mouseover'); fire('pointermove', PointerEvent); fire('mousemove');
+  await temuSleep(temuRand(120, 320));
+  fire('pointerdown', PointerEvent); fire('mousedown');
+  await temuSleep(temuRand(50, 140));
+  fire('pointerup', PointerEvent); fire('mouseup'); fire('click');
+}
+// wait until the attribute controls of every row have rendered and stopped changing (Temu fills them in late)
+async function temuWaitRowsSettled(rows, maxMs = 15000) {
+  const t0 = Date.now(); let last = '', stable = 0;
+  while (Date.now() - t0 < maxMs) {
+    const sig = rows.map(r => temuRowFields(r).map(f => f.label + ':' + f.current).join('|') + '#' + (r.innerText || '').length).join('||');
+    const hasCtl = rows.every(r => r.querySelector('[data-testid="beast-core-select"], input:not([type="checkbox"]):not([type="hidden"]), textarea'));
+    if (hasCtl && sig === last) { if (++stable >= 3) return true; } else stable = 0;
+    last = sig; await temuSleep(500);
+  }
+  return false;
+}
 async function temuPickSelectValue(sel, want) {
   const wantL = want ? String(want).trim().toLowerCase() : '';
   const current = temuSelectCurrent(sel).toLowerCase();
@@ -3131,11 +3071,8 @@ async function temuPickSelectValue(sel, want) {
     return 'already';
   }
   const head = sel.querySelector('[data-testid="beast-core-select-header"]') || sel;
-  head.scrollIntoView({ block: 'center' });
-  await temuSleep(150);
-  head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-  head.click();
-  await temuSleep(400);
+  await temuHumanClick(head);
+  await temuSleep(temuRand(450, 900));
 
   // Search options
   let opt = null;
@@ -3160,10 +3097,8 @@ async function temuPickSelectValue(sel, want) {
   }
 
   // Click the option
-  opt.scrollIntoView({ block: 'nearest' });
-  opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-  opt.click();
-  await temuSleep(350);
+  await temuHumanClick(opt);
+  await temuSleep(temuRand(400, 800));
   const cur = temuSelectCurrent(sel);
   return cur && cur.trim().toLowerCase() === opt.textContent.trim().toLowerCase() ? 'set' : 'verify_failed';
 }
@@ -3237,7 +3172,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
     if (!mall) return fail('Store name unavailable ? draft changes blocked. Wait for Seller Center to load.');
     if (mall.toLowerCase() !== String(expectStore).toLowerCase())
-      return fail(`Ghalat store khula hai: Temu par "${mall}" hai, extension mein "${expectStore}" active hai.`);
+      return fail(`Wrong store is open: Temu shows "${mall}", the extension has "${expectStore}" active.`);
   }
   // Support both products-excel-multiple-edit (TB_father) and product-action.html (beast-core table rows)
   const rows = await temuWait(() => {
@@ -3250,7 +3185,10 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     }
     return r.length ? r : null;
   }, 10000);
-  if (!rows) return fail('Koi draft row nahi mili — "Product action required" ya "Complete product details" page khula hai?');
+  if (!rows) return fail('No draft row found — is the "Product action required" or "Complete product details" page open?');
+  const zhS = (t, st = 'working') => { try { zhFrame(st, 'ZHunter · ' + t); } catch (_) {} };
+  zhS('fixing draft — waiting for the page');
+  await temuWaitRowsSettled(rows);
   let changed = 0, stillEmpty = 0, submitted = 0;
   const pick = (attrs, label) => {
     const want = label.trim().toLowerCase();
@@ -3266,17 +3204,27 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const fields = temuRowFields(row);
     const need = fields.filter(f => f.required && f.empty);
     const notes = [];
-    if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — sab required fields bhare hain` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
+    if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — all required fields are filled` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
+      const lbl = f.label.trim().toLowerCase();
       let want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? null;
-      if (want == null) { notes.push(f.label + ': missing sourced/user-approved value'); stillEmpty++; continue; }
+      // candidates, best first: the user's rule/default, then the extension's own hints (golf → Rubber), then generic fallback
+      const cands = [];
+      if (want != null) cands.push(want);
+      if (lbl === 'material' && /golf|tee\b|tees\b/.test(tl)) cands.push('Rubber');
+      if (TEMU_DRAFT_FALLBACKS[lbl]) cands.push(TEMU_DRAFT_FALLBACKS[lbl]);
+      if (!cands.length) { notes.push(f.label + ': missing sourced/user-approved value'); stillEmpty++; continue; }
+      zhS(`fixing draft — ${f.label}`);
       if (f.sel) {
-        const res = await temuPickSelectValue(f.sel, want);
+        let res = 'no_option';
+        for (const c of cands) { res = await temuPickSelectValue(f.sel, c); if (res === 'set' || res === 'already') { want = c; break; } await temuSleep(temuRand(500, 1000)); }
         if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${temuSelectCurrent(f.sel) || want}`); }
-        else { notes.push(`${f.label}: (${res})`); stillEmpty++; }
+        else { notes.push(`${f.label}: (${res}) — tried ${cands.join(' / ')}`); stillEmpty++; }
+        await temuSleep(temuRand(700, 1600));
       } else if (f.inp) {
+        want = cands[0];
         temuSetNativeValue(f.inp, want); changed++; notes.push(`${f.label}=${want} (typed)`);
-      } else { notes.push(`${f.label}: field type samajh nahi aaya`); stillEmpty++; }
+      } else { notes.push(`${f.label}: field type not recognized`); stillEmpty++; }
     }
     ok(`${name.slice(0, 45) || 'Product'} [${rule ? rule.name : 'defaults'}${catTxt ? ' · ' + catTxt.split('/').pop() : ''}] → ${notes.join(', ')}`);
   }
@@ -3284,21 +3232,23 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const allRemaining = rows.flatMap(r => temuRowFields(r)).filter(f => f.required && f.empty);
     if (stillEmpty > 0 || allRemaining.length > 0) {
       const remainingCount = Math.max(stillEmpty, allRemaining.length);
-      warn(`${remainingCount} required field(s) abhi bhi khali — Submit NAHI dabaya; upar wale fields page par khud bhar kar Submit karein`);
+      warn(`${remainingCount} required field(s) still empty — Submit was NOT pressed; fill the fields above on the page and press Submit yourself`);
     } else {
-      await temuSleep(500);
+      zhS('fixing draft — checking before Submit');
+      await temuSleep(temuRand(1500, 3000));
       const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
       if (bottomBtn && /^submit$/i.test((bottomBtn.textContent || '').trim()) && temuVisible(bottomBtn) && !bottomBtn.disabled && bottomBtn.getAttribute('aria-disabled') !== 'true' && !bottomBtn.classList.contains('disable-2fw28')) {
-        bottomBtn.click(); submitted++;
-        ok('Main Submit button dabaya — Temu par result dekhein!');
+        await temuHumanClick(bottomBtn); submitted++;
+        ok('Pressed the main Submit button — check the result on Temu!');
       } else {
         let rowClicks = 0;
         for (const row of rows) {
           const btn = row.querySelector('.btn-3yOxL.primary-2pgGm, [class*="primary"][role="button"], button');
           if (btn && /^submit$/i.test((btn.textContent || '').trim()) && temuVisible(btn) && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && !btn.classList.contains('disable-2fw28')) {
-            btn.click();
+            zhS(`fixing draft — submitting ${rowClicks + 1}/${rows.length}`);
+            await temuHumanClick(btn);
             rowClicks++; submitted++;
-            await temuSleep(350);
+            await temuSleep(temuRand(1500, 3200));
           }
         }
         if (rowClicks > 0) {
@@ -3310,6 +3260,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
       }
     }
   }
+  zhS(stillEmpty ? `${stillEmpty} field(s) need you` : 'draft fixed ✓', stillEmpty ? 'error' : 'done');
   report.unshift(`${rows.length} drafts, ${changed} fields set, ${stillEmpty} still empty`);
   return { success: stillEmpty === 0, report, changed, total: rows.length, stillEmpty, submitted, confirmed: false };
 }
@@ -3322,9 +3273,9 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const report = [];
   const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
   if (expectStore && mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
-    return { success: false, wrongStore: true, mall, report: [`✗ Ye tab store "${mall}" ka hai, extension mein "${expectStore}" active hai`] };
+    return { success: false, wrongStore: true, mall, report: [`✗ This tab belongs to store "${mall}", the extension has "${expectStore}" active`] };
   const sec = temuHistorySection();
-  if (!sec) return { success: false, report: ['✗ Upload history section nahi mili'] };
+  if (!sec) return { success: false, report: ['✗ Upload history section not found'] };
   const rowsOf = () => [...sec.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
   const btnOf = row => [...row.querySelectorAll('[role="button"], button, a')].find(b =>
     /view\s*(failed|processing)\s*details|view\s*processing\s*results?|complete\s*product\s*inf|download\s*processing/i.test((b.textContent || '').trim())
@@ -3351,14 +3302,14 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
     }
     if (!row) row = pickRow();
   }
-  if (!row) return { success: true, failed: [], report: ['• Upload history mein ye upload nahi mila' + (uploadId ? ` (ID ${uploadId})` : '')] };
+  if (!row) return { success: true, failed: [], report: ['• This upload was not found in Upload history' + (uploadId ? ` (ID ${uploadId})` : '')] };
   const btn = btnOf(row);
-  if (!btn) return { success: true, failed: [], report: ['• Is upload par "View failed details" button nahi hai (koi failed product nahi, ya abhi processing)'] };
+  if (!btn) return { success: true, failed: [], report: ['• This upload has no "View failed details" button (no failed products, or still processing)'] };
   btn.click();
   const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m =>
     /failed to upload|processing results?|require additional attribute|product.*information/i.test(m.innerText || '')
   ), 8000);
-  if (!modal) return { success: false, report: ['✗ "failed to upload" popup nahi khula'] };
+  if (!modal) return { success: false, report: ['✗ The "failed to upload" popup did not open'] };
   await temuWait(() => modal.querySelector('tr[data-testid="beast-core-table-body-tr"]'), 5000);
   const failed = [];
   for (const tr of modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')) {
@@ -3421,17 +3372,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
     if (message?.action === 'TEMU_UPLOAD_FILE') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      temuPageAutoUpload(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
+      try { zhFrame('working', 'ZHunter · uploading to Temu…'); } catch (_) {}
+      temuPageAutoUpload(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · upload failed ✗' : 'ZHunter · upload done ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · upload failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
       return true;
     }
     if (message?.action === 'TEMU_READ_FAILED') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
-      temuPageReadFailed(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
+      try { zhFrame('working', 'ZHunter · checking upload results…'); } catch (_) {}
+      temuPageReadFailed(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · check failed ✗' : 'ZHunter · results read ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · check failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
       return true;
     }
     if (message?.action === 'TEMU_FIX_DRAFTS') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ Yeh Temu seller page nahi hai'] }); return true; }
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
       temuPageFixDrafts(message).then(sendResponse).catch(err => sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }));
       return true;
     }
@@ -3785,6 +3738,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!IMG_PLATFORM_KEYS.some(k => h.includes(k))) return;
   if (NON_PRODUCT_PATTERNS.some(p => p.test(path) || p.test(href))) return;
   if (!PRODUCT_PATH_PATTERNS.some(p => p.test(path) || p.test(href))) return;
+  // v9.15: the shared product gate decides last — store/mall/list pages (e.g. temu.com/mall.html?...goods_id=...) never get the card
+  const zhIsProduct = () => { try { return typeof ZhGate === 'undefined' ? true : ZhGate.isProductUrl(location.href); } catch (_) { return true; } };
+  if (!zhIsProduct()) return;
+  try {
+    let _zhLast = location.href;
+    setInterval(() => {
+      if (location.href === _zhLast) return;
+      _zhLast = location.href;
+      if (!zhIsProduct()) document.getElementById(PANEL_ID)?.remove();
+    }, 1500);
+  } catch (_) {}
 
   // ── Image Collector ──────────────────────────────────────────
   const IMAGE_CARD_CAP = 40;
@@ -4333,7 +4297,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     header.className = 'header';
     header.innerHTML = `
       <div class="header-left">
-        <div class="header-icon"><img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="ZH" onerror="this.style.display='none';this.parentNode.textContent='ZH'"></div>
+        <div class="header-icon"><img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="ZH"></div>
         <span class="header-title">ZHunter Images</span>
         <span class="header-count" id="zh-img-count">0</span>
       </div>
@@ -4352,6 +4316,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         </button>
       </div>
     `;
+    header.querySelector('.header-icon img')?.addEventListener('error', function() {
+      this.style.display = 'none';
+      if (this.parentNode) this.parentNode.textContent = 'ZH';
+    }, { once: true });
     panel.appendChild(header);
 
     // ── Body
@@ -4638,7 +4606,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         .zh-lb-close {
           background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-          color: #94A3B8; width: 30px; height: 30px; border-radius: 50%;
+          color: #94A3B8; width: 30px; height: 30px; border-radius: 8px;
           cursor: pointer; display: flex; align-items: center; justify-content: center;
           font-size: 14px; font-weight: bold; transition: all 0.2s;
         }
@@ -4651,7 +4619,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         .zh-lb-nav {
           background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
-          color: #F8FAFC; width: 42px; height: 42px; border-radius: 50%;
+          color: #F8FAFC; width: 42px; height: 42px; border-radius: 10px;
           cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
           transition: all 0.2s; flex-shrink: 0;
         }
@@ -5292,7 +5260,7 @@ function zhFrame(state, label, color) {
   to{filter:drop-shadow(0 0 16px #00F2FE) brightness(1.3);box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
 }
 #zh-frame-l{
-  position:absolute;left:16px;bottom:16px;display:none;align-items:center;gap:8px;
+  position:absolute;right:16px;bottom:16px;display:none;align-items:center;gap:8px;
   height:26px;padding:0 12px 0 9px;border-radius:6px;
   background:rgba(8,14,26,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:#FFFFFF;font:700 11px/1 ui-monospace,monospace,sans-serif;

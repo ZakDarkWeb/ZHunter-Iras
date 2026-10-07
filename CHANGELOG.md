@@ -1,5 +1,42 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Floating image card only on single product pages (store/mall pages like temu.com/mall.html no longer match; shared ZhGate used).
+- Fix drafts: waits for Temu to render the attribute fields (was submitting before Material appeared), tries rule/default/golf→Rubber/fallback values against the real option list, human-like clicks and pauses; on-page status label (right-bottom) for fixing/uploading/checking.
+- Free AI title prompt: "Your own prompt" box + "AI Edit with my prompt" (bulk, with Stop/Undo, saved prompts) in Title Optimizer; checkbox in Content Studio Instructions to use own prompt for titles.
+
+- Temu export: titles with only a golf brand/model (TaylorMade, Titleist, Warbird, TP5, Pro V1...) now use the golf category profile instead of failing with NO_CATEGORY_PROFILE.
+
+- UI: no round buttons/chips anywhere (pills, chips, close/nav buttons, page lightbox) - rectangular; number badges (Last hunt/Library counts, tab counts, review count) resized so the number fits.
+
+- Content Studio layout: toolbar re-aligned (equal Titles/Bullets/Description chips, full-width Rewrite + This product only, Products/Instructions side by side), equal footer buttons.
+
+- Title rewrite: progress bar, Stop button and "Undo last rewrite"; review card delete now needs a second click (3s); AI Image Studio bar restyled with the theme accent and a 2-column layout; hunt result tick visible again, filter buttons rectangular.
+
+- UI: Hunting card rebuilt (stat tiles, filled hero, fixed All/Complete/Pending pills); result/cancelled screen wording unified ("2/3 complete", "Not hunted" tile, "Hunt remaining"); Edit Studio + Content Studio purple replaced by the extension accent (cyan).
+
+- Hunt: a problem link is opened ONCE in a brand-new tab and the old/stuck tab is closed (queue mode and open-tabs mode) instead of retrying in the same tab.
+
+- Hunt speed: queue waits cut to the old v9 values (settle 0.5-1s, pre-scrape 0.3-0.8s, link gap 0.5-1.5s, breather every 15-20 links); removed the Temu tab reload ("clean link") in tab mode; late verification boxes now pause the hunt.
+
+- Hunt v9.15: fixed Temu tab-hunt crash ("page did not respond"); Temu price + gallery read from the page DOM; Temu tracking/spec params removed from links; Hunt + result cards restyled to the extension theme; remaining mixed-language labels translated.
+
+- DOM-verified scraper fixes (saved Ecom DOMs): Walmart/Sam's Club price no longer read from recommendation tiles; Amazon image order (landing image first, no duplicates); Temu gallery-only images (no swatches); Temu price read from #goods_price (was picking the rating 4.8); 'Rs.' currency kept.
+- **Product links only (all sites):** new shared `product_url_gate.js`. Home, store/mall, search, category, cart, login and seller pages are rejected when adding to the queue (single, paste, import, auto-capture), when starting a hunt, and in the Hunt tab auto-scan.
+- **Bot verification / login:** one global hold. Every worker stops; hunting continues only after you press "▶ Solved — Resume" (no timeout, no auto-resume). The product link is then opened again.
+- **Not found / sold-out page after verification:** the link is retried (2x with a pause, then recovery rounds). Redirects away from the product are retried once.
+- **No skipped links:** failed links are no longer retried immediately; every other link is hunted first, then the recovery rounds retry them. Result strip now reads "N/M complete · X need retry · Y not tried"; "Partial" renamed "Incomplete".
+- **Images:** each picture is downloaded with up to 3 attempts (only failed ones repeat), extra fetch strategies in the background, a final retry pass, and Retry on an image-only failure re-downloads pictures without re-hunting.
+- **Temu first image:** gallery pictures are taken from the page data with swatch/recommendation/layout images excluded; og:image is last resort; queue mode now uses the same scraper as open-tabs mode.
+- Backup: branch `backup/2026-10-07-before-hunt`, tag `backup-2026-10-07-before-hunt`.
+
+
+## Unreleased (2026-10-07) — Open Studio redesign, 500-char titles, English UI
+- **Title limit:** Temu allows 500 characters. All counters, limits and AI prompts now use 500 as the hard maximum and aim for under 240 (green up to 240, amber up to 500, red above). Title rules avoid violation words.
+- **Open Studio (Content Studio):** Redesigned with SVG icons, theme tokens (dark/light), a violet accent for AI actions and cyan for save, a single product picker, one primary rewrite button, collapsible bullets/description with previews, a Fit-to-500 title tool, and clear disabled-state tooltips.
+- **English everywhere:** Remaining Roman Urdu UI text, status messages and tooltips translated to English across sidepanel, content, background, Flow/Gemini/GPT scripts and title rules.
+- **Backup:** git branch `backup/2026-10-07-before-studio-english`, tag `backup-2026-10-07-before-studio-english`, and folder copy in `tmp/`. No version bump, no ZIP.
+
 ## v9.12.13 (2026-10-04) — Robust Table-Row Multi-Tier Detection & Submit Safety
 - **Recent Hunt filter fix:** Library rows retain batch IDs; older batches recover only with matching timestamps/counts. Hunt selection clears conflicting searches, repeated clicks reset the filter, and unmatched hunts keep the current list visible.
 - **Compact History records:** Reduced card spacing, top-right CSV/Delete actions, and one metadata line for date/item count.

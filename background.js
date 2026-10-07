@@ -3,7 +3,7 @@
 // Handles storage operations, messaging, content script orchestration, and AI generation
 // ============================================================
 'use strict';
-importScripts('sourcing_sync.js', 'audit_storage.js');
+importScripts('sourcing_sync.js', 'audit_storage.js', 'product_url_gate.js');
 
 // Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
 let _zhExportFolder = true;
@@ -332,6 +332,7 @@ function normalizeQueueUrl(raw) {
     const u = new URL(String(raw || '').trim());
     u.hash = '';
     u.hostname = u.hostname.toLowerCase();
+    if (/(^|\.)temu\.com$/i.test(u.hostname) && typeof ZhGate !== 'undefined') return ZhGate.cleanUrl(u.href);
     if ((u.protocol === 'https:' && u.port === '443') || (u.protocol === 'http:' && u.port === '80')) u.port = '';
     for (const key of [...u.searchParams.keys()]) {
       if (/^(utm_|gclid$|fbclid$|msclkid$|ref$)/i.test(key)) u.searchParams.delete(key);
@@ -435,7 +436,9 @@ function isSupportedProductUrl(str) {
     const u = new URL(str);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
     const h = u.hostname.toLowerCase().replace(/^www\./, '');
-    return PRODUCT_HOST_PATTERNS.some(pattern => h === pattern || h.endsWith('.' + pattern));
+    if (!PRODUCT_HOST_PATTERNS.some(pattern => h === pattern || h.endsWith('.' + pattern))) return false;
+    // v9.14 — only real product pages (not home / store / mall / search / category / cart pages)
+    return ZhGate.isProductUrl(str);
   } catch (_) { return false; }
 }
 
@@ -482,7 +485,8 @@ function fallbackImageUrl(imageUrl) {
   } catch (_) { return null; }
 }
 
-async function fetchOnce(url, settings) {
+async function fetchOnce(url, settings, fopts) {
+  fopts = fopts || {};
   try {
     // Some CDNs (Amazon, etc.) block requests that don't look like browser image loads.
     // Adding Referer + Accept headers makes the fetch look like a normal <img> request.
@@ -496,6 +500,9 @@ async function fetchOnce(url, settings) {
       const origin = new URL(url).origin;
       headers['Referer'] = origin + '/';
     } catch (_) {}
+    // v9.14 — alternative strategies used when the first attempt fails
+    if (fopts.noReferer) delete headers['Referer'];
+    if (fopts.referer) headers['Referer'] = fopts.referer;
 
     const response = await fetch(url, {
       headers,
@@ -672,6 +679,21 @@ async function fetchImageAsBase64(imageUrl, settings) {
     const retry = await fetchOnce(fallback, settings);
     if (retry.success) return retry;
   }
+  // v9.14 — more strategies before giving up: no Referer, the store's own page as Referer, query-less URL
+  const alts = [{ noReferer: true }];
+  if (/kwcdn\.com|temu/i.test(imageUrl)) alts.push({ referer: 'https://www.temu.com/' });
+  for (const o of alts) {
+    const r2 = await fetchOnce(imageUrl, settings, o);
+    if (r2.success) return r2;
+  }
+  try {
+    const u = new URL(imageUrl);
+    if (u.search) {
+      const bare = u.origin + u.pathname;
+      const r3 = await fetchOnce(bare, settings, { noReferer: true });
+      if (r3.success) return r3;
+    }
+  } catch (_) {}
   return primary;
 }
 
@@ -1215,7 +1237,7 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
     const savedJob = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
     if (savedJob) await chrome.storage.local.set({zhTemuUploadJob:{...savedJob,tabId:tab.id}});
     _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null;
-    report.push(bg ? '✓ Temu tab khola (processing ke baad focus wapas aa jayega)' : '✓ Temu tab khola');
+    report.push(bg ? '✓ Temu tab opened (focus will return after processing)' : '✓ Temu tab khola');
 
     // wait for content script
     let ready = false;
@@ -1224,7 +1246,7 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
       const r = await tabsSend(tab.id, { action: 'PING' });
       ready = !!(r && r.ready);
     }
-    if (!ready) { report.push('✗ Temu page load nahi hua (login check karein)'); return finish({ success: false, report }); }
+    if (!ready) { report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
     report.push('✓ Temu page ready');
 
     const result = await tabsSend(tab.id, {
@@ -1243,7 +1265,7 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
     try {
       if (bg && _temuUpload.activated && _temuUpload.prevTabId != null && out.success && out.confirmed !== false) {
         await chrome.tabs.update(_temuUpload.prevTabId, { active: true });
-        out.report.push('✓ Focus wapas aap ke tab par');
+        out.report.push('✓ Focus returned to your tab');
       }
     } catch (_) {}
     _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
@@ -1829,6 +1851,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   // Check auto-capture enabled setting (default: true)
   if (settings.bulkQueueAutoCapture !== true) return; // v8: off unless the user turns it on
+  if (!ZhGate.isProductUrl(url)) return;              // v9.14 — never auto-queue home / store / mall / search pages
 
   const queue = stored[BULK_QUEUE_KEY] || [];
   const normUrl = url.split('#')[0].trim();

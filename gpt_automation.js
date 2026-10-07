@@ -89,11 +89,11 @@
     window.__zhGptImgInProgress = true;
     setTimeout(() => { window.__zhGptImgInProgress = false; }, 6000);
 
-    showGptHUD('ZHunter: Product image attach ho rahi he...', 'info');
+    showGptHUD('ZHunter: Attaching product image...', 'info');
 
     const file = dataUrlToFile(imgBase64, 'zhunter_product.png');
     if (!file) {
-      showGptHUD('Image convert nahi ho saki', 'warn');
+      showGptHUD('Image could not be converted', 'warn');
       return;
     }
 
@@ -143,7 +143,7 @@
       } catch (_) {}
     }
 
-    showGptHUD('✓ Image ready! Agar zaroorat ho to Ctrl+V se paste karein.', 'ok');
+    showGptHUD('✓ Image ready! Paste with Ctrl+V if needed.', 'ok');
   }
 
   // Check and process pending action from storage

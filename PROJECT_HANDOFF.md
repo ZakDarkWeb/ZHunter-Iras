@@ -1,11 +1,11 @@
-# ZHunter Iras: Project Handoff (v9.12.13)
+# ZHunter Iras: Project Handoff (v9.15.0)
 
 > **Nayi chat ke liye (user):** nayi chat mein ye file paste/attach karein, aur extension ka folder connect karein (ya folder ka zip attach karein). Phir likhein:
 > *"Ye mera ZHunter Iras Chrome extension hai. Pehle `PROJECT_HANDOFF.md`, `.agents/AGENTS.md` aur `CHANGELOG.md` parho, phir mera naya kaam suno."*
 >
 > **Nayi AI ke liye:** ye poori file parhein, phir section 7 ki checklist follow karein. Folder connect na ho to user se connect karwayein (ya zip mangwayein). Andaze par kaam na karein.
 
-Last updated: 04 Oct 2026 · Version: **9.12.13** (`manifest.json`) · Naam: **ZHunter Iras** (v9.12.2 tak "ZHunter PRO")
+Last updated: 04 Oct 2026 · Version: **9.15.0** (`manifest.json`) · Naam: **ZHunter Iras** (v9.12.2 tak "ZHunter PRO")
 Folder (user ke computer par): `C:\Users\Basit\Downloads\06_Extensions_&_Code_Projects\Temu Working\05_ZHunter-Catalog\ZHunter Iras - Codex`
 Temu template sample: `C:\Users\Basit\Downloads\Temu\TEMU_GENERAL_UPLOAD_TEMPLATE_*.xlsx`
 

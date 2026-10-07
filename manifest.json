@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZHunter Iras",
-  "version": "9.12.13",
+  "version": "9.15.0",
   "description": "Product research side panel: hunt product images, videos and details from Amazon, Walmart, Sam's Club, Alibaba, AliExpress and more; bulk-hunt open tabs or a background queue; export XLSX/CSV/HTML/PDF sheets and image ZIPs.",
   "author": "ZHunter",
   "permissions": [
@@ -84,6 +84,7 @@
         "https://*/*"
       ],
       "js": [
+        "product_url_gate.js",
         "content.js"
       ],
       "run_at": "document_idle"
