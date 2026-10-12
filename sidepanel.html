@@ -418,6 +418,7 @@
             <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
           </select></div>
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Retries once with backoff on timeout/error</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Flow: auto Generate click</b><span>ON = extension presses Generate (uses Chrome debugger). OFF = you press Generate yourself; no debugger banner</span></div><label class="sw-wrap"><input type="checkbox" id="setFlowDbg" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Failed tabs always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>URLs only; Master ZIP won't include images. Hunt runs 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Every download (sheet, ZIP, images) goes to Downloads → <b>ZHunter Export</b> → today's date folder (e.g. ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
@@ -516,7 +517,7 @@
           <div style="width:100%;display:grid;gap:9px;">
             <div class="l"><b>Groq API Keys</b><span>Save replaces the active key pool</span></div>
             <select id="groqKeyMode" class="sel" aria-label="API key mode"><option value="single">Single key</option><option value="multiple">Multiple keys</option></select>
-            <input type="password" id="groqApiKeyInput" class="inp" autocomplete="off" spellcheck="false" placeholder="gsk_..." aria-label="Single Groq API key" />
+            <input type="password" id="groqApiKeyInput" class="inp" autocomplete="off" spellcheck="false" placeholder="gsk_… Groq · sk-or-… OpenRouter · AIza…/AQ.… Gemini" aria-label="Single AI API key" />
             <textarea id="groqApiKeysInput" class="inp keys-masked hidden" rows="4" autocomplete="off" spellcheck="false" placeholder="Paste one API key per line" aria-label="Multiple Groq API keys" style="width:100%;resize:vertical;font-family:var(--mono);"></textarea>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <button type="button" id="saveGroqKeyBtn" class="btn btn-primary btn-xs">Save / Replace</button>
@@ -1120,19 +1121,36 @@
               <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt">Export + Upload to Temu</span>
             </button>
+            <details class="temu-more-tools" id="temuMoreTools">
+              <summary><span>More tools</span><small>Export file only · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
             <div class="temu-actions-sub-bar">
               <button id="temuExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Download the file only — upload to Temu yourself">
                 <svg class="i i-xs" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Export file only
               </button>
+              <button id="temuLearnCatBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Products with no category: Temu's own suggested categories are shown, you pick one, and it is saved for next time">
+                <svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg>
+                Learn categories
+              </button>
               <button id="temuFixDraftsBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Set Material / Age Group on Temu's 'Complete product details' page and Submit">
                 <svg class="i i-xs" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                 Fix drafts on Temu
+              </button>
+              <button id="temuLearnAttrBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="On Temu's &quot;Product action required&quot; page: remember each category's required attributes and add unknown categories">
+                <svg class="i i-xs" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
+                Learn attributes
+              </button>
+              <button id="temuStoreExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="On Temu 'Manage products' tick the products you want, then press this: their full details are read and saved as a Temu bulk sheet you can import in another Chrome / store">
+                <svg class="i i-xs" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Store export
               </button>
               <button id="temuFailedBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Reads Temu's 'View failed details' popup and shows the reason for each failed product; duplicates are marked in listed history">
                 <svg class="i i-xs" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 Upload errors
               </button>
+            </div>
+            </details>
+            <div class="temu-actions-sub-bar temu-mark-row">
               <button id="temuMarkListedBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" hidden title="If you uploaded the exported file to Temu yourself, mark these products as 'listed' (skipped next time)">
                 Mark as listed
               </button>
@@ -1614,6 +1632,11 @@
               <button type="button" id="temuCatSearchClear" class="temu-cat-search-clear hidden" title="Clear search">✕</button>
             </div>
             <div class="temu-cat-toolbar-actions">
+              <button id="temuImportTplsBtn" class="btn btn-ghost temu-cat-secondary-btn" type="button" title="Pick Temu bulk-listing template files (.xlsx) to add all their categories">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Import templates</span>
+              </button>
+              <input type="file" id="temuCatTplMulti" accept=".xlsx" multiple style="display:none" />
               <button id="temuPickCatalogTopBtn" class="btn btn-ghost temu-cat-secondary-btn" type="button" title="Pick from built-in 50+ catalog">
                 <svg class="i" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                 <span>Catalog</span>
@@ -1721,6 +1744,19 @@
   </div>
 
   <!-- ═══ TEMU CATEGORY CATALOG PICKER MODAL ═══ -->
+  <div id="temuLearnModal" class="modal-back hidden" style="z-index:2600;">
+    <div class="modal-box tlc">
+      <div class="tlc-head"><b>Learn categories from Temu</b><span id="tlcCount" class="tlc-count">1 / 1</span><button id="tlcClose" class="modal-close" type="button" aria-label="Close">✕</button></div>
+      <div id="tlcTitle" class="tlc-title"></div>
+      <div id="tlcStatus" class="tlc-status">Opening Temu…</div>
+      <div id="tlcOpts" class="tlc-opts"></div>
+      <label class="tlc-lbl">Match words (any product title containing this gets the category)<input id="tlcMatch" type="text" spellcheck="false"></label>
+      <div class="tlc-actions">
+        <button id="tlcSkip" class="btn btn-ghost" type="button">Skip</button>
+        <button id="tlcSave" class="btn btn-primary" type="button" disabled>Save &amp; next</button>
+      </div>
+    </div>
+  </div>
   <div id="temuCatalogModal" class="modal-back hidden">
     <div class="modal-box temu-catalog-box">
       <div class="modal-head">
@@ -1803,6 +1839,10 @@
           <div id="temuStepProdName" class="tsp-name">Product Title</div>
           <div id="temuStepStatus" class="tsp-status">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
         </div>
+      </div>
+      <div class="tsp-ctl">
+        <button id="temuStepPauseBtn" class="btn btn-ghost" type="button" title="Pause here — Resume continues from the same place">⏸ Pause</button>
+        <button id="temuStepDoneBtn" class="btn btn-ghost" type="button" title="Stop now — finished images stay saved, remaining products are left as they are">✔ Done (stop here)</button>
       </div>
       <div class="tsp-actions">
         <button id="temuStepSkipBtn" class="btn btn-ghost" type="button">Skip ⏩</button>

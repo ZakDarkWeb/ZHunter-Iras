@@ -14,6 +14,7 @@
     ['amazon.', (p) => /\/(?:dp|gp\/product|gp\/aw\/d|d|exec\/obidos\/asin)\/[a-z0-9]{10}/i.test(p)],
     ['walmart.com', (p) => /\/ip\/(?:[^/]+\/)?\d+/i.test(p)],
     ['samsclub.com', (p) => /\/(?:p|ip)\/(?:[^/]+\/)?(?:prod\d+|\d+)/i.test(p)],
+    ['bjs.com', (p) => /\/product\/[^/]+\/\d{6,}/i.test(p)],
     ['ebay.', (p) => /\/itm\/(?:[^/]+\/)?\d+/i.test(p)],
     ['aliexpress.', (p) => /\/(?:item|i)\/\d+\.html/i.test(p)],
     ['alibaba.com', (p) => /\/p(?:roduct)?-detail\/[^/]+\.html/i.test(p)],

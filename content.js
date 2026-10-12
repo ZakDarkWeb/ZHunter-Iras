@@ -146,8 +146,7 @@ function normalizeImg(rawUrl) {
       return u.href;
     }
     if (/bjs\.scene7\.com|bjs\.com/i.test(h)) {
-      let href = u.href.replace(/\?\$bjs-[^$]+\$/i, '?$bjs-Zoom$');
-      return href;
+      return u.origin + u.pathname + '?$bjs-Zoom$';
     }
     if (/kwcdn\.com|temu/i.test(h)) {
       let href = u.href.replace(/\?imageView2\/2\/w\/\d+.*$/i, '?imageView2/2/w/1600/q/90/format/jpg');
@@ -2270,6 +2269,7 @@ function scrapeBestBuy() {
 function scrapeBjs() {
   const r = { title: '', price: '', images: [], videos: [], variants: [], bullets: [] };
   const sym = detectPageCurrencySymbol() || '$';
+  const cleanImageUrl = (u) => String(u || '').replace(/\?\$bjs-[^$]+\$/i, '?$bjs-Zoom$');
 
   // 1. Title
   const titleEl = document.querySelector(
@@ -2279,7 +2279,7 @@ function scrapeBjs() {
   if (titleEl) r.title = titleEl.innerText.trim();
 
   // 2. Price
-  const cnstrcPrice = document.querySelector('[data-cnstrc-item-price]')?.getAttribute('data-cnstrc-item-price');
+  const cnstrcPrice = (document.querySelector('.normal-price[data-cnstrc-item-price], .price-wrapper [data-cnstrc-item-price]') || document.querySelector('[data-cnstrc-item-price]'))?.getAttribute('data-cnstrc-item-price');
   if (cnstrcPrice && !isNaN(parseFloat(cnstrcPrice))) {
     r.price = `${sym}${parseFloat(cnstrcPrice).toFixed(2)}`;
   } else {
@@ -2297,6 +2297,7 @@ function scrapeBjs() {
   // 3. Images (BJ's Scene7 high-resolution gallery)
   const bjsImgSeen = new Set();
   const bjsItemId = 
+    document.querySelector('.cls-item-number .cls-item, .cls-item')?.textContent.match(/Item:\s*(\d+)/i)?.[1] ||
     document.querySelector('[data-cnstrc-item-id]:not([class*="rec"]):not([id*="carousel"])')?.getAttribute('data-cnstrc-item-id') ||
     document.querySelector('.cls-item-number, .cls-item')?.textContent.match(/Item:\s*(\d+)/i)?.[1] ||
     document.querySelector('#magic-scroll-id a[href*="scene7.com/is/image/bjs/"], a#prodGallery[href*="scene7.com/is/image/bjs/"]')?.href?.match(/\/bjs\/(\d+)/)?.[1] ||
@@ -2992,6 +2993,28 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
 // ═══════════════════════════════════════════════════════════════
 // v9.0.0 — Temu "Complete product details" auto-fix (drafts)
 // Page: seller.temu.com/products-excel-multiple-edit.html
+// v9.15 - read-only scan of Temu's "Product action required" table -> [{title, goodsId, category, attrs:[{label, required, value}]}]
+function temuPageScanAttrs() {
+  const rows = [];
+  const txt = e => (e && e.textContent || '').replace(/\s+/g, ' ').trim();
+  document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]').forEach(tr => {
+    const catEl = tr.querySelector('[class*="catName"]'); if (!catEl) return;
+    const category = txt(catEl).replace(/^Category:\s*/i, '');
+    const goodsId = (txt(tr.querySelector('[class*="pId"]')).match(/\d{6,}/) || [''])[0];
+    const title = txt(tr.querySelector('[class*="elli_outerWrapper"]'));
+    const attrs = [];
+    tr.querySelectorAll('[class*="attr-control-item"]').forEach(it => {
+      const lab = it.querySelector('[class*="Form_itemLabelContent"]'); if (!lab) return;
+      const label = txt(lab);
+      const required = !!it.querySelector('[class*="Form_itemRequired"]');
+      let value = txt(it.querySelector('[class*="inputItemRenderer"]'));
+      if (!value) { const inp = it.querySelector('input[data-testid="beast-core-select-htmlInput"], input[type="text"]'); value = inp && !/^select$/i.test(inp.placeholder || '') ? (inp.value || '') : ''; }
+      attrs.push({ label, required, value });
+    });
+    rows.push({ title, goodsId, category, attrs });
+  });
+  return { success: true, rows };
+}
 // Panel sends TEMU_FIX_DRAFTS { rules:[{name, match:[..], attributes:{Label:Value}}],
 //   defaults:{Label:Value}, autoSubmit:bool, expectStore }.
 // For every product row we set the attribute dropdowns (Material, Applicable Age
@@ -3163,6 +3186,38 @@ function temuRowFields(row) {
 
   return out;
 }
+// v9.15 - smart draft values from the product title / category (same rules as the sidepanel's smart attributes)
+function temuDraftSmart(lbl, title, cat) {
+  const t = String(title || '').toLowerCase(), toys = /^toys & games/i.test(cat || '');
+  if (/age group/.test(lbl)) {
+    const Y = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18], M = [1, 3, 4, 5, 6, 10, 12, 18];
+    let m = t.match(/(\d{1,2})\s*(?:-\s*\d{1,2}\s*)?months?\b/);
+    if (m) { const v = parseInt(m[1], 10), o = [...M].reverse().find(x => x <= v); return { explicit: o ? `${o} Months+` : '0-5M' }; }
+    m = t.match(/(\d{1,2})\s*-\s*\d{1,2}\s*(?:years?|yrs?)/) || t.match(/(?:ages?|for)\s*(\d{1,2})\s*(?:\+|and up|& up|plus|years?|yrs?|-)/) || t.match(/(\d{1,2})\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?)?\b/) || t.match(/(\d{1,2})\s*(?:years?|yrs?)(?:\s*(?:old|\+|and up|& up))?/) || t.match(/\b(\d{1,2})\s*\+(?!\d)/);
+    if (m) { const v = parseInt(m[1], 10); if (v >= 18) return { explicit: '18 Years+' }; if (v <= 1) return { explicit: '12 Months+' }; const o = [...Y].reverse().find(x => x <= v); if (o) return { explicit: `${o} Years+` }; }
+    if (/\b(newborn|infant)\b/.test(t)) return { explicit: '0 Year+' };
+    if (/\btoddler/.test(t)) return { explicit: '18 Months+' };
+    return toys ? { dept: '3 Years+' } : {};
+  }
+  if (lbl === 'material') {
+    const map = [[/\b(wood|wooden)\b/, 'Wood'], [/\bstainless steel\b/, 'Stainless Steel'], [/\b(metal|aluminum|iron)\b/, 'Metal'], [/\b(plastic|abs)\b/, 'Plastic'], [/\bsilicone\b/, 'Silicone'], [/\bcotton\b/, 'Cotton'], [/\bpolyester\b/, 'Polyester'], [/\bglass\b/, 'Glass'], [/\bceramic\b/, 'Ceramic'], [/\brubber\b/, 'Rubber'], [/\b(paper|cardboard)\b/, 'Paper'], [/\bfoam\b/, 'Foam']];
+    const hit = map.find(([re]) => re.test(t)); return hit ? { explicit: hit[1] } : {};
+  }
+  if (lbl === 'power supply') return /\b(battery|batteries|electric|rechargeable|usb|plug|led|remote control)\b/.test(t) ? {} : { explicit: 'Use Without Electricity' };
+  return {};
+}
+// open the dropdown and pick the first option matching a pattern ("no battery", "none" ...); returns the option text or '' (and the list of options it saw)
+async function temuPickByRegex(sel, re) {
+  const head = sel.querySelector('[data-testid="beast-core-select-header"]') || sel;
+  await temuHumanClick(head); await temuSleep(temuRand(450, 900));
+  let opts = []; const t0 = Date.now();
+  while (Date.now() - t0 < 3500 && !opts.length) { await temuSleep(150); opts = temuDropdownOptions(); }
+  const names = opts.map(o => o.textContent.trim());
+  const opt = opts.find(o => re.test(o.textContent.trim()));
+  if (!opt) { try { document.body.click(); } catch (_) {} return { text: '', names }; }
+  await temuHumanClick(opt); await temuSleep(temuRand(400, 800));
+  return { text: opt.textContent.trim(), names };
+}
 async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true, expectStore } = {}) {
   const report = [];
   const ok = m => report.push('✓ ' + m);
@@ -3207,10 +3262,14 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — all required fields are filled` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
       const lbl = f.label.trim().toLowerCase();
-      let want = pick(ruleAttrs, f.label) ?? pick(defaults, f.label) ?? null;
-      // candidates, best first: the user's rule/default, then the extension's own hints (golf → Rubber), then generic fallback
+      let want = pick(ruleAttrs, f.label) ?? null;
+      // candidates, best first: the category rule, the title ("Ages 4-8", "wooden"), the department default (toys → 3 Years+), your default list, then the generic fallback
       const cands = [];
+      const sm = temuDraftSmart(lbl, name, catTxt);
       if (want != null) cands.push(want);
+      if (sm.explicit) cands.push(sm.explicit);
+      if (sm.dept) cands.push(sm.dept);
+      { const dv = pick(defaults, f.label); if (dv != null) cands.push(dv); if (want == null) want = dv ?? sm.explicit ?? sm.dept ?? null; }
       if (lbl === 'material' && /golf|tee\b|tees\b/.test(tl)) cands.push('Rubber');
       if (TEMU_DRAFT_FALLBACKS[lbl]) cands.push(TEMU_DRAFT_FALLBACKS[lbl]);
       if (!cands.length) { notes.push(f.label + ': missing sourced/user-approved value'); stillEmpty++; continue; }
@@ -3219,7 +3278,15 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
         let res = 'no_option';
         for (const c of cands) { res = await temuPickSelectValue(f.sel, c); if (res === 'set' || res === 'already') { want = c; break; } await temuSleep(temuRand(500, 1000)); }
         if (res === 'set' || res === 'already') { changed += res === 'set' ? 1 : 0; notes.push(`${f.label}=${temuSelectCurrent(f.sel) || want}`); }
-        else { notes.push(`${f.label}: (${res}) — tried ${cands.join(' / ')}`); stillEmpty++; }
+        else {
+          // nothing matched: for battery / power style fields pick a "no battery / none" option from the REAL list
+          let done = false;
+          if (/battery|power/.test(lbl)) {
+            const r2 = await temuPickByRegex(f.sel, /^(no battery|without battery|battery not included|not included|no|none|not applicable|n\/a|not required|non-battery)/i);
+            if (r2.text) { notes.push(`${f.label}=${r2.text}`); changed++; done = true; } else if (r2.names.length) notes.push(`${f.label}: options are [${r2.names.slice(0, 8).join(' | ')}]`);
+          }
+          if (!done) { notes.push(`${f.label}: (${res}) — tried ${cands.join(' / ')}`); stillEmpty++; }
+        }
         await temuSleep(temuRand(700, 1600));
       } else if (f.inp) {
         want = cands[0];
@@ -3229,35 +3296,32 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     ok(`${name.slice(0, 45) || 'Product'} [${rule ? rule.name : 'defaults'}${catTxt ? ' · ' + catTxt.split('/').pop() : ''}] → ${notes.join(', ')}`);
   }
   if (autoSubmit) {
-    const allRemaining = rows.flatMap(r => temuRowFields(r)).filter(f => f.required && f.empty);
-    if (stillEmpty > 0 || allRemaining.length > 0) {
-      const remainingCount = Math.max(stillEmpty, allRemaining.length);
-      warn(`${remainingCount} required field(s) still empty — Submit was NOT pressed; fill the fields above on the page and press Submit yourself`);
+    // v9.15 - submit every COMPLETE product (one by one); a product with an empty required field no longer blocks all the others
+    const rowDone = tr => !temuRowFields(tr).some(f => f.required && f.empty);
+    const liveRows = () => { let r = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"], tr[class*="table-body-tr"]')]; if (!r.length) r = [...document.querySelectorAll('tr[class*="TB_father"]')]; return r; };
+    const gid = tr => (tr.textContent.match(/Goods ID:\s*(\d+)/) || [])[1] || (tr.querySelector('[class*="elli_outerWrapper"]')?.textContent || '').trim().slice(0, 60);
+    const submitBtnOf = tr => { const b = tr.querySelector('.btn-3yOxL.primary-2pgGm, [class*="primary"][role="button"], button'); return b && /^submit$/i.test((b.textContent || '').trim()) && temuVisible(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true' && !b.classList.contains('disable-2fw28') ? b : null; };
+    const incomplete = liveRows().filter(r => !rowDone(r));
+    if (incomplete.length) warn(`${incomplete.length} product(s) still have an empty required field - skipped (fill them by hand on the page); all the others are submitted one by one`);
+    zhS('fixing draft — checking before Submit');
+    await temuSleep(temuRand(1500, 3000));
+    const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
+    if (!incomplete.length && bottomBtn && /^submit$/i.test((bottomBtn.textContent || '').trim()) && temuVisible(bottomBtn) && !bottomBtn.disabled && bottomBtn.getAttribute('aria-disabled') !== 'true' && !bottomBtn.classList.contains('disable-2fw28')) {
+      await temuHumanClick(bottomBtn); submitted++;
+      ok('Pressed the main Submit button — check the result on Temu!');
     } else {
-      zhS('fixing draft — checking before Submit');
-      await temuSleep(temuRand(1500, 3000));
-      const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
-      if (bottomBtn && /^submit$/i.test((bottomBtn.textContent || '').trim()) && temuVisible(bottomBtn) && !bottomBtn.disabled && bottomBtn.getAttribute('aria-disabled') !== 'true' && !bottomBtn.classList.contains('disable-2fw28')) {
-        await temuHumanClick(bottomBtn); submitted++;
-        ok('Pressed the main Submit button — check the result on Temu!');
-      } else {
-        let rowClicks = 0;
-        for (const row of rows) {
-          const btn = row.querySelector('.btn-3yOxL.primary-2pgGm, [class*="primary"][role="button"], button');
-          if (btn && /^submit$/i.test((btn.textContent || '').trim()) && temuVisible(btn) && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && !btn.classList.contains('disable-2fw28')) {
-            zhS(`fixing draft — submitting ${rowClicks + 1}/${rows.length}`);
-            await temuHumanClick(btn);
-            rowClicks++; submitted++;
-            await temuSleep(temuRand(1500, 3200));
-          }
-        }
-        if (rowClicks > 0) {
-          ok(`${rowClicks} product(s) par Submit dabaya ✓`);
-        } else {
-          if (bottomBtn) bottomBtn.click();
-          ok('Submit dabaya ✓');
-        }
+      const clicked = new Set(); let rowClicks = 0;
+      for (let guard = 0; guard < 60; guard++) {
+        const target = liveRows().find(tr => rowDone(tr) && !clicked.has(gid(tr)) && submitBtnOf(tr));
+        if (!target) break;
+        clicked.add(gid(target));
+        zhS(`fixing draft — submitting ${rowClicks + 1}`);
+        await temuHumanClick(submitBtnOf(target));
+        rowClicks++; submitted++;
+        await temuSleep(temuRand(2200, 4200));
       }
+      if (rowClicks > 0) ok(`${rowClicks} product(s) submitted ✓`);
+      else warn('No Submit button could be pressed - press it by hand');
     }
   }
   zhS(stillEmpty ? `${stillEmpty} field(s) need you` : 'draft fixed ✓', stillEmpty ? 'error' : 'done');
@@ -3381,6 +3445,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
       try { zhFrame('working', 'ZHunter · checking upload results…'); } catch (_) {}
       temuPageReadFailed(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · check failed ✗' : 'ZHunter · results read ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · check failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
+      return true;
+    }
+    if (message?.action === 'TEMU_SCAN_ATTRS') {
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, rows: [] }); return true; }
+      try { sendResponse(temuPageScanAttrs()); } catch (e) { sendResponse({ success: false, rows: [], error: String(e?.message || e) }); }
       return true;
     }
     if (message?.action === 'TEMU_FIX_DRAFTS') {
@@ -5054,11 +5123,11 @@ chrome.runtime.onMessage.addListener(message => {
     }
     const el = document.createElement('div');
     const color = message.type === 'warn' ? '#FBBF24' : message.type === 'err' ? '#F87171' : '#00E5FF';
-    el.style.cssText = 'font:600 13px Inter,Segoe UI,system-ui,sans-serif;color:#E2E8F0;background:linear-gradient(135deg,rgba(8,20,50,.97),rgba(4,10,28,.98));border:1px solid rgba(0,229,255,.35);border-left:3px solid ' + color + ';border-radius:10px;padding:10px 14px;margin-top:8px;box-shadow:0 16px 48px rgba(0,0,0,.6),0 0 24px rgba(0,229,255,.18);opacity:0;transform:translateY(6px);transition:opacity .18s,transform .18s;max-width:320px;';
+    el.style.cssText = 'font:700 15px Inter,Segoe UI,system-ui,sans-serif;color:#E2E8F0;background:linear-gradient(135deg,rgba(8,20,50,.97),rgba(4,10,28,.98));border:1px solid rgba(0,229,255,.35);border-left:3px solid ' + color + ';border-radius:10px;padding:10px 14px;margin-top:8px;box-shadow:0 16px 48px rgba(0,0,0,.6),0 0 24px rgba(0,229,255,.18);opacity:0;transform:translateY(6px);transition:opacity .18s,transform .18s;max-width:320px;';
     el.textContent = String(message.text || '');
     host.appendChild(el);
     requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; setTimeout(() => el.remove(), 250); }, 2600);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; setTimeout(() => el.remove(), 250); }, 3800);
   } catch (_) {}
 });
 

@@ -9,13 +9,18 @@ importScripts('sourcing_sync.js', 'audit_storage.js', 'product_url_gate.js');
 let _zhExportFolder = true;
 try { chrome.storage.local.get('zhExportFolder', x => { _zhExportFolder = x?.zhExportFolder !== false; }); } catch (_) {}
 try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.zhExportFolder) _zhExportFolder = ch.zhExportFolder.newValue !== false; }); } catch (_) {}
+// v9.15 — blob downloads reach this listener with a random UUID name, which used to REPLACE the real file name (batch name lost). Callers register the wanted name first.
+const _zhDlNames = new Map();
+try { chrome.runtime.onMessage.addListener((m, s, send) => { if (m && m.action === 'ZH_DL_NAME' && m.url && m.filename) { _zhDlNames.set(m.url, String(m.filename)); setTimeout(() => _zhDlNames.delete(m.url), 120000); send({ ok: true }); } }); } catch (_) {}
 try {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     try {
-      const mine = item.byExtensionId === chrome.runtime.id || String(item.url || '').includes('chrome-extension://' + chrome.runtime.id) || String(item.referrer || '').startsWith('chrome-extension://' + chrome.runtime.id);
-      if (!_zhExportFolder || !mine) return;
-      const rel = String(item.filename || 'file').replace(/\\/g, '/').replace(/^\/+/, '');
-      if (/^ZHunter Export\//i.test(rel)) return;
+      const want = _zhDlNames.get(item.url);
+      const mine = !!want || item.byExtensionId === chrome.runtime.id || String(item.url || '').includes('chrome-extension://' + chrome.runtime.id) || String(item.referrer || '').startsWith('chrome-extension://' + chrome.runtime.id);
+      if (!mine) return;
+      const rel = String(want || item.filename || 'file').replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!_zhExportFolder) { if (want) suggest({ filename: rel, conflictAction: 'uniquify' }); return; }
+      if (/^ZHunter Export\//i.test(rel)) { if (want) suggest({ filename: rel, conflictAction: 'uniquify' }); return; }
       const d = new Date(), pad = n => String(n).padStart(2, '0');
       const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
       suggest({ filename: `ZHunter Export/${day}/${rel}`, conflictAction: 'uniquify' });
@@ -60,7 +65,7 @@ const PUBLIC_SETTING_KEYS = new Set([
   'showTabHunt', 'showTabBulk', 'showTabLibrary', 'showTabSettings', 'maxHuntImages',
   'autoCategory', 'duplicateCheck', 'badgeEnabled', 'saveToCurrentFolder',
   'lastFolder', 'bulkFilenamePrefix', 'autoSkipDuplicates', 'bulkAutoCloseTabs', 'bulkTabGroup',
-  'bulkSkipImageDownload', 'zhExportFolder', 'bulkParallelTabs', 'bulkAutoRetry',
+  'bulkSkipImageDownload', 'zhExportFolder', 'bulkParallelTabs', 'queueParallelTabs', 'bulkAutoRetry',
   'imageFormat', 'imageRatio', 'imageBg', 'imageMinSize', 'imageMax5MB',
   'bulkQueueAutoCapture', 'bulkSheetColumns', 'customBulkColumns',
   'temuConfig', 'temuTemplateB64', 'temuTemplateName',
@@ -337,6 +342,8 @@ function normalizeQueueUrl(raw) {
     for (const key of [...u.searchParams.keys()]) {
       if (/^(utm_|gclid$|fbclid$|msclkid$|ref$)/i.test(key)) u.searchParams.delete(key);
     }
+    // v9.15 - on these sites the path alone identifies the product; tracking/variant params only create duplicates in the queue
+    if (/(^|\.)(walmart\.com|amazon\.[a-z.]+|ebay\.[a-z.]+|etsy\.com|aliexpress\.[a-z]+|samsclub\.com)$/i.test(u.hostname)) u.search = '';
     u.searchParams.sort();
     return u.href;
   } catch (_) { return ''; }
@@ -389,7 +396,7 @@ function detectCategory(url) {
       apple: 'Apple', microsoft: 'Microsoft', figma: 'Figma',
       notion: 'Notion', temu: 'Temu', aliexpress: 'AliExpress',
       walmart: 'Walmart', shopify: 'Shopify', shein: 'Shein',
-      daraz: 'Daraz', faire: 'Faire', samsclub: "Sam's Club",
+      daraz: 'Daraz', faire: 'Faire', samsclub: "Sam's Club", bjs: "BJ's",
       alibaba: 'Alibaba', worldwidegolfballs: 'WW Golf Balls',
       worldwidegolfshops: 'WW Golf Shops', worldgolfshop: 'World Golf Shop',
       golf: 'Golf.com', rockbottomgolf: 'Rock Bottom Golf'
@@ -421,7 +428,7 @@ const PRODUCT_HOST_PATTERNS = [
   'amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.fr', 'amazon.it',
   'amazon.es', 'amazon.co.jp', 'amazon.in', 'amazon.com.au', 'amazon.com.mx',
   'amazon.nl', 'amazon.pl', 'amazon.se', 'amazon.sg', 'amazon.ae', 'amazon.sa',
-  'amazon.tr', 'amazon.eg', 'amazon.be', 'walmart.com', 'samsclub.com',
+  'amazon.tr', 'amazon.eg', 'amazon.be', 'walmart.com', 'samsclub.com', 'bjs.com',
   'faire.com', 'alibaba.com', 'aliexpress.com', 'aliexpress.ru', 'temu.com',
   'ebay.com', 'ebay.co.uk', 'ebay.de', 'ebay.ca', 'ebay.com.au', 'ebay.fr',
   'ebay.it', 'ebay.es', 'etsy.com', 'daraz.pk', 'daraz.com.bd', 'daraz.lk',
@@ -1141,6 +1148,50 @@ async function storePendingImageHunt(tabId, tabUrl, tabTitle, imageUrl) {
   } catch (_) {}
 }
 
+// v9.15 - unwrap sponsored/redirect tracking links (Walmart /sp/track?...&rd=<real url>) to the real product URL
+function unwrapTrackingUrl(str) {
+  try {
+    const u = new URL(str);
+    for (const k of ['rd', 'url', 'u', 'redirect', 'redirect_url', 'dest', 'target']) {
+      const v = u.searchParams.get(k);
+      if (!v) continue;
+      let d = v;
+      try { d = decodeURIComponent(v); } catch (_) {}
+      if (/^\//.test(d)) d = u.origin + d;
+      if (/^https?:\/\//i.test(d) && isSupportedProductUrl(d)) return d;
+    }
+    if (/\/(?:sp\/track|track|click|redirect)\b/i.test(u.pathname)) {
+      const m = decodeURIComponent(u.search).match(/(https?:\/\/[^\s&]+\/ip\/[^\s&]+|\/ip\/[^\s&]+)/i);
+      if (m) { const d = m[1].startsWith('/') ? u.origin + m[1] : m[1]; if (isSupportedProductUrl(d)) return d; }
+    }
+  } catch (_) {}
+  return str;
+}
+
+// v9.15 - resolve the product link around the last right-click (ctx_capture.js records nearby links)
+async function zhCtxProduct(tab, frameId) {
+  try {
+    if (tab?.id == null) return {};
+    const target = { tabId: tab.id }; if (Number.isInteger(frameId) && frameId > 0) target.frameIds = [frameId];
+    const res = await chrome.scripting.executeScript({ target, func: () => window.__zhCtx || null });
+    const ctx = res && res[0] && res[0].result;
+    if (!ctx || !Array.isArray(ctx.levels) || Date.now() - (ctx.t || 0) > 60000) return {};
+    for (const level of ctx.levels) {
+      const hits = new Map();
+      for (const l of level) {
+        let u = l.href;
+        if (!isSupportedProductUrl(u)) u = unwrapTrackingUrl(u);
+        if (!isSupportedProductUrl(u)) continue;
+        let key = u; try { const x = new URL(u); key = x.hostname + x.pathname; } catch (_) {}
+        if (!hits.has(key) || (!hits.get(key).title && l.text)) hits.set(key, { url: u, title: l.text || '' });
+      }
+      if (hits.size === 1) return [...hits.values()][0];
+      if (hits.size > 1) return { ambiguous: true };
+    }
+  } catch (_) {}
+  return {};
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   let url = '', title = '';
   switch (info.menuItemId) {
@@ -1157,14 +1208,45 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     default: return;
   }
   if (!url) return;
-  if (!isSupportedProductUrl(url)) { broadcastToast('Not a supported product link', 'warn'); return; }
+  if (!isSupportedProductUrl(url)) url = unwrapTrackingUrl(url);
+  // v9.15 - inject the toast straight into the page (works even if the page was not refreshed after an extension reload)
+  const pageToast = (text, type) => {
+    if (tab?.id == null) return;
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [String(text || ''), String(type || 'ok')],
+      func: (msg, kind) => {
+        let host = document.getElementById('zhunter-page-toast');
+        if (!host) {
+          host = document.createElement('div'); host.id = 'zhunter-page-toast';
+          host.style.cssText = 'position:fixed;right:16px;bottom:96px;z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;gap:6px;align-items:flex-end;';
+          document.documentElement.appendChild(host);
+        }
+        const c = kind === 'warn' ? '#FBBF24' : kind === 'err' ? '#F87171' : '#34D399';
+        const el = document.createElement('div');
+        el.textContent = msg;
+        el.style.cssText = 'font:600 13px Segoe UI,system-ui,sans-serif;color:#fff;background:#0b1220;border:1px solid ' + c + ';border-left:5px solid ' + c + ';padding:8px 14px;border-radius:4px;max-width:260px;box-shadow:0 8px 28px rgba(0,0,0,.45);opacity:0;transition:opacity .2s;';
+        host.appendChild(el);
+        requestAnimationFrame(() => { el.style.opacity = '1'; });
+        setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 250); }, 3500);
+      }
+    }).catch(() => {});
+  };
+  if (!isSupportedProductUrl(url)) url = unwrapTrackingUrl(url);
+  // v9.15 - right-click on a card's price/badge/empty area gives the page (or a non-product link): look at the product links around the click
+  if (!isSupportedProductUrl(url) && info.menuItemId !== 'zh-add-selection') {
+    const found = await zhCtxProduct(tab, info.frameId);
+    if (found.url) { url = found.url; if (found.title) title = found.title; }
+    else if (found.ambiguous) { broadcastToast('Several products here — right-click directly on the product title or picture', 'warn'); pageToast('ZHunter: right-click directly on the product title or picture', 'warn'); return; }
+  }
+  if (!isSupportedProductUrl(url)) { broadcastToast('Not a supported product link', 'warn'); pageToast('ZHunter: not a supported product link', 'warn'); return; }
   const result = await addBulkQueueItems([{ url, title }]);
   let text = '', type = 'ok';
   if (result.success && result.addedCount) { await flashBadgeSuccess(); text = `Added to ZHunter queue (${result.total} waiting)`; }
   else if (result.success) { text = 'Already in the ZHunter queue'; type = 'warn'; }
-  if (!text) return;
+  if (!text) { text = 'ZHunter: could not add this link'; type = 'err'; }
   broadcastToast(text, type);
-  if (tab?.id != null) chrome.tabs.sendMessage(tab.id, { action: 'ZH_PAGE_TOAST', text, type }).catch(() => {});
+  pageToast(text.startsWith('ZHunter') ? text : 'ZHunter: ' + text, type);
 });
 
 // ── MESSAGE ROUTER ───────────────────────────────────────────
@@ -1445,7 +1527,7 @@ async function handleMessage(msg, sender, queueLocked = false) {
               const blobUrl = URL.createObjectURL(blob);
               const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : directExt;
               const result = await new Promise(resolve => {
-                chrome.downloads.download({ url: blobUrl, filename: `${baseName}.${ext}`, saveAs: false, conflictAction: 'uniquify' }, downloadId => {
+                _zhDlNames.set(blobUrl, `${baseName}.${ext}`); chrome.downloads.download({ url: blobUrl, filename: `${baseName}.${ext}`, saveAs: false, conflictAction: 'uniquify' }, downloadId => {
                   const error = chrome.runtime.lastError?.message || '';
                   setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
                   resolve(error || !downloadId ? { success: false, error: error || 'download_not_started' } : { success: true, downloadId });

@@ -1,6 +1,68 @@
 # ZHunter Iras — CHANGELOG
 
-## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- **Edit Studio**: new tick "PACK label" — choose whether the red-and-black "N PACK" label is written on pack images (also stamped when you take a pack image from Flow). Remembered.
+- **Pack label**: the red-and-black "N PACK" label is now stamped in the TOP-RIGHT corner, and the background/scene prompt tells the AI to keep that label untouched.
+- **Titles**: source site names (Amazon, Walmart, eBay, Etsy, BJ's Wholesale Club, Costco, Target, Temu …) are removed from listing titles (prefix "Amazon.com:", suffix "| BJ's Wholesale Club", "at Walmart").
+- **Paste category**: Review card now has a "paste the Temu category" box (path from another profile) — creates/uses that category for the product and remembers it.
+- **BJ's** scraper bug fixed: a missing helper made price + images always come back empty.
+- **BJ's** link hunt (queue): no longer marks partial early — waits up to 90 s for price + photos to appear.
+- **BJ's** slow/VPN loading: hunt now waits up to ~75 s for page load and ~44 s for price + gallery before reading (other sites unchanged).
+- **BJ's** hunt: waits until price + gallery have loaded before reading (fixes "price + images not found"); price now read from the main product only.
+- **BJ's** right-click "Add" on product links now works (bjs.com added to background host list).
+- **BJ's** (bjs.com) product pages now show in Bulk "Open tabs" and can be hunted (added to platform list, auto-scrape list and product-URL gate).
+- **Store export / import**: on Temu "Manage products" tick products → Upload page → More tools → "Store export". Each product's copy page opens in a background tab (read-only, auto-closed), full details are saved as a Temu bulk sheet. In another Chrome, "Import sheet" loads it into editable review cards (title, images, category, price kept as-is). New files: temu_store_copy.js, temu_net_hook.js (manifest content_scripts).
+
+
+
+
+
+
+
+
+
+- Fix drafts auto-submit: one product with an empty required field (e.g. Battery Properties) no longer blocks Submit for ALL others - complete products are submitted one by one, the rest are listed. Draft values are now smarter: Age Group/Material/Power Supply come from the title first (Toys default '3 Years+' instead of the old '14 Years+'), and battery/power dropdowns pick a 'no battery / none' option from the real list (or print the options so we can add it).
+- Smart attributes: export now fills the Keyword Attributes column with the right Temu option words per product (Applicable Age Group from the title e.g. 'Ages 4-8' -> '4 Years+', Material from the title, Power Supply 'Use Without Electricity', plus anything learned for that category). New 'Learn attributes' button (More tools) reads Temu's 'Product action required' page: remembers each category's required attributes + values, adds unknown categories (by full path) and remembers product types.
+- Upload page tidier: Export file only / Learn categories / Fix drafts on Temu / Upload errors now sit in a collapsible 'More tools' section (Mark as listed stays visible when it appears); the Store/Template card returns to one line when you click elsewhere.
+- One built-in Temu general template (temu_template.xlsx, same for every store - only the hidden brand list differed): adding a store no longer asks for a template file; a store's own .xlsx is optional ('Use own .xlsx'). Brands still come from the extension's own brand/trademark settings.
+- Categories tab: new 'Import templates' button - pick one or many Temu bulk-listing template .xlsx files; the hidden 'Category Name' sheet (id + full path) is read and every new category is added (no Temu page, no typing). The extension also LEARNS from your 'Change category' choices (product-type words like 'breakfast bowl', 'waffles') and uses them for later products.
+- Fixed: exported files were saved with a random UUID name (batch name lost). Blob downloads now keep their real name (e.g. temu_upload_<batch>.xlsx) inside ZHunter Export/<date>/.
+- Review card 'Change category' now lists the 3 best guesses first ("Suggested for this product"); Doubtful also when a frozen/canned/dried title sits in a non-frozen/canned/dried category or a non-mix title in a Mix category.
+- Smart categories: 234 new official Temu categories (id + full path, from the sheets in 'Categories template', ~406 total) with product-type words (sausage, waffles, breakfast bowl…); the matcher now SCORES every category (more words, side-by-side words, context like frozen/deli/canned) instead of first-match; Review card marks 'Doubtful' when two categories score about equal. Size/weight of new categories is set per department (editable in Categories tab).
+- Learn categories is now semi-manual: the extension copies the title, YOU paste it in Temu's Product name box, and the extension (read-only) picks up Temu's suggestions the moment they appear. No robotic typing, no page refresh loops.
+- Learn categories: takes Temu's suggestions the moment they appear while typing (after 3+ words) instead of finishing the title; never leaves the name box (so Temu cannot auto-pick a wrong category); clicks "Reselect" first if Temu had auto-picked one.
+- Learn categories: the title is now typed letter by letter with uneven speed (not pasted in one go), so Temu's category suggestion is triggered like a real user.
+- Learn categories recovery now behaves like a person: after the rest, it opens another Temu page (seller home), scrolls a little, waits, then returns to "Add new product" and tries again.
+- Learn categories: slower, calmer pacing (6-12 s between titles; on no suggestion rest 30-60 s, refresh once, retry once) so Temu does not throttle the suggestions.
+- AI: Google Gemini keys (AIza… / AQ.…) can be saved next to Groq / OpenRouter keys; they use Gemini Flash (free tier) via the OpenAI-compatible endpoint, with model fallback and daily-limit parking. Key test supports Gemini.
+- AI: OpenRouter keys (sk-or-…) can be saved next to Groq keys (Settings → AI keys). They use OpenRouter's free models (auto-switch if one is unavailable); a daily-limit hit parks that key for an hour. Key test also checks OpenRouter keys.
+- Title rewrite progress bar + Stop button re-laid out (full-width bar, count left, clear red Stop right).
+- Batch name is now remembered (saved as you type, restored when the panel opens).
+- Learn categories: match words are now the product type taken from the Temu category you pick (e.g. "breakfast bowl") — no more brand / first-3-words ("jimmy dean frozen"); updates when you change the option, and you can still edit it.
+- Learn categories: when Temu gives no suggestion, the extension refreshes the Temu page itself and retries (up to 2 times) instead of stopping.
+- Content Studio: Titles-only (or Titles + others) now writes the TITLE with your own title format/rules (same engine as the Rewrite title button); only ticked fields go to AI.
+- Export: bullets/description that were not rewritten by AI keep the sourcing text with avoid-words removed and a light re-order (e.g. 1st bullet moves to 2nd place) so they are not identical to the source.
+- Light theme: Edit Studio (manual) and AI Image Studio (auto stepper) restyled for light mode — panels, inputs, pack chips, buttons, image cards were grey/white-on-white.
+- Light theme: Temu Upload tab (Title Optimizer, AI Image Studio selects/labels) text was white-on-white because some colour variables had only dark fallbacks; now defined for light mode.
+- Manual Studio: pack prompt now rebuilds for the chosen pack count (3, 4, 6…) — it was stuck on the 2-pack text; ⚡ Paste in Flow pastes exactly the prompt tab that is selected (Image / Pack).
+- Right-click add (all sites): new ctx_capture.js remembers product links around the click, so clicking a card's price/badge/empty area (page menu) or a sponsored/redirect link still adds the right product; several products under one click → asks to click the title/picture. Queue also ignores tracking/variant parameters on Walmart/Amazon/eBay/Etsy/AliExpress/Sam's (no duplicates).
+- Batch name (Upload tab) is now used: it goes into the exported/uploaded file name (temu_upload_<name>.xlsx) and shows as a chip on every History record.
+- Suspicious source price limit raised to $300 (cfg.max_source_price).
+- Pricing: products below the floor get a stable random price between the floor and 299.99 (cfg.price_rand_max); the max (999) now allows up to 999.99.
+- Review cards show each product's category (⚠ when its name shares no word with the title) with a "Change category…" dropdown; the choice is saved per product and used by the export.
+- Pricing: products below the price floor no longer all get the same price (floor + a little by cost + a stable per-product bit, never below the floor); "N Pack - …" titles are priced and sheet-logged on source × N; a source price over $100 (Settings value max_source_price) blocks export with PRICE_SUSPICIOUS so a wrong scraped price is not listed or written to the sheet.
+- Upload: if Temu is still processing after 200s, ZHunter keeps watching the upload (every ~10s, up to 25 min) and marks products + updates History only after Temu says Completed. With errors/Action required: reads failures, marks duplicates as listed, runs Fix drafts automatically, never marks products that failed.
+- Settings: "Flow: auto Generate click" switch (default ON = as before). OFF = Chrome debugger is never used; image + prompt are filled and you press Generate yourself.
+- Hunt (queue) now acts more like a person: irregular 1.5–4s gaps (sometimes longer), a short look-around scroll before reading a page, a 20–60s rest every 12–20 links, and a warning at 150 / 300 links per day.
+- Temu Export: "Learn categories" — for products with no category, the title is pasted into Temu's Add-product page (name box only, nothing submitted), Temu's suggested categories are shown, you pick one and it is saved as a category profile.
+- Flow: the page script (content.js) no longer runs on flow.google.com, so the page is not modified by ZHunter while you work by hand (Flow automation is separate and unchanged).
+- Auto image popup: Pause/Resume and Done (stop here) buttons.
+- Pack images: strict per-count prompt (exact N units, no AI text); extension stamps the correct "N PACK" label itself on the final image.
+- Flow automation: random human-like pauses (1-3s / 2-6s, occasional extra) between attach image, paste prompt and send.
+- Fix: hunt popup kept showing "Incomplete links are being hunted again" during the image download; it now shows "Saving pictures…".
+- Fix: "Unsupported settings: queueParallelTabs" when changing Links at once (setting added to the allowed list).
+- Right-click add: on-page toast now always shows (added / already in queue / not supported), bigger and longer, even with the side panel closed.
+- Right-click "add to queue": sponsored/tracking links (Walmart /sp/track?...&rd=) are unwrapped to the real product link.
 - Temu History: honest statuses — Uploaded / N need fix / Sent — check Temu / Not uploaded / Fixed & listed (after 'Fix drafts on Temu' succeeds the record's errors are cleared and its products are added to the Listed history, so they are skipped in the next export); filter 'Errors' renamed 'Needs fix' and now includes everything not yet listed.
 - Edit Studio: Original and Result shown big side-by-side (click original to zoom), image buttons in a tidy grid, 'auto next' option (moves to the next product after its last picked image is replaced), clearer Prompt fold.
 - Temu Review cards: one-click Pack buttons (1×–12×) set the title, mark the product for image edit, and a '✨ Studio' button opens Edit Studio for that product; Flow batch setup now defaults packed products' main image to 'Pack → Background' with the pack qty.

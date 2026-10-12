@@ -426,6 +426,9 @@ async function zhTextRun(one, titleAction = null) {
               fields.filter(f => f !== 'title').length ? await zhTextGenerate(it.source, fields.filter(f => f !== 'title'), preferences, () => ZhTextStudio.stop) : {})
           : titleAction
           ? { title: await rewriteValidatedTemuTitle(it.source, it.draft.title, titleAction === 'rewrite' ? getTemuOptimizerInstruction(preferences) : temuTitleActionInstruction(titleAction), titleAction === 'rewrite' && !preferences) }
+          : fields.includes('title')
+          ? Object.assign({ title: await rewriteValidatedTemuTitle(it.source, it.draft.title, getTemuOptimizerInstruction(preferences), !preferences) },
+              fields.filter(f => f !== 'title').length ? await zhTextGenerate(it.source, fields.filter(f => f !== 'title'), preferences, () => ZhTextStudio.stop) : {})
           : await zhTextGenerate(it.source, fields, preferences, () => ZhTextStudio.stop);
         if (ZhTextStudio.stop) { it.status = it.touched.size ? 'Draft' : 'Ready'; break; }
         Object.assign(it.draft, output);

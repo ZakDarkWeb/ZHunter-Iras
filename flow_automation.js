@@ -23,6 +23,11 @@
   const log = (...a) => console.log(TAG, ...a);
   const warn = (...a) => console.warn(TAG, ...a);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // v9.15 — Settings → "Flow: auto Generate click (uses Chrome debugger)". OFF = you press Generate yourself; no debugger at all.
+  let DBG_ON = true;
+  async function useDebugger() { try { const v = (await chrome.storage.local.get(['zhFlowUseDebugger']))?.zhFlowUseDebugger; DBG_ON = v !== false; } catch (_) {} return DBG_ON; }
+  // v9.15x — irregular, human-like pauses between the big steps (layered: short 1-3s, long 2-6s, sometimes extra)
+  const rpause = (minS, maxS, why) => { let ms = Math.round((minS + Math.random() * (maxS - minS)) * 1000); if (Math.random() < 0.12) ms += Math.round(1000 + Math.random() * 2500); log('pause', (ms / 1000).toFixed(1) + 's', why || ''); return sleep(ms); };
 
   const ATTACH_TIMEOUT_MS = 60000;   // image upload into the chip
   const START_TIMEOUT_MS = 20000;    // generation must visibly start within this
@@ -302,6 +307,7 @@
 
   async function cdpClickEl(el) {
     if (!el || !el.isConnected) return false;
+    if (!DBG_ON) return false;
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
     await sleep(120);
     const r = el.getBoundingClientRect();
@@ -618,7 +624,14 @@
       ['trusted CDP click', cdpGenClick, START_TIMEOUT_MS]
     ];
     let ok = false;
-    for (const [name, fn, wait] of attempts) {
+    const dbgOn = await useDebugger();
+    if (!dbgOn) {
+      updateFlowHUD('ZHunter: image + prompt ready — press Generate in Flow yourself', 'warn');
+      reportStatus(job, 'prompt', '✋ Press Generate in Flow — image and prompt are ready', false);
+      ok = !!(await waitFor(started, 10 * 60000, 300));
+      if (!ok) throw new JobError('Generate was not pressed within 10 minutes');
+    }
+    for (const [name, fn, wait] of (dbgOn ? attempts : [])) {
       if (await waitFor(started, 300, 100)) { ok = true; break; }
       log('Start generation via', name);
       await fn();
@@ -686,6 +699,7 @@
   let runningJobId = null;
 
   async function runJob(job) {
+    await useDebugger();
     runningJobId = job.jobId;
     job.shortTitle = (job.productTitle || 'Product').slice(0, 30);
     log('Job start', job.jobId, job.productTitle, 'img#', job.imageIndex);
@@ -701,11 +715,14 @@
       await ensureSettings();
       await clearPromptBox();
 
+      await rpause(1, 3, 'before image');
       reportStatus(job, 'image', `ZHunter: image attach · ${job.shortTitle}`);
       await attachImage(job);
+      await rpause(2, 6, 'after image');
 
       reportStatus(job, 'prompt', 'ZHunter: prompt paste');
       await injectPrompt(job.prompt);
+      await rpause(2, 6, 'before send');
 
       const res = await generateAndCapture(job);
       if (res.cancelled) {
