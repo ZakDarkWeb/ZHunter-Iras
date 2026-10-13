@@ -3399,29 +3399,35 @@ async function uploadImageToPublicHost(source) {
     }
     if (!cleanB64) return source;
 
-    const postData = 'key=6d207e02198a847aa98d0a2a901485a5&action=upload&source=' + encodeURIComponent(cleanB64) + '&format=json';
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const uploadRes = await fetch('https://freeimage.host/api/1/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: postData,
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-
-    if (uploadRes.ok) {
-      const json = await uploadRes.json();
-      if (json?.image?.url) {
-        return json.image.url;
+    // up to 3 tries: longer wait each time, smaller image on the retries (a slow/large upload used to time out → DOMException)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let b64 = cleanB64;
+      if (attempt > 1) {
+        try { const smaller = await compressBase64Image(processedSource, attempt === 2 ? 1200 : 1000, 0.85); b64 = (smaller.split(',')[1] || cleanB64); } catch (_) {}
       }
+      const postData = 'key=6d207e02198a847aa98d0a2a901485a5&action=upload&source=' + encodeURIComponent(b64) + '&format=json';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000 + attempt * 15000);
+      try {
+        const uploadRes = await fetch('https://freeimage.host/api/1/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: postData,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (uploadRes.ok) {
+          const json = await uploadRes.json();
+          if (json?.image?.url) return json.image.url;
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        console.log('[ZHunter] Public image upload attempt ' + attempt + ' failed:', err?.name || '', err?.message || '');
+      }
+      await new Promise(r => setTimeout(r, 800 * attempt));
     }
   } catch (err) {
-    console.warn('[ZHunter] Public image upload error:', err);
+    console.log('[ZHunter] Public image upload error:', err?.name || '', err?.message || String(err));
   }
   return source;
 }

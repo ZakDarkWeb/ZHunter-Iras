@@ -278,7 +278,7 @@
       showGptHUD('ZHunter: sending titles to ChatGPT…', 'info');
       if (job.newChat && job.prompt) {
         const first = await askChatGpt(job, job.prompt, 'Prompt');
-        if (!/done/i.test(first)) console.warn('[ZHunter GPT] First reply was not DONE:', first.slice(0, 80));
+        if (!/done/i.test(first)) console.log('[ZHunter GPT] First reply was not DONE:', first.slice(0, 80));
         await sleep(1500);
       }
       const reply = await askChatGpt(job, job.text, 'Titles');
