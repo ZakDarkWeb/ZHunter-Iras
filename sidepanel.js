@@ -13030,7 +13030,7 @@ async function temuRunExport(opts = {}) {
     // v9.3.1: listed-history ab sirf CONFIRMED upload ke baad mark hoti hai (export-only par nahi).
     { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Mark ${n} as listed`; } }
     zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile());
-    if (!opts.forUpload) { try { await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); } catch (_) {} }
+    if (!opts.forUpload) { try { const _hid = await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); await temuHistKeepFile(_hid, out, temuBatchFile()); } catch (_) {} }
     const lines = items.map(it => `${it.sku}  ${it.brand || '—'}  ${it.vtype || 'Color'}: ${it.color}  ${it.weight}lb(${it.wsrc || '?'})  img=${it.images.length}  $${it.base ?? '—'}${it.pxLabel ? ' ' + it.pxLabel : ''}  bullets=${(it.bullets || []).length}${it.warn.length ? '  ⚠ ' + it.warn.join(',') : ''}`);
     say(`✓ ${n} products → temu_upload.xlsx\n` + (skipped.length ? `Skipped: ${skipped.length} (${skipped.slice(0,3).join('; ')}${skipped.length>3?'…':''})\n` : '') + lines.join('\n'));
     toast(`Temu file ready — ${n} products`, 'ok');
@@ -13111,6 +13111,7 @@ async function temuAutoUploadJob() {
       histId = await temuHistAdd({ kind: 'upload', store: uploadSnapshot.store, n: uploadSnapshot.items.length, skipped: (uploadSnapshot.skipped || []).length,
         source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', confirmed: !!(result?.success && result?.confirmed), uploadId: idm ? idm[1] : '',
         added: result?.added ?? (rm ? +rm[2] : null), errors: result?.errors ?? (rm ? +rm[3] : null), items: temuHistItems(uploadSnapshot.items), skippedList: (uploadSnapshot.skipped || []).slice(0, 300) });
+      await temuHistKeepFile(histId, uploadSnapshot.bytes, temuBatchFile());
     } catch (_) {}
     const completeBatch = result?.success && result?.confirmed && result.status === 'Completed' && result.errors === 0 && result.processed === uploadSnapshot.items.length && result.added === uploadSnapshot.items.length;
     if (completeBatch) {
@@ -13472,6 +13473,41 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false } 
 }
 
 // ── v9.7.0 Temu upload history (chrome.storage.local.temuUploadHistory, max 100) ──
+// ── History files: the xlsx of each export / upload is kept in IndexedDB (not in chrome.storage → no slowdown) ──
+const ZhFiles = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const rq = indexedDB.open('zhunter_files', 1);
+    rq.onupgradeneeded = () => { rq.result.createObjectStore('files'); };
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  }));
+  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('files', mode); const st = t.objectStore('files'); const r = fn(st); t.oncomplete = () => res(r && 'result' in r ? r.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); };
+  return {
+    put: (id, blob, name) => tx('readwrite', st => st.put({ blob, name, size: blob.size, at: Date.now() }, id)),
+    get: (id) => tx('readonly', st => st.get(id)),
+    del: (id) => tx('readwrite', st => st.delete(id)),
+    keys: () => tx('readonly', st => st.getAllKeys()),
+    putRaw: (id, val) => tx('readwrite', st => st.put(val, id)),
+    getRaw: (id) => tx('readonly', st => st.get(id)),
+  };
+})();
+async function temuHistKeepFile(histId, bytes, name) {   // save the xlsx for a history record (never blocks the export if it fails)
+  try {
+    if (!histId || !bytes) return;
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    await ZhFiles.put(histId, blob, name || 'temu_upload.xlsx');
+    await temuHistPatch(histId, { fileName: name || 'temu_upload.xlsx', fileSize: blob.size });
+    // clean up files whose history record no longer exists
+    const ids = new Set((await temuHistGet()).map(h => h.id)); const ks = await ZhFiles.keys();
+    for (const k of ks) if (!ids.has(k) && k !== 'sheet_state') await ZhFiles.del(k);
+    { // only the newest 50 files are kept (older records stay in History, just without the file)
+      const list = await temuHistGet(); const keep = new Set(list.slice(0, 50).map(h => h.id));
+      let drop = false;
+      for (const h of list) if (h.fileName && !keep.has(h.id)) { try { await ZhFiles.del(h.id); } catch (_) {} delete h.fileName; delete h.fileSize; drop = true; }
+      if (drop) await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r));
+    }
+  } catch (e) { console.log('[ZHunter] history file not saved', e?.message || e); }
+}
 async function temuHistGet() { return new Promise(r => chrome.storage.local.get('temuUploadHistory', x => r(Array.isArray(x?.temuUploadHistory) ? x.temuUploadHistory : []))); }
 // v9.15 — optional batch name typed on the Upload tab (used in file name + History)
 function temuBatchName() { return (document.getElementById('temuBatchNameInp')?.value || '').trim().slice(0, 60); }
@@ -13684,6 +13720,7 @@ async function temuRenderHistory() {
         </div>
         <div class="temu-hist-acts">
           ${(h.kind === 'upload' && !h.fixedAt && !(h.confirmed && !(h.errors > 0))) ? '<button class="btn btn-ghost btn-xs" type="button" data-act="mark" title="Temu has finished this upload — mark its products as listed">✓ Mark listed</button>' : ''}
+          ${h.fileName ? `<button class="btn btn-ghost btn-xs" type="button" data-act="xlsx" title="Download the Temu upload file (${esc(h.fileName)}${h.fileSize ? ', ' + Math.max(1, Math.round(h.fileSize / 1024)) + ' KB' : ''})">XLSX</button>` : ''}
           <button class="btn btn-ghost btn-xs temu-hist-csv-btn" type="button" data-act="csv" title="Download record CSV">CSV</button>
           <button class="btn btn-ghost btn-xs btn-danger temu-hist-del-btn" type="button" data-act="del" title="Delete this history record">Delete</button>
         </div>
@@ -13697,6 +13734,13 @@ async function temuRenderHistory() {
       await temuHistPatch(h.id, { confirmed: true, errors: 0, fixedAt: Date.now() });
       temuUpdateSrcInfo(); toast(`✓ ${its.length} products marked as listed`, 'ok');
     });
+    el.querySelector('[data-act="xlsx"]')?.addEventListener('click', async () => {
+      try {
+        const f = await ZhFiles.get(h.id);
+        if (!f?.blob) { toast('The file is no longer stored for this record', 'warn'); return; }
+        await zhSaveBlob(f.blob, f.name || h.fileName || 'temu_upload.xlsx');
+      } catch (e) { toast('Could not read the file: ' + (e?.message || e), 'warn'); }
+    });
     el.querySelector('[data-act="csv"]').addEventListener('click', () => {
       const lines = [['SKU', 'Title', 'URL', 'Base Price', 'Variation'].join(',')].concat((h.items || []).map(it => [it.sku, it.title, it.url, it.base, it.variation].map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')));
       zhSaveBlob(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }), `temu_upload_${h.store || 'store'}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`);
@@ -13707,6 +13751,7 @@ async function temuRenderHistory() {
       const allHist = await temuHistGet();
       const nextHist = allHist.filter(x => (h.id ? x.id !== h.id : x.t !== h.t));
       await new Promise(r => chrome.storage.local.set({ temuUploadHistory: nextHist }, r));
+      try { if (h.id) await ZhFiles.del(h.id); } catch (_) {}
       temuRenderHistory();
       toast('History record deleted ✓', 'ok');
     });
@@ -18965,42 +19010,44 @@ async function temuLearnCategories() {
 
 // ══ Imported sheet survives a Reload / closing the panel ═══════════════════════════
 // The rows of an imported sheet (titles, edited images, categories) used to live only in memory. They are now saved
-// automatically (storage key zhTemuSheetState) and restored when the panel opens. Expiring Flow image links are
-// converted to real image data while they are still valid, so edits never "expire".
+// automatically in IndexedDB (not chrome.storage → no slowdown) and restored when the panel opens. Expiring Flow image
+// links are turned into (compressed) image data while they are still valid, so edits never "expire".
 (function zhSheetPersistInit() {
-  const KEY = 'zhTemuSheetState';
+  const KEY = 'sheet_state';
   let lastSig = '', busy = false;
   const sigOf = rows => (rows || []).map(r => [r.id, r.title, r.price, r.copyCat, (r.images || []).map(u => String(u).length + ':' + String(u).slice(-14)).join(',')].join('|')).join('~');
   async function freezeFlowImages(rows) {
-    let changed = false;
     for (const r of rows) {
       if (!Array.isArray(r.images)) continue;
       for (let i = 0; i < r.images.length; i++) {
         const u = r.images[i];
         if (typeof u === 'string' && /^https:\/\/flow-content\.google\//i.test(u)) {
-          try { const res = await msg({ action: 'FETCH_FLOW_IMAGE', url: u }); if (res?.success && res.base64) { r.images[i] = res.base64; changed = true; } } catch (_) {}
+          try {
+            const res = await msg({ action: 'FETCH_FLOW_IMAGE', url: u });
+            if (res?.success && res.base64) { let d = res.base64; try { d = await compressBase64Image(d, 1500, 0.9); } catch (_) {} r.images[i] = d; }
+          } catch (_) {}
         }
       }
     }
-    return changed;
   }
   async function save() {
     if (busy) return; busy = true;
     try {
       const rows = (typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) ? TemuSheetRows : null;
-      if (!rows || !rows.length) { if (lastSig && lastSig !== 'EMPTY') { lastSig = 'EMPTY'; await chrome.storage.local.remove(KEY); } return; }
+      if (!rows || !rows.length) { if (lastSig && lastSig !== 'EMPTY') { lastSig = 'EMPTY'; await ZhFiles.del(KEY); } return; }
+      const sig0 = sigOf(rows);
+      if (sig0 === lastSig) return;            // nothing changed → no work at all
       await freezeFlowImages(rows);
       const sig = sigOf(rows);
-      if (sig === lastSig) return;
       const opt = document.querySelector('#temuSource option[value="sheet"]');
-      await chrome.storage.local.set({ [KEY]: { rows, label: opt ? opt.textContent : `Imported sheet (${rows.length})`, savedAt: Date.now() } });
+      await ZhFiles.putRaw(KEY, { rows, label: opt ? opt.textContent : `Imported sheet (${rows.length})`, savedAt: Date.now() });
       lastSig = sig;
-    } catch (e) { console.warn('[ZHunter] sheet autosave', e); } finally { busy = false; }
+    } catch (e) { console.log('[ZHunter] sheet autosave', e?.message || e); } finally { busy = false; }
   }
   async function restore() {
     try {
       if (typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows) && TemuSheetRows.length) return;
-      const st = (await chrome.storage.local.get([KEY]))?.[KEY];
+      const st = await ZhFiles.getRaw(KEY);
       if (!st || !Array.isArray(st.rows) || !st.rows.length) return;
       TemuSheetRows = st.rows; TemuLast = null;
       lastSig = sigOf(TemuSheetRows);
@@ -19009,7 +19056,7 @@ async function temuLearnCategories() {
       try { temuUpdateSrcInfo(); } catch (_) {}
       try { temuRenderReview(); } catch (_) {}
       try { toast(`Restored your imported sheet — ${st.rows.length} products (edits kept)`, 'ok'); } catch (_) {}
-    } catch (e) { console.warn('[ZHunter] sheet restore', e); }
+    } catch (e) { console.log('[ZHunter] sheet restore', e?.message || e); }
   }
   setTimeout(restore, 1800);
   setInterval(save, 4000);
