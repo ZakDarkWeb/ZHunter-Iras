@@ -15,7 +15,7 @@
       <div class="brand-meta"><span class="brand-version" data-version>v9.15.0</span></div>
     </div>
     <div class="sp"></div>
-    <button id="topTemuStorePill" class="hdr-pill-btn temu-top-pill" type="button" title="Open Temu Export">
+    <button id="topTemuStorePill" class="hdr-pill-btn temu-top-pill" type="button" title="Open Temu Export" style="display:none" hidden>
       <span class="temu-pill-ico"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span>
       <span class="temu-pill-name">Temu Export</span>
     </button>
@@ -402,6 +402,7 @@
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Visible Tabs</span>
       <div class="set" id="visibleTabsSet">
+        <div class="it"><div class="l"><b>Temu Export</b><span>Upload, Temu settings and categories window</span></div><button id="settingsTemuOpenBtn" class="btn btn-primary btn-xs" type="button">Open Temu Export</button></div>
         <div class="it"><div class="l"><b>Hunt tab</b><span>Show single-page image & video hunting tab</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabHunt" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Bulk tab</b><span>Show multi-tab bulk hunting queue</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabBulk" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Library tab</b><span>Show hunted products & export library</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabLibrary" checked><span class="sw"></span></label></div>
@@ -1837,6 +1838,7 @@
         <img id="temuStepImg" src="" alt="Current image" class="tsp-img" />
         <div class="tsp-info">
           <div id="temuStepProdName" class="tsp-name">Product Title</div>
+          <div id="temuStepTimer" class="tsp-status" style="opacity:.85;font-variant-numeric:tabular-nums">⏱ 00:00</div>
           <div id="temuStepStatus" class="tsp-status">Sent to Flow tab with prompt &amp; Nano Banana 2...</div>
         </div>
       </div>

@@ -2,6 +2,9 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Image Studio: live timer (total time + average per image) while Flow edits run; summary shown at the end.
+- Header "Temu Export" button hidden; the window opens from Settings tab → "Open Temu Export" (still in the XLSX dropdown too).
+
 - Flow: Generate click is now human-like (random spot inside the button, random mouse path, 0.3–1.2 s hesitation, random press length). Gaps between images are random (Safe 8–20 s / Normal 4–10 s / Fast 1.5–4 s) plus a short random break every 6–20 images (10–60 s).
 - **Edit Studio**: new tick "PACK label" — choose whether the red-and-black "N PACK" label is written on pack images (also stamped when you take a pack image from Flow). Remembered.
 - **Pack label**: the red-and-black "N PACK" label is now stamped in the TOP-RIGHT corner, and the background/scene prompt tells the AI to keep that label untouched.

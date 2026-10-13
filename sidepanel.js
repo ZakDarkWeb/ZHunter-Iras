@@ -15750,11 +15750,40 @@ async function temuStartBulkImageEdit(opts = {}) {
     prompt,
     activeJobId: null,
     running: true,
+    startedAt: Date.now(),
     stats: { done: 0, skipped: 0 }
   };
+  zhStepTimerStart();
 
   temuStepOpenModal();
   await temuStepProcessCurrent();
+}
+
+// v9.15.0 — timer: live clock while the image studio runs, summary (total + average per image) at the end
+let _zhStepTimerId = null;
+function zhFmtDur(ms) {
+  const t = Math.max(0, Math.round(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s` : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+function zhStepTimerStart() {
+  clearInterval(_zhStepTimerId);
+  const tick = () => {
+    const el = $('temuStepTimer'); const S = TemuImgStepper;
+    if (!el || !S?.startedAt) return;
+    if (!S.running) { clearInterval(_zhStepTimerId); _zhStepTimerId = null; return; }
+    const done = S.stats?.done || 0;
+    el.textContent = `⏱ ${zhFmtDur(Date.now() - S.startedAt)}` + (done ? ` · ${done} done · avg ${zhFmtDur((Date.now() - S.startedAt) / done)}/image` : '');
+  };
+  tick(); _zhStepTimerId = setInterval(tick, 1000);
+}
+function zhStepTimerStop() {
+  clearInterval(_zhStepTimerId); _zhStepTimerId = null;
+  const S = TemuImgStepper, el = $('temuStepTimer');
+  if (!S?.startedAt) return '';
+  const total = Date.now() - S.startedAt, done = S.stats?.done || 0;
+  const txt = `⏱ Total ${zhFmtDur(total)}` + (done ? ` · average ${zhFmtDur(total / done)} per image (${done} images)` : '');
+  if (el) el.textContent = txt;
+  return txt;
 }
 
 function temuStepCancelActiveJob() {
@@ -16187,9 +16216,10 @@ async function temuStepFinish() {
   temuStepCancelActiveJob();
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
+  const timeTxt = zhStepTimerStop();
   if (TemuImgStepper.engine === 'flow') {
     const sk = stats?.skipped || 0;
-    temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}`, 'ok');
+    temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
     const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · Done ✅`;
     await new Promise(r => setTimeout(r, 2500));
   }
@@ -16197,7 +16227,7 @@ async function temuStepFinish() {
   await temuRenderReview();
   if (TemuImgStepper.engine === 'flow') {
     const skipped = stats?.skipped || 0;
-    toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)`, 'ok');
+    toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
   } else {
     toast('🎉 All selected images processed successfully!', 'ok');
   }
@@ -16488,7 +16518,7 @@ function initTemuExport() {
     const tb = e.target.closest('#temuModal .temu-tab'); if (tb) { temuSwitchTab(tb.dataset.ttab); return; }
     if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) {} }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
-    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
+    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill') || e.target.closest('#settingsTemuOpenBtn')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
 
     // Categories & Catalog events
     const deptBtn = e.target.closest('#temuCatDeptBar .temu-cat-dept-btn');
