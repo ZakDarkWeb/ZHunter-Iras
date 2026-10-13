@@ -48,6 +48,26 @@
       return oo.apply(this, arguments);
     };
   } catch (_) {}
+  // Some rows (e.g. "Incomplete" products) open the copy page through a link click instead of window.open — capture that too.
+  try {
+    document.addEventListener('click', (e) => {
+      try {
+        const de = document.documentElement;
+        if (!de || de.getAttribute('data-zc-capture') !== '1') return;
+        const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+        const h = a && a.getAttribute('href');
+        if (h && !/^(#|javascript:)/i.test(h)) { e.preventDefault(); e.stopPropagation(); de.setAttribute('data-zc-url', h); }
+      } catch (_) {}
+    }, true);
+    const ac = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      try {
+        const de = document.documentElement; const h = this.getAttribute('href');
+        if (de && de.getAttribute('data-zc-capture') === '1' && h && !/^(#|javascript:)/i.test(h)) { de.setAttribute('data-zc-url', h); return; }
+      } catch (_) {}
+      return ac.apply(this, arguments);
+    };
+  } catch (_) {}
   // The page's own "Leave site?" warning is skipped only while the extension closes its helper tab (data-zc-closing)
   try {
     const oa = EventTarget.prototype.addEventListener, orm = EventTarget.prototype.removeEventListener, map = new WeakMap();

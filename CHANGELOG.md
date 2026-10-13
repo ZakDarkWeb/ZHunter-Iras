@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Store export: also captures copy links opened through a link click (Incomplete products), uses the tab Temu opens itself as a fallback, and the error now lists the menu items found.
 - Hunt (open tabs): a product page with 2 images is now accepted as complete on the first look (no more "fewer than 3 images" retry for it).
 - Hunt recovery: tabs that are already open and loaded are no longer refreshed (only sleeping or unloaded tabs are reloaded) — fixes pages breaking (e.g. Temu "sold out") after a retry.
 - ChatGPT Auto: ignores the hidden "ChatGPT said:" line (fixes count mismatch).

@@ -12818,9 +12818,13 @@ async function temuStoreExport() {
       let t2 = null, data = null;
       try {
         // press the row's own "More → Copy Listing"; Temu's exact copy link is captured and opened here (a scripted click would be popup-blocked)
-        const op = await send(tab.id, { action: 'ZC_OPEN_COPY', goodsId: p.goodsId }, 14000);
+        let _newTab = null; const _onNew = (nt) => { if (nt.openerTabId === tab.id || /seller\.temu\.com/.test(nt.pendingUrl || nt.url || '')) _newTab = nt; };
+        chrome.tabs.onCreated.addListener(_onNew);
+        let op = await send(tab.id, { action: 'ZC_OPEN_COPY', goodsId: p.goodsId }, 14000);
+        chrome.tabs.onCreated.removeListener(_onNew);
+        if (!op?.ok && _newTab) { t2 = _newTab; op = { ok: true, url: null, viaTab: true }; }   // Temu opened the copy page itself — use that tab
         if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button was not pressed (${op?.error || 'no answer'})`);
-        else t2 = await chrome.tabs.create({ url: new URL(op.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId });
+        else if (!op.viaTab) t2 = await chrome.tabs.create({ url: new URL(op.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId });
         if (t2 && await ready(t2.id, 40)) { const r = await send(t2.id, { action: 'ZC_COPY_SCRAPE' }, 120000); data = r?.data || null; }
       } catch (_) {}
       if (t2) { const closed = await temuCloseCopyTab(t2.id); if (!closed) problems.push('Tab did not close (Temu asked "leave?") — close it manually'); }

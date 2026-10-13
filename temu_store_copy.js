@@ -200,7 +200,11 @@
     item.click();
     const url = await waitFor(() => de.getAttribute('data-zc-url'), 6000, 150);
     de.removeAttribute('data-zc-capture');
-    if (!url) return { ok: false, error: 'Temu did not give a copy link' };
+    if (!url) { const ah = item.querySelector('a[href]')?.getAttribute('href'); if (ah && !/^(#|javascript:)/i.test(ah)) return { ok: true, url: ah, label: (item.textContent || '').trim() }; }
+    if (!url) {
+      const menu = [...document.querySelectorAll('li[class*="cIL_item"]')].filter(vis).map(li => (li.textContent || '').trim()).slice(0, 6).join(' / ');
+      return { ok: false, error: 'Temu did not give a copy link' + (menu ? ' [menu: ' + menu + ']' : ''), tabHint: true };
+    }
     return { ok: true, url, label: (item.textContent || '').trim() };
   }
 
