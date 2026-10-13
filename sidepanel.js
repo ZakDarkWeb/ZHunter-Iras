@@ -18874,8 +18874,10 @@ async function temuLearnCategories() {
   rows = JSON.parse(JSON.stringify(rows));
   const { items } = temuEnrich(rows, cfg0);
   const todo = [], seen = new Set();
-  items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE')).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
-  if (!todo.length) { toast('All products already have a category ✓', 'ok'); return; }
+  const doubtfulIt = (it, cfgX) => { try { const pr = Object.values(cfgX.category_profiles || {}).find(q => String(q.category_keyword || '').toLowerCase() === String(it.category_keyword || '').toLowerCase()); return temuCatDoubtful(it.title, pr); } catch (_) { return false; } };
+  // products with no category AND products whose category looks doubtful (the ⚠ ones) are checked against Temu's own suggestions
+  items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
+  if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
   TlcState = { running: true, stop: false };
   const modal = $('temuLearnModal'); modal.classList.remove('hidden');
   $('tlcClose').onclick = () => { TlcState.stop = true; modal.classList.add('hidden'); };
@@ -18886,7 +18888,7 @@ async function temuLearnCategories() {
     for (const it of todo) {
       if (TlcState.stop) break;
       let cfg = temuGetCfg();
-      if (temuProfileFor(it.title, cfg)[0]) continue;      // an earlier pick already covers this one
+      { const cur = temuProfileFor(it.title, cfg); if (cur[0] && !doubtfulIt({ title: it.title, category_keyword: cur[1].category_keyword }, cfg)) continue; }   // an earlier pick already covers this one
       k++;
       $('tlcCount').textContent = `${k} / ${todo.length}`; $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
       // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
