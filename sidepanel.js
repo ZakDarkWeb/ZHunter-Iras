@@ -18956,3 +18956,56 @@ async function temuLearnCategories() {
     });
   } catch (_) {}
 })();
+
+// ══ Imported sheet survives a Reload / closing the panel ═══════════════════════════
+// The rows of an imported sheet (titles, edited images, categories) used to live only in memory. They are now saved
+// automatically (storage key zhTemuSheetState) and restored when the panel opens. Expiring Flow image links are
+// converted to real image data while they are still valid, so edits never "expire".
+(function zhSheetPersistInit() {
+  const KEY = 'zhTemuSheetState';
+  let lastSig = '', busy = false;
+  const sigOf = rows => (rows || []).map(r => [r.id, r.title, r.price, r.copyCat, (r.images || []).map(u => String(u).length + ':' + String(u).slice(-14)).join(',')].join('|')).join('~');
+  async function freezeFlowImages(rows) {
+    let changed = false;
+    for (const r of rows) {
+      if (!Array.isArray(r.images)) continue;
+      for (let i = 0; i < r.images.length; i++) {
+        const u = r.images[i];
+        if (typeof u === 'string' && /^https:\/\/flow-content\.google\//i.test(u)) {
+          try { const res = await msg({ action: 'FETCH_FLOW_IMAGE', url: u }); if (res?.success && res.base64) { r.images[i] = res.base64; changed = true; } } catch (_) {}
+        }
+      }
+    }
+    return changed;
+  }
+  async function save() {
+    if (busy) return; busy = true;
+    try {
+      const rows = (typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows)) ? TemuSheetRows : null;
+      if (!rows || !rows.length) { if (lastSig && lastSig !== 'EMPTY') { lastSig = 'EMPTY'; await chrome.storage.local.remove(KEY); } return; }
+      await freezeFlowImages(rows);
+      const sig = sigOf(rows);
+      if (sig === lastSig) return;
+      const opt = document.querySelector('#temuSource option[value="sheet"]');
+      await chrome.storage.local.set({ [KEY]: { rows, label: opt ? opt.textContent : `Imported sheet (${rows.length})`, savedAt: Date.now() } });
+      lastSig = sig;
+    } catch (e) { console.warn('[ZHunter] sheet autosave', e); } finally { busy = false; }
+  }
+  async function restore() {
+    try {
+      if (typeof TemuSheetRows !== 'undefined' && Array.isArray(TemuSheetRows) && TemuSheetRows.length) return;
+      const st = (await chrome.storage.local.get([KEY]))?.[KEY];
+      if (!st || !Array.isArray(st.rows) || !st.rows.length) return;
+      TemuSheetRows = st.rows; TemuLast = null;
+      lastSig = sigOf(TemuSheetRows);
+      const sel = $('temuSource');
+      if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = st.label || `Imported sheet (${st.rows.length})`; } sel.value = 'sheet'; }
+      try { temuUpdateSrcInfo(); } catch (_) {}
+      try { temuRenderReview(); } catch (_) {}
+      try { toast(`Restored your imported sheet — ${st.rows.length} products (edits kept)`, 'ok'); } catch (_) {}
+    } catch (e) { console.warn('[ZHunter] sheet restore', e); }
+  }
+  setTimeout(restore, 1800);
+  setInterval(save, 4000);
+  window.addEventListener('pagehide', () => { try { save(); } catch (_) {} });
+})();
