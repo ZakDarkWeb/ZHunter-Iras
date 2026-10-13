@@ -873,7 +873,7 @@
     await waitFor(() => Q.chips(Q.promptRoot()).every(c => c.getAttribute('aria-busy') !== 'true'), ATTACH_TIMEOUT_MS, 250);
     if (prompt) { try { await injectPrompt(prompt); } catch (_) {} }
     Q.editor(Q.promptRoot())?.focus();
-    updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — ab Generate dabayein`, added ? 'ok' : 'warn');
+    updateFlowHUD(`✓ ${added}/${images.length} images${prompt ? ' + prompt' : ''} — now press Generate`, added ? 'ok' : 'warn');
     return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images were not added to the prompt box' };
   }
 

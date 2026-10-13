@@ -5104,7 +5104,7 @@ function initGroqStudio() {
     if (deadKeys.length > 0) {
       summaryHtml += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;align-items:center;">
         <button type="button" id="groqRemoveDeadKeysBtn" class="btn btn-warn btn-xs">🗑️ Remove ${deadKeys.length} Dead Key(s)</button>
-        <span style="font-size:10px;color:var(--text-sec,#94a3b8);">Kharab keys list se hatakar save karein</span>
+        <span style="font-size:10px;color:var(--text-sec,#94a3b8);">Remove the bad keys from the list and save</span>
       </div>`;
     }
 
@@ -5120,7 +5120,7 @@ function initGroqStudio() {
         if ($('groqApiKeysInput')) $('groqApiKeysInput').value = finalKeys.join('\n');
         if ($('groqKeyStatus')) $('groqKeyStatus').textContent = `${finalKeys.length} active keys`;
         out.innerHTML = `<div style="color:#10b981;font-weight:600;">✓ Dead keys removed! ${finalKeys.length} active key(s) remain.</div>`;
-        toast(`${deadKeys.length} dead keys remove ho gayin!`, 'ok');
+        toast(`${deadKeys.length} dead keys removed!`, 'ok');
       });
     }
 
@@ -12800,39 +12800,39 @@ async function temuStoreExport() {
     const all = await chrome.tabs.query({ url: 'https://seller.temu.com/*' });
     const lst = all.filter(t => /\/products\.html/.test(t.url || ''));
     const tab = lst.find(t => t.active) || lst[0];
-    if (!tab) { say('Pehle Temu "Manage products" page kholein aur jo products chahiye un par tick lagayein.'); return; }
-    if (!(await ready(tab.id, 8))) { say('✗ Temu page se connect nahi hua. Page refresh karke dobara try karein.'); return; }
+    if (!tab) { say('First open the Temu "Manage products" page and tick the products you want.'); return; }
+    if (!(await ready(tab.id, 8))) { say('✗ Could not connect to the Temu page. Refresh the page and try again.'); return; }
     const sel = await send(tab.id, { action: 'ZC_LIST_SELECTED' });
     const picks = sel?.rows || [];
-    if (!picks.length) { say('Koi product tick nahi hai. Manage products me products select karein, phir dobara dabayein.'); return; }
+    if (!picks.length) { say('No product is ticked. Select products in Manage products, then press again.'); return; }
     const done = [], problems = [];
     let zcSess = ''; try { zcSess = new URL(tab.url).searchParams.get('_x_sessn_id') || ''; } catch (_) {}
     for (let i = 0; i < picks.length; i++) {
       const p = picks[i];
-      say(`Reading ${i + 1}/${picks.length}: ${(p.title || p.goodsId).slice(0, 50)}…\n(page background me khulta hai, apne aap band hoga)`);
+      say(`Reading ${i + 1}/${picks.length}: ${(p.title || p.goodsId).slice(0, 50)}…\n(the page opens in the background and closes by itself)`);
       let t2 = null, data = null;
       try {
         // press the row's own "More → Copy Listing"; Temu's exact copy link is captured and opened here (a scripted click would be popup-blocked)
         const op = await send(tab.id, { action: 'ZC_OPEN_COPY', goodsId: p.goodsId }, 14000);
-        if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button nahi dabi (${op?.error || 'no answer'})`);
+        if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button was not pressed (${op?.error || 'no answer'})`);
         else t2 = await chrome.tabs.create({ url: new URL(op.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId });
         if (t2 && await ready(t2.id, 40)) { const r = await send(t2.id, { action: 'ZC_COPY_SCRAPE' }, 120000); data = r?.data || null; }
       } catch (_) {}
-      if (t2) { const closed = await temuCloseCopyTab(t2.id); if (!closed) problems.push('Tab band nahi hua (Temu ne "leave?" poocha) — manually band kar dein'); }
+      if (t2) { const closed = await temuCloseCopyTab(t2.id); if (!closed) problems.push('Tab did not close (Temu asked "leave?") — close it manually'); }
       try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
       if (data?.ok) done.push({ p, d: data }); else problems.push(`${(p.title || p.goodsId).slice(0, 40)}: ${(data?.warn || ['no data']).join(', ')}`);
       await sleep(700 + Math.random() * 900);
     }
-    if (!done.length) { say('✗ Koi product read nahi hua.\n' + problems.map(x => '• ' + x).join('\n')); return; }
+    if (!done.length) { say('✗ No product could be read.\n' + problems.map(x => '• ' + x).join('\n')); return; }
     const cfg = temuGetCfg();
     const items = [], notes = [];
     for (const { p, d } of done) {
       const s0 = (d.skus && d.skus[0]) || {};
       const nm = (p.title || d.title || p.goodsId).slice(0, 40);
       const base = parseFloat(s0.base), list = parseFloat(s0.list);
-      if (!(base > 0)) { problems.push(nm + ': base price nahi mila — skip'); continue; }
-      if (!(d.images || []).length) { problems.push(nm + ': images nahi mili — skip' + (d.netPaths?.length ? ' (page keys: ' + d.netPaths.slice(0, 4).join(' | ') + ')' : '')); continue; }
-      if ((d.skus || []).length > 1) notes.push(nm + `: ${d.skus.length} variations — sirf pehli copy hui`);
+      if (!(base > 0)) { problems.push(nm + ': base price not found — skipped'); continue; }
+      if (!(d.images || []).length) { problems.push(nm + ': images not found — skipped' + (d.netPaths?.length ? ' (page keys: ' + d.netPaths.slice(0, 4).join(' | ') + ')' : '')); continue; }
+      if ((d.skus || []).length > 1) notes.push(nm + `: ${d.skus.length} variations — only the first one was copied`);
       const color = String(s0.name || '').trim();
       const leaf = String(d.catPath || '').split(' / ').pop().trim();
       items.push({
@@ -12844,7 +12844,7 @@ async function temuStoreExport() {
         dimL: s0.dims?.[0], dimW: s0.dims?.[1], dimH: s0.dims?.[2], weight: s0.weight || ''
       });
     }
-    if (!items.length) { say('✗ Export ke liye kuch nahi bacha.\n' + problems.map(x => '• ' + x).join('\n')); return; }
+    if (!items.length) { say('✗ Nothing left to export.\n' + problems.map(x => '• ' + x).join('\n')); return; }
     const b64 = temuActiveStore()?.templateB64 || await temuBuiltinTemplateB64();
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
@@ -13745,8 +13745,8 @@ async function temuImportSheet(file) {
         const sel = $('temuSource');
         if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = `Store sheet — ${file.name} (${zc.length})`; } sel.value = 'sheet'; }
         temuUpdateSrcInfo();
-        if (rep) rep.textContent = `✓ Store sheet: ${file.name} — ${zc.length} products (${nc} categories matched).\nReview cards me title / images edit karein, store check karein, phir "Export + Upload to Temu".`;
-        toast(`${zc.length} products imported — review karke upload karein`, 'ok');
+        if (rep) rep.textContent = `✓ Store sheet: ${file.name} — ${zc.length} products (${nc} categories matched).\nEdit titles / images in the review cards, check the store, then press "Export + Upload to Temu".`;
+        toast(`${zc.length} products imported — review them, then upload`, 'ok');
         try { temuRenderReview(); } catch (_) {}
         return;
       }
@@ -14332,7 +14332,7 @@ async function temuImportAllCatalog() {
   await temuSaveCfg(cfg);
   temuRenderProfiles();
   temuRenderCatalogGrid();
-  toast(`${count} new categories catalog se add ho gayin!`, 'ok');
+  toast(`${count} new categories added from the catalog!`, 'ok');
 }
 
 async function temuImportTemplateCategory(file) {
@@ -14683,7 +14683,7 @@ async function temuRenderReview() {
           <button class="temu-rv-img-btn gemini" data-action="gemini" data-iidx="${iIdx}" data-url="${esc(url)}" title="Edit in Flow / Gemini">✨</button>
           <button class="temu-rv-img-btn paste" data-action="paste_img" data-iidx="${iIdx}" title="Paste Edited Image from Clipboard">📋</button>
           <button class="temu-rv-img-btn" data-action="device_img" data-iidx="${iIdx}" title="Replace image from device" aria-label="Replace image from device">📂</button>
-          ${(() => { const hh = zhHistFor(r.id, url); return `<button class="temu-rv-img-btn" data-action="img_undo" data-iidx="${iIdx}" ${hh.back.length ? '' : 'disabled'} title="Pichli image par wapas (${hh.back.length} saved)">◀</button><button class="temu-rv-img-btn" data-action="img_redo" data-iidx="${iIdx}" ${hh.fwd.length ? '' : 'disabled'} title="Agli image (${hh.fwd.length} saved)">▶</button>`; })()}
+          ${(() => { const hh = zhHistFor(r.id, url); return `<button class="temu-rv-img-btn" data-action="img_undo" data-iidx="${iIdx}" ${hh.back.length ? '' : 'disabled'} title="Previous image (${hh.back.length} saved)">◀</button><button class="temu-rv-img-btn" data-action="img_redo" data-iidx="${iIdx}" ${hh.fwd.length ? '' : 'disabled'} title="Next image (${hh.fwd.length} saved)">▶</button>`; })()}
         </div>
       </div>
     `).join('');
@@ -14994,12 +14994,12 @@ async function temuRenderReview() {
           temuOpenGeminiModal(imgUrl, r.title || '', r.id, iIdx);
         } else if (action === 'img_undo' || action === 'img_redo') {
           const okH = await zhImgHistStep(r.id, iIdx, action === 'img_undo' ? 'undo' : 'redo');
-          if (!okH) { toast('Is image ki aur history nahi he', 'warn'); return; }
+          if (!okH) { toast('No more history for this image', 'warn'); return; }
           const fresh = _productRowsById(r.id)[0];
           if (fresh && Array.isArray(fresh.images)) r.images = [...fresh.images];
           TemuLast = null;
           await temuRenderReview();
-          toast(action === 'img_undo' ? '◀ Pichli image wapas aa gayi' : '▶ Agli image lag gayi', 'ok');
+          toast(action === 'img_undo' ? '◀ Previous image restored' : '▶ Next image applied', 'ok');
         } else if (action === 'device_img') {
           const input = document.createElement('input');
           input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp';
@@ -15381,7 +15381,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   const ta = $('temuGptPrompt'); if (!ta) return;
   const info = () => {
     const el = $('temuGptBatchInfo'); if (!el) return;
-    el.textContent = ZhGptBatch ? `${ZhGptBatch.ids.length} products copy hue (${new Date(ZhGptBatch.at).toLocaleTimeString()}). Jawab isi list ke hisab se lagega.` : 'Abhi koi list copy nahi hui.';
+    el.textContent = ZhGptBatch ? `${ZhGptBatch.ids.length} products copied (${new Date(ZhGptBatch.at).toLocaleTimeString()}). The answer will be applied to exactly this list.` : 'No list copied yet.';
   };
   chrome.storage.local.get([KEY, BKEY]).then(st => {
     ta.value = st[KEY] || ZH_GPT_DEFAULT_PROMPT;
@@ -15390,13 +15390,13 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   ta.addEventListener('change', () => chrome.storage.local.set({ [KEY]: ta.value }));
   const copy = async (txt, okMsg) => {
     try { await navigator.clipboard.writeText(txt); toast(okMsg, 'ok'); }
-    catch (_) { toast('Copy nahi hua — dobara click karein', 'warn'); }
+    catch (_) { toast('Copy failed — click again', 'warn'); }
   };
-  $('temuGptCopyPromptBtn')?.addEventListener('click', () => copy(ta.value, 'Prompt copy ho gaya — ChatGPT mein paste karein'));
-  $('temuGptDefaultPromptBtn')?.addEventListener('click', () => { ta.value = ZH_GPT_DEFAULT_PROMPT; chrome.storage.local.set({ [KEY]: ta.value }); toast('Default prompt wapas', 'ok'); });
+  $('temuGptCopyPromptBtn')?.addEventListener('click', () => copy(ta.value, 'Prompt copied — paste it into ChatGPT'));
+  $('temuGptDefaultPromptBtn')?.addEventListener('click', () => { ta.value = ZH_GPT_DEFAULT_PROMPT; chrome.storage.local.set({ [KEY]: ta.value }); toast('Default prompt restored', 'ok'); });
   $('temuGptCopyTitlesBtn')?.addEventListener('click', async () => {
     const rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
-    if (!rows.length) { toast('Pehle products tick karein', 'warn'); return; }
+    if (!rows.length) { toast('Tick the products first', 'warn'); return; }
     const titles = rows.map(r => {
       const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
       return String(card?.querySelector('.temu-rv-title-inp')?.value || r.title || '').replace(/\s+/g, ' ').trim();
@@ -15405,7 +15405,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
     try { await chrome.storage.local.set({ [BKEY]: ZhGptBatch }); } catch (_) {}
     ZhGptPending = null; $('temuGptApplyBtn')?.classList.add('hidden'); const pv = $('temuGptPreview'); if (pv) pv.innerHTML = '';
     info();
-    await copy(titles.map((t, i) => `${i + 1}. ${t}`).join('\n'), `${titles.length} titles copy ho gaye (numbered)`);
+    await copy(titles.map((t, i) => `${i + 1}. ${t}`).join('\n'), `${titles.length} titles copied (numbered)`);
   });
   const parse = (raw) => {
     const lines = String(raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -15421,10 +15421,10 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   $('temuGptPreviewBtn')?.addEventListener('click', () => {
     const pv = $('temuGptPreview'), ap = $('temuGptApplyBtn');
     ZhGptPending = null; ap?.classList.add('hidden');
-    if (!ZhGptBatch) { pv.innerHTML = '<div class="temu-gpt-bad">Pehle "2. Titles copy" dabayein.</div>'; return; }
+    if (!ZhGptBatch) { pv.innerHTML = '<div class="temu-gpt-bad">Press "2. Copy titles" first.</div>'; return; }
     const { out, numbered } = parse($('temuGptPaste').value);
     const n = ZhGptBatch.ids.length;
-    if (!out.length) { pv.innerHTML = '<div class="temu-gpt-bad">Paste box khali he.</div>'; return; }
+    if (!out.length) { pv.innerHTML = '<div class="temu-gpt-bad">The paste box is empty.</div>'; return; }
     let newTitles;
     if (numbered === out.length) {
       newTitles = new Array(n).fill(null);
@@ -15432,7 +15432,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
     } else newTitles = out.map(o => o.t);
     const got = numbered === out.length ? newTitles.filter(Boolean).length : newTitles.length;
     if (got !== n || (numbered !== out.length && out.length !== n)) {
-      pv.innerHTML = `<div class="temu-gpt-bad">Galat tadad: ${n} titles bheje the, ${got} wapas aaye. Kuch lagaya nahi gaya. ChatGPT se poori list dobara mangein.</div>`;
+      pv.innerHTML = `<div class="temu-gpt-bad">Count mismatch: ${n} titles were sent, ${got} came back. Nothing was applied. Ask ChatGPT for the full list again.</div>`;
       return;
     }
     ZhGptPending = ZhGptBatch.ids.map((id, i) => {
@@ -15440,13 +15440,13 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
       const a = words(old), b = words(title); let common = 0; a.forEach(w => { if (b.has(w)) common++; });
       return { id, url: ZhGptBatch.urls?.[i] || '', old, title, warn: a.size > 2 && common === 0, on: true };
     });
-    pv.innerHTML = ZhGptPending.map((c, i) => `<label class="temu-gpt-row${c.warn ? ' warn' : ''}"><input type="checkbox" data-i="${i}" checked><div><div class="old">${i + 1}. ${esc(c.old)}</div><div class="new">→ ${esc(c.title)} <small>(${c.title.length})</small>${c.warn ? ' <span class="temu-gpt-bad">⚠ purane title se koi lafz nahi milta — check karein</span>' : ''}</div></div></label>`).join('');
+    pv.innerHTML = ZhGptPending.map((c, i) => `<label class="temu-gpt-row${c.warn ? ' warn' : ''}"><input type="checkbox" data-i="${i}" checked><div><div class="old">${i + 1}. ${esc(c.old)}</div><div class="new">→ ${esc(c.title)} <small>(${c.title.length})</small>${c.warn ? ' <span class="temu-gpt-bad">⚠ shares no word with the old title — please check</span>' : ''}</div></div></label>`).join('');
     pv.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { ZhGptPending[Number(cb.dataset.i)].on = cb.checked; }));
     ap?.classList.remove('hidden');
   });
   $('temuGptApplyBtn')?.addEventListener('click', async () => {
     const list = (ZhGptPending || []).filter(c => c.on && c.title);
-    if (!list.length) { toast('Apply karne ke liye kuch nahi', 'warn'); return; }
+    if (!list.length) { toast('Nothing to apply', 'warn'); return; }
     const btn = $('temuGptApplyBtn'); btn.disabled = true;
     try {
       const rows = await temuGetQueuedRows();
@@ -15469,9 +15469,9 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
       }
       if (changes.length) await temuSaveTitles(changes);
       TemuTitleUndo = changes.map(c => ({ ...c })); temuTitleUndoUi();
-      toast(`✓ ${changes.length} titles lag gaye (Undo button upar he)`, 'ok');
+      toast(`✓ ${changes.length} titles applied (use the Undo button above to revert)`, 'ok');
       ZhGptPending = null; btn.classList.add('hidden'); $('temuGptPreview').innerHTML = ''; $('temuGptPaste').value = '';
-    } catch (e) { toast('Titles apply nahi hue: ' + (e?.message || e), 'warn'); }
+    } catch (e) { toast('Titles were not applied: ' + (e?.message || e), 'warn'); }
     finally { btn.disabled = false; }
   });
 })();
@@ -18065,7 +18065,7 @@ async function zsAiRewriteTitle(it) {
     const instruction = getTemuOptimizerInstruction(temuTitlePreferences());
     const out = await rewriteValidatedTemuTitle(it.product, base, instruction);
     let t = out.replace(PACK_PREFIX_RE, '');
-    if (!t) throw new Error('khali jawab');
+    if (!t) throw new Error('empty answer');
     t = cleanTemuTitleResult(packTitle(t, it.pack));
     zsSetTitle(it, t);
     await temuSaveTitles([{ id: it.product.id, url: it.product.url, title: t }]);
@@ -18315,9 +18315,9 @@ function zsGo(delta) {
           const r = /^https:\/\/flow-content\.google\//i.test(cur) ? await msg({ action: 'FETCH_FLOW_IMAGE', url: cur }) : await msg({ action: 'FETCH_BASE64', url: cur, settings: { imageFormat: 'original' } });
           cur = r?.success && r.base64 ? r.base64 : cur;
         }
-        if (!/^data:image\//i.test(cur || '')) { toast('Image download nahi hui, label nahi laga', 'warn'); return; }
+        if (!/^data:image\//i.test(cur || '')) { toast('Image could not be downloaded, label not added', 'warn'); return; }
         await zsApply(it, i, await zhStampPackLabel(cur, it.pack, true), 'Label');
-      } catch (err) { toast('Label nahi laga: ' + (err?.message || err), 'warn'); }
+      } catch (err) { toast('Label not added: ' + (err?.message || err), 'warn'); }
     } else if (act === 'undo') {
       await zsUndo(it, i);
     }
