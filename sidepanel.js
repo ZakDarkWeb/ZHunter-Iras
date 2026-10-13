@@ -12990,10 +12990,20 @@ async function temuRunExport(opts = {}) {
             const pub = await uploadImageToPublicHost(item.img);
             if (!pub || !/^https?:\/\//i.test(pub) || /^https:\/\/flow-content\.google\//i.test(pub)) throw new Error('Edited image is not on a public host');
             item.row.images[item.index] = pub;
-          } catch (e) { throw new Error('Image upload failed for ' + item.row.title + ': ' + e.message); }
+          } catch (e) { item.failed = e.message || 'upload failed'; }   // expired / unreachable edited image: handled below (original used or image dropped), the export goes on
           doneCount++;
           say(`Cloud image upload: ${doneCount}/${pendingUploads.length} done…`);
         }));
+      }
+      { // images that could not be re-hosted (e.g. an old Flow link that has expired): main image → the original, others → dropped
+        const bad = pendingUploads.filter(x => x.failed); const names = [];
+        for (const x of bad) {
+          const orig = x.row.zhOriginalMainUrl;
+          if (x.index === 0 && /^https?:\/\//i.test(orig || '') && !/^https:\/\/flow-content\.google\//i.test(orig)) x.row.images[0] = orig; else x.row.images[x.index] = null;
+          names.push((x.row.title || '').slice(0, 40));
+        }
+        rows.forEach(r => { if (Array.isArray(r.images)) r.images = r.images.filter(Boolean); });
+        if (bad.length) { say(`⚠ ${bad.length} edited image(s) expired and could not be uploaded — original used or image skipped (${[...new Set(names)].join(', ')}). Re-edit them in Image Studio if you need them.`); toast(`${bad.length} expired edited image(s) skipped`, 'warn'); }
       }
       await zhLibPatch(saved => { let changed = false; for (const row of rows) { const m = saved.find(x => x.id === row.id || x.url === row.url); if (m) { m.images = [...row.images]; changed = true; } } return changed; });
     }
