@@ -220,6 +220,7 @@
     const walk = (el) => {
       for (const c of el.children) {
         const tag = c.tagName;
+        if (c.classList.contains('sr-only') || (tag === 'H4' && /^(ChatGPT|You) said/i.test(c.textContent.trim()))) continue;
         if (tag === 'OL') { let n = parseInt(c.getAttribute('start') || '1', 10) || 1; for (const li of c.children) lines.push(`${n++}. ${li.innerText.trim().replace(/\s*\n\s*/g, ' ')}`); }
         else if (tag === 'UL') { for (const li of c.children) lines.push(li.innerText.trim().replace(/\s*\n\s*/g, ' ')); }
         else if (tag === 'PRE') { lines.push(...c.innerText.split('\n').map(x => x.trim()).filter(Boolean)); }
@@ -229,6 +230,7 @@
       }
     };
     walk(root);
+    for (let i = lines.length - 1; i >= 0; i--) if (/^(ChatGPT said|You said)\s*:?$/i.test(lines[i])) lines.splice(i, 1);
     return (lines.length ? lines : root.innerText.split('\n').map(x => x.trim()).filter(Boolean)).join('\n');
   }
 

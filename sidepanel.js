@@ -15451,6 +15451,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   });
   const parse = (raw) => {
     const lines = String(raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    while (lines.length && /^(ChatGPT said|You said)\s*:?$/i.test(lines[0])) lines.shift();
     const out = []; let numbered = 0;
     for (const l of lines) {
       const m = l.match(/^(\d{1,4})\s*[.)\-:]\s*(.+)$/);
