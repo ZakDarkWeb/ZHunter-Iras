@@ -1999,11 +1999,25 @@ async function cdpDetach(tabId) {
   try { await chrome.debugger.detach({ tabId }); } catch (_) {}
 }
 
+const _cdpRnd = (a, b) => a + Math.random() * (b - a);
+const _cdpSleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function cdpMouseClick(tabId, x, y) {
-  const base = { x: Math.round(x), y: Math.round(y), modifiers: 0, pointerType: 'mouse' };
-  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', button: 'none', buttons: 0 });
-  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1 });
-  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { ...base, type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1 });
+  // v9.15.0 — human-like: mouse glides in over a few random steps, random hesitation before pressing,
+  // random press length. No two clicks have the same timing or path.
+  const send = (o) => chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { modifiers: 0, pointerType: 'mouse', ...o });
+  const steps = 2 + Math.floor(Math.random() * 3);
+  let cx = x + _cdpRnd(-90, 90), cy = y + _cdpRnd(-60, 60);
+  for (let i = 0; i < steps; i++) {
+    const t = (i + 1) / (steps + 1);
+    await send({ type: 'mouseMoved', button: 'none', buttons: 0, x: Math.round(cx + (x - cx) * t), y: Math.round(cy + (y - cy) * t) });
+    await _cdpSleep(_cdpRnd(25, 90));
+  }
+  const base = { x: Math.round(x), y: Math.round(y) };
+  await send({ ...base, type: 'mouseMoved', button: 'none', buttons: 0 });
+  await _cdpSleep(_cdpRnd(300, 1200));
+  await send({ ...base, type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1 });
+  await _cdpSleep(_cdpRnd(55, 170));
+  await send({ ...base, type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1 });
 }
 
 // Trusted click at viewport CSS-pixel coordinates (computed by the content script).
@@ -2043,7 +2057,7 @@ async function cdpClickSelector(tabId, selector) {
         el.scrollIntoView({ block: 'center', inline: 'center' });
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return null;
-        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const x = r.left + r.width * (0.3 + Math.random() * 0.4), y = r.top + r.height * (0.3 + Math.random() * 0.4);
         const hit = document.elementFromPoint(x, y);
         if (!hit || (hit !== el && !el.contains(hit))) return null;
         return { x, y };

@@ -2981,11 +2981,13 @@ function flowPrefetchImage(src) {
 
 // v9.11.0 — auto speed: Safe / Normal / Fast (only the pause between images changes;
 // still ONE generation at a time so results can never land on the wrong product)
+// v9.15.0 — random gaps + short random breaks (every brkEvery[0..1] images, brk[0..1] ms)
 const FLOW_SPEEDS = {
-  safe:   { min: 4000, max: 9000, label: 'Safe' },
-  normal: { min: 2000, max: 4000, label: 'Normal' },
-  fast:   { min: 800,  max: 1600, label: 'Fast' }
+  safe:   { min: 8000, max: 20000, label: 'Safe',   brkEvery: [6, 10],  brk: [30000, 60000] },
+  normal: { min: 4000, max: 10000, label: 'Normal', brkEvery: [8, 14],  brk: [20000, 40000] },
+  fast:   { min: 1500, max: 4000,  label: 'Fast',   brkEvery: [12, 20], brk: [10000, 20000] }
 };
+let _flowSinceBreak = 0, _flowNextBreakAt = 0;
 function flowSpeedKey() {
   const v = $('temuAiImgSpeedSel')?.value;
   return FLOW_SPEEDS[v] ? v : 'normal';
@@ -3520,8 +3522,15 @@ function temuStepScheduleNext() {
     return;
   }
   const sp = FLOW_SPEEDS[flowSpeedKey()];
-  const wait = sp.min + Math.floor(Math.random() * (sp.max - sp.min));
-  temuStepSetStatus(`✓ Replaced — next image in ${Math.round(wait / 1000)}s…`, 'ok');
+  let wait = sp.min + Math.floor(Math.random() * (sp.max - sp.min));
+  _flowSinceBreak++;
+  if (!_flowNextBreakAt) _flowNextBreakAt = sp.brkEvery[0] + Math.floor(Math.random() * (sp.brkEvery[1] - sp.brkEvery[0] + 1));
+  let tookBreak = false;
+  if (_flowSinceBreak >= _flowNextBreakAt) {
+    wait = sp.brk[0] + Math.floor(Math.random() * (sp.brk[1] - sp.brk[0]));
+    _flowSinceBreak = 0; _flowNextBreakAt = 0; tookBreak = true;
+  }
+  temuStepSetStatus(`✓ Replaced — ${tookBreak ? 'short break, ' : ''}next image in ${Math.round(wait / 1000)}s…`, 'ok');
   const idx = TemuImgStepper.currentIndex;
   const session = TemuImgStepper;
   setTimeout(() => {
