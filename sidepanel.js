@@ -12853,7 +12853,17 @@ async function temuStoreExport() {
       if (!(d.images || []).length) { problems.push(nm + ': images not found — skipped' + (d.netPaths?.length ? ' (page keys: ' + d.netPaths.slice(0, 4).join(' | ') + ')' : '')); continue; }
       if ((d.skus || []).length > 1) notes.push(nm + `: ${d.skus.length} variations — only the first one was copied`);
       const color = String(s0.name || '').trim();
-      const leaf = String(d.catPath || '').split(' / ').pop().trim();
+      let leaf = String(d.catPath || '').split(' / ').pop().trim();
+      { // Temu's AI only matches a keyword that exists in today's category list — prefer a known category (same path, then best title match)
+        const profs = Object.values(cfg.category_profiles || {});
+        const norm = x => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const byPath = profs.find(q => q.full_path && norm(q.full_path) === norm(d.catPath));
+        if (byPath && byPath.category_keyword) leaf = byPath.category_keyword;
+        else if (!profs.some(q => norm(q.category_keyword) === norm(leaf))) {
+          const best = temuScoreProfiles(temuCleanTitle(d.title || nm, cfg), cfg)[0];
+          if (best?.prof?.category_keyword) { notes.push(nm + `: category "${leaf}" is not in your list — used "${best.prof.category_keyword}" (check it)`); leaf = best.prof.category_keyword; }
+        }
+      }
       items.push({
         goods: 'ZC-' + p.goodsId, sku: `ZC-${p.goodsId}-${color.replace(/[^A-Za-z0-9]+/g, '') || 'Std'}`,
         title: d.title, category_keyword: leaf, brand: d.brand, trademark: d.trademark,

@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Store export: the sheet category now uses a keyword from your category list (exact path match, else best match for the title) because Temu only auto-picks categories that exist in its current list; a note tells you when it was replaced.
 - Review thumbnails that fail to load are fetched once through the background (Referer fallback) and shown from memory.
 - Store export: picks the exact "Copy listing" menu item (not "Copy Goods ID"), presses it with full mouse events, and asks you to refresh the Temu page if the page helper is not loaded yet.
 - Store export: also captures copy links opened through a link click (Incomplete products), uses the tab Temu opens itself as a fallback, and the error now lists the menu items found.
