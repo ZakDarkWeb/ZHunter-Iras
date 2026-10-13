@@ -34,6 +34,16 @@ document.addEventListener('error', e => {
   }
 }, true);
 
+// A review thumbnail that fails to load (e.g. hotlink-protected seller image) is fetched once through the background (with Referer tricks) and shown from memory.
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || img.dataset.zhRetried) return;
+  if (!img.matches('.temu-rv-img-thumb, .temu-rv-thumb, .temu-rv-head img')) return;
+  const u = img.getAttribute('src') || ''; if (!/^https?:\/\//i.test(u)) return;
+  img.dataset.zhRetried = '1';
+  try { chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url: u, settings: { imageFormat: 'original' } }, r => { void chrome.runtime.lastError; if (r?.success && r.base64) img.src = r.base64; }); } catch (_) {}
+}, true);
+
 // Global delegated stopPropagation for bp-open-btn (CSP-safe, no inline onclick)
 document.addEventListener('click', e => {
   if (e.target.closest('.bp-open-btn')) e.stopPropagation();

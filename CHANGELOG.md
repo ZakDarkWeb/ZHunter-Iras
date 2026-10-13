@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Review thumbnails that fail to load are fetched once through the background (Referer fallback) and shown from memory.
 - Store export: picks the exact "Copy listing" menu item (not "Copy Goods ID"), presses it with full mouse events, and asks you to refresh the Temu page if the page helper is not loaded yet.
 - Store export: also captures copy links opened through a link click (Incomplete products), uses the tab Temu opens itself as a fallback, and the error now lists the menu items found.
 - Hunt (open tabs): a product page with 2 images is now accepted as complete on the first look (no more "fewer than 3 images" retry for it).
