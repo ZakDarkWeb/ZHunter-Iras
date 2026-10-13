@@ -5923,3 +5923,14 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .temu-rv-cat-paste{display:flex;gap:6px;width:100%}
 .temu-rv-cat-paste-inp{flex:1;min-width:0}
 .temu-rv-cat-paste-btn{flex:none}
+
+/* v9.15.0 — ChatGPT titles + image history buttons */
+.temu-gpt{margin-top:10px;padding:10px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2)}
+.temu-gpt textarea{width:100%;box-sizing:border-box;margin:6px 0;font-size:11px;font-family:var(--mono)}
+.temu-gpt-preview{max-height:260px;overflow:auto;margin-top:6px;font-size:11px}
+.temu-gpt-row{display:flex;gap:6px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line-2)}
+.temu-gpt-row .old{opacity:.6;text-decoration:line-through}
+.temu-gpt-row .new{font-weight:600}
+.temu-gpt-row.warn{background:rgba(245,158,11,.10)}
+.temu-gpt-bad{color:var(--bad);font-weight:700}
+.temu-rv-img-btn[disabled]{opacity:.3;cursor:default;pointer-events:none}

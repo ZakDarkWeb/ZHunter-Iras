@@ -2,6 +2,9 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Images: ◀ ▶ buttons on every review image = undo / redo through up to 5 earlier versions (original → pack → background edit). The shown version is the one uploaded.
+- Titles: "ChatGPT se titles" box in the Title Optimizer — saved prompt + Prompt copy, numbered Titles copy, paste ChatGPT's list back, Preview (old → new, count check, warning if a title looks unrelated), Apply. Product IDs are remembered at copy time so titles can never land on another product.
+
 - Image Studio: live timer (total time + average per image) while Flow edits run; summary shown at the end.
 - Header "Temu Export" button hidden; the window opens from Settings tab → "Open Temu Export" (still in the XLSX dropdown too).
 
