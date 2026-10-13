@@ -8034,7 +8034,7 @@ async function scrapeOneTab(tabInfo) {
   let status;
   if (!scraped) {
     status = 'fail';
-  } else if (!scraped.title || !scraped.price || (tabImgs < 3 && !(tabImgs >= 1 && tabInfo._fewSeen >= 1))) {
+  } else if (!scraped.title || !scraped.price || (tabImgs < 3 && tabImgs < 2 && !(tabImgs >= 1 && tabInfo._fewSeen >= 1))) {   // v9.15 — 2 images = a real 2-image product, accepted on the first look
     if (scraped.title && scraped.price && tabImgs >= 1 && tabImgs < 3) tabInfo._fewSeen = tabImgs;   // v9.15 — second look with 1–2 images = real single-image product
     status = 'partial';
     if (!error) error = huntMissingCode(scraped.title, scraped.price, tabImgs);
