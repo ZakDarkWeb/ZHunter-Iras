@@ -175,9 +175,9 @@
   // we keep waiting), wait for the reply to finish, and store the reply text in zhGptTitlesResult.
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const SEL = {
-    editor: '#prompt-textarea, div.ProseMirror[contenteditable="true"], textarea[name="prompt-textarea"]',
-    send: 'button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"]',
-    stop: 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"]',
+    editor: 'form[data-chatgpt-composer] .ProseMirror, div.ProseMirror[role="textbox"], #prompt-textarea, div.ProseMirror[contenteditable="true"], textarea[name="prompt-textarea"]',
+    send: 'form[data-chatgpt-composer] button[type="submit"], button[data-testid="send-button"], button[aria-label="Send"], button[aria-label="Send prompt"], button[aria-label="Send message"]',
+    stop: 'button[data-testid="stop-button"], button[aria-label="Stop"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"]',
     user: '[data-message-author-role="user"]',
     bot: '[data-message-author-role="assistant"]'
   };
@@ -241,7 +241,10 @@
     const btn = await waitUntil(() => { const b = document.querySelector(SEL.send); return b && !b.disabled ? b : null; }, 8000);
     const started = () => countEl(SEL.user) > userBefore || !!document.querySelector(SEL.stop);
     if (btn) { try { btn.click(); } catch (_) {} }
-    if (!(await waitUntil(started, 6000))) {
+    if (!(await waitUntil(started, 4000))) {   // second try: submit the composer form directly
+      try { const f = (btn && btn.form) || document.querySelector('form[data-chatgpt-composer]'); f?.requestSubmit?.(btn || undefined); } catch (_) {}
+    }
+    if (!(await waitUntil(started, 4000))) {
       showGptHUD('ZHunter: press Send in ChatGPT yourself — I will read the answer', 'warn');
       setResult(job, 'press_send', { note: 'Press Send in the ChatGPT tab' });
       if (!(await waitUntil(started, 10 * 60000, 500))) throw new Error('Message was not sent within 10 minutes');

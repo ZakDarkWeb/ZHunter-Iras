@@ -1012,6 +1012,7 @@
               <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
                 <p class="temu-title-help">Rewrite with your Temu title format, or make a focused edit.</p>
                 <button id="temuAiBulkRewriteBtn" class="btn btn-primary temu-title-main" type="button" title="Apply your provided Temu title format to checked products">AI Title Rewrite</button>
+                <details class="temu-title-advanced temu-fold"><summary>AI title edit <span>Your own prompt · saved prompts</span></summary>
                 <div class="temu-title-custom">
                   <label class="temu-title-custom-lbl" for="temuTitleCustomPrompt">Your own prompt <span>applies to the current title</span></label>
                   <textarea id="temuTitleCustomPrompt" class="inp" rows="3" placeholder="e.g. Put the brand first, remove the size, end with 'Golf Balls'. Max 120 characters."></textarea>
@@ -1022,6 +1023,7 @@
                     <button id="temuTitleDelPromptBtn" class="temu-img-pick-btn" type="button" title="Delete the selected saved prompt">Delete</button>
                   </div>
                 </div>
+                </details>
                 <div class="temu-title-run hidden" id="temuTitleRun" aria-live="polite">
                   <div class="temu-title-prog"><i id="temuTitleProgBar"></i></div>
                   <div class="temu-title-run-row"><span id="temuTitleProgTxt">0 / 0</span><button id="temuTitleStopBtn" class="temu-title-stop" type="button" title="Stop after the current title. Titles already done are kept.">■ Stop</button></div>
@@ -1032,6 +1034,7 @@
                   <button id="temuTitleRemoveBrandBtn" class="btn btn-secondary" type="button" title="Remove brand names from checked titles while preserving other wording">Remove Brand</button>
                 </div>
                 <details class="temu-title-advanced"><summary>Custom instructions <span>Optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="Extra preferences for AI Title Rewrite?" aria-label="Custom title instructions"></textarea></details>
+                <details class="temu-title-advanced temu-fold"><summary>ChatGPT optimizer <span>Copy / auto-send titles</span></summary>
                 <div class="temu-gpt" id="temuGptBox">
                   <label class="temu-title-custom-lbl" for="temuGptPrompt">Titles via ChatGPT <span>1) copy the prompt → paste into ChatGPT · 2) copy titles → paste · 3) paste the answer back here</span></label>
                   <textarea id="temuGptPrompt" class="inp" rows="3" spellcheck="false" aria-label="ChatGPT prompt"></textarea>
@@ -1056,6 +1059,7 @@
                   </div>
                   <div id="temuGptPreview" class="temu-gpt-preview"></div>
                 </div>
+                </details>
                 <small class="temu-title-help">Applies to checked products only</small>
               </div>
             </div>

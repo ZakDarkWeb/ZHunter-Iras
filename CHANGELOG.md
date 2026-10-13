@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- ChatGPT auto: updated selectors for the current ChatGPT page (Send button, message box) + form-submit fallback. Title Optimizer: "AI title edit" and "ChatGPT optimizer" are now collapsible sections.
+
 - Titles via ChatGPT — Auto: "Auto: send to ChatGPT" sends all checked titles in ONE message to your open ChatGPT chat (or a new chat, sending the saved prompt first), waits for the answer, reads it back and shows the preview. If ChatGPT ignores the scripted Send click, press Send yourself — the answer is still read automatically (no debugger).
 
 - AI Image Studio bar: removed the old "Pack" dropdown and "Make Pack" button (pack is now set per product in the review card, Edit Studio and Flow batch setup). The Speed setting moved into the Auto-mode dialog where it applies.
