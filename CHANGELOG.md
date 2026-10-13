@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Titles via ChatGPT — Auto: "Auto: send to ChatGPT" sends all checked titles in ONE message to your open ChatGPT chat (or a new chat, sending the saved prompt first), waits for the answer, reads it back and shows the preview. If ChatGPT ignores the scripted Send click, press Send yourself — the answer is still read automatically (no debugger).
+
 - AI Image Studio bar: removed the old "Pack" dropdown and "Make Pack" button (pack is now set per product in the review card, Edit Studio and Flow batch setup). The Speed setting moved into the Auto-mode dialog where it applies.
 
 - Prompts: new default background prompt (keeps pack count/badge corner, store style); new pack prompt that keeps the original background (old white-background pack prompt stays as "Purana"). Pack label can be extension-stamped (default), or none.

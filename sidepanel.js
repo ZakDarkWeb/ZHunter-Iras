@@ -15394,9 +15394,10 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   };
   $('temuGptCopyPromptBtn')?.addEventListener('click', () => copy(ta.value, 'Prompt copied — paste it into ChatGPT'));
   $('temuGptDefaultPromptBtn')?.addEventListener('click', () => { ta.value = ZH_GPT_DEFAULT_PROMPT; chrome.storage.local.set({ [KEY]: ta.value }); toast('Default prompt restored', 'ok'); });
-  $('temuGptCopyTitlesBtn')?.addEventListener('click', async () => {
+  // builds the numbered list of the CHECKED products and remembers their ids (so the answer can only land on them)
+  const makeBatch = async () => {
     const rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
-    if (!rows.length) { toast('Tick the products first', 'warn'); return; }
+    if (!rows.length) { toast('Tick the products first', 'warn'); return null; }
     const titles = rows.map(r => {
       const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
       return String(card?.querySelector('.temu-rv-title-inp')?.value || r.title || '').replace(/\s+/g, ' ').trim();
@@ -15405,7 +15406,48 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
     try { await chrome.storage.local.set({ [BKEY]: ZhGptBatch }); } catch (_) {}
     ZhGptPending = null; $('temuGptApplyBtn')?.classList.add('hidden'); const pv = $('temuGptPreview'); if (pv) pv.innerHTML = '';
     info();
-    await copy(titles.map((t, i) => `${i + 1}. ${t}`).join('\n'), `${titles.length} titles copied (numbered)`);
+    return titles.map((t, i) => `${i + 1}. ${t}`).join('\n');
+  };
+  $('temuGptCopyTitlesBtn')?.addEventListener('click', async () => {
+    const txt = await makeBatch(); if (!txt) return;
+    await copy(txt, `${ZhGptBatch.titles.length} titles copied (numbered)`);
+  });
+  // ── Auto: send to ChatGPT, read the answer, fill the paste box, show the preview ──
+  let autoRun = null;
+  const autoStatus = (t) => { const el = $('temuGptAutoStatus'); if (el) el.textContent = t || ''; };
+  $('temuGptAutoBtn')?.addEventListener('click', async () => {
+    if (autoRun) { toast('A ChatGPT run is already in progress', 'warn'); return; }
+    const txt = await makeBatch(); if (!txt) return;
+    const mode = $('temuGptAutoMode')?.value || 'tab';
+    const id = 'gt_' + Date.now().toString(36);
+    const tabs = await chrome.tabs.query({ url: '*://chatgpt.com/*' });
+    if (mode === 'tab' && !tabs.length) { toast('Open your ChatGPT chat in a tab first (or choose "New chat")', 'warn'); autoStatus('No ChatGPT tab is open.'); return; }
+    autoRun = id; $('temuGptAutoBtn').disabled = true;
+    autoStatus(`Sending ${ZhGptBatch.titles.length} titles to ChatGPT…`);
+    await chrome.storage.local.remove(['zhGptTitlesResult']);
+    await chrome.storage.local.set({ zhGptTitlesJob: { id, text: txt, prompt: ta.value, newChat: mode === 'new', at: Date.now(), started: false } });
+    try {
+      if (mode === 'tab') {
+        const tab = tabs.find(t => t.active) || tabs[0];
+        await chrome.tabs.update(tab.id, { active: true });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(() => {});
+        await chrome.tabs.sendMessage(tab.id, { action: 'ZH_GPT_TITLES_START' }).catch(() => {});
+      } else {
+        await chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });   // the new tab picks the job up by itself
+      }
+    } catch (e) { autoStatus('Could not reach ChatGPT: ' + (e?.message || e)); autoRun = null; $('temuGptAutoBtn').disabled = false; }
+  });
+  chrome.storage.onChanged.addListener((ch, area) => {
+    const r = area === 'local' ? ch.zhGptTitlesResult?.newValue : null;
+    if (!r || !autoRun || r.id !== autoRun) return;
+    if (r.status === 'working' || r.status === 'press_send') { autoStatus(r.status === 'press_send' ? 'Press Send in the ChatGPT tab — the answer will be read automatically.' : (r.note || 'Working…')); return; }
+    autoRun = null; $('temuGptAutoBtn').disabled = false;
+    if (r.status === 'error') { autoStatus('✗ ' + (r.error || 'Failed')); toast('ChatGPT: ' + (r.error || 'failed'), 'warn'); return; }
+    if (r.status === 'done') {
+      autoStatus('✓ Answer received — check the preview below, then Apply.');
+      $('temuGptPaste').value = r.text || '';
+      $('temuGptPreviewBtn')?.click();
+    }
   });
   const parse = (raw) => {
     const lines = String(raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);

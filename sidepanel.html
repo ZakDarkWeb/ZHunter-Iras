@@ -1040,6 +1040,14 @@
                     <button id="temuGptDefaultPromptBtn" class="temu-img-pick-btn" type="button" title="Put back the original prompt">Default</button>
                     <button id="temuGptCopyTitlesBtn" class="btn btn-secondary btn-xs" type="button" title="Copy a numbered list of the checked products' titles">2. Copy titles</button>
                   </div>
+                  <div class="temu-title-custom-row">
+                    <button id="temuGptAutoBtn" class="btn btn-primary btn-xs" type="button" title="Sends the checked products' titles to ChatGPT and reads the answer back">Auto: send to ChatGPT</button>
+                    <select id="temuGptAutoMode" class="temu-img-sel" aria-label="ChatGPT chat">
+                      <option value="tab">My open ChatGPT chat</option>
+                      <option value="new">New chat + send prompt first</option>
+                    </select>
+                  </div>
+                  <small class="temu-title-help" id="temuGptAutoStatus"></small>
                   <small class="temu-title-help" id="temuGptBatchInfo">No list copied yet.</small>
                   <textarea id="temuGptPaste" class="inp" rows="4" spellcheck="false" placeholder="3. Paste ChatGPT's updated titles list here"></textarea>
                   <div class="temu-title-custom-row">

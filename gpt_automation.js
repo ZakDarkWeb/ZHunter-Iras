@@ -168,6 +168,123 @@
     }
   }
 
+
+  // ═══ v9.15 — Titles via ChatGPT (auto) ═══════════════════════════════════
+  // Job lives in chrome.storage.local.zhGptTitlesJob = { id, text, prompt?, newChat }.
+  // We type the text into the composer, click Send (if ChatGPT ignores the scripted click, the user presses Send —
+  // we keep waiting), wait for the reply to finish, and store the reply text in zhGptTitlesResult.
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const SEL = {
+    editor: '#prompt-textarea, div.ProseMirror[contenteditable="true"], textarea[name="prompt-textarea"]',
+    send: 'button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"]',
+    stop: 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"]',
+    user: '[data-message-author-role="user"]',
+    bot: '[data-message-author-role="assistant"]'
+  };
+  const countEl = (sel) => document.querySelectorAll(sel).length;
+  const setResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ zhGptTitlesResult: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
+
+  async function waitUntil(fn, ms, step = 300) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(step); }
+    return null;
+  }
+
+  async function typeIntoComposer(text) {
+    const ed = await waitUntil(() => document.querySelector(SEL.editor), 20000);
+    if (!ed) throw new Error('ChatGPT message box not found (is the chat open and logged in?)');
+    ed.focus();
+    const getVal = () => (ed.value !== undefined ? ed.value : ed.innerText) || '';
+    const squash = (v) => String(v).replace(/\s+/g, '');
+    const want = squash(text);
+    // 1) clear
+    try { document.execCommand('selectAll'); document.execCommand('delete'); } catch (_) {}
+    // 2) paste event (ProseMirror handles plain-text paste incl. line breaks)
+    try {
+      const dt = new DataTransfer(); dt.setData('text/plain', text);
+      ed.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+    } catch (_) {}
+    if (await waitUntil(() => squash(getVal()).length >= want.length * 0.98, 2500)) return ed;
+    // 3) fallback: insertText
+    ed.focus();
+    try { document.execCommand('selectAll'); document.execCommand('delete'); document.execCommand('insertText', false, text); } catch (_) {}
+    if (await waitUntil(() => squash(getVal()).length >= want.length * 0.98, 4000)) return ed;
+    throw new Error('Text did not enter the ChatGPT message box');
+  }
+
+  // Turn the rendered answer into plain lines ("1. title"). innerText drops list numbers, so lists are walked by hand.
+  function answerText(node) {
+    if (!node) return '';
+    const root = node.querySelector('.markdown, [class*="markdown"]') || node;
+    const lines = [];
+    const walk = (el) => {
+      for (const c of el.children) {
+        const tag = c.tagName;
+        if (tag === 'OL') { let n = parseInt(c.getAttribute('start') || '1', 10) || 1; for (const li of c.children) lines.push(`${n++}. ${li.innerText.trim().replace(/\s*\n\s*/g, ' ')}`); }
+        else if (tag === 'UL') { for (const li of c.children) lines.push(li.innerText.trim().replace(/\s*\n\s*/g, ' ')); }
+        else if (tag === 'PRE') { lines.push(...c.innerText.split('\n').map(x => x.trim()).filter(Boolean)); }
+        else if (tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'BLOCKQUOTE') { lines.push(...c.innerText.split('\n').map(x => x.trim()).filter(Boolean)); }
+        else if (c.children.length) walk(c);
+        else { const t = c.innerText?.trim(); if (t) lines.push(t); }
+      }
+    };
+    walk(root);
+    return (lines.length ? lines : root.innerText.split('\n').map(x => x.trim()).filter(Boolean)).join('\n');
+  }
+
+  // type → send → wait for the reply; returns the reply text
+  async function askChatGpt(job, text, label) {
+    const userBefore = countEl(SEL.user), botBefore = countEl(SEL.bot);
+    setResult(job, 'working', { note: `${label}: typing…` });
+    await typeIntoComposer(text);
+    await sleep(600 + Math.random() * 600);
+    const btn = await waitUntil(() => { const b = document.querySelector(SEL.send); return b && !b.disabled ? b : null; }, 8000);
+    const started = () => countEl(SEL.user) > userBefore || !!document.querySelector(SEL.stop);
+    if (btn) { try { btn.click(); } catch (_) {} }
+    if (!(await waitUntil(started, 6000))) {
+      showGptHUD('ZHunter: press Send in ChatGPT yourself — I will read the answer', 'warn');
+      setResult(job, 'press_send', { note: 'Press Send in the ChatGPT tab' });
+      if (!(await waitUntil(started, 10 * 60000, 500))) throw new Error('Message was not sent within 10 minutes');
+    }
+    setResult(job, 'working', { note: `${label}: ChatGPT is answering…` });
+    await waitUntil(() => countEl(SEL.bot) > botBefore, 60000, 400);
+    // finished = no stop button and the answer text stayed the same for ~3 s
+    let last = '', stable = 0; const t0 = Date.now();
+    while (Date.now() - t0 < 10 * 60000) {
+      await sleep(1000);
+      const bots = document.querySelectorAll(SEL.bot); const cur = bots.length ? bots[bots.length - 1].innerText : '';
+      if (document.querySelector(SEL.stop)) { stable = 0; last = cur; continue; }
+      if (cur && cur === last) stable++; else { stable = 0; last = cur; }
+      if (stable >= 3) break;
+    }
+    const bots = document.querySelectorAll(SEL.bot);
+    if (!bots.length) throw new Error('No answer from ChatGPT');
+    return answerText(bots[bots.length - 1]);
+  }
+
+  async function runTitlesJob() {
+    let job;
+    try { job = (await chrome.storage.local.get(['zhGptTitlesJob']))?.zhGptTitlesJob; } catch (_) { return; }
+    if (!job || job.started || Date.now() - (job.at || 0) > 5 * 60000) return;
+    if (window.__zhGptTitlesBusy) return;
+    window.__zhGptTitlesBusy = true;
+    try {
+      await chrome.storage.local.set({ zhGptTitlesJob: { ...job, started: true } });
+      showGptHUD('ZHunter: sending titles to ChatGPT…', 'info');
+      if (job.newChat && job.prompt) {
+        const first = await askChatGpt(job, job.prompt, 'Prompt');
+        if (!/done/i.test(first)) console.warn('[ZHunter GPT] First reply was not DONE:', first.slice(0, 80));
+        await sleep(1500);
+      }
+      const reply = await askChatGpt(job, job.text, 'Titles');
+      setResult(job, 'done', { text: reply });
+      showGptHUD('✓ Answer read — go back to ZHunter and press Apply', 'ok');
+    } catch (e) {
+      setResult(job, 'error', { error: e?.message || String(e) });
+      showGptHUD('ZHunter: ' + (e?.message || 'error'), 'warn');
+    } finally { window.__zhGptTitlesBusy = false; }
+  }
+
   window.__zhunterGptExecute = checkPendingAction;
 
   try {
@@ -175,11 +292,13 @@
       if (msg?.action === 'TRIGGER_GPT_IMAGE') {
         checkPendingAction();
       }
+      if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
     });
   } catch (_) {}
 
   // Run immediately
   checkPendingAction();
+  setTimeout(runTitlesJob, 2500);   // a freshly opened ChatGPT tab picks up a waiting titles job
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkPendingAction);
