@@ -188,15 +188,19 @@
   async function openCopy(gid) {
     const tr = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')].find(r => new RegExp('Goods ID:\\s*' + gid).test(r.innerText || r.textContent || ''));
     if (!tr) return { ok: false, error: 'row not found' };
+    if (document.documentElement.getAttribute('data-zc-hook') !== '1') return { ok: false, error: 'Refresh this Temu page (F5) once, then try again' };
     const tds = tr.querySelectorAll(':scope > td');
     const scope = tds[tds.length - 1] || tr;
     const more = [...scope.querySelectorAll('*')].find(e => ownText(e) === 'More');
     if (!more) return { ok: false, error: 'More button not found' };
     ['mouseover', 'mouseenter', 'mousedown', 'mouseup', 'click'].forEach(ev => more.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })));
-    const item = await waitFor(() => [...document.querySelectorAll('li[class*="cIL_item"]')].find(li => /^Copy/i.test((li.textContent || '').trim()) && vis(li)), 5000, 150);
+    const menuItems = () => [...document.querySelectorAll('li[class*="cIL_item"]')].filter(vis);
+    const item = await waitFor(() => { const m = menuItems(); return m.find(li => /^copy\s*(listing|product|goods)?\s*$/i.test((li.textContent || '').trim()) && !/id/i.test(li.textContent)) || m.find(li => /copy/i.test(li.textContent || '') && !/\bid\b/i.test(li.textContent || '')); }, 5000, 150);
     if (!item) { document.body.click(); return { ok: false, error: 'Copy item not in menu' }; }
     const de = document.documentElement;
     de.removeAttribute('data-zc-url'); de.setAttribute('data-zc-capture', '1');
+    await sleep(300);
+    ['mouseover', 'mouseenter', 'mousedown', 'mouseup'].forEach(ev => item.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })));
     item.click();
     const url = await waitFor(() => de.getAttribute('data-zc-url'), 6000, 150);
     de.removeAttribute('data-zc-capture');

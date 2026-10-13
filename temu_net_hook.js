@@ -7,6 +7,7 @@
   'use strict';
   if (window.__zhNetHook) return;
   window.__zhNetHook = true;
+  try { document.documentElement.setAttribute('data-zc-hook', '1'); } catch (_) {}
   const HINT = /goodsId|goods_id|carousel|imageUrl|hdThumbUrl|skuList|goodsDesc|bulletPoints|thumbUrl/i;
   let box = null;
   const getBox = () => {
