@@ -12688,7 +12688,7 @@ function temuEnrich(rows, cfg) {
     const num = (v, def) => { const x = parseFloat(v); return isFinite(x) && x > 0 ? Math.round(x * 10) / 10 : def; };
     const images = (Array.isArray(r.images) ? r.images : []).filter(u => typeof u === 'string' && /^https?:\/\//i.test(u) && (/\.(jpe?g|png|webp)(\?|$)/i.test(u) || u.includes('iili.io') || u.includes('image'))).slice(0, cfg.max_sku_images);
 
-    if (r.copyCat && (!profName || !(cfg.cat_overrides || {})[temuSourceIdentity(url)])) {
+    if (r.copyCat && !profName) {   // v9.15 — a category matched from the title wins; the copied one (often wrong on old listings) is only the fallback
       const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) =>
         String(p.category_keyword || '').toLowerCase() === String(r.copyCat).toLowerCase());
       if (hit) { profName = hit[0]; prof = hit[1]; }
@@ -12854,15 +12854,13 @@ async function temuStoreExport() {
       if ((d.skus || []).length > 1) notes.push(nm + `: ${d.skus.length} variations — only the first one was copied`);
       const color = String(s0.name || '').trim();
       let leaf = String(d.catPath || '').split(' / ').pop().trim();
-      { // Temu's AI only matches a keyword that exists in today's category list — prefer a known category (same path, then best title match)
-        const profs = Object.values(cfg.category_profiles || {});
-        const norm = x => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim();
-        const byPath = profs.find(q => q.full_path && norm(q.full_path) === norm(d.catPath));
-        if (byPath && byPath.category_keyword) leaf = byPath.category_keyword;
-        else if (!profs.some(q => norm(q.category_keyword) === norm(leaf))) {
-          const best = temuScoreProfiles(temuCleanTitle(d.title || nm, cfg), cfg)[0];
-          if (best?.prof?.category_keyword) { notes.push(nm + `: category "${leaf}" is not in your list — used "${best.prof.category_keyword}" (check it)`); leaf = best.prof.category_keyword; }
-        }
+      { // The category on an old / incomplete listing is often wrong (e.g. breakfast sandwiches under "Ice Cream Sandwiches") —
+        // so choose by the product title from your category list (same matcher as normal hunts); keep the copied one only if nothing matches.
+        const best = temuScoreProfiles(temuCleanTitle(d.title || nm, cfg), cfg)[0];
+        if (best?.prof?.category_keyword) {
+          if (String(best.prof.category_keyword).toLowerCase() !== leaf.toLowerCase()) notes.push(nm + `: category "${leaf}" → "${best.prof.category_keyword}" (matched from the title)`);
+          leaf = best.prof.category_keyword;
+        } else notes.push(nm + `: no category matched the title — kept "${leaf}" (check it)`);
       }
       items.push({
         goods: 'ZC-' + p.goodsId, sku: `ZC-${p.goodsId}-${color.replace(/[^A-Za-z0-9]+/g, '') || 'Std'}`,
@@ -12914,6 +12912,7 @@ function temuZcParse(buf) {
 async function temuZcApplyCategories(rows) {
   const cfg = temuGetCfg(); let changed = 0;
   rows.forEach(r => {
+    return;   // v9.15 — copied categories are no longer forced; the title-matched one is used (copied one = fallback)
     const leaf = String(r.copyCat || '').toLowerCase(); if (!leaf) return;
     const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) => String(p.category_keyword || '').toLowerCase() === leaf);
     if (hit) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(r.url)] = hit[0]; changed++; }
