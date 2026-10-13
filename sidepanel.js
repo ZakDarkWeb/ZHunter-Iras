@@ -6357,7 +6357,7 @@ function huntItemName(it, id) {
 async function huntRetryTabItem(t, level) {
   const prev = latestHuntResult(t.tabId);
   setBulkRowStatus(t.tabId, 'active');
-  setBulkRowMeta(t.tabId, level >= 3 ? 'Bringing tab to front, retrying…' : level === 2 ? 'Hard reload, long wait…' : 'Reload…');
+  setBulkRowMeta(t.tabId, level >= 3 ? 'Bringing tab to front, retrying…' : level === 2 ? 'Checking page again, long wait…' : 'Checking page again…');
   let restoreTo = null;
   try {
     const tab = await huntEnsureTab(t);
@@ -6367,8 +6367,13 @@ async function huntRetryTabItem(t, level) {
       restoreTo = active?.id && active.id !== t.tabId ? active.id : null;
       await chrome.tabs.update(t.tabId, { active: true });
     }
-    await new Promise(res => chrome.tabs.reload(t.tabId, { bypassCache: level >= 2 }, () => { void chrome.runtime.lastError; res(); }));
-    await huntWaitTabLoaded(t.tabId, prevUrl, level >= 2 ? 90000 : 45000);
+    // A page that is already open and loaded is NOT refreshed (a reload can break it, e.g. Temu "sold out").
+    // Only a sleeping / unloaded / re-opened-by-us tab is reloaded.
+    const needReload = !!(tab.discarded || tab.status !== 'complete');
+    if (needReload) {
+      await new Promise(res => chrome.tabs.reload(t.tabId, { bypassCache: false }, () => { void chrome.runtime.lastError; res(); }));
+      await huntWaitTabLoaded(t.tabId, prevUrl, level >= 2 ? 90000 : 45000);
+    }
     await sleep(level >= 3 ? 4500 : level === 2 ? 3000 : 1500);
     try { await chrome.scripting.executeScript({ target: { tabId: t.tabId }, files: ['content.js'] }); } catch (_) {}
     await sleep(300);

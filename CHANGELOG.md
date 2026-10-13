@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Hunt recovery: tabs that are already open and loaded are no longer refreshed (only sleeping or unloaded tabs are reloaded) — fixes pages breaking (e.g. Temu "sold out") after a retry.
 - ChatGPT Auto: ignores the hidden "ChatGPT said:" line (fixes count mismatch).
 - ChatGPT Auto: reads the answer with the new ChatGPT page markup (assistant/user message selectors).
 
