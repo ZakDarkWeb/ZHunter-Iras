@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: the suggested "Match words" is now the product type from the start of the title (e.g. "biscuit rollup") instead of one generic word like "breakfast" that matched everything.
 - Learn categories: now also reviews products whose category shows the ⚠ check mark (not only products with no category) using Temu's own suggestions.
 - Store export / imported store sheets: category is now matched from the product title (your category list) instead of trusting the old listing category (often wrong, e.g. "Ice Cream Sandwiches"); the copied one is only a fallback.
 - Store export: the sheet category now uses a keyword from your category list (exact path match, else best match for the title) because Temu only auto-picks categories that exist in its current list; a note tells you when it was replaced.

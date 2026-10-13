@@ -18693,7 +18693,12 @@ function tlcSuggestMatch(title, path, brand) {
     const run = leaf.slice(i, j); if (run.length <= best.length) break;
     for (let p = 0; p + run.length <= tt.length; p++) if (run.every((w, k) => tt[p + k] === w) && !run.every(w => bset.has(w))) { best = run; break; }
   }
-  if (best.length >= 2 || (best.length === 1 && best[0].length >= 5)) return best.join(' ');
+  if (best.length >= 2) return best.join(' ');
+  // one generic word (e.g. "breakfast") would catch every product — use the product type from the front of the title instead (last 2 words before the first comma)
+  { const seg = String(title || '').replace(/^\s*\d+\s*pack\s*[-–]\s*/i, '').split(/[,;|\u2013\u2014]| - | with | \(/i)[0];
+    const sw = tlcToks(seg).map(tlcStem).filter(w => !TLC_STOP.has(w) && !bset.has(w) && !/^\d/.test(w) && w.length > 2);
+    if (sw.length >= 2) return sw.slice(-2).join(' '); }
+  if (best.length === 1 && best[0].length >= 5) return best.join(' ');
   const inTitle = leaf.filter(w => w.length >= 5 && content.includes(w));
   if (inTitle.length) return inTitle[0];
   return content.slice(0, 2).join(' ');
