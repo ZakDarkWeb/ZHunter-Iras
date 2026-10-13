@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- AI Image Studio bar: removed the old "Pack" dropdown and "Make Pack" button (pack is now set per product in the review card, Edit Studio and Flow batch setup). The Speed setting moved into the Auto-mode dialog where it applies.
+
 - Prompts: new default background prompt (keeps pack count/badge corner, store style); new pack prompt that keeps the original background (old white-background pack prompt stays as "Purana"). Pack label can be extension-stamped (default), or none.
 - Flow batch setup + Edit Studio: per-product "PACK label" tick and per-product pack prompt switch (New / Old white bg). Edit Studio: "🏷 N PACK" button adds the label to an existing image later (undo with ◀).
 

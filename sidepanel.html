@@ -1094,32 +1094,6 @@
                   <span id="temuImgEditBtnLabel">Edit Images</span>
                 </button>
               </div>
-              <!-- v9.11.0 — speed, pack, manual board -->
-              <div class="temu-img-bar-controls">
-                <div class="temu-img-sel-wrap">
-                  <label class="temu-img-sel-label">Speed</label>
-                  <select id="temuAiImgSpeedSel" class="temu-img-sel" title="Auto Flow: gap between images. Faster = higher risk of the account being flagged">
-                    <option value="safe">🛡 Safe (8–20s)</option>
-                    <option value="normal" selected>⚡ Normal (4–10s)</option>
-                    <option value="fast">🚀 Fast (1.5–4s)</option>
-                  </select>
-                </div>
-                <div class="temu-img-sel-wrap">
-                  <label class="temu-img-sel-label">Pack</label>
-                  <select id="temuAiImgPackSel" class="temu-img-sel" title="Convert selected products to an N-pack (title + main image)">
-                    <option value="">Off</option>
-                    <option value="2">2 Pack</option>
-                    <option value="3">3 Pack</option>
-                    <option value="4">4 Pack</option>
-                    
-                    <option value="6">6 Pack</option>
-                    <option value="8">8 Pack</option>
-                    <option value="10">10 Pack</option>
-                    <option value="12">12 Pack</option>
-                  </select>
-                </div>
-                <button id="temuMakePackBtn" class="temu-img-pick-btn" type="button" title="Add &quot;N Pack - &quot; in front of the selected product titles and open Edit Studio (manual)">📦 Make Pack</button>
-              </div>
               <div id="temuAiImgPromptWrap" class="temu-img-prompt-wrap hidden">
                 <textarea id="temuAiImgPromptInp" class="inp inp-ta temu-img-prompt-ta" placeholder="Enter commercial photography AI prompt..."></textarea>
               </div>
@@ -1904,8 +1878,14 @@
       </button>
       <button id="zhModeAutoBtn" type="button" class="zs-mode">
         <span class="zs-mode-ic">🤖</span>
-        <span><b>Auto</b><small>The extension creates each image in Flow by itself (per the Speed setting)</small></span>
+        <span><b>Auto</b><small>The extension creates each image in Flow by itself (use the speed below)</small></span>
       </button>
+      <div class="zs-sub" style="margin:8px 2px 4px">Auto speed (random pause between images)</div>
+      <select id="temuAiImgSpeedSel" class="temu-img-sel" style="width:100%" title="Auto mode only. Faster = higher risk of the account being flagged">
+        <option value="safe">🛡 Safe (8–20s)</option>
+        <option value="normal" selected>⚡ Normal (4–10s)</option>
+        <option value="fast">🚀 Fast (1.5–4s)</option>
+      </select>
     </div>
   </div>
 
