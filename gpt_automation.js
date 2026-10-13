@@ -178,8 +178,8 @@
     editor: 'form[data-chatgpt-composer] .ProseMirror, div.ProseMirror[role="textbox"], #prompt-textarea, div.ProseMirror[contenteditable="true"], textarea[name="prompt-textarea"]',
     send: 'form[data-chatgpt-composer] button[type="submit"], button[data-testid="send-button"], button[aria-label="Send"], button[aria-label="Send prompt"], button[aria-label="Send message"]',
     stop: 'button[data-testid="stop-button"], button[aria-label="Stop"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"]',
-    user: '[data-message-author-role="user"]',
-    bot: '[data-message-author-role="assistant"]'
+    user: '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]',
+    bot: '[data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]'
   };
   const countEl = (sel) => document.querySelectorAll(sel).length;
   const setResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ zhGptTitlesResult: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
