@@ -2781,7 +2781,7 @@ function closeLightbox() {
 // Default AI Studio Commercial Prompt (1:1 Hero-Shot Listing Image)
 // v9.9.0 — user's e-commerce scene prompt (bump the version below whenever this changes,
 // so a prompt saved from an older default gets replaced once).
-const AI_IMAGE_PROMPT_VERSION = 2;
+const AI_IMAGE_PROMPT_VERSION = 3;
 const DEFAULT_AI_COMMERCIAL_PROMPT = `Edit the provided product image into a professional, realistic e-commerce main image.
 
 Understand the product first, then create a realistic scene that naturally shows the product in its relevant environment and use context.
@@ -2790,6 +2790,34 @@ Keep the original product as the main hero subject.
 
 DO NOT change, redesign, recreate, or alter the original product.
 Preserve the exact product shape, proportions, colors, packaging, branding, logo, label, text, graphics, quantity information, and important visual details.
+
+==================================================
+KEEP PACK / QUANTITY UNCHANGED (IMPORTANT)
+==================================================
+
+If the provided image shows multiple units or a pack:
+- Keep the EXACT same number of units.
+- Keep the same arrangement and the same relative size of the units.
+- Keep any pack badge or quantity text (for example "5 PACK") exactly as it is:
+  same text, same position, same colors, fully readable, never covered or hidden.
+- Do NOT add, remove, resize, or rearrange units.
+- Do NOT shrink the product to make room for props.
+
+Only the surroundings and background change. The product group stays untouched.
+
+==================================================
+STORE STYLE
+==================================================
+
+- Bright, clean, appetizing look with rich natural colors.
+- Soft warm natural light (like window light), gentle shadows.
+- Shallow depth of field: sharp product, softly blurred background.
+- Product fills about 80-90% of the 1:1 frame.
+- Supporting objects must be product-related only
+  (for example coffee beans for coffee, chocolate pieces for chocolate,
+  nuts for nut mix, sauce bowl or spices for jerky, a glass of the drink for shakes,
+  themed decor like small pumpkins for Halloween products).
+- Keep supporting objects secondary to the product, never crowding it. Keep the badge corner (top-right) clear.
 
 Create a realistic lifestyle/commercial photography scene appropriate for the product.
 
@@ -3616,7 +3644,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
   }
   // v9.15x — final stage of a pack job: stamp the correct "N PACK" label ourselves (AI-drawn labels were often wrong)
   if (how === 'Auto' && current.packQty > 1 && current.batchMode !== 'background' && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
-    finalUrl = await zhStampPackLabel(finalUrl, current.packQty);
+    finalUrl = await zhStampPackLabel(finalUrl, current.packQty, current.packLabel !== false);
   }
   const pid = current.product?.id, idx = current.imgIndex;
   const oldImg = _imgEntryUrl(current.product?.images?.[idx]);
@@ -15729,13 +15757,13 @@ function temuInitReviewToggle() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ Bulk AI Image Studio Pipeline ═══
 // ═════════════════════════════════════════════════════════════════
-function temuBatchStages(mode, quantity, backgroundPrompt) {
+function temuBatchStages(mode, quantity, backgroundPrompt, label = zhPackLabelOn, style = zhPackStyle) {
   const n = Number(quantity);
   if (!['background', 'pack', 'pack_background'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity must be between 2 and 24');
-  const keepLabel = ' Do not add any new text, number, label or badge; keep the scene clean.' + (zhPackLabelOn ? ' ' + ZH_KEEP_PACK_LABEL : '');
+  const keepLabel = ' Do not add any new text, number, label or badge; keep the scene clean.' + (label ? ' ' + ZH_KEEP_PACK_LABEL : '');
   const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.${keepLabel}`;
-  const pack = mode === 'background' ? '' : packMasterPrompt(n);
+  const pack = mode === 'background' ? '' : packMasterPrompt(n, label, style);
   return mode === 'background' ? [background] : mode === 'pack' ? [pack] : [pack, background];
 }
 
@@ -15751,14 +15779,18 @@ function temuConfigureBatch(queue, backgroundPrompt) {
         <input class="batch-search" type="search" placeholder="Search products…" aria-label="Search products">
         <div class="batch-selection"><button type="button" class="btn btn-ghost batch-select-all">Select visible</button><button type="button" class="btn btn-ghost batch-select-none">Clear selection</button><span class="batch-selected-count"></span></div>
         <div class="batch-bulk-controls"><select class="batch-bulk-mode" aria-label="Bulk image task"><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option><option value="skip">Skip / keep original</option></select>
-        <label>Qty <input class="batch-bulk-qty" type="number" min="2" max="24" value="2" disabled aria-label="Bulk pack quantity"></label></div>
+        <label>Qty <input class="batch-bulk-qty" type="number" min="2" max="24" value="2" disabled aria-label="Bulk pack quantity"></label>
+        <label title="Write the red-and-black N PACK label on the pack image"><input type="checkbox" class="batch-bulk-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
+        <select class="batch-bulk-style" aria-label="Pack prompt"><option value="new">Pack prompt: New (original background)</option><option value="old">Pack prompt: Old (white background)</option></select></div>
         <div class="batch-selection"><button type="button" class="btn btn-primary batch-apply-selected">Apply to selected</button><button type="button" class="btn btn-ghost batch-apply-all">Apply to all</button></div>
       </div>
       <div class="batch-items">${queue.map((q, i) => `<div data-batch="${i}" class="batch-item">
         <div class="batch-item-heading"><input type="checkbox" class="batch-pick" aria-label="Select image ${i + 1}"><img src="${esc(q.imgUrl)}" loading="lazy" alt=""><span title="${esc(q.product.title || '')}">${esc(trunc(q.product.title || 'Product', 65))}<small>Image #${q.imgIndex + 1}</small></span><button class="btn btn-ghost batch-product" type="button" title="Select all images of this product">Product</button></div>
         <div class="batch-item-settings">
         <select class="batch-mode" aria-label="Image task"><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option></select>
-        <label>Qty <input class="batch-qty" type="number" min="2" max="24" value="2" disabled aria-label="Pack quantity"></label></div>
+        <label>Qty <input class="batch-qty" type="number" min="2" max="24" value="2" disabled aria-label="Pack quantity"></label>
+        <label title="Write the red-and-black N PACK label"><input type="checkbox" class="batch-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
+        <select class="batch-style" aria-label="Pack prompt"><option value="new">New</option><option value="old">Old (white bg)</option></select></div>
       </div>`).join('')}<p class="batch-empty" hidden>No matching products</p></div>
       <div class="batch-footer"><p class="batch-summary"></p>
       <p class="batch-help">No pack? Choose Background only. No edits? Choose Skip. Pack → Background uses 2 generations.</p>
@@ -15782,6 +15814,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       entries.forEach(row => {
         const mode = row.querySelector('.batch-mode').value;
         row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip';
+        row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip';
         row.classList.toggle('batch-skipped', mode === 'skip');
         row.classList.toggle('batch-selected', row.querySelector('.batch-pick').checked);
         if (mode !== 'skip') { active++; steps += mode === 'pack_background' ? 2 : 1; }
@@ -15807,7 +15840,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       const qty = Number(modal.querySelector('.batch-bulk-qty').value);
       try { if (mode !== 'skip') temuBatchStages(mode, qty, backgroundPrompt); }
       catch (e) { error.textContent = e.message; return; }
-      targets.forEach(row => { row.querySelector('.batch-mode').value = mode; row.querySelector('.batch-qty').value = qty; });
+      targets.forEach(row => { row.querySelector('.batch-mode').value = mode; row.querySelector('.batch-qty').value = qty; row.querySelector('.batch-lbl').checked = modal.querySelector('.batch-bulk-lbl').checked; row.querySelector('.batch-style').value = modal.querySelector('.batch-bulk-style').value; });
       update();
     };
     modal.querySelector('.batch-apply-selected').onclick = () => apply(false);
@@ -15821,9 +15854,10 @@ function temuConfigureBatch(queue, backgroundPrompt) {
         const settings = activeEntries.map(row => {
           const mode = row.querySelector('.batch-mode').value;
           const qty = Number(row.querySelector('.batch-qty').value);
-          return { index: Number(row.dataset.batch), mode, qty, stages: temuBatchStages(mode, qty, backgroundPrompt) };
+          const label = row.querySelector('.batch-lbl').checked, style = row.querySelector('.batch-style').value;
+          return { index: Number(row.dataset.batch), mode, qty, label, style, stages: temuBatchStages(mode, qty, backgroundPrompt, label, style) };
         });
-        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, stages: s.stages, stageIndex: 0, prompt: s.stages[0] }));
+        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0] }));
         queue.splice(0, queue.length, ...activeQueue);
         modal.remove(); resolve(true);
       } catch (e) { modal.querySelector('.batch-error').textContent = e.message; }
@@ -17491,8 +17525,293 @@ const ZH_KEEP_PACK_LABEL = 'IMPORTANT: if the image already has a bold "N PACK" 
 // user choice (Edit Studio tick "PACK label"): write "N PACK" on pack images or not
 let zhPackLabelOn = true;
 try { chrome.storage.local.get(['zhPackLabelOn'], st => { if (typeof st?.zhPackLabelOn === 'boolean') zhPackLabelOn = st.zhPackLabelOn; }); } catch (_) {}
-function zhWithKeepLabel(p) { p = String(p || '').split('\n\n' + ZH_KEEP_PACK_LABEL).join('').trim(); return zhPackLabelOn ? (p + '\n\n' + ZH_KEEP_PACK_LABEL).trim() : p; }
-function packStrictPrompt(n) {
+function zhWithKeepLabel(p, on = zhPackLabelOn) { p = String(p || '').split('\n\n' + ZH_KEEP_PACK_LABEL).join('').trim(); return on ? (p + '\n\n' + ZH_KEEP_PACK_LABEL).trim() : p; }
+
+// v9.15 — NEW pack prompt (keeps the original background). The "N PACK" label is either added by the extension
+// (corner kept clean), drawn by the AI (style "ai"), or left out.
+const PACK_NEW_TPL = `Create a professional marketplace-ready [PACK COUNT]-PACK product image
+from the provided product image.
+
+==================================================
+CORE OBJECTIVE
+==================================================
+
+Transform the provided image into a professional [PACK COUNT]-PACK presentation.
+
+The input image is the ONLY source of truth for the product.
+
+First identify ONE complete original product unit/set.
+
+Then create exactly [PACK COUNT] complete and identical units/sets of that product
+inside ONE realistic professional product photograph.
+
+IMPORTANT:
+
+DUPLICATE THE PRODUCT, NOT THE ORIGINAL PHOTOGRAPH.
+
+Do NOT simply copy, mirror, tile, or repeat the entire original image.
+Do NOT place multiple copies of the original photograph together.
+
+Instead, reconstruct the actual product and create [PACK COUNT] physical units
+inside one shared realistic scene.
+
+The final image MUST visibly communicate that the customer receives
+[PACK COUNT] COMPLETE UNITS / SETS.
+
+==================================================
+COMPLETE PRODUCT UNIT
+==================================================
+
+First determine exactly what ONE complete sellable unit/set consists of.
+
+If the original contains multiple components that belong together,
+treat all of them as ONE complete set.
+
+Examples:
+1 knife block + all knives = ONE COMPLETE SET
+1 utensil holder + all utensils = ONE COMPLETE SET
+1 bottle + its included accessories = ONE COMPLETE SET
+1 box + included products = ONE COMPLETE SET
+1 package containing multiple items = ONE COMPLETE SET
+
+Then recreate that COMPLETE SET [PACK COUNT] TIMES.
+
+Every important component belonging to the original set must be represented
+appropriately in every duplicated set.
+
+Do NOT duplicate only the main object.
+Do NOT create incomplete sets.
+Do NOT leave the original quantity unchanged.
+
+==================================================
+EXACT PRODUCT ACCURACY
+==================================================
+
+Every duplicated unit must remain visually identical to the original.
+
+Preserve exactly:
+- product design, shape, proportions, dimensions
+- colors, materials, textures, patterns
+- logos, branding, printed text, labels
+- handles, openings, buttons, edges, components, small details
+
+Do NOT redesign the product.
+Do NOT change colors, branding, or text.
+Do NOT invent features. Do NOT remove features.
+Do NOT improve or stylize the product.
+
+The ONLY intentional changes are:
+1. increasing the quantity from ONE COMPLETE UNIT to exactly [PACK COUNT] COMPLETE UNITS
+2. the pack label handling described below
+
+==================================================
+KEEP THE ORIGINAL BACKGROUND
+==================================================
+
+The background of the provided image must stay the same.
+
+Keep the same background color, surface, environment, lighting direction
+and mood as the original image.
+
+If the original background is white, keep it white.
+If the original has a kitchen, table or lifestyle scene, keep that same scene.
+
+Do NOT replace, clean up, restyle, or change the background.
+
+Do NOT add any new objects, props, people, hands, food, plants, furniture,
+decorations or graphics that are not in the original image.
+
+Existing background elements may stay as they are in the original,
+but do not multiply or redesign them.
+
+Extend the same background naturally behind and around the additional units
+so the final image looks like ONE photograph.
+
+==================================================
+SMART MULTI-PACK POSITIONING
+==================================================
+
+Do NOT use one fixed layout for every product.
+
+Analyze the physical shape, dimensions, structure and number of units first.
+Then automatically choose the most professional arrangement.
+
+For products where depth positioning looks natural (bottles, cartons, boxes,
+containers, bags and similar solid products):
+- one or more units in the foreground, the center unit slightly larger
+- other units slightly behind
+- subtle size difference caused by realistic perspective
+- controlled overlap
+- clear visibility of each unit
+
+Do NOT dramatically resize products.
+Do NOT change their actual proportions.
+
+For flat, wide or multi-piece products where front/back positioning would
+hide important components, do NOT force a depth composition.
+Use the most natural arrangement instead:
+side-by-side, staggered, offset, rows, controlled diagonal, or grouped.
+
+Choose the layout that best communicates [PACK COUNT] complete units
+while keeping the product professional and recognizable.
+
+==================================================
+HIGHER PACK COUNTS
+==================================================
+
+For larger quantities such as 6, 8, 10 or 12 packs:
+
+Do NOT simply make every product extremely small.
+Create an organized, visually balanced composition.
+Use realistic grouping, depth and staggered positioning where appropriate.
+Keep the products large enough to remain recognizable.
+
+Do NOT create an overcrowded pile.
+Do NOT create excessive empty space.
+Do NOT hide most of the products behind the front products.
+
+If some overlap is necessary, keep enough of each unit visible to communicate
+the total quantity clearly.
+
+==================================================
+NO IMAGE DUPLICATION
+==================================================
+
+Never duplicate the source photograph itself.
+
+Create [PACK COUNT] physical product units within one shared photograph.
+They must look like they were physically arranged and photographed together.
+
+Do NOT make the image look like multiple screenshots were combined.
+Do NOT create repeated rectangular copies.
+Do NOT create a collage.
+Do NOT mirror the entire original composition.
+
+==================================================
+REALISTIC PRODUCT PHOTOGRAPHY
+==================================================
+
+All [PACK COUNT] units must look physically present in the same photograph.
+
+Use realistic perspective, scale, depth, lighting, shadows, contact shadows,
+reflections where appropriate, spacing and overlap.
+
+Do not make products float.
+Do not create impossible geometry.
+Do not merge different products together.
+Do not create distorted components.
+
+{{BADGE}}==================================================
+FRAMING
+==================================================
+
+Create a balanced professional e-commerce composition in 1:1 square.
+
+All [PACK COUNT] units should fit naturally within the frame.
+Do not crop important product parts.
+Avoid excessive empty space.
+Keep products large enough to remain recognizable
+(products should fill roughly 80-90% of the frame).
+
+==================================================
+FINAL VERIFICATION
+==================================================
+
+Before finalizing, verify ALL of the following:
+
+1. What is ONE complete original product unit?
+2. Are there EXACTLY [PACK COUNT] complete units in the final image?
+3. Does every unit contain the necessary components?
+4. Has the product design remained unchanged?
+5. Is the background the same as the original image?
+6. Does the image look like ONE real photograph, not duplicated source images?
+7. Is the layout appropriate for this specific product?
+8. Are the products clearly visible?
+{{V9}}
+{{V10}}
+11. Were NO new objects added?
+12. Is the output 1:1 square?
+
+If any requirement is incorrect, fix it before finalizing.
+
+FINAL GOAL:
+ONE ORIGINAL PRODUCT
+→ EXACTLY [PACK COUNT] COMPLETE IDENTICAL PRODUCTS
+→ SAME ORIGINAL BACKGROUND
+→ ONE REALISTIC PROFESSIONAL PHOTOGRAPH
+{{GOAL}}
+→ 1:1 SQUARE
+→ NO EXTRA OBJECTS
+→ NO PRODUCT DESIGN CHANGES
+→ NO MISSING UNITS`;
+const PACK_NEW_BADGE_AI = `==================================================
+MANDATORY PACK BADGE
+==================================================
+
+The final image MUST contain a badge with the exact text:
+
+[PACK COUNT] PACK
+
+This is REQUIRED. NEVER omit it, hide it, crop it, or make it tiny.
+
+PLACEMENT:
+Place the badge in the TOP-RIGHT corner of the image.
+Keep a safe margin from the top and right edges.
+The badge must NOT cover the product's logo, brand name, or important text.
+If the product occupies the top-right area, move the badge to the nearest
+clean spot in the upper-right region while keeping it fully visible.
+
+BADGE DESIGN:
+- Circular or rounded glossy badge with a thin outline.
+- Badge color must match the product's own packaging colors
+  (for example gold/brown for coffee and nuts, red or blue for protein shakes,
+  orange/black for Halloween products, navy or red for snacks and jerky).
+- Text color must have strong contrast with the badge color (white or black/gold).
+- Number [PACK COUNT] larger and bolder than the word PACK.
+- Heavy modern sans-serif font, uppercase, no thin or script fonts.
+- Badge size about 12-16% of the image width:
+  readable as a small thumbnail, but never dominating the product.
+
+If the original image already has a quantity or pack badge,
+REPLACE it with this one. Never show two badges.
+
+The ONLY allowed wording is:
+[PACK COUNT] PACK
+
+Do NOT add price, discount, sale text, stickers, banners, or other marketing claims.
+Do NOT use "pcs", "pieces", "sets", "X", "double pack", or any other wording.
+
+`;
+function packNewPrompt(n, label) {
+  n = Number(n) || 2;
+  const sec = label === 'ai' ? PACK_NEW_BADGE_AI
+    : label ? `==================================================
+PACK LABEL
+==================================================
+
+Do NOT draw any badge, text, number or the word PACK anywhere in the image.
+Keep the TOP-RIGHT corner (about 25% of the width and height) clean: no product parts, no text.
+A bold "[PACK COUNT] PACK" label is added there separately after generation.
+If the original image already has a quantity or pack badge, remove it and restore the clean background.
+
+`
+    : `==================================================
+NO PACK LABEL
+==================================================
+
+Do NOT add any badge, text, number, sticker or the word PACK anywhere in the image.
+If the original image already has a quantity or pack badge, remove it and restore the clean background.
+
+`;
+  const v9 = label === 'ai' ? '9. Is the "[PACK COUNT] PACK" badge in the top-right, clearly visible and readable?' : label ? '9. Is the top-right corner clean (no text, no product parts)?' : '9. Is there NO badge or added text anywhere?';
+  const v10 = label === 'ai' ? '10. Does the badge color match the product, and is the text spelled exactly right?' : '10. Is every unit identical to the original, with nothing extra added?';
+  const goal = label === 'ai' ? '→ TOP-RIGHT "[PACK COUNT] PACK" BADGE IN PRODUCT-MATCHING COLORS' : label ? '→ TOP-RIGHT CORNER LEFT CLEAN (LABEL ADDED SEPARATELY)' : '→ NO ADDED TEXT OR BADGE';
+  return PACK_NEW_TPL.replace('{{BADGE}}', sec).replace('{{V9}}', v9).replace('{{V10}}', v10).replace('{{GOAL}}', goal).split('[PACK COUNT]').join(String(n));
+}
+// pack prompt style: 'new' (original background) or 'old' (strict, clean white studio background)
+let zhPackStyle = 'new';
+try { chrome.storage.local.get(['zhPackStyle'], st => { if (st?.zhPackStyle === 'old' || st?.zhPackStyle === 'new') zhPackStyle = st.zhPackStyle; }); } catch (_) {}
+function packStrictPrompt(n, label = zhPackLabelOn) {
   n = Number(n) || 2;
   const w = PACK_WORDS[n] || String(n);
   const layout = PACK_LAYOUTS[n] || 'a neat grid of rows, every unit fully visible';
@@ -17508,7 +17827,7 @@ function packStrictPrompt(n) {
     `- Every one of the ${n} units is identical to the reference: same shape, size, colours, printed text, logo, flavour/variant, label and packaging. Do not redesign, translate, restyle or mix variants.`,
     `- All ${n} units fully visible, same scale, not cropped, clean spacing, consistent perspective and lighting, soft realistic contact shadows.`,
     `- Total number of units in the picture = ${n}. No extra, partial, mirrored, ghost or background copies.`,
-    '- Do NOT add any text, number, "PACK" label, badge, icon, sticker, price or watermark.' + (zhPackLabelOn ? ' Keep the top-right corner (about 25% of the width and height) clean and empty — a bold red-and-black "N PACK" label is added there separately.' : ''),
+    '- Do NOT add any text, number, "PACK" label, badge, icon, sticker, price or watermark.' + (label ? ' Keep the top-right corner (about 25% of the width and height) clean and empty — a bold red-and-black "N PACK" label is added there separately.' : ''),
     '- Keep all printed text on the product exactly as in the reference.',
     '- Square 1:1 image, centred composition, clean white or very light studio background, units fill about 75-85% of the frame.',
     '',
@@ -17516,9 +17835,9 @@ function packStrictPrompt(n) {
   ].join('\n');
 }
 // Stamp a clean "N PACK" label (red number, black PACK) on the top-right of a data: image. Returns data: URL.
-async function zhStampPackLabel(dataUrl, n) {
+async function zhStampPackLabel(dataUrl, n, on = zhPackLabelOn) {
   try {
-    if (!zhPackLabelOn || !/^data:image\//i.test(dataUrl || '') || !(n >= 2)) return dataUrl;
+    if (!on || !/^data:image\//i.test(dataUrl || '') || !(n >= 2)) return dataUrl;
     const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl; });
     const W = img.naturalWidth, H = img.naturalHeight;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -17537,9 +17856,9 @@ async function zhStampPackLabel(dataUrl, n) {
     return cv.toDataURL('image/jpeg', 0.95);
   } catch (_) { return dataUrl; }
 }
-function packMasterPrompt(n) { return packStrictPrompt(n); }
+function packMasterPrompt(n, label = zhPackLabelOn, style = zhPackStyle) { return style === 'old' ? packStrictPrompt(n, label) : packNewPrompt(n, label); }
 function packMasterPromptFull(n) { return PACK_MASTER_PROMPT.split('[PACK COUNT]').join(String(n)); }
-function packImagePrompt(n) { return packMasterPrompt(n); }
+function packImagePrompt(n, label, style) { return packMasterPrompt(n, label === undefined ? zhPackLabelOn : label, style || zhPackStyle); }
 
 async function zhImageToPngBlob(src) {
   let dataUrl = src;
@@ -17602,8 +17921,9 @@ async function zhStudioOpen(startProductId = null) {
     const pack = packFromTitle(r.title);
     return {
       product: r, pNo: i + 1, picked, showAll: false, pack,
+      packLabel: zhPackLabelOn, packStyle: zhPackStyle,
       promptMode: pack > 1 ? 'pack' : 'image',
-      prompts: { image: zhWithKeepLabel(basePrompt), pack: packImagePrompt(Math.max(2, pack)) },
+      prompts: { image: zhWithKeepLabel(basePrompt), pack: packImagePrompt(Math.max(2, pack), zhPackLabelOn, zhPackStyle) },
       slots: {}, pasteSel: new Set(picked), active: picked[0] ?? 0
     };
   });
@@ -17671,6 +17991,10 @@ function zhStudioRender(dir = 0) {
             <button type="button" data-pm="image" class="${it.promptMode === 'image' ? 'on' : ''}">Image prompt</button>
             <button type="button" data-pm="pack" class="${it.promptMode === 'pack' ? 'on' : ''}">Pack prompt${it.pack > 1 ? ` (${it.pack})` : ''}</button>
           </div>
+          ${it.promptMode === 'pack' ? `<div class="zs-seg" title="If the image is not good, try the other pack prompt">
+            <button type="button" data-ps="new" class="${it.packStyle === 'new' ? 'on' : ''}">Naya</button>
+            <button type="button" data-ps="old" class="${it.packStyle === 'old' ? 'on' : ''}">Purana (white bg)</button>
+          </div>` : ''}
           <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>
         </div>
         <textarea id="zsPrompt" class="zs-prompt" rows="3" spellcheck="false">${esc(prompt)}</textarea>
@@ -17702,6 +18026,7 @@ function zhStudioRender(dir = 0) {
                 ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Clipboard image into this slot (no Ctrl+V needed)">📥 Paste</button>` : ''}
                 ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Newest Flow image into this slot">⬇ Take from Flow</button>` : ''}
                 ${s.newUrl ? `<button type="button" class="zs-btn sm" data-act="undo" title="Original wapis">↩</button>` : ''}
+                ${it.pack > 1 && (s.newUrl || isPick) ? `<button type="button" class="zs-btn sm" data-act="stamp" title="Write the red-and-black ${it.pack} PACK label on this image (undo with ◀ in the review)">🏷 ${it.pack} PACK</button>` : ''}
               </div>
             </div>`;
           }).join('')}
@@ -17710,7 +18035,7 @@ function zhStudioRender(dir = 0) {
       <div class="zs-flowbar">
         <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in Flow (${it.pasteSel.size})</button>
         <label class="zs-tick"><input type="checkbox" id="zsWithPrompt" ${ZhStudio.withPrompt ? 'checked' : ''}/> + prompt</label>
-        <label class="zs-tick" title="Write the red-and-black 'N PACK' label at the top-right of pack images"><input type="checkbox" id="zsPackLabel" ${zhPackLabelOn ? 'checked' : ''}/> PACK label</label>
+        <label class="zs-tick" title="This product only: write the red-and-black 'N PACK' label at the top-right of pack images"><input type="checkbox" id="zsPackLabel" ${it.packLabel ? 'checked' : ''}/> PACK label (this product)</label>
         <label class="zs-tick" title="After the last picked image of a product is replaced, go to the next product"><input type="checkbox" id="zsAutoNext" ${ZhStudio.autoNext !== false ? 'checked' : ''}/> auto next</label>
         <button type="button" class="zs-btn" id="zsOpenFlow">↗ Open Flow</button>
       </div>
@@ -17795,7 +18120,7 @@ async function zsApply(it, i, src, how = 'Paste') {
     if (/^https:\/\/flow-content\.google\//i.test(src)) {
       try { const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src }); if (r?.success && r.base64) finalUrl = r.base64; } catch (_) {}
     }
-    if (zhPackLabelOn && it.promptMode === 'pack' && it.pack > 1 && /^data:image\//i.test(finalUrl)) finalUrl = await zhStampPackLabel(finalUrl, it.pack);   // "N PACK" label, top-right
+    if (how !== 'Label' && it.packLabel && it.promptMode === 'pack' && it.pack > 1 && /^data:image\//i.test(finalUrl)) finalUrl = await zhStampPackLabel(finalUrl, it.pack, true);   // "N PACK" label, top-right
     const pid = it.product.id;
     await replaceProductImage(pid, i, finalUrl, null);
     if (Array.isArray(it.product.images)) {
@@ -17903,7 +18228,7 @@ function zsGo(delta) {
       const p = packFromTitle(t);
       if (p !== it.pack) {
         it.pack = p; body.querySelectorAll('.zs-chip').forEach(b => b.classList.toggle('on', +b.dataset.pack === p));
-        if (p > 1 && !it.packEdited) { it.prompts.pack = packImagePrompt(p); if (it.promptMode === 'pack') { const ta = $('zsPrompt'); if (ta) ta.value = it.prompts.pack; } }
+        if (p > 1 && !it.packEdited) { it.prompts.pack = packImagePrompt(p, it.packLabel, it.packStyle); if (it.promptMode === 'pack') { const ta = $('zsPrompt'); if (ta) ta.value = it.prompts.pack; } }
       }
     } else if (e.target.id === 'zsPrompt') {
       it.prompts[it.promptMode] = e.target.value; if (it.promptMode === 'pack') it.packEdited = true;
@@ -17920,12 +18245,12 @@ function zsGo(delta) {
       ZhStudio.autoNext = e.target.checked;
       chrome.storage.local.set({ zhStudioAutoNext: e.target.checked });
     } else if (e.target.id === 'zsPackLabel') {
+      // v9.15 — per product (the tick also becomes the default for the next batch)
+      it.packLabel = e.target.checked;
       zhPackLabelOn = e.target.checked;
       chrome.storage.local.set({ zhPackLabelOn });
-      ZhStudio.items.forEach(x => {   // rebuild prompts for the new choice (your own edited pack text is kept)
-        x.prompts.image = zhWithKeepLabel(x.prompts.image);
-        if (!x.packEdited) x.prompts.pack = packImagePrompt(Math.max(2, x.pack || 2));
-      });
+      it.prompts.image = zhWithKeepLabel(it.prompts.image, it.packLabel);
+      if (!it.packEdited) it.prompts.pack = packImagePrompt(Math.max(2, it.pack || 2), it.packLabel, it.packStyle);
       zhStudioRender();
     } else if (e.target.id === 'zsWithPrompt') {
       ZhStudio.withPrompt = e.target.checked;
@@ -17941,11 +18266,16 @@ function zsGo(delta) {
       it.pack = p;
       zsSetTitle(it, packTitle(it.product.title, p));
       if (p > 1) {
-        if (!it.packEdited) it.prompts.pack = packImagePrompt(p);   // v9.15 — rebuild for the new pack count unless you edited the text yourself
+        if (!it.packEdited) it.prompts.pack = packImagePrompt(p, it.packLabel, it.packStyle);   // v9.15 — rebuild for the new pack count unless you edited the text yourself
         it.promptMode = 'pack';
       } else it.promptMode = 'image';
       zhStudioRender();
       return;
+    }
+    if (t.closest('[data-ps]')) {
+      it.packStyle = t.closest('[data-ps]').dataset.ps; zhPackStyle = it.packStyle; chrome.storage.local.set({ zhPackStyle });
+      it.packEdited = false; it.prompts.pack = packImagePrompt(Math.max(2, it.pack || 2), it.packLabel, it.packStyle);
+      zhStudioRender(); return;
     }
     if (t.closest('[data-pm]')) { it.promptMode = t.closest('[data-pm]').dataset.pm; zhStudioRender(); return; }
     if (t.closest('#zsAiTitle')) { await zsAiRewriteTitle(it); return; }
@@ -17978,6 +18308,16 @@ function zsGo(delta) {
       if (!g) { toast('No new generated image found in Flow (keep the Flow project tab open)', 'warn'); return; }
       ZhStudio.usedFlowIds.add(g.id);
       await zsApply(it, i, g.src, 'Flow');
+    } else if (act === 'stamp') {
+      try {
+        let cur = it.slots[i]?.newUrl || _allImgUrls(it.product)[i];
+        if (!/^data:image\//i.test(cur || '')) {
+          const r = /^https:\/\/flow-content\.google\//i.test(cur) ? await msg({ action: 'FETCH_FLOW_IMAGE', url: cur }) : await msg({ action: 'FETCH_BASE64', url: cur, settings: { imageFormat: 'original' } });
+          cur = r?.success && r.base64 ? r.base64 : cur;
+        }
+        if (!/^data:image\//i.test(cur || '')) { toast('Image download nahi hui, label nahi laga', 'warn'); return; }
+        await zsApply(it, i, await zhStampPackLabel(cur, it.pack, true), 'Label');
+      } catch (err) { toast('Label nahi laga: ' + (err?.message || err), 'warn'); }
     } else if (act === 'undo') {
       await zsUndo(it, i);
     }

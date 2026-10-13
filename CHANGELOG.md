@@ -2,6 +2,9 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Prompts: new default background prompt (keeps pack count/badge corner, store style); new pack prompt that keeps the original background (old white-background pack prompt stays as "Purana"). Pack label can be extension-stamped (default), or none.
+- Flow batch setup + Edit Studio: per-product "PACK label" tick and per-product pack prompt switch (New / Old white bg). Edit Studio: "🏷 N PACK" button adds the label to an existing image later (undo with ◀).
+
 - Images: ◀ ▶ buttons on every review image = undo / redo through up to 5 earlier versions (original → pack → background edit). The shown version is the one uploaded.
 - Titles: "ChatGPT se titles" box in the Title Optimizer — saved prompt + Prompt copy, numbered Titles copy, paste ChatGPT's list back, Preview (old → new, count check, warning if a title looks unrelated), Apply. Product IDs are remembered at copy time so titles can never land on another product.
 
