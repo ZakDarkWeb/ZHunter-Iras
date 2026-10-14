@@ -3576,7 +3576,7 @@ function gptPoolUiInner() {
     const nm = $('temuStepProdName'); if (nm) nm.textContent = cur.product?.title || 'Product';
     const sb = $('temuStepSub'); if (sb) sb.textContent = `Now: ${trunc(cur.product?.title || 'Product', 40)} · Image #${cur.imgIndex + 1}`;
   }
-  const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'AB'[i]}: ${n}` : '').filter(Boolean);
+  const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'ABCDEF'[i]}: ${n}` : '').filter(Boolean);
   try { temuStepResultsRender(); } catch (_) {}
   temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
 }
@@ -3635,10 +3635,11 @@ async function gptPoolWorker(S, idx) {
 
 async function gptPoolStart() {
   const S = TemuImgStepper;
-  S.pool = { next: 0, finished: 0, slotNote: ['', ''], failed: [] };
+  S.pool = { next: 0, finished: 0, slotNote: ['', '', '', '', '', ''], failed: [] };
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = 'none'; }
   const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = 'pre-line';
-  const n = Math.min(GPT_SLOTS, S.queue.length);
+  const wanted = Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || GPT_SLOTS));
+  const n = Math.min(wanted, S.queue.length);
   gptPoolUi();
   const workers = [];
   for (let i = 0; i < n; i++) {   // reserve every tab first (tab B is opened here if only one ChatGPT tab exists)
@@ -16447,6 +16448,11 @@ function temuInitReviewToggle() {
     });
   }
   // v9.15 — remember the chosen image engine
+  { const ts = $('temuGptTabsSel');   // how many ChatGPT tabs work together
+    if (ts) {
+      chrome.storage.local.get(['zhGptTabs']).then(r => { if (r?.zhGptTabs && [...ts.options].some(o => o.value === String(r.zhGptTabs))) ts.value = String(r.zhGptTabs); }).catch(() => {});
+      ts.addEventListener('change', () => chrome.storage.local.set({ zhGptTabs: parseInt(ts.value, 10) }).catch(() => {}));
+    } }
   { const es = $('temuAiImgEngineSel');
     if (es) {
       chrome.storage.local.get(['zhImgEngine']).then(r => { if (r?.zhImgEngine && [...es.options].some(o => o.value === r.zhImgEngine)) es.value = r.zhImgEngine; }).catch(() => {});
