@@ -4188,6 +4188,7 @@ function temuStepResultsRender() {
     document.querySelectorAll('#temuStepResWrap [data-r="redo"], #temuStepResWrap [data-r="revert"]').forEach(b => { b.disabled = !S.sel; b.title = S.sel ? b.title : 'Tap an image in the list first'; });
     const lbl = $('temuStepResSel'); const t = S.sel;
     if (lbl) lbl.textContent = t ? `Selected: ${trunc(t.product?.title || 'Product', 18)} · #${t.imgIndex + 1}` : 'Tap an image (Replace → current one)';
+    { const nf = S.queue.filter(it => it.status === 'failed' || it.status === 'skipped').length, rb = $('temuStepRetryBtn'); if (rb) { rb.classList.toggle('hidden', !nf); rb.textContent = `🔁 Retry failed (${nf})`; } }
     const stopB = $('temuStepStopBtn'); if (stopB) stopB.style.display = S.running ? '' : 'none';
     for (const id of ['temuStepPauseBtn', 'temuStepDoneBtn']) { const b = $(id); if (b) b.style.display = S.running ? '' : 'none'; }
   }, 120);
@@ -4204,6 +4205,7 @@ function temuStepSelect(it) {
 function temuStepRedoPrepare(item) {
   const S = TemuImgStepper;
   if (item.status === 'done' && S.stats.done > 0) S.stats.done--;
+  if ((item.status === 'failed' || item.status === 'skipped') && S.stats.skipped > 0) S.stats.skipped--;
   item.imgUrl = item.origUrl || item.imgUrl; item.stageIndex = 0;
   if (item.stages?.length) item.prompt = item.stages[0];
   item.tried = []; item.done = false; item.continueStage = false; item.sentAt = null; item.snap = null; item._more = false; item.status = 'busy';
@@ -4229,6 +4231,38 @@ async function temuStepRedo(item) {
     return;
   }
   S.redoOnly = true; S.currentIndex = S.queue.indexOf(item);
+  await temuStepProcessCurrent();
+}
+// 🔁 Retry failed: every failed / skipped image runs again
+async function temuStepRetryFailed() {
+  const S = TemuImgStepper; if (!S?.queue) return;
+  const list = S.queue.filter(it => it.status === 'failed' || it.status === 'skipped');
+  if (!list.length) { toast('No failed images', 'info'); return; }
+  if (S.running && S.pool) {
+    list.forEach(it => { temuStepRedoPrepare(it); (S.pool.redo = S.pool.redo || []).push(it); });
+    temuStepResultsRender(); toast(`🔁 ${list.length} image${list.length > 1 ? 's' : ''} queued again`, 'ok'); return;
+  }
+  if (S.running) { toast('Press ⏹ Stop first (or wait), then Retry failed', 'warn'); return; }
+  list.forEach(temuStepRedoPrepare);
+  S.running = true; S.stopped = false; S.paused = false; S.gptDown = false; S.heldAdvance = false;
+  temuStepResultsRender();
+  if (S.pool) {
+    S.pool.redo = list.slice(); S.pool.next = S.queue.length;
+    temuStepSetStatus(`🔁 Retrying ${list.length} failed image${list.length > 1 ? 's' : ''}…`);
+    try {
+      const n = Math.min(Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || 2)), list.length);
+      for (let i = 0; i < n; i++) await gptEnsureSlot(S, i);
+      const w = []; for (let i = 0; i < n; i++) { w.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }
+      await Promise.all(w);
+    } catch (e) { console.warn('[ZHunter] retry error', e); }
+    S.running = false;
+    const left = S.queue.filter(it => it.status === 'failed').length;
+    temuStepSetStatus(left ? `⚠️ Retry finished — ${left} still failed (tap one to Redo or Replace by hand)` : '✅ Retry finished — all images done', left ? 'error' : 'ok');
+    temuStepResultsRender(); temuRenderReview().catch(() => {});
+    return;
+  }
+  S.redoQueue = list.slice(); const first = S.redoQueue.shift();
+  S.redoOnly = true; S.currentIndex = S.queue.indexOf(first);
   await temuStepProcessCurrent();
 }
 async function temuStepRevert(item) {
@@ -4265,6 +4299,7 @@ function temuStepBindResults() {
     };
   });
   const stop = $('temuStepStopBtn'); if (stop) stop.onclick = () => temuStepStopAuto();
+  { const rb = $('temuStepRetryBtn'); if (rb) rb.onclick = () => temuStepRetryFailed(); }
   const sel = $('temuStepManualEng');
   if (sel) {
     sel.value = temuStepManualEngine();
@@ -16831,6 +16866,11 @@ async function temuStepAdvance() {
   const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
   if (current?.continueStage) current.continueStage = false;
   else {
+    if (TemuImgStepper.redoQueue?.length) {   // Retry failed: next failed image
+      const nx = TemuImgStepper.redoQueue.shift(); temuStepRedoPrepare(nx);
+      TemuImgStepper.currentIndex = TemuImgStepper.queue.indexOf(nx);
+      await temuStepProcessCurrent(); return;
+    }
     if (TemuImgStepper.redoOnly) {   // one image was run again by hand — stop after it
       TemuImgStepper.redoOnly = false; TemuImgStepper.running = false; TemuImgStepper.currentIndex = TemuImgStepper.queue.length;
       zhStepTimerStop(); temuStepResultsRender();

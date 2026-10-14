@@ -5984,3 +5984,8 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .tsp .temu-step-manual, .tsp .tsp-row2, .tsp .tsp-ctl, .tsp .tsp-actions { flex-wrap: wrap; }
 .tsp .tsp-ctl > *, .tsp .tsp-actions > * { min-width: 0; }
 .tsp .tsp-res-item .ph { width: 32px; height: 32px; border-radius: 6px; background: rgba(255,255,255,.06); flex: none; display: inline-block; }
+
+.tsp-res-h{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tsp-retry{margin-left:auto;padding:4px 9px;font-size:11px;font-weight:600;border-radius:7px;border:1px solid #f87171;background:rgba(248,113,113,.1);color:#fca5a5;cursor:pointer}
+.tsp-retry:hover{background:rgba(248,113,113,.2)}
+.tsp-retry.hidden{display:none}
