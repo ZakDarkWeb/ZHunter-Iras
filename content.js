@@ -1098,8 +1098,13 @@ function universalPrice() {
 function scrapeAmazon() {
   const r = { title: '', price: '', images: [], videos: [], variants: [] };
 
-  const titleEl = document.querySelector('#productTitle, #title span, h1.a-size-large, #title_feature_div #title');
-  if (titleEl) r.title = (titleEl.innerText || titleEl.textContent || '').replace(/\s+/g, ' ').trim();
+  // v9.15 — #productTitle FIRST: "#title span" can be a hidden "Adding to Cart..." label that comes earlier on the page
+  const AMZ_BAD = /^(adding to cart|add to cart|added to cart|loading|please wait|processing)/i;
+  for (const sel of ['#productTitle', '#titleSection #title span#productTitle', 'h1#title span', 'h1.a-size-large', '#title_feature_div #title']) {
+    const el = document.querySelector(sel);
+    const t = el ? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    if (t && !AMZ_BAD.test(t)) { r.title = t; break; }
+  }
   // v9.15 — more ways to find the Amazon title (other layouts, hidden spans, structured data, tab title)
   if (!r.title) {
     for (const sel of ['#productTitle', '#title', '#titleSection h1', '#dp-container h1', '#ppd h1', 'h1[id*="title" i]', 'h1 span', 'h1', '[data-feature-name="title"] span', '#mobileTitle', '#fresh-title']) {

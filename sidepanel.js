@@ -465,7 +465,7 @@ function scrapePageData() {
     }
 
     if (h.includes('amazon.')) {
-      data.title = txt(document.querySelector('#productTitle, #title span, h1')) || data.title;
+      data.title = txt(document.querySelector('#productTitle')) || (/^(adding to cart|add to cart|loading)/i.test(txt(document.querySelector('#title span, h1'))) ? '' : txt(document.querySelector('#title span, h1'))) || data.title;
       data.price = data.price || firstPrice(['#corePrice_feature_div .a-price:not(.a-text-price) .a-offscreen','.priceToPay .a-offscreen','.apexPriceToPay .a-offscreen','#apex_offerDisplay_desktop .a-price .a-offscreen','#priceblock_ourprice','#priceblock_dealprice','input[name="priceValue"]']);
 
       // ── AMAZON IMAGE FIX (bulk hunt) ──────────────────────────────────────

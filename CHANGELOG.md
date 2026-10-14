@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix (root cause): Amazon title was read from a hidden "Adding to Cart..." label, so every Amazon product became "title not found". #productTitle is now read first.
 - Fix: Learn categories no longer skips products that Export reports as NO_CATEGORY_PROFILE.
 - Fix: ⚠ no longer appears just because a title says "frozen"/"canned"/"dried" when you already taught that Temu category with such a title.
 - Fix: a title you taught in Learn categories no longer keeps the ⚠ mark (taught title is matched in raw and cleaned form).
