@@ -291,10 +291,10 @@
   }
 
   // ═══ v9.15 — Image edit via ChatGPT (auto) ═══════════════════════════════
-  // Job lives in chrome.storage.local.zhGptImgJob = { id, imgBase64, prompt, at, started }.
+  // Job comes from the side panel (message ZH_GPT_IMG_RUN); the result is written to chrome.storage.local["zhGptRes_"+id].
   // New chat (opened by the side panel) → attach image → pick "Create image" (if the menu has it) → prompt → send →
   // wait for the new image → read it → zhGptImgResult = { id, status:'done', dataUrl } (or 'error').
-  const setImgResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ zhGptImgResult: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
+  const setImgResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ ['zhGptRes_' + job.id]: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
   const blobToDataUrl = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
   const humanClick = (el) => {
     for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
@@ -357,19 +357,21 @@
     return null;
   }
 
-  async function runImgJob() {
-    let job;
-    try { job = (await chrome.storage.local.get(['zhGptImgJob']))?.zhGptImgJob; } catch (_) { return; }
-    if (!job || job.started || !job.imgBase64 || Date.now() - (job.at || 0) > 3 * 60000) return;
-    if (window.__zhGptImgBusy) return;
+  // job = { id, imgBase64, prompt } — sent by the side panel straight to this tab (chat may be reused for several images)
+  async function runImgJob(job) {
+    if (!job || !job.imgBase64 || !job.id) return;
+    window.__zhGptSeen = window.__zhGptSeen || new Set();
+    if (window.__zhGptSeen.has(job.id)) return;
+    window.__zhGptSeen.add(job.id);
+    if (window.__zhGptImgBusy) { setImgResult(job, 'error', { error: 'This ChatGPT tab is busy' }); return; }
     window.__zhGptImgBusy = true;
     try {
-      await chrome.storage.local.set({ zhGptImgJob: { ...job, started: true, imgBase64: '' } });
       showGptHUD('ZHunter: editing the image in ChatGPT…', 'info');
       setImgResult(job, 'working', { note: 'ChatGPT: attaching image…' });
       await attachImageToComposer(job.imgBase64);
       setImgResult(job, 'working', { note: 'ChatGPT: preparing…' });
-      const tool = await pickCreateImageTool();
+      const form0 = document.querySelector('form[data-chatgpt-composer], form[data-type="unified-composer"]');
+      const tool = (form0 && /create image/i.test(form0.innerText || '')) ? true : await pickCreateImageTool();
       const userBefore = countEl(SEL.user), botBefore = countEl(SEL.bot);
       await typeIntoComposer((tool ? '' : 'Create an image. ') + job.prompt);
       await sleep(900 + Math.random() * 700);
@@ -421,19 +423,19 @@
   window.__zhunterGptExecute = checkPendingAction;
 
   try {
-    chrome.runtime?.onMessage?.addListener((msg) => {
+    chrome.runtime?.onMessage?.addListener((msg, sender, sendResponse) => {
       if (msg?.action === 'TRIGGER_GPT_IMAGE') {
         checkPendingAction();
       }
       if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
-      if (msg?.action === 'ZH_GPT_IMG_START') runImgJob();
+      if (msg?.action === 'ZH_GPT_IMG_RUN') { runImgJob(msg.job); try { sendResponse({ ok: true }); } catch (_) {} }
+
     });
   } catch (_) {}
 
   // Run immediately
   checkPendingAction();
   setTimeout(runTitlesJob, 2500);   // a freshly opened ChatGPT tab picks up a waiting titles job
-  setTimeout(runImgJob, 3000);      // ...and a waiting image-edit job
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkPendingAction);

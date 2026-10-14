@@ -3449,36 +3449,163 @@ function temuStepFallback(reason) {
   setTimeout(() => { if (TemuImgStepper === S && S.running && S.queue[S.currentIndex] === cur && !cur.done) temuStepSendCurrent(); }, 1500);
   return true;
 }
-// ChatGPT image result (from gpt_automation.js)
-try {
-  chrome.storage.onChanged.addListener((ch, area) => {
-    const r = area === 'local' ? ch.zhGptImgResult?.newValue : null;
-    const S = TemuImgStepper;
-    if (!r || !S?.running || !S.gptJobId || r.id !== S.gptJobId) return;
-    const cur = S.queue?.[S.currentIndex];
-    if (!cur || cur.done) return;
-    if (r.status === 'working') { temuStepSetStatus('⏳ ' + (r.note || 'ChatGPT working…')); return; }
-    S.gptJobId = null;
-    if (r.status === 'error') {
-      if (r.limit) S.gptDown = true;
-      if (temuStepFallback('ChatGPT: ' + (r.error || 'failed'))) return;
-      temuStepSetStatus('⚠️ ChatGPT: ' + (r.error || 'failed') + ' — press "Send Again", "Skip" or paste the image yourself', 'error');
-      temuStepManualAttn(true);
-      return;
-    }
-    if (r.status === 'done' && r.dataUrl) { cur.done = true; temuStepApplyManualImage(r.dataUrl, 'Auto'); chrome.storage.local.remove(['zhGptImgResult']).catch?.(() => {}); }
+// ═══ v9.15 — ChatGPT image engine: 2 tabs working at the same time, chats are re-used ═══
+// Each "slot" is one ChatGPT tab. A slot starts a NEW chat first, then sends up to GPT_CHAT_EVERY images in that
+// same chat (each message says "new image, ignore the previous ones"), then starts a fresh chat again.
+const GPT_CHAT_EVERY = 5;
+const GPT_SLOTS = 2;
+const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function gptEnsureSlot(S, idx) {
+  S.gptSlots = S.gptSlots || [];
+  let slot = S.gptSlots[idx];
+  const alive = async (id) => { try { const t = await chrome.tabs.get(id); return /^https:\/\/chatgpt\.com\//.test(t.url || '') ? t : null; } catch (_) { return null; } };
+  if (slot?.tabId && await alive(slot.tabId)) return slot;
+  const used = new Set(S.gptSlots.filter(x => x && x !== slot).map(x => x.tabId));
+  const tabs = (await chrome.tabs.query({ url: '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
+  let tab = tabs.find(t => t.active) || tabs[0];
+  if (!tab) {
+    const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;
+    tab = await chrome.tabs.create({ url: 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
+    await gptWaitTab(tab.id);
+    slot = { tabId: tab.id, n: 0, fresh: true };
+  } else slot = { tabId: tab.id, n: Infinity, fresh: false };   // existing tab: first job starts a new chat
+  S.gptSlots[idx] = slot;
+  return slot;
+}
+async function gptWaitTab(tabId, ms = 40000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (!t) return false;
+    if (t.status === 'complete') { await sleepMs(2500); return true; }
+    await sleepMs(500);
+  }
+  return false;
+}
+// send one image to a slot and wait for the edited image (resolves with a data: URL)
+async function gptSendAndWait(S, idx, b64, prompt, onNote) {
+  const slot = await gptEnsureSlot(S, idx);
+  const id = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+  const key = 'zhGptRes_' + id;
+  if (slot.n >= GPT_CHAT_EVERY) {
+    onNote?.('opening a new chat…');
+    await chrome.tabs.update(slot.tabId, { url: 'https://chatgpt.com/', active: true });
+    await sleepMs(800);
+    await gptWaitTab(slot.tabId);
+    slot.n = 0;
+  } else await chrome.tabs.update(slot.tabId, { active: true }).catch(() => {});
+  const text = (slot.n > 0 ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
+  slot.n++;
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const fin = (fn, v) => {
+      if (done) return; done = true;
+      chrome.storage.onChanged.removeListener(lis); clearTimeout(to); S.gptAborts?.delete(abort);
+      chrome.storage.local.remove([key]).catch(() => {});
+      fn(v);
+    };
+    const lis = (ch, area) => {
+      const r = area === 'local' ? ch[key]?.newValue : null;
+      if (!r) return;
+      if (r.status === 'working') { onNote?.(r.note || 'working…'); return; }
+      if (r.status === 'done' && r.dataUrl) fin(resolve, r.dataUrl);
+      else if (r.status === 'error') fin(reject, Object.assign(new Error(r.error || 'failed'), { limit: !!r.limit }));
+    };
+    const abort = () => fin(reject, Object.assign(new Error('stopped'), { aborted: true }));
+    S.gptAborts = S.gptAborts || new Set(); S.gptAborts.add(abort);
+    const to = setTimeout(() => fin(reject, new Error('ChatGPT took too long')), 9 * 60000);
+    chrome.storage.onChanged.addListener(lis);
+    (async () => {
+      const job = { id, imgBase64: b64, prompt: text };
+      for (let t = 0; t < 3 && !done; t++) {
+        try { const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_GPT_IMG_RUN', job }); if (r?.ok) return; } catch (_) {}
+        try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['gpt_automation.js'] }); } catch (_) {}
+        await sleepMs(1500);
+      }
+      fin(reject, new Error('Could not reach the ChatGPT tab — refresh it (F5) once'));
+    })();
   });
-} catch (_) {}
-// ChatGPT watchdog: a job that never answers must not freeze the run
-setInterval(() => {
+}
+
+// progress text for the 2-tab runner
+function gptPoolUi() {
+  const S = TemuImgStepper; if (!S?.pool) return;
+  const total = S.queue.length, done = S.pool.finished;
+  const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round(done / Math.max(1, total) * 100) + '%';
+  const bd = $('temuStepBadge'); if (bd) bd.textContent = `${done} / ${total}`;
+  const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ChatGPT · ${done}/${total}`;
+  const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'AB'[i]}: ${n}` : '').filter(Boolean);
+  temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
+}
+
+async function gptRunItem(S, idx, item) {
+  const label = () => `image #${item.imgIndex + 1} · ${trunc(item.product.title || 'Product', 28)}`;
+  let more = true;
+  while (more && S.running) {
+    const stageTxt = item.stages && item.stages.length > 1 ? ` (step ${item.stageIndex + 1}/${item.stages.length})` : '';
+    let result = null, lastErr = null;
+    for (let attempt = 0; attempt < 2 && S.running && !result; attempt++) {
+      try {
+        S.pool.slotNote[idx] = `${label()}${stageTxt} — sending…`; gptPoolUi();
+        let b64 = await flowPrefetchImage(item.imgUrl);
+        if (!b64 && item.imgUrl?.startsWith('data:')) b64 = item.imgUrl;
+        if (!b64) throw new Error('Image could not be downloaded');
+        if (attempt > 0 && S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;   // retry in a fresh chat
+        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(); });
+      } catch (e) {
+        lastErr = e;
+        if (e.aborted || e.limit) break;
+      }
+    }
+    if (!S.running) return false;
+    if (!result) {
+      if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; }
+      S.stats.skipped++;
+      S.pool.failed.push(`${label()}: ${lastErr?.message || 'failed'}`);
+      toast(`ChatGPT: ${label()} failed — ${lastErr?.message || 'error'}`, 'warn');
+      return false;
+    }
+    const ok = await temuStepApplyManualImage(result, 'Auto', item);
+    if (!ok) { S.stats.skipped++; return false; }
+    more = !!item._more;
+  }
+  return true;
+}
+
+async function gptPoolWorker(S, idx) {
+  try {
+    while (S.running && !S.gptDown) {
+      while (S.paused && S.running) await sleepMs(500);
+      if (!S.running) break;
+      const item = S.queue[S.pool.next]; S.pool.next++;
+      if (!item) break;
+      await gptRunItem(S, idx, item);
+      S.pool.finished++;
+      S.pool.slotNote[idx] = ''; gptPoolUi();
+      if (S.pool.next < S.queue.length && S.running && !S.gptDown) await sleepMs(3000 + Math.random() * 6000);   // human-like gap
+    }
+  } catch (e) { console.warn('[ZHunter] GPT worker error', e); }
+  S.pool.slotNote[idx] = '';
+}
+
+async function gptPoolStart() {
   const S = TemuImgStepper;
-  if (!S?.running || !S.gptJobId) return;
-  const cur = S.queue?.[S.currentIndex];
-  if (!cur || cur.done || !cur.sentAt || Date.now() - cur.sentAt < 9 * 60000) return;
-  S.gptJobId = null;
-  if (temuStepFallback('ChatGPT took too long')) return;
-  temuStepSetStatus('⚠️ ChatGPT took too long — press "Send Again", "Skip" or paste the image yourself', 'error'); temuStepManualAttn(true);
-}, 5000);
+  S.pool = { next: 0, finished: 0, slotNote: ['', ''], failed: [] };
+  for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = 'none'; }
+  const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = 'pre-line';
+  const n = Math.min(GPT_SLOTS, S.queue.length);
+  gptPoolUi();
+  const workers = [];
+  for (let i = 0; i < n; i++) { workers.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }   // tab B starts a few seconds after tab A
+  await Promise.all(workers);
+  if (TemuImgStepper !== S || !S.running) return;
+  if (S.gptDown) {
+    toast('ChatGPT limit reached: ' + (S.pool.limitMsg || 'try again later'), 'warn');
+    temuStepSetStatus('⚠️ ChatGPT limit reached — ' + (S.pool.limitMsg || 'try again later') + '. Finished images are saved; run the rest later or use Flow.', 'error');
+  } else if (S.pool.failed.length) console.log('[ZHunter] GPT failed items:', S.pool.failed);
+  await temuStepFinish();
+}
 
 function temuStepSetStatus(text, kind = 'info') {
   const el = $('temuStepStatus');
@@ -3683,18 +3810,20 @@ setInterval(async () => {
 }, 2500);
 
 // v9.10.1 — manual image for the current step (paste / drop / "Flow se latest")
-async function temuStepApplyManualImage(src, how = 'manual') {
+async function temuStepApplyManualImage(src, how = 'manual', item = null) {
   if (!TemuImgStepper?.running) return false;
-  const current = TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
+  const current = item || TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
   if (!current || !src) return false;
-  current.done = true;
-  // A late automatic result for this step must not overwrite the manual one
-  if (TemuImgStepper.activeJobId) {
-    FlowHandledResults.add(TemuImgStepper.activeJobId);
-    _markFlowJobDone(TemuImgStepper.activeJobId, /^https?:/i.test(src) ? src : null);
+  if (!item) {   // item = ChatGPT 2-tab runner: several images are in flight, so nothing global is touched
+    current.done = true;
+    // A late automatic result for this step must not overwrite the manual one
+    if (TemuImgStepper.activeJobId) {
+      FlowHandledResults.add(TemuImgStepper.activeJobId);
+      _markFlowJobDone(TemuImgStepper.activeJobId, /^https?:/i.test(src) ? src : null);
+    }
+    temuStepCancelActiveJob();
+    temuStepSetStatus(`⏳ ${how}: applying image…`);
   }
-  temuStepCancelActiveJob();
-  temuStepSetStatus(`⏳ ${how}: applying image…`);
 
   // v9.11.0 — local copy first (fast); the public Temu link is made in the background below,
   // so the next step no longer waits for the upload.
@@ -3726,11 +3855,12 @@ async function temuStepApplyManualImage(src, how = 'manual') {
     current.stageIndex++;
     current.tried = [];
     current.prompt = current.stages[current.stageIndex];
-    current.continueStage = true;
+    current.continueStage = !item;
     current.sentAt = null;
   } else {
     TemuImgStepper.stats.done++;
   }
+  current._more = !!moreStages;
   try { await temuRenderReview(); } catch (_) {}
   toast(`✓ ${trunc(current.product?.title || 'Product', 30)} · Image #${idx + 1} replaced (${how})`, 'ok');
 
@@ -3747,7 +3877,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
       }
     })();
   }
-  temuStepScheduleNext();
+  if (!item) temuStepScheduleNext();
   return true;
 }
 
@@ -16133,6 +16263,8 @@ async function temuStartBulkImageEdit(opts = {}) {
   zhStepTimerStart();
 
   temuStepOpenModal();
+  for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
+  if (engine === 'chatgpt') { await gptPoolStart(); return; }   // v9.15 — 2 ChatGPT tabs at the same time
   await temuStepProcessCurrent();
 }
 
@@ -16166,7 +16298,8 @@ function zhStepTimerStop() {
 function temuStepCancelActiveJob() {
   if (TemuImgStepper.activeJobId) FlowJobs.delete(TemuImgStepper.activeJobId);
   TemuImgStepper.activeJobId = null;
-  TemuImgStepper.gptJobId = null;   // v9.15 — ChatGPT image job
+  TemuImgStepper.gptToken = null;   // v9.15 — ChatGPT image attempt
+  try { for (const f of [...(TemuImgStepper.gptAborts || [])]) f(); } catch (_) {}
   TemuImgStepper.npToken = null;   // v9.12.6 — stops a running "new project" countdown
   temuStepManualAttn(false);
 }
@@ -16312,7 +16445,8 @@ function temuStepOpenModal() {
       } else {
         TemuImgStepper.paused = false;
         pb.classList.remove('paused'); pb.textContent = '⏸ Pause';
-        if (TemuImgStepper.heldAdvance) { TemuImgStepper.heldAdvance = false; temuStepSetStatus('▶ Resumed', 'ok'); await temuStepAdvance(); }
+        if (TemuImgStepper.pool) { temuStepSetStatus('▶ Resumed', 'ok'); }
+        else if (TemuImgStepper.heldAdvance) { TemuImgStepper.heldAdvance = false; temuStepSetStatus('▶ Resumed', 'ok'); await temuStepAdvance(); }
         else if (!TemuImgStepper.activeJobId) { temuStepSetStatus('▶ Resumed', 'ok'); await temuStepSendCurrent(); }
         else temuStepSetStatus('▶ Resumed — waiting for the image…', 'ok');
       }
@@ -16479,40 +16613,31 @@ async function temuStepSendCurrent() {
     });
     if (statusEl) statusEl.textContent = '✓ Gemini opened with image & prompt! Generate, copy the result, then click "Paste & Next".';
   } else if (engine === 'chatgpt') {
-    // v9.15 — fully automatic: new ChatGPT chat per image → attach → prompt → send → read the new image
+    // v9.15 — Auto engine: one ChatGPT tab (chat re-used), result comes back by itself
     temuStepCancelActiveJob();
-    const jobId = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-    TemuImgStepper.gptJobId = jobId;
+    const S = TemuImgStepper, token = {};
+    S.gptToken = token;
     current.done = false;
     current.sentAt = Date.now();
     temuStepSetStatus('⏳ Sending to ChatGPT…');
-    let b64 = await flowPrefetchImage(current.imgUrl);
-    if (!b64 && current.imgUrl?.startsWith('data:')) b64 = current.imgUrl;
-    if (TemuImgStepper.gptJobId !== jobId) return;
-    if (!b64) {
-      TemuImgStepper.gptJobId = null;
-      if (temuStepFallback('ChatGPT: image could not be downloaded')) return;
-      temuStepSetStatus('⚠️ Image could not be downloaded — press "Send Again" or "Skip"', 'error');
-      return;
-    }
-    const gptPrompt = ((current.prompt || prompt) + '').trim();
-    await chrome.storage.local.remove(['zhGptImgResult']);
-    await chrome.storage.local.set({ zhGptImgJob: { id: jobId, imgBase64: b64, prompt: gptPrompt, at: Date.now(), started: false } });
-    try {
-      const tabs = await chrome.tabs.query({ url: '*://chatgpt.com/*' });
-      if (tabs.length) {
-        const tab = tabs.find(t => t.active) || tabs[0];
-        await chrome.tabs.update(tab.id, { url: 'https://chatgpt.com/', active: true });   // fresh chat; the page picks the job up by itself
-        if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-      } else {
-        await chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });
+    (async () => {
+      try {
+        let b64 = await flowPrefetchImage(current.imgUrl);
+        if (!b64 && current.imgUrl?.startsWith('data:')) b64 = current.imgUrl;
+        if (!b64) throw new Error('Image could not be downloaded');
+        const url = await gptSendAndWait(S, 0, b64, ((current.prompt || prompt) + '').trim(), (n) => { if (S.gptToken === token) temuStepSetStatus('⏳ ChatGPT: ' + n); });
+        if (S.gptToken !== token || current.done || !S.running) return;
+        current.done = true;
+        await temuStepApplyManualImage(url, 'Auto');
+      } catch (e) {
+        if (e.aborted || S.gptToken !== token || !S.running) return;
+        S.gptToken = null;
+        if (e.limit) S.gptDown = true;
+        if (temuStepFallback('ChatGPT: ' + (e.message || 'failed'))) return;
+        temuStepSetStatus('⚠️ ChatGPT: ' + (e.message || 'failed') + ' — press "Send Again", "Skip" or paste the image yourself', 'error');
+        temuStepManualAttn(true);
       }
-      temuStepSetStatus('⏳ ChatGPT: new chat → image → prompt → result arrives automatically.');
-    } catch (e) {
-      TemuImgStepper.gptJobId = null;
-      if (temuStepFallback('ChatGPT could not be opened')) return;
-      temuStepSetStatus('⚠️ ChatGPT could not be opened: ' + (e?.message || e), 'error');
-    }
+    })();
   }
 }
 
