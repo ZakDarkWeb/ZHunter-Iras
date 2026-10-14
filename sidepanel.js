@@ -9386,7 +9386,11 @@ async function huntRetryAll() {
 function zhCaptureSourceFacts(row) { return JSON.parse(JSON.stringify({ title: row.title, description: row.description, bullets: row.bullets, brand: row.brand, color: row.color, size: row.size, material: row.material, weight: row.weight, variants: row.variants, images: row.images })); }
 const ZhMasterBaselines = new WeakMap();
 async function getMasterRows() {
-  const saved = await chrome.storage.local.get([MASTER_KEY, 'zhTextEdits']);
+  let saved = null;
+  for (let attempt = 0; attempt < 4 && !saved; attempt++) {   // v9.15 — storage can answer "channel closed" while the browser is busy: try again
+    try { saved = await chrome.storage.local.get([MASTER_KEY, 'zhTextEdits']); }
+    catch (e) { if (attempt === 3) throw e; await new Promise(r => setTimeout(r, 400 * (attempt + 1))); }
+  }
   const rows = saved[MASTER_KEY] || [];
   ZhMasterBaselines.set(rows, JSON.parse(JSON.stringify(rows)));
   for (const row of rows) if (!row._sourceFacts) {
