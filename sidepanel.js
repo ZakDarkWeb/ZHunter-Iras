@@ -13179,8 +13179,10 @@ function temuProductPhrases(title) {
 function temuCatDoubtful(title, prof) {
   if (!prof || !prof.category_keyword) return true;
   // a title you taught the extension for exactly this category is never doubtful
-  try { const cf = temuGetCfg(), sg = temuExTokens(temuCleanTitle(title, cf)).tokens.slice().sort().join(' ');
-    if ((cf.cat_examples || []).some(e => e.s === sg && (cf.category_profiles?.[e.k]?.full_path || "#") === (prof.full_path || ""))) return false; } catch (_) {}
+  try { const cf = temuGetCfg();
+    // v9.15 — the taught title may have been stored as typed OR cleaned: accept either form
+    const sigs = [...new Set([title, zhStripSourceNames(title || ''), temuCleanTitle(title, cf), temuCleanTitle(zhStripSourceNames(title || ''), cf)].map(t => temuExTokens(t).tokens.slice().sort().join(' ')))];
+    if ((cf.cat_examples || []).some(e => sigs.includes(e.s) && (cf.category_profiles?.[e.k]?.full_path || "#") === (prof.full_path || ""))) return false; } catch (_) {}
   let list = [];
   try { list = temuScoreProfiles(temuCleanTitle(title, temuGetCfg()), temuGetCfg()); } catch (_) {}
   const me = list.find(x => x.prof === prof || (prof.id && x.prof.id === prof.id));
@@ -19747,7 +19749,8 @@ async function temuLearnCategories() {
       const same = Object.entries(cfg.category_profiles).find(([, p]) => (p.full_path || '') === pick.path);
       if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
       else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
-      temuLearnExample(cfg, it.title, same ? same[0] : key);   // v9.15 — the whole title is the lesson
+      { const _k = same ? same[0] : key; const _st = zhStripSourceNames(it.title || '');   // v9.15 — the whole title is the lesson (stored in every form it can appear in)
+        [it.title, _st, temuCleanTitle(it.title, cfg), temuCleanTitle(_st, cfg)].forEach(t => temuLearnExample(cfg, t, _k)); }
       // this product gets the category you just chose, right now
       try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = same ? same[0] : key; } } catch (_) {}
       await temuSaveCfg(cfg); saved++;
