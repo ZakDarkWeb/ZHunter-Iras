@@ -3433,6 +3433,53 @@ async function uploadImageToPublicHost(source) {
 }
 window.uploadImageToPublicHost = uploadImageToPublicHost;
 
+// v9.15 — engine of the CURRENT step ("auto" picks per image: ChatGPT → Flow → Gemini)
+function stepEng() { const S = TemuImgStepper; return (S && (S.curEngine || (S.engine !== 'auto' ? S.engine : 'chatgpt'))) || 'flow'; }
+const ZH_AUTO_ORDER = ['chatgpt', 'flow', 'gemini'];
+// Auto: this engine failed → try the next one for the same image. Returns true if it moved on.
+function temuStepFallback(reason) {
+  const S = TemuImgStepper;
+  if (!S?.running || S.engine !== 'auto') return false;
+  const cur = S.queue?.[S.currentIndex];
+  if (!cur || cur.done) return false;
+  const next = ZH_AUTO_ORDER.find(e => !(cur.tried || []).includes(e) && !(e === 'chatgpt' && S.gptDown));
+  if (!next) return false;
+  temuStepCancelActiveJob();
+  toast(`${reason} — trying ${next === 'chatgpt' ? 'ChatGPT' : next === 'flow' ? 'Flow' : 'Gemini'} instead`, 'info');
+  setTimeout(() => { if (TemuImgStepper === S && S.running && S.queue[S.currentIndex] === cur && !cur.done) temuStepSendCurrent(); }, 1500);
+  return true;
+}
+// ChatGPT image result (from gpt_automation.js)
+try {
+  chrome.storage.onChanged.addListener((ch, area) => {
+    const r = area === 'local' ? ch.zhGptImgResult?.newValue : null;
+    const S = TemuImgStepper;
+    if (!r || !S?.running || !S.gptJobId || r.id !== S.gptJobId) return;
+    const cur = S.queue?.[S.currentIndex];
+    if (!cur || cur.done) return;
+    if (r.status === 'working') { temuStepSetStatus('⏳ ' + (r.note || 'ChatGPT working…')); return; }
+    S.gptJobId = null;
+    if (r.status === 'error') {
+      if (r.limit) S.gptDown = true;
+      if (temuStepFallback('ChatGPT: ' + (r.error || 'failed'))) return;
+      temuStepSetStatus('⚠️ ChatGPT: ' + (r.error || 'failed') + ' — press "Send Again", "Skip" or paste the image yourself', 'error');
+      temuStepManualAttn(true);
+      return;
+    }
+    if (r.status === 'done' && r.dataUrl) { cur.done = true; temuStepApplyManualImage(r.dataUrl, 'Auto'); chrome.storage.local.remove(['zhGptImgResult']).catch?.(() => {}); }
+  });
+} catch (_) {}
+// ChatGPT watchdog: a job that never answers must not freeze the run
+setInterval(() => {
+  const S = TemuImgStepper;
+  if (!S?.running || !S.gptJobId) return;
+  const cur = S.queue?.[S.currentIndex];
+  if (!cur || cur.done || !cur.sentAt || Date.now() - cur.sentAt < 9 * 60000) return;
+  S.gptJobId = null;
+  if (temuStepFallback('ChatGPT took too long')) return;
+  temuStepSetStatus('⚠️ ChatGPT took too long — press "Send Again", "Skip" or paste the image yourself', 'error'); temuStepManualAttn(true);
+}, 5000);
+
 function temuStepSetStatus(text, kind = 'info') {
   const el = $('temuStepStatus');
   if (!el) return;
@@ -3469,7 +3516,8 @@ function onFlowStatus(m) {
       TemuImgStepper.activeJobId = null;
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
       if (current) current.sentAt = null;
-      if (unusual && TemuImgStepper.engine === 'flow') flowAutoNewProject();   // v9.12.6
+      if (unusual && stepEng() === 'flow' && TemuImgStepper.engine !== 'auto') flowAutoNewProject();   // v9.12.6
+      else if (temuStepFallback('Flow: ' + (m.text || 'error'))) { /* Auto engine moved on */ }
       else { toast('Flow: ' + (m.text || 'error') + ' — use "Send Again", "Skip" or the Manual buttons below', 'warn'); temuStepManualAttn(true); }
     } else {
       toast('Flow: ' + (m.text || 'error'), 'warn');
@@ -3659,7 +3707,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
     if (finalUrl === src) finalUrl = (await uploadImageToPublicHost(src)) || src;
   }
   // v9.15x — final stage of a pack job: stamp the correct "N PACK" label ourselves (AI-drawn labels were often wrong)
-  if (how === 'Auto' && current.packQty > 1 && current.batchMode !== 'background' && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
+  if (how === 'Auto' && current.packQty > 1 && current.batchMode !== 'background' && current.batchMode !== 'improve' && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
     finalUrl = await zhStampPackLabel(finalUrl, current.packQty, current.packLabel !== false);
   }
   const pid = current.product?.id, idx = current.imgIndex;
@@ -3676,6 +3724,7 @@ async function temuStepApplyManualImage(src, how = 'manual') {
   if (moreStages) {
     current.imgUrl = finalUrl;
     current.stageIndex++;
+    current.tried = [];
     current.prompt = current.stages[current.stageIndex];
     current.continueStage = true;
     current.sentAt = null;
@@ -3779,7 +3828,7 @@ let _flowPollBusy = false;
 setInterval(async () => {
   if (_flowPollBusy) return;
   const S = TemuImgStepper;
-  if (!S?.running || S.engine !== 'flow') return;
+  if (!S?.running || stepEng() !== 'flow') return;
   const cur = S.queue?.[S.currentIndex];
   if (!cur || cur.done || !cur.sentAt) return;
   _flowPollBusy = true;
@@ -15865,6 +15914,12 @@ function temuInitReviewToggle() {
       chrome.storage.local.set({ zhunterAiImagePrompt: imgPromptInp.value });
     });
   }
+  // v9.15 — remember the chosen image engine
+  { const es = $('temuAiImgEngineSel');
+    if (es) {
+      chrome.storage.local.get(['zhImgEngine']).then(r => { if (r?.zhImgEngine && [...es.options].some(o => o.value === r.zhImgEngine)) es.value = r.zhImgEngine; }).catch(() => {});
+      es.addEventListener('change', () => chrome.storage.local.set({ zhImgEngine: es.value }).catch(() => {}));
+    } }
   $('temuAiImgPromptToggleBtn')?.addEventListener('click', () => {
     $('temuAiImgPromptWrap')?.classList.toggle('hidden');
   });
@@ -15889,28 +15944,31 @@ function temuInitReviewToggle() {
 // ═════════════════════════════════════════════════════════════════
 // ═══ Bulk AI Image Studio Pipeline ═══
 // ═════════════════════════════════════════════════════════════════
+// v9.15 — simple "just make it better" prompt (no background / pack change)
+const ZH_GPT_IMPROVE_PROMPT = 'Make this image interesting as much as you can. Act as a human psychology specialist and image editor specialist. Improve and edit the image as much as you can, but keep the exact same product, packaging, labels and number of units. Do not change the pack count. Do not add any new text, number, label or badge. Output a square 1:1 image.';
 function temuBatchStages(mode, quantity, backgroundPrompt, label = zhPackLabelOn, style = zhPackStyle) {
   const n = Number(quantity);
-  if (!['background', 'pack', 'pack_background'].includes(mode)) throw new Error('Invalid image mode');
+  if (!['background', 'pack', 'pack_background', 'improve'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity must be between 2 and 24');
   const keepLabel = ' Do not add any new text, number, label or badge; keep the scene clean.' + (label ? ' ' + ZH_KEEP_PACK_LABEL : '');
   const background = `${backgroundPrompt}\nChange only the background and scene. Preserve the exact product, packaging, labels and number of units shown in the reference. Do not add or remove units.${keepLabel}`;
+  if (mode === 'improve') return [ZH_GPT_IMPROVE_PROMPT];
   const pack = mode === 'background' ? '' : packMasterPrompt(n, label, style);
   return mode === 'background' ? [background] : mode === 'pack' ? [pack] : [pack, background];
 }
 
-function temuConfigureBatch(queue, backgroundPrompt) {
+function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
   return new Promise(resolve => {
     const modal = document.createElement('div');
     modal.className = 'modal-back flow-batch-modal';
     modal.style.zIndex = '100020';
     modal.innerHTML = `<div class="modal-box flow-batch-box">
-      <div class="batch-header"><h3>Flow batch setup</h3>
-      <p>Nano Banana 2 · 1:1 · x1</p></div>
+      <div class="batch-header"><h3>Image batch setup</h3>
+      <p>${esc(engineName)} · 1:1 · x1</p></div>
       <div class="batch-tools">
         <input class="batch-search" type="search" placeholder="Search products…" aria-label="Search products">
         <div class="batch-selection"><button type="button" class="btn btn-ghost batch-select-all">Select visible</button><button type="button" class="btn btn-ghost batch-select-none">Clear selection</button><span class="batch-selected-count"></span></div>
-        <div class="batch-bulk-controls"><select class="batch-bulk-mode" aria-label="Bulk image task"><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option><option value="skip">Skip / keep original</option></select>
+        <div class="batch-bulk-controls"><select class="batch-bulk-mode" aria-label="Bulk image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option><option value="skip">Skip / keep original</option></select>
         <label>Qty <input class="batch-bulk-qty" type="number" min="2" max="24" value="2" disabled aria-label="Bulk pack quantity"></label>
         <label title="Write the red-and-black N PACK label on the pack image"><input type="checkbox" class="batch-bulk-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
         <select class="batch-bulk-style" aria-label="Pack prompt"><option value="new">Pack prompt: New (original background)</option><option value="old">Pack prompt: Old (white background)</option></select></div>
@@ -15919,20 +15977,23 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       <div class="batch-items">${queue.map((q, i) => `<div data-batch="${i}" class="batch-item">
         <div class="batch-item-heading"><input type="checkbox" class="batch-pick" aria-label="Select image ${i + 1}"><img src="${esc(q.imgUrl)}" loading="lazy" alt=""><span title="${esc(q.product.title || '')}">${esc(trunc(q.product.title || 'Product', 65))}<small>Image #${q.imgIndex + 1}</small></span><button class="btn btn-ghost batch-product" type="button" title="Select all images of this product">Product</button></div>
         <div class="batch-item-settings">
-        <select class="batch-mode" aria-label="Image task"><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option></select>
+        <select class="batch-mode" aria-label="Image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option></select>
         <label>Qty <input class="batch-qty" type="number" min="2" max="24" value="2" disabled aria-label="Pack quantity"></label>
         <label title="Write the red-and-black N PACK label"><input type="checkbox" class="batch-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
         <select class="batch-style" aria-label="Pack prompt"><option value="new">New</option><option value="old">Old (white bg)</option></select></div>
       </div>`).join('')}<p class="batch-empty" hidden>No matching products</p></div>
       <div class="batch-footer"><p class="batch-summary"></p>
-      <p class="batch-help">No pack? Choose Background only. No edits? Choose Skip. Pack → Background uses 2 generations.</p>
+      <p class="batch-help">Improve image only = just make the photo better (no new background, no pack). No edits? Choose Skip. Pack → Background uses 2 generations.</p>
       <p class="batch-error" role="alert"></p>
       <div class="batch-footer-actions"><button type="button" class="btn btn-ghost batch-cancel">Cancel</button><button type="button" class="btn btn-primary batch-start">Start batch</button></div></div>
     </div>`;
     document.body.appendChild(modal);
     const entries = [...modal.querySelectorAll('[data-batch]')];
+    const defMode = engineName === 'Flow' ? 'background' : 'improve';
+    modal.querySelector('.batch-bulk-mode').value = defMode;
     entries.forEach(row => {
       row.querySelector('.batch-mode').add(new Option('Skip / keep original', 'skip'));
+      row.querySelector('.batch-mode').value = defMode;
       { const pk = packFromTitle(queue[Number(row.dataset.batch)].product.title); if (pk > 1) { row.querySelector('.batch-mode').value = Number(row.dataset.batch) >= 0 && queue[Number(row.dataset.batch)].imgIndex === 0 ? 'pack_background' : 'background'; if (row.querySelector('.batch-mode').value === 'pack_background') row.querySelector('.batch-qty').value = String(pk); } }
       row.querySelector('.batch-product').onclick = () => {
         const pid = queue[Number(row.dataset.batch)].product.id;
@@ -15945,8 +16006,8 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       let steps = 0, active = 0;
       entries.forEach(row => {
         const mode = row.querySelector('.batch-mode').value;
-        row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip';
-        row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip';
+        row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip' || mode === 'improve';
+        row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip' || mode === 'improve';
         row.classList.toggle('batch-skipped', mode === 'skip');
         row.classList.toggle('batch-selected', row.querySelector('.batch-pick').checked);
         if (mode !== 'skip') { active++; steps += mode === 'pack_background' ? 2 : 1; }
@@ -15955,7 +16016,7 @@ function temuConfigureBatch(queue, backgroundPrompt) {
       modal.querySelector('.batch-selected-count').textContent = `${entries.filter(row => row.querySelector('.batch-pick').checked).length} selected`;
       modal.querySelector('.batch-start').disabled = !active;
       const bulkMode = modal.querySelector('.batch-bulk-mode').value;
-      modal.querySelector('.batch-bulk-qty').disabled = bulkMode === 'background' || bulkMode === 'skip';
+      modal.querySelector('.batch-bulk-qty').disabled = bulkMode === 'background' || bulkMode === 'skip' || bulkMode === 'improve';
     };
     modal.querySelector('.batch-search').oninput = e => {
       const term = e.target.value.trim().toLowerCase();
@@ -16057,7 +16118,7 @@ async function temuStartBulkImageEdit(opts = {}) {
     return;
   }
 
-  if (engine === 'flow' && !(await temuConfigureBatch(queue, prompt))) return;
+  if (engine !== 'gemini' && !(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : 'Auto (ChatGPT → Flow → Gemini)'))) return;
 
   TemuImgStepper = {
     queue,
@@ -16105,6 +16166,7 @@ function zhStepTimerStop() {
 function temuStepCancelActiveJob() {
   if (TemuImgStepper.activeJobId) FlowJobs.delete(TemuImgStepper.activeJobId);
   TemuImgStepper.activeJobId = null;
+  TemuImgStepper.gptJobId = null;   // v9.15 — ChatGPT image job
   TemuImgStepper.npToken = null;   // v9.12.6 — stops a running "new project" countdown
   temuStepManualAttn(false);
 }
@@ -16322,10 +16384,10 @@ async function temuStepProcessCurrent() {
   if (titleEl) titleEl.textContent = `AI Image Studio · Step ${currentIndex + 1}/${total}`;
   { const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round((currentIndex / Math.max(1, total)) * 100) + '%'; const bd = $('temuStepBadge'); if (bd) bd.textContent = `${currentIndex + 1} / ${total}`; }
   if (subEl) subEl.textContent = `Product: ${trunc(current.product.title, 40)} · Image #${current.imgIndex + 1}`;
-  if (subEl && current.stages) subEl.textContent += ` · ${current.batchMode === 'background' || current.stageIndex === 1 ? 'Background' : 'Pack ' + current.packQty} · ${current.stageIndex + 1}/${current.stages.length}`;
+  if (subEl && current.stages) subEl.textContent += ` · ${current.batchMode === 'improve' ? 'Improve' : current.batchMode === 'background' || current.stageIndex === 1 ? 'Background' : 'Pack ' + current.packQty} · ${current.stageIndex + 1}/${current.stages.length}`;
   if (imgEl) imgEl.src = current.imgUrl;
   if (nameEl) nameEl.textContent = current.product.title || 'Product';
-  temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine}...`);
+  temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine === 'auto' ? 'Auto' : TemuImgStepper.engine}...`);
 
   // Paste & Next is only for the manual engines
   $('temuStepPasteNextBtn')?.classList.remove('hidden'); // v9.10.1 — manual fallback for Flow too
@@ -16334,9 +16396,18 @@ async function temuStepProcessCurrent() {
 }
 
 async function temuStepSendCurrent() {
-  const { queue, currentIndex, engine, prompt } = TemuImgStepper;
+  const { queue, currentIndex, prompt } = TemuImgStepper;
   const current = queue[currentIndex];
   if (!current) return;
+  // v9.15 — Auto: ChatGPT first, then Flow, then Gemini (each engine is tried once per image/stage)
+  let engine = TemuImgStepper.engine;
+  if (engine === 'auto') {
+    current.tried = current.tried || [];
+    engine = ZH_AUTO_ORDER.find(e => !current.tried.includes(e) && !(e === 'chatgpt' && TemuImgStepper.gptDown)) || 'flow';
+    if (!current.tried.includes(engine)) current.tried.push(engine);
+    else current.tried = [engine];   // "Send Again" after everything failed → start over
+  }
+  TemuImgStepper.curEngine = engine;
 
   const statusEl = $('temuStepStatus');
 
@@ -16392,7 +16463,7 @@ async function temuStepSendCurrent() {
     await chrome.storage.local.set({
       pendingGeminiAction: {
         imgBase64: base64Data,
-        prompt: prompt,
+        prompt: current.prompt || prompt,
         timestamp: Date.now(),
         processed: false
       }
@@ -16408,36 +16479,40 @@ async function temuStepSendCurrent() {
     });
     if (statusEl) statusEl.textContent = '✓ Gemini opened with image & prompt! Generate, copy the result, then click "Paste & Next".';
   } else if (engine === 'chatgpt') {
-    let base64Data = current.imgUrl;
-    if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
-      try {
-        const resp = await fetch(current.imgUrl);
-        const blob = await resp.blob();
-        base64Data = await new Promise(res => {
-          const rd = new FileReader();
-          rd.onload = () => res(rd.result);
-          rd.readAsDataURL(blob);
-        });
-      } catch (_) {}
+    // v9.15 — fully automatic: new ChatGPT chat per image → attach → prompt → send → read the new image
+    temuStepCancelActiveJob();
+    const jobId = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    TemuImgStepper.gptJobId = jobId;
+    current.done = false;
+    current.sentAt = Date.now();
+    temuStepSetStatus('⏳ Sending to ChatGPT…');
+    let b64 = await flowPrefetchImage(current.imgUrl);
+    if (!b64 && current.imgUrl?.startsWith('data:')) b64 = current.imgUrl;
+    if (TemuImgStepper.gptJobId !== jobId) return;
+    if (!b64) {
+      TemuImgStepper.gptJobId = null;
+      if (temuStepFallback('ChatGPT: image could not be downloaded')) return;
+      temuStepSetStatus('⚠️ Image could not be downloaded — press "Send Again" or "Skip"', 'error');
+      return;
     }
-    await chrome.storage.local.set({
-      pendingGptAction: {
-        imgBase64: base64Data,
-        prompt: prompt,
-        timestamp: Date.now(),
-        processed: false
-      }
-    });
-    chrome.tabs.query({ url: '*://chatgpt.com/*' }, (existingTabs) => {
-      if (existingTabs && existingTabs.length > 0) {
-        chrome.tabs.update(existingTabs[0].id, { active: true });
-        chrome.scripting.executeScript({ target: { tabId: existingTabs[0].id }, files: ['gpt_automation.js'] }).catch(() => {});
-        chrome.tabs.sendMessage(existingTabs[0].id, { action: 'TRIGGER_GPT_IMAGE' }).catch(() => {});
+    const gptPrompt = ((current.prompt || prompt) + '').trim();
+    await chrome.storage.local.remove(['zhGptImgResult']);
+    await chrome.storage.local.set({ zhGptImgJob: { id: jobId, imgBase64: b64, prompt: gptPrompt, at: Date.now(), started: false } });
+    try {
+      const tabs = await chrome.tabs.query({ url: '*://chatgpt.com/*' });
+      if (tabs.length) {
+        const tab = tabs.find(t => t.active) || tabs[0];
+        await chrome.tabs.update(tab.id, { url: 'https://chatgpt.com/', active: true });   // fresh chat; the page picks the job up by itself
+        if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
       } else {
-        chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });
+        await chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });
       }
-    });
-    if (statusEl) statusEl.textContent = '✓ ChatGPT opened with image & prompt! Generate, copy the result, then click "Paste & Next".';
+      temuStepSetStatus('⏳ ChatGPT: new chat → image → prompt → result arrives automatically.');
+    } catch (e) {
+      TemuImgStepper.gptJobId = null;
+      if (temuStepFallback('ChatGPT could not be opened')) return;
+      temuStepSetStatus('⚠️ ChatGPT could not be opened: ' + (e?.message || e), 'error');
+    }
   }
 }
 
@@ -16498,7 +16573,7 @@ async function temuStepHandlePasteNext() {
     } catch (_) {}
   }
 
-  if (base64FromClipboard && TemuImgStepper.engine === 'flow') {
+  if (base64FromClipboard && (stepEng() !== 'gemini' || current.stages)) {
     if (btn) btn.disabled = false;
     await temuStepApplyManualImage(base64FromClipboard, 'Paste');
     return;
@@ -16533,7 +16608,7 @@ async function temuStepFinish() {
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
   const timeTxt = zhStepTimerStop();
-  if (TemuImgStepper.engine === 'flow') {
+  if (TemuImgStepper.engine !== 'gemini') {
     const sk = stats?.skipped || 0;
     temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
     const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · Done ✅`;
@@ -16541,7 +16616,7 @@ async function temuStepFinish() {
   }
   if (!TemuImgStepper.running) $('temuImgStepperModal')?.classList.add('hidden');
   await temuRenderReview();
-  if (TemuImgStepper.engine === 'flow') {
+  if (TemuImgStepper.engine !== 'gemini') {
     const skipped = stats?.skipped || 0;
     toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
   } else {

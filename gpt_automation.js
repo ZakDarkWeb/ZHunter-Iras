@@ -290,6 +290,134 @@
     } finally { window.__zhGptTitlesBusy = false; }
   }
 
+  // ═══ v9.15 — Image edit via ChatGPT (auto) ═══════════════════════════════
+  // Job lives in chrome.storage.local.zhGptImgJob = { id, imgBase64, prompt, at, started }.
+  // New chat (opened by the side panel) → attach image → pick "Create image" (if the menu has it) → prompt → send →
+  // wait for the new image → read it → zhGptImgResult = { id, status:'done', dataUrl } (or 'error').
+  const setImgResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ zhGptImgResult: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
+  const blobToDataUrl = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+  const humanClick = (el) => {
+    for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      try { el.dispatchEvent(new (t.startsWith('pointer') ? PointerEvent : MouseEvent)(t, { bubbles: true, cancelable: true, button: 0 })); } catch (_) {}
+    }
+  };
+
+  async function attachImageToComposer(dataUrl) {
+    const file = dataUrlToFile(dataUrl, 'zhunter_product.png');
+    if (!file) throw new Error('Image could not be converted');
+    const ed = await waitUntil(() => document.querySelector(SEL.editor), 25000);
+    if (!ed) throw new Error('ChatGPT message box not found (is the chat open and logged in?)');
+    await sleep(1200);
+    const target = document.querySelector('form[data-type="unified-composer"]') || document.querySelector('form[data-chatgpt-composer]') ||
+                   document.querySelector('[data-composer-surface="true"]') || ed.closest('form') || ed;
+    const thumbs = () => target.querySelectorAll('img[src^="blob:"], [data-testid*="attachment"], [data-testid*="file" i], button[aria-label*="Remove" i]').length;
+    const before = thumbs();
+    try { ed.focus(); } catch (_) {}
+    const dt = new DataTransfer(); dt.items.add(file);
+    const o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight / 2) };
+    target.dispatchEvent(new DragEvent('dragenter', o)); target.dispatchEvent(new DragEvent('dragover', o));
+    await sleep(80);
+    target.dispatchEvent(new DragEvent('drop', o));
+    if (!(await waitUntil(() => thumbs() > before, 15000))) console.log('[ZHunter GPT] Could not confirm the attachment thumbnail — continuing');
+    await sleep(1500);
+  }
+
+  // Best effort: "+" menu → "Create image". If the menu looks different we just continue (prompt says "Create an image").
+  async function pickCreateImageTool() {
+    try {
+      const plus = document.querySelector('[data-testid="composer-plus-btn"], button[aria-label="Add files and more"], button[aria-label*="Add files" i]');
+      if (!plus) return false;
+      humanClick(plus); await sleep(800);
+      const items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"]')];
+      const it = items.find(x => /create image/i.test(x.textContent || ''));
+      if (!it) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300); return false; }
+      humanClick(it); await sleep(700);
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // the biggest finished image inside the newest answer
+  function bestAnswerImage(bot) {
+    let best = null, area = 0;
+    for (const im of bot.querySelectorAll('img')) {
+      if (!im.complete || im.naturalWidth < 300) continue;
+      const a = im.naturalWidth * im.naturalHeight;
+      if (a > area) { best = im; area = a; }
+    }
+    return best;
+  }
+
+  async function readImageAsDataUrl(img) {
+    const src = img.currentSrc || img.src;
+    try { const r = await fetch(src, { credentials: 'include' }); if (r.ok) return await blobToDataUrl(await r.blob()); } catch (_) {}
+    try {
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png');
+    } catch (_) {}
+    return null;
+  }
+
+  async function runImgJob() {
+    let job;
+    try { job = (await chrome.storage.local.get(['zhGptImgJob']))?.zhGptImgJob; } catch (_) { return; }
+    if (!job || job.started || !job.imgBase64 || Date.now() - (job.at || 0) > 3 * 60000) return;
+    if (window.__zhGptImgBusy) return;
+    window.__zhGptImgBusy = true;
+    try {
+      await chrome.storage.local.set({ zhGptImgJob: { ...job, started: true, imgBase64: '' } });
+      showGptHUD('ZHunter: editing the image in ChatGPT…', 'info');
+      setImgResult(job, 'working', { note: 'ChatGPT: attaching image…' });
+      await attachImageToComposer(job.imgBase64);
+      setImgResult(job, 'working', { note: 'ChatGPT: preparing…' });
+      const tool = await pickCreateImageTool();
+      const userBefore = countEl(SEL.user), botBefore = countEl(SEL.bot);
+      await typeIntoComposer((tool ? '' : 'Create an image. ') + job.prompt);
+      await sleep(900 + Math.random() * 700);
+      const btn = await waitUntil(() => { const b = document.querySelector(SEL.send); return b && !b.disabled ? b : null; }, 20000);
+      const started = () => countEl(SEL.user) > userBefore || !!document.querySelector(SEL.stop);
+      if (btn) { try { btn.click(); } catch (_) {} }
+      if (!(await waitUntil(started, 4000))) { try { const f = (btn && btn.form) || document.querySelector('form[data-chatgpt-composer]'); f?.requestSubmit?.(btn || undefined); } catch (_) {} }
+      if (!(await waitUntil(started, 4000))) {
+        showGptHUD('ZHunter: press Send in ChatGPT yourself — I will read the image', 'warn');
+        setImgResult(job, 'working', { note: 'Press Send in the ChatGPT tab' });
+        if (!(await waitUntil(started, 5 * 60000, 500))) throw new Error('Message was not sent');
+      }
+      setImgResult(job, 'working', { note: 'ChatGPT is creating the image…' });
+      await waitUntil(() => countEl(SEL.bot) > botBefore, 60000, 400);
+      const t0 = Date.now(); let img = null, stable = 0, lastSrc = '', quiet = 0, lastTxt = '';
+      while (Date.now() - t0 < 8 * 60000) {
+        await sleep(1500);
+        const bots = document.querySelectorAll(SEL.bot);
+        const bot = bots[bots.length - 1];
+        if (!bot || bots.length <= botBefore) continue;
+        const busy = !!document.querySelector(SEL.stop);
+        const txt = (bot.innerText || '').trim();
+        const cand = bestAnswerImage(bot);
+        if (cand && !busy) {
+          const s = cand.currentSrc || cand.src;
+          if (s === lastSrc) stable++; else { stable = 0; lastSrc = s; }
+          if (stable >= 2) { img = cand; break; }
+          continue;
+        }
+        stable = 0;
+        if (!busy && !cand) {
+          if (/limit|too many|try again (later|after)|come back/i.test(txt) && txt.length < 600) throw new Error('LIMIT: ' + txt.slice(0, 120));
+          if (txt === lastTxt) quiet++; else { quiet = 0; lastTxt = txt; }
+          if (quiet >= 20 && txt) throw new Error('ChatGPT did not make an image: ' + txt.slice(0, 120));
+        } else quiet = 0;
+      }
+      if (!img) throw new Error('ChatGPT image did not appear in time');
+      const dataUrl = await readImageAsDataUrl(img);
+      if (!dataUrl) throw new Error('Could not read the generated image');
+      setImgResult(job, 'done', { dataUrl });
+      showGptHUD('✓ Image ready — ZHunter is taking it', 'ok');
+    } catch (e) {
+      const m = e?.message || String(e);
+      setImgResult(job, 'error', { error: m.replace(/^LIMIT:\s*/, ''), limit: /^LIMIT:/.test(m) });
+      showGptHUD('ZHunter: ' + m.replace(/^LIMIT:\s*/, ''), 'warn');
+    } finally { window.__zhGptImgBusy = false; }
+  }
+
   window.__zhunterGptExecute = checkPendingAction;
 
   try {
@@ -298,12 +426,14 @@
         checkPendingAction();
       }
       if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
+      if (msg?.action === 'ZH_GPT_IMG_START') runImgJob();
     });
   } catch (_) {}
 
   // Run immediately
   checkPendingAction();
   setTimeout(runTitlesJob, 2500);   // a freshly opened ChatGPT tab picks up a waiting titles job
+  setTimeout(runImgJob, 3000);      // ...and a waiting image-edit job
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkPendingAction);

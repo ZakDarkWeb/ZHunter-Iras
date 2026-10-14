@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Image editing: new engines — **ChatGPT (auto)**: new chat per image → attach image → "Create image" + prompt → send → result read and put back automatically (same stages as Flow). **Auto** engine: ChatGPT first; on error/limit → Flow; then Gemini (manual paste). New batch task **Improve image only** (simple prompt, no background/pack change). Engine choice is remembered.
 - History: every Export / Upload now keeps its Temu xlsx (XLSX button on the history card, newest 50 kept, stored in IndexedDB so Chrome stays fast). Imported-sheet autosave also moved to IndexedDB with compressed images.
 - Image upload to the public host: 3 tries with longer waits and smaller image on retries (fixes "Public image upload error: DOMException" timeouts); ChatGPT "first reply not DONE" note is now only a console log.
 - Imported sheet (Store sheet / Imported sheet) is saved automatically and restored after Reload or closing the panel (titles, edited images, categories kept).
