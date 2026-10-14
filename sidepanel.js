@@ -3509,7 +3509,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote) {
       const r = area === 'local' ? ch[key]?.newValue : null;
       if (!r) return;
       if (r.status === 'working') { onNote?.(r.note || 'working…'); return; }
-      if (r.status === 'done' && r.dataUrl) fin(resolve, r.dataUrl);
+      if (r.status === 'done' && r.dataUrl) { if (/^\/c\/[\w-]+$/.test(r.chat || '')) (S.gptChats = S.gptChats || new Set()).add(r.chat); fin(resolve, r.dataUrl); }
       else if (r.status === 'error') fin(reject, Object.assign(new Error(r.error || 'failed'), { limit: !!r.limit }));
     };
     const abort = () => fin(reject, Object.assign(new Error('stopped'), { aborted: true }));
@@ -3526,6 +3526,34 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote) {
       fin(reject, new Error('Could not reach the ChatGPT tab — refresh it (F5) once'));
     })();
   });
+}
+
+// v9.15 — after the run: archive (not delete) the ChatGPT chats this run created
+async function gptArchiveChats(S) {
+  const list = [...(S.gptChats || [])];
+  if (!list.length || S.archiving) return;
+  S.archiving = true; S.gptChats.clear();
+  let tabId = (S.gptSlots || []).find(x => x?.tabId)?.tabId;
+  if (!(tabId && await chrome.tabs.get(tabId).catch(() => null))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
+  if (!tabId) return;
+  let ok = 0, bad = 0;
+  for (let i = 0; i < list.length; i++) {
+    temuStepSetStatus(`🗂 Archiving ChatGPT chats… ${i + 1}/${list.length}`);
+    try {
+      await chrome.tabs.update(tabId, { url: 'https://chatgpt.com' + list[i], active: true });
+      await sleepMs(800); await gptWaitTab(tabId);
+      let r = null;
+      for (let t = 0; t < 3 && !r?.ok; t++) {
+        try { r = await chrome.tabs.sendMessage(tabId, { action: 'ZH_GPT_ARCHIVE', path: list[i] }); }
+        catch (_) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['gpt_automation.js'] }); } catch (_) {} await sleepMs(1500); }
+        if (r && !r.ok && /not the expected|not found/.test(r.error || '')) break;
+      }
+      if (r?.ok) ok++; else { bad++; console.log('[ZHunter] archive failed', list[i], r?.error); }
+    } catch (_) { bad++; }
+    await sleepMs(1500 + Math.random() * 2000);
+  }
+  chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' }).catch(() => {});
+  toast(`🗂 ChatGPT chats archived: ${ok}${bad ? ` · ${bad} could not be archived (archive them by hand)` : ''}`, bad ? 'warn' : 'ok');
 }
 
 // progress text for the 2-tab runner
@@ -16733,6 +16761,7 @@ async function temuStepFinish() {
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
   const timeTxt = zhStepTimerStop();
+  try { await gptArchiveChats(TemuImgStepper); } catch (e) { console.log('[ZHunter] archive error', e?.message || e); }
   if (TemuImgStepper.engine !== 'gemini') {
     const sk = stats?.skipped || 0;
     temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');

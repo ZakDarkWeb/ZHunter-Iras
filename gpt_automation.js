@@ -411,13 +411,28 @@
       if (!img) throw new Error('ChatGPT image did not appear in time');
       const dataUrl = await readImageAsDataUrl(img);
       if (!dataUrl) throw new Error('Could not read the generated image');
-      setImgResult(job, 'done', { dataUrl });
+      setImgResult(job, 'done', { dataUrl, chat: location.pathname });
       showGptHUD('✓ Image ready — ZHunter is taking it', 'ok');
     } catch (e) {
       const m = e?.message || String(e);
       setImgResult(job, 'error', { error: m.replace(/^LIMIT:\s*/, ''), limit: /^LIMIT:/.test(m) });
       showGptHUD('ZHunter: ' + m.replace(/^LIMIT:\s*/, ''), 'warn');
     } finally { window.__zhGptImgBusy = false; }
+  }
+
+  // ═══ v9.15 — Archive a chat that ZHunter created (never delete; only the exact path the panel names) ═══
+  async function runArchive(path) {
+    if (!path || !/^\/c\/[\w-]+$/.test(path) || location.pathname !== path) return { ok: false, error: 'not the expected chat' };
+    await waitUntil(() => document.querySelector(SEL.editor), 15000);
+    await sleep(1500);
+    const btn = await waitUntil(() => document.querySelector('[data-testid="conversation-options-button"], button[aria-label="Open conversation options"], button[aria-label*="conversation options" i]'), 8000);
+    if (!btn) return { ok: false, error: 'options button not found' };
+    humanClick(btn); await sleep(900);
+    const item = await waitUntil(() => [...document.querySelectorAll('[role="menuitem"]')].find(x => /^\s*archive\s*$/i.test(x.textContent || '') || x.getAttribute('data-testid') === 'archive-chat-menu-item'), 4000);
+    if (!item) { try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (_) {} return { ok: false, error: 'Archive item not found' }; }
+    humanClick(item);
+    const gone = await waitUntil(() => location.pathname !== path, 6000);
+    return gone ? { ok: true } : { ok: false, error: 'archive not confirmed' };
   }
 
   window.__zhunterGptExecute = checkPendingAction;
@@ -428,6 +443,7 @@
         checkPendingAction();
       }
       if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
+      if (msg?.action === 'ZH_GPT_ARCHIVE') { runArchive(msg.path).then(r => { try { sendResponse(r); } catch (_) {} }).catch(e => { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }); return true; }
       if (msg?.action === 'ZH_GPT_IMG_RUN') { runImgJob(msg.job); try { sendResponse({ ok: true }); } catch (_) {} }
 
     });
