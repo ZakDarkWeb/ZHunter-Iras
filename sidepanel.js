@@ -19011,6 +19011,8 @@ async function zsApply(it, i, src, how = 'Paste') {
       try { const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src }); if (r?.success && r.base64) finalUrl = r.base64; } catch (_) {}
     }
     if (how !== 'Label' && it.packLabel && it.promptMode === 'pack' && it.pack > 1 && /^data:image\//i.test(finalUrl)) finalUrl = await zhStampPackLabel(finalUrl, it.pack, true);   // "N PACK" label, top-right
+    // v9.15 — a pasted picture can be several MB: shrink it first (1500px, high-quality JPEG) so saving to the Library is fast
+    if (/^data:image\//i.test(finalUrl) && finalUrl.length > 450000) { try { const c = await compressBase64Image(finalUrl, 1500, 0.9); if (c && c.length < finalUrl.length) finalUrl = c; } catch (_) {} }
     const pid = it.product.id;
     await replaceProductImage(pid, i, finalUrl, null);
     if (Array.isArray(it.product.images)) {
