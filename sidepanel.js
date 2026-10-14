@@ -4190,7 +4190,8 @@ function temuStepResultsRender() {
     if (lbl) lbl.textContent = t ? `Selected: ${trunc(t.product?.title || 'Product', 18)} · #${t.imgIndex + 1}` : 'Tap an image (Replace → current one)';
     { const nf = S.queue.filter(it => it.status === 'failed' || it.status === 'skipped').length, rb = $('temuStepRetryBtn'); if (rb) { rb.classList.toggle('hidden', !nf); rb.textContent = `🔁 Retry failed (${nf})`; } }
     const stopB = $('temuStepStopBtn'); if (stopB) stopB.style.display = S.running ? '' : 'none';
-    for (const id of ['temuStepPauseBtn', 'temuStepDoneBtn']) { const b = $(id); if (b) b.style.display = S.running ? '' : 'none'; }
+    { const pb2 = $('temuStepPauseBtn'); if (pb2) pb2.style.display = S.running ? '' : 'none';
+      const db2 = $('temuStepDoneBtn'); if (db2) { db2.style.display = ''; db2.textContent = S.running ? '✔ Done (stop here)' : '✔ Close & continue'; } }
   }, 120);
 }
 function temuStepSelect(it) {
@@ -16922,6 +16923,7 @@ function temuStepOpenModal() {
       }
     }; }
     if (db) db.onclick = async () => {
+      if (!TemuImgStepper.running) { modal.classList.add('hidden'); try { await temuRenderReview(); } catch (_) {} temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); return; }   // run is over: just close the window
       TemuImgStepper.paused = false; TemuImgStepper.heldAdvance = false;
       temuStepCancelActiveJob();
       await temuStepFinish();

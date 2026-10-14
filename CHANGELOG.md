@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Image studio: when the run is over the green button becomes "✔ Close & continue" (closes the window, refreshes the review list).
 - ChatGPT: finished image is now also found as a new generated image after our message, so the run no longer hangs on "working" when the answer block is not recognised.
 - Image studio: "🔁 Retry failed (n)" button in the Results list runs every failed / skipped image again (uses all chosen ChatGPT tabs).
 - Image studio: "ChatGPT tabs" select (1–4 tabs working together, remembered).
