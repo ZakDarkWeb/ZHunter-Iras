@@ -19562,7 +19562,7 @@ async function tlcReload(tab) {
   }
 }
 // runs INSIDE the Temu page: type the title in the product-name box and read the suggested categories
-function tlcPageRead(title, prev) {
+function tlcPageRead(title, prev, mode) {   // mode 'paste' = whole title at once, 'type' = letter by letter (whole title)
   return (async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const input = [...document.querySelectorAll('input[type="text"]')].find(i => /product name/i.test(i.placeholder || ''));
@@ -19580,35 +19580,31 @@ function tlcPageRead(title, prev) {
     const baseline = JSON.stringify(read());                      // anything already on screen is old
     const keyEv = (type, ch) => input.dispatchEvent(new KeyboardEvent(type, { key: ch, bubbles: true }));
     const text = String(title);
-    // the moment Temu shows suggestions for what is typed so far, take them — no need to finish the title
-    const grab = async () => {
-      const cur = read(); if (!cur.length || JSON.stringify(cur) === baseline) return null;
-      let key = JSON.stringify(cur);
-      for (let n = 0; n < 4; n++) { await sleep(350); const again = read(); const k2 = JSON.stringify(again); if (k2 === key && again.length) return again; key = k2; }
-      return read().length ? read() : null;
-    };
-    let words = 0;
-    for (let c = 0; c < text.length; c++) {
-      const ch = text[c];
-      keyEv('keydown', ch);
+    if (mode === 'paste') {
+      // v9.15 — step 1: the COMPLETE title goes in at once (like Ctrl+V)
       let ok = false;
-      try { ok = document.execCommand('insertText', false, ch); } catch (_) {}
-      if (!ok) { setter.call(input, input.value + ch); fire(input, 'input'); }
-      keyEv('keyup', ch);
-      if (ch === ' ' && text[c - 1] !== ' ') {
-        words++;
-        if (words >= 3) { await sleep(500); const got = await grab(); if (got) return { options: got, early: true, typed: input.value }; }
+      try { input.select(); ok = document.execCommand('insertText', false, text); } catch (_) {}
+      if (!ok || input.value !== text) { setter.call(input, text); fire(input, 'input'); }
+    } else {
+      // step 2: the COMPLETE title typed like a person, letter by letter (no early stop)
+      for (let c = 0; c < text.length; c++) {
+        const ch = text[c];
+        keyEv('keydown', ch);
+        let ok = false;
+        try { ok = document.execCommand('insertText', false, ch); } catch (_) {}
+        if (!ok) { setter.call(input, input.value + ch); fire(input, 'input'); }
+        keyEv('keyup', ch);
+        await sleep(30 + Math.random() * 70 + (Math.random() < 0.06 ? 150 + Math.random() * 300 : 0));
       }
-      await sleep(35 + Math.random() * 90 + (Math.random() < 0.06 ? 150 + Math.random() * 300 : 0));
+      if (input.value !== title) { setter.call(input, title); fire(input, 'input'); }
     }
-    if (input.value !== title) { setter.call(input, title); fire(input, 'input'); }
     fire(input, 'change');
-    // whole title typed: wait for suggestions (the box is NOT left, so Temu cannot auto-pick a category)
+    // whole title is in: wait for suggestions (the box is NOT left, so Temu cannot auto-pick a category)
     const t0 = Date.now(); let last = '', stableSince = 0;
-    while (Date.now() - t0 < 15000) {
+    while (Date.now() - t0 < 12000) {
       const cur = read(), key = JSON.stringify(cur);
-      if (cur.length && (key !== baseline || Date.now() - t0 > 8000)) {
-        if (key === last) { if (Date.now() - stableSince > 1000) return { options: cur }; }
+      if (cur.length && key !== baseline) {
+        if (key === last) { if (Date.now() - stableSince > 1200) return { options: cur }; }
         else { last = key; stableSince = Date.now(); }
       }
       await sleep(350);
@@ -19616,8 +19612,8 @@ function tlcPageRead(title, prev) {
     return { options: read(), timeout: true };
   })();
 }
-async function tlcRead(tab, title, prev) {
-  const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageRead, args: [title, prev || []] });
+async function tlcRead(tab, title, prev, mode) {
+  const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageRead, args: [title, prev || [], mode || 'paste'] });
   return r?.result || { error: 'no_result' };
 }
 // runs INSIDE the Temu page: read-only snapshot (no typing, no clicking)
@@ -19705,13 +19701,17 @@ async function temuLearnCategories() {
       // v9.15 — AUTO first: the extension types the title like a person; if that does not work, MANUAL: you paste it (Ctrl+V)
       let res = null;
       if (!TlcState.manualOnly) {
-        tlcSay('🤖 Auto: typing the title in Temu…');
-        try {
-          const r = await tlcRead(tab, it.title, prev);
-          if (r?.error === 'no_input') res = { error: 'no_input' };
-          else if (r?.options?.length) { res = { options: r.options }; TlcState.autoFail = 0; }
-          else TlcState.autoFail = (TlcState.autoFail || 0) + 1;
-        } catch (_) { TlcState.autoFail = (TlcState.autoFail || 0) + 1; }
+        // v9.15 — order: 1) paste the complete title → 2) type the complete title → 3) manual. The first suggestion is accepted automatically.
+        for (const mode of ['paste', 'type']) {
+          if (res || TlcState.stop) break;
+          tlcSay(mode === 'paste' ? '🤖 Auto 1/2: pasting the complete title in Temu…' : '🤖 Auto 2/2: typing the complete title like a person…');
+          try {
+            const r = await tlcRead(tab, it.title, prev, mode);
+            if (r?.error === 'no_input') { res = { error: 'no_input' }; }
+            else if (r?.options?.length) { res = { options: r.options, auto: true }; TlcState.autoFail = 0; }
+          } catch (_) {}
+        }
+        if (!res) TlcState.autoFail = (TlcState.autoFail || 0) + 1;
         if ((TlcState.autoFail || 0) >= 3) TlcState.manualOnly = true;   // auto keeps failing → manual for the rest
         if (!res) tlcSay('Auto did not give suggestions → manual mode');
       }
@@ -19730,7 +19730,10 @@ async function temuLearnCategories() {
       if (res.skip) continue;
       if (res.error === 'no_input') { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); break; }
       prev = res.options || [];
+      let autoTimer = null;
+      if (res.auto && prev.length) autoTimer = setTimeout(() => { try { tlcSay('✓ First suggestion accepted automatically'); $('tlcSave').click(); } catch (_) {} }, 2200);
       const pick = await tlcAsk(it, k, todo.length, prev);
+      clearTimeout(autoTimer);
       if (TlcState.stop) break;
       if (pick.skip) continue;
       const leaf = pick.path.split(' / ').pop().trim();
