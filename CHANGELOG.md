@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix: Learn categories now checks only products that show the ⚠ mark (same test as the list), not every product.
 - Learn categories: Temu gets the COMPLETE title (1: paste, 2: type letter by letter, 3: manual); the first Temu suggestion is accepted automatically after 2 seconds (you can change it before that).
 - Fix: reading the Library no longer shows "message channel closed" — it retries up to 4 times.
 - Fix: Amazon hunt — real product pages on odd addresses are no longer called "redirected away", and Amazon pages get 15s (not 4s) to be read before "timeout".
