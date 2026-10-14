@@ -18788,7 +18788,12 @@ function zhChooseEditMode() {
 (function initZhMode() {
   const close = () => $('zhModeModal')?.classList.add('hidden');
   $('zhModeCloseBtn')?.addEventListener('click', close);
-  $('zhModeManualBtn')?.addEventListener('click', () => { close(); zhStudioOpen(); });
+  $('zhModeManualBtn')?.addEventListener('click', () => {
+    close();
+    // v9.15 — Manual studio starts with the engine chosen in "Engine" (ChatGPT / Flow / Gemini); you can still change it inside the studio
+    try { const e = $('temuAiImgEngineSel')?.value; const m = ZH_ENG[e] ? e : (e === 'auto' ? 'chatgpt' : ''); if (m) { zhManualEng = m; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); } } catch (_) {}
+    zhStudioOpen();
+  });
   $('zhModeAutoBtn')?.addEventListener('click', () => { close(); temuStartBulkImageEdit(); });
 })();
 
@@ -18916,7 +18921,7 @@ function zhStudioRender(dir = 0) {
         </div>
       </div>
       <div class="zs-flowbar">
-        <select id="zsEng" class="zs-btn" title="Which tool the buttons use">${Object.entries(ZH_ENG).map(([k, v]) => `<option value="${k}"${k === temuStepManualEngine() ? ' selected' : ''}>${v.name}</option>`).join('')}</select>
+        <select id="zsEng" class="zs-btn" title="Which tool the buttons use (Flow / ChatGPT / Gemini)">${Object.entries(ZH_ENG).map(([k, v]) => `<option value="${k}"${k === temuStepManualEngine() ? ' selected' : ''}>${v.name}</option>`).join('')}</select>
         <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in ${ZH_ENG[temuStepManualEngine()].name} (${it.pasteSel.size})</button>
         <label class="zs-tick"><input type="checkbox" id="zsWithPrompt" ${ZhStudio.withPrompt ? 'checked' : ''}/> + prompt</label>
         <label class="zs-tick" title="This product only: write the red-and-black 'N PACK' label at the top-right of pack images"><input type="checkbox" id="zsPackLabel" ${it.packLabel ? 'checked' : ''}/> PACK label (this product)</label>
