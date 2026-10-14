@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: AUTO mode first (the extension types the title itself); if Temu shows no suggestions it falls back to MANUAL (title copied, you paste) — after 3 auto failures it stays manual. Match-word rules are gone completely: only whole titles are learned (up to 6000 examples).
 - Archive safety: a ChatGPT chat is archived only if every message in it is one of our own prompts. When every image is done (no failed ones) the image window closes by itself after 3 s; failed count is fixed after manual replace.
 - Image studio: when the run is over the green button becomes "✔ Close & continue" (closes the window, refreshes the review list).
 - ChatGPT: finished image is now also found as a new generated image after our message, so the run no longer hangs on "working" when the answer block is not recognised.

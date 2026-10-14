@@ -13047,7 +13047,7 @@ function temuLearnExample(cfg, title, key) {
     const i = cfg.cat_examples.findIndex(e => e.s === sig);
     if (i >= 0) cfg.cat_examples.splice(i, 1);
     cfg.cat_examples.push({ k: key, t: tokens, h: head, s: sig });
-    if (cfg.cat_examples.length > 1500) cfg.cat_examples.splice(0, cfg.cat_examples.length - 1500);
+    if (cfg.cat_examples.length > 6000) cfg.cat_examples.splice(0, cfg.cat_examples.length - 6000);
   } catch (_) {}
 }
 function temuScoreProfiles(title, cfg) {
@@ -19628,7 +19628,7 @@ function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category
     });
     { const first = box.querySelector('input'); if (first) { first.checked = true; first.dispatchEvent(new Event('change')); } }   // Temu's top suggestion is pre-selected
     $('tlcSkip').onclick = () => resolve({ skip: true });
-    save.onclick = () => resolve({ path: options[chosen], match: ($('tlcMatch').value || '').trim().toLowerCase() });
+    save.onclick = () => resolve({ path: options[chosen], match: '' });   // v9.15 — no word rules: the whole title is the lesson
     tlcSay(options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
   });
 }
@@ -19656,14 +19656,29 @@ async function temuLearnCategories() {
       { const cur = temuProfileFor(it.title, cfg); if (cur[0] && !doubtfulIt({ title: it.title, category_keyword: cur[1].category_keyword }, cfg)) continue; }   // an earlier pick already covers this one
       k++;
       $('tlcCount').textContent = `${k} / ${todo.length}`; $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
+      // v9.15 — AUTO first: the extension types the title like a person; if that does not work, MANUAL: you paste it (Ctrl+V)
+      let res = null;
+      if (!TlcState.manualOnly) {
+        tlcSay('🤖 Auto: typing the title in Temu…');
+        try {
+          const r = await tlcRead(tab, it.title, prev);
+          if (r?.error === 'no_input') res = { error: 'no_input' };
+          else if (r?.options?.length) { res = { options: r.options }; TlcState.autoFail = 0; }
+          else TlcState.autoFail = (TlcState.autoFail || 0) + 1;
+        } catch (_) { TlcState.autoFail = (TlcState.autoFail || 0) + 1; }
+        if ((TlcState.autoFail || 0) >= 3) TlcState.manualOnly = true;   // auto keeps failing → manual for the rest
+        if (!res) tlcSay('Auto did not give suggestions → manual mode');
+      }
+      const ctl = { stop: false };
+      if (!res) {
       // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
       tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
       const copyTitle = async () => { try { await navigator.clipboard.writeText(it.title); return true; } catch (_) { try { const ta = document.createElement('textarea'); ta.value = it.title; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch (__) { return false; } } };
       await copyTitle();
       $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
-      const ctl = { stop: false };
       const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
-      const res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop), skipP]);
+      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop), skipP]);
+      }
       ctl.stop = true;
       if (TlcState.stop) break;
       if (res.skip) continue;
@@ -19678,7 +19693,6 @@ async function temuLearnCategories() {
       let n = 2; while (cfg.category_profiles[key]) key = key.replace(/_\d+$/, '') + '_' + n++;
       // v9.15 — match words: only phrases of 2+ words (a single word would pull every product into this category); commas split phrases
       const words = String(pick.match || '').split(/[,;]+/).map(w => w.replace(/[^a-z0-9' \-]+/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase()).filter(w => w.split(' ').length >= 2);
-      if (pick.match && !words.length) toast('Single word not saved as a rule — the full title is remembered instead', 'info');
       // the same Temu category may already exist (same path) → just add the new match words to it
       const same = Object.entries(cfg.category_profiles).find(([, p]) => (p.full_path || '') === pick.path);
       if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
