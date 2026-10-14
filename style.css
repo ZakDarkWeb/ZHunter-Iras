@@ -5967,9 +5967,20 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .tsp-eng{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;font-size:11px}
 .tsp-eng select{padding:3px 6px;border-radius:7px;background:transparent;color:inherit;border:1px solid var(--border,#2a2f3a)}
 
-/* v9.15 — Bulk: hunt only one Chrome tab group */
+/* v9.15 — Bulk: hunt only one Chrome tab group (square chips, theme colours) */
 .bulk-groups{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
-.bulk-groups .bg-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border,#2a2f3a);background:transparent;color:inherit;font-size:11px;cursor:pointer}
-.bulk-groups .bg-chip i{width:9px;height:9px;border-radius:50%;background:#888;display:inline-block}
-.bulk-groups .bg-chip small{opacity:.65}
-.bulk-groups .bg-chip.on{border-color:#00E5FF;background:rgba(0,229,255,.12)}
+.bulk-groups .bg-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);font-size:11px;font-weight:600;cursor:pointer;transition:border-color .15s,background .15s,color .15s}
+.bulk-groups .bg-chip:hover{border-color:var(--cyan,#00E5FF);color:var(--ink,#fff)}
+.bulk-groups .bg-chip i{width:8px;height:8px;border-radius:2px;display:inline-block;flex:none}
+.bulk-groups .bg-chip small{font-weight:500;color:var(--ink-4);font-size:10px}
+.bulk-groups .bg-chip.on{border-color:var(--cyan,#00E5FF);background:rgba(0,229,255,.12);color:var(--ink,#fff)}
+
+/* v9.15 — stepper: fits small side panels (scrolls, compact buttons) */
+.tsp { max-height: calc(100vh - 16px); overflow-y: auto; overflow-x: hidden; }
+.tsp .tsp-res-list { max-height: 150px; }
+.tsp .tsp-res-act { gap: 4px; }
+.tsp .tsp-res-act button:disabled { opacity: .4; cursor: not-allowed; }
+.tsp .tsp-res-item img { width: 32px; height: 32px; }
+.tsp .temu-step-manual, .tsp .tsp-row2, .tsp .tsp-ctl, .tsp .tsp-actions { flex-wrap: wrap; }
+.tsp .tsp-ctl > *, .tsp .tsp-actions > * { min-width: 0; }
+.tsp .tsp-res-item .ph { width: 32px; height: 32px; border-radius: 6px; background: rgba(255,255,255,.06); flex: none; display: inline-block; }

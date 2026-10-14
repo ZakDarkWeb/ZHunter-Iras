@@ -4181,11 +4181,12 @@ function temuStepResultsRender() {
     const top = box.scrollTop, blank = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
     box.innerHTML = S.queue.map((it, i) => {
       const st = it.status || 'wait';
-      return `<div class="tsp-res-item ${st}${S.sel === it ? ' sel' : ''}" data-i="${i}"><img src="${esc(it.origUrl || it.imgUrl)}" alt=""><span class="arr">→</span><img src="${esc(it.newUrl || blank)}" alt="" style="${it.newUrl ? '' : 'opacity:.2'}"><span class="nm">${esc(trunc(it.product?.title || 'Product', 26))} · #${it.imgIndex + 1}</span><span class="st">${TSP_ST[st] || st}</span></div>`;
+      return `<div class="tsp-res-item ${st}${S.sel === it ? ' sel' : ''}" data-i="${i}"><img src="${esc(it.origUrl || it.imgUrl)}" alt=""><span class="arr">→</span>${it.newUrl ? `<img src="${esc(it.newUrl)}" alt="">` : '<span class="ph"></span>'}<span class="nm">${esc(trunc(it.product?.title || 'Product', 26))} · #${it.imgIndex + 1}</span><span class="st">${TSP_ST[st] || st}</span></div>`;
     }).join('');
     box.scrollTop = top;
+    document.querySelectorAll('#temuStepResWrap [data-r="redo"], #temuStepResWrap [data-r="revert"]').forEach(b => { b.disabled = !S.sel; b.title = S.sel ? b.title : 'Tap an image in the list first'; });
     const lbl = $('temuStepResSel'); const t = S.sel;
-    if (lbl) lbl.textContent = t ? `${trunc(t.product?.title || 'Product', 22)} · #${t.imgIndex + 1}` : 'Tap an image';
+    if (lbl) lbl.textContent = t ? `Selected: ${trunc(t.product?.title || 'Product', 18)} · #${t.imgIndex + 1}` : 'Tap an image (Replace → current one)';
     const stopB = $('temuStepStopBtn'); if (stopB) stopB.style.display = S.running ? '' : 'none';
     for (const id of ['temuStepPauseBtn', 'temuStepDoneBtn']) { const b = $(id); if (b) b.style.display = S.running ? '' : 'none'; }
   }, 120);

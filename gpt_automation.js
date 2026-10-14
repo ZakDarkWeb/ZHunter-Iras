@@ -325,14 +325,34 @@
   // Best effort: "+" menu → "Create image". If the menu looks different we just continue (prompt says "Create an image").
   async function pickCreateImageTool() {
     try {
+      const form = () => document.querySelector('form[data-chatgpt-composer], form[data-type="unified-composer"]');
+      const chosen = () => /create image/i.test((form()?.innerText || '')) && !document.querySelector('[data-mention-section-items]');
+      const findRow = () => {
+        const rows = [...document.querySelectorAll('[data-mention-section-items] button, [data-menu-row-content]')];
+        const hit = rows.find(x => /^\s*create image/i.test((x.innerText || x.textContent || '').trim()));
+        return hit ? (hit.closest('button') || hit) : null;
+      };
       const plus = document.querySelector('[data-testid="composer-plus-btn"], button[aria-label="Add files and more"], button[aria-label*="Add files" i]');
       if (!plus) return false;
-      humanClick(plus); await sleep(800);
-      const items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"]')];
-      const it = items.find(x => /create image/i.test(x.textContent || ''));
-      if (!it) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300); return false; }
-      humanClick(it); await sleep(700);
-      return true;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let row = findRow();
+        if (!row) {   // menu is closed → open it (never click "+" while it is already open: that closes it)
+          if (plus.getAttribute('aria-expanded') !== 'true') { humanClick(plus); }
+          row = await waitUntil(findRow, 3500, 150);
+        }
+        if (!row) { await sleep(500); continue; }
+        try { row.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+        await sleep(250 + Math.random() * 250);
+        humanClick(row); await sleep(900);
+        if (!findRow() && /create image/i.test((form()?.innerText || ''))) return true;   // menu closed and the "Create image" chip is in the composer
+        if (!findRow()) return true;   // menu closed after the click
+        try { row.click(); } catch (_) {}   // second way to press it
+        await sleep(900);
+        if (!findRow()) return true;
+      }
+      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (_) {}
+      await sleep(300);
+      return false;
     } catch (_) { return false; }
   }
 
