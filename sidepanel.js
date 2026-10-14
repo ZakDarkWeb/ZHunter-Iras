@@ -12631,7 +12631,7 @@ const TEMU_DEFAULT_CONFIG = {
   list_price_multiplier: 1.25,
   price_round_to_99: true,
   price_min: 80.0,
-  price_strategy: 'gap', ask_gap: 50, ask_gap_frozen: 85,
+  price_strategy: 'gap', ask_tiers: '10:50, 25:45, 60:40, 120:60, 40%', ask_gap_frozen: 35,
   price_max: 999.0,
   quantity_min: 250,
   quantity_max: 500,
@@ -13131,16 +13131,38 @@ function temuCostOf(rawPrice, title) {
   return n > 1 ? String(Math.round(p * n * 100) / 100) : rawPrice;
 }
 function temuSeedFrac(seed) { let h = 2166136261; const t = String(seed || ''); for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return ((h >>> 0) % 1000) / 1000; }
+function temuParseTiers(str) {
+  const def = '10:50, 25:45, 60:40, 120:60, 40%';
+  const steps = []; let pct = 0.4;
+  String(str || def).split(',').forEach(x => {
+    x = x.trim(); let m;
+    if ((m = x.match(/^(\d+(?:\.\d+)?)\s*%$/))) pct = parseFloat(m[1]) / 100;
+    else if ((m = x.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/))) steps.push([parseFloat(m[1]), parseFloat(m[2])]);
+  });
+  steps.sort((a, b) => a[0] - b[0]);
+  if (!steps.length) return temuParseTiers(def);
+  return { steps, pct };
+}
 function temuPrice(src, cfg, prof, seed) {
   const p = parseFloat(String(src ?? '').replace(/[$,]/g, ''));
   if (!isFinite(p) || p <= 0) return [null, null, null];
   const rule = temuPriceRule(cfg, prof);
-  // v9.15 — new strategy (store owner): our price = source cost + a gap (Temu then suggests a lower price and we accept it).
-  // Normal products: cost + 50 (cost 10 → 60). Frozen: cost + 85 (cost 10 → 95). Whole dollars, no .99 endings.
+  // v9.15 — new strategy (store owner): our price = source cost + a gap that depends on the cost (Temu then suggests a lower price and we accept it).
+  // Default tiers "cost up to : gap" → 10:50 (cost 10 = 60), 25:45, 60:40, 120:60, then 40% above. Frozen gets an extra +35 (cost 10 = 95).
+  // Cents are random but stable per product (67.94, 43.48 …), never always .99.
   if (cfg.price_strategy !== 'legacy') {
+    const tiers = temuParseTiers(cfg.ask_tiers);
+    let gap = null;
+    for (const t of tiers.steps) if (p <= t[0]) { gap = t[1]; break; }
+    if (gap === null) gap = p * tiers.pct;
     const frozen = /frozen/i.test(String(seed || '') + ' ' + (prof?.full_path || '') + ' ' + (prof?.name || ''));
-    const gap = parseFloat(frozen ? (cfg.ask_gap_frozen ?? 85) : (cfg.ask_gap ?? 50)) || 0;
-    const b = Math.round(p + gap), l = Math.round(b * (cfg.list_price_multiplier || 1.25));
+    if (frozen) gap += parseFloat(cfg.ask_gap_frozen ?? 35) || 0;
+    const key = String(seed || src);
+    const jitter = temuSeedFrac(key + '|j') * Math.min(6, Math.max(1, gap * 0.12));   // small stable wiggle upwards (gap never gets smaller)
+    const cents = 1 + Math.floor(temuSeedFrac(key + '|c') * 97);                      // .01 – .98
+    const b = Math.round((Math.floor(p + gap + jitter) + cents / 100) * 100) / 100;
+    const lc = 1 + Math.floor(temuSeedFrac(key + '|l') * 97);
+    const l = Math.round((Math.floor(b * (cfg.list_price_multiplier || 1.25)) + lc / 100) * 100) / 100;
     return [b, l, rule];
   }
   let base = p * rule.px;
@@ -15083,7 +15105,7 @@ function temuFillForm() {
   set('tgW', d.weight_lb); set('tgL', d.length_in); set('tgWd', d.width_in); set('tgH', d.height_in);
   set('tgPx', cfg.price_multiplier); set('tgPx2', cfg.price_multiplier);
   set('tgListPx', cfg.list_price_multiplier ?? 1.25);
-  set('tgGap', cfg.ask_gap ?? 50); set('tgGapFz', cfg.ask_gap_frozen ?? 85);
+  set('tgGap', cfg.ask_tiers || '10:50, 25:45, 60:40, 120:60, 40%'); set('tgGapFz', cfg.ask_gap_frozen ?? 35);
   set('tgMinPx', cfg.price_min ?? 80); set('tgMaxPx', cfg.price_max ?? 999);
   set('tgQtyMin', cfg.quantity_min ?? 250); set('tgQtyMax', cfg.quantity_max ?? 500);
   set('tgMaxW', cfg.max_weight_lb ?? 8);
@@ -17809,7 +17831,7 @@ function initTemuExport() {
       const cfg = temuGetCfg();
       cfg.price_multiplier = px;
       { const lp = num($('tgListPx')?.value); if (lp) cfg.list_price_multiplier = lp; }
-      { const g = num($('tgGap')?.value), gf = num($('tgGapFz')?.value); if (g) cfg.ask_gap = g; if (gf) cfg.ask_gap_frozen = gf; cfg.price_strategy = cfg.price_strategy || 'gap'; }
+      { const g = ($('tgGap')?.value || '').trim(), gf = num($('tgGapFz')?.value); if (g && temuParseTiers(g).steps.length) cfg.ask_tiers = g; if (gf !== null) cfg.ask_gap_frozen = gf; cfg.price_strategy = cfg.price_strategy || 'gap'; }
       { const minP = num($('tgMinPx')?.value); if (minP) cfg.price_min = minP; }
       { const maxP = num($('tgMaxPx')?.value); if (maxP) cfg.price_max = maxP; }
       { const a = parseInt($('tgQtyMin')?.value, 10), b = parseInt($('tgQtyMax')?.value, 10);

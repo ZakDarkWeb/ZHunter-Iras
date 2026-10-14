@@ -1214,16 +1214,16 @@
               </div>
 
               <div class="temu-setting-box">
-                <div class="temu-setting-lbl">Price gap ($)</div>
+                <div class="temu-setting-lbl">Price gap tiers</div>
                 <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                  <input id="tgGap" class="inp" placeholder="50" inputmode="decimal" title="Our price = source cost + this gap (cost 10 → 60). Temu then suggests a lower price." /></div>
-                <span class="temu-setting-sub">Cost + gap (normal)</span>
+                  <input id="tgGap" class="inp" placeholder="10:50, 25:45, 60:40, 120:60, 40%" title="cost up to : gap in $. Example 10:50 = cost up to 10 → price = cost + 50 (cost 10 = 60). The last % is used above the last tier." /></div>
+                <span class="temu-setting-sub">Cost up to : gap</span>
               </div>
               <div class="temu-setting-box">
-                <div class="temu-setting-lbl">Frozen gap ($)</div>
+                <div class="temu-setting-lbl">Frozen extra ($)</div>
                 <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                  <input id="tgGapFz" class="inp" placeholder="85" inputmode="decimal" title="Frozen products: cost + this gap (cost 10 → 95)" /></div>
-                <span class="temu-setting-sub">Cost + gap (frozen)</span>
+                  <input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
+                <span class="temu-setting-sub">Added for Frozen</span>
               </div>
 
               <div class="temu-setting-box">
