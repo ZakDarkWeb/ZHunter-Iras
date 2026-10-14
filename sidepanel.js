@@ -13050,6 +13050,25 @@ function temuLearnExample(cfg, title, key) {
     if (cfg.cat_examples.length > 6000) cfg.cat_examples.splice(0, cfg.cat_examples.length - 6000);
   } catch (_) {}
 }
+let _zhExModelCache = { sig: '', model: null };
+function temuExModel(cfg) {
+  const ex = cfg.cat_examples || []; if (!ex.length) return null;
+  const sig = ex.length + '|' + (ex[ex.length - 1]?.s || '') + '|' + Object.keys(cfg.category_profiles || {}).length;
+  if (_zhExModelCache.sig === sig) return _zhExModelCache.model;
+  const cats = new Map(), df = new Map();
+  for (const e of ex) {
+    let c = cats.get(e.k); if (!c) { c = { n: 0, words: new Map(), pairs: new Set() }; cats.set(e.k, c); }
+    c.n++; for (const w of e.t) c.words.set(w, (c.words.get(w) || 0) + 1);
+    for (let i = 0; i + 1 < e.t.length; i++) c.pairs.add(e.t[i] + ' ' + e.t[i + 1]);
+  }
+  for (const c of cats.values()) { for (const [w, n] of c.words) c.words.set(w, n / c.n); }
+  for (const c of cats.values()) for (const w of c.words.keys()) df.set(w, (df.get(w) || 0) + 1);
+  const N = Math.max(1, cats.size), idf = new Map();
+  for (const [w, d] of df) idf.set(w, Math.log(1 + N / d));
+  const model = { cats, idf, idfDefault: Math.log(1 + N) * 0.6 };
+  _zhExModelCache = { sig, model };
+  return model;
+}
 function temuScoreProfiles(title, cfg) {
   const tt = temuCatTokens(title);
   if (!tt.length) return [];
@@ -13095,25 +13114,27 @@ function temuScoreProfiles(title, cfg) {
       else res.push({ name: key, prof: p, score: sc, order: 99999, phrase: ph });
     }
   } catch (_) {}
-  // taught titles (examples): similar product words → same category (no single-word rule involved)
+  // taught titles (examples): ALL the words of a title count together — rare words weigh more than common ones, word pairs weigh extra,
+  // and a category wins only when several of the title's words agree (never one single word on its own)
   try {
-    const exs = cfg.cat_examples || [];
-    if (exs.length) {
-      const mine = temuExTokens(title), mset = new Set(mine.tokens), profs = cfg.category_profiles || {};
-      const bestBy = new Map();
-      for (const ex of exs) {
-        if (!profs[ex.k]) continue;
-        let inter = 0; for (const w of ex.t) if (mset.has(w)) inter++;
-        if (inter < 2) continue;
-        const sim = inter / (ex.t.length + mset.size - inter);
-        if (sim < 0.2 && inter < 3) continue;   // 2+ shared product words (e.g. beef + jerky) are enough
-        const sc = 22 + Math.round(40 * sim) + Math.min(inter, 5) * 2;
-        if (sc > (bestBy.get(ex.k) || 0)) bestBy.set(ex.k, sc);
-      }
-      for (const [key, sc] of bestBy) {
+    const m = temuExModel(cfg);
+    if (m) {
+      const mine = temuExTokens(title), toks = mine.tokens;
+      const profs = cfg.category_profiles || {};
+      let totalW = 0; for (const w of toks) totalW += m.idf.get(w) || m.idfDefault;
+      const pairs = new Set(); for (let i = 0; i + 1 < toks.length; i++) pairs.add(toks[i] + ' ' + toks[i + 1]);
+      if (totalW > 0) for (const [key, cat] of m.cats) {
+        if (!profs[key]) continue;
+        let got = 0, hits = 0;
+        for (const w of toks) { const f = cat.words.get(w); if (f) { got += (m.idf.get(w) || m.idfDefault) * f; hits++; } }
+        let pairHits = 0; for (const p of pairs) if (cat.pairs.has(p)) pairHits++;
+        if (hits < 2 && !pairHits) continue;                       // one lonely word is never enough
+        const cover = Math.min(1, (got + pairHits * 1.2) / totalW);   // share of the title explained by this category
+        const sc = 20 + Math.round(55 * cover) + Math.min(pairHits, 3) * 3;
+        if (cover < 0.25) continue;
         const hit = res.find(x => x.name === key);
-        if (hit) { if (sc > hit.score) { hit.score = sc; hit.phrase = 'similar title'; } }
-        else res.push({ name: key, prof: profs[key], score: sc, order: 99998, phrase: 'similar title' });
+        if (hit) { if (sc > hit.score) { hit.score = sc; hit.phrase = 'similar titles'; } }
+        else res.push({ name: key, prof: profs[key], score: sc, order: 99998, phrase: 'similar titles' });
       }
     }
   } catch (_) {}
