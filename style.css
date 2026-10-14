@@ -5966,3 +5966,10 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .tsp-res-act button,.tsp-eng button{padding:4px 8px;font-size:11px;border-radius:7px;border:1px solid var(--border,#2a2f3a);background:transparent;color:inherit;cursor:pointer}
 .tsp-eng{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;font-size:11px}
 .tsp-eng select{padding:3px 6px;border-radius:7px;background:transparent;color:inherit;border:1px solid var(--border,#2a2f3a)}
+
+/* v9.15 — Bulk: hunt only one Chrome tab group */
+.bulk-groups{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.bulk-groups .bg-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border,#2a2f3a);background:transparent;color:inherit;font-size:11px;cursor:pointer}
+.bulk-groups .bg-chip i{width:9px;height:9px;border-radius:50%;background:#888;display:inline-block}
+.bulk-groups .bg-chip small{opacity:.65}
+.bulk-groups .bg-chip.on{border-color:#00E5FF;background:rgba(0,229,255,.12)}

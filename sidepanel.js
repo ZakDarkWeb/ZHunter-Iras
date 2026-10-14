@@ -7469,13 +7469,39 @@ async function startQueueHunt() {
 
 
 // ── Tab list loading ────────────────────────────────────────
+const TAB_GROUP_COLORS = { grey: '#9aa0a6', blue: '#4f8ef7', red: '#ee5a5a', yellow: '#f5c542', green: '#3fbf7f', pink: '#f06fb5', purple: '#a06cf0', cyan: '#33c9dc', orange: '#f59a3f' };
+function bulkRenderGroupBar(gById, gCount) {
+  const bar = $('bulkGroupBar'); if (!bar) return;
+  const ids = [...gCount.keys()];
+  if (ids.length < 2 && !ids.some(id => id !== -1)) { bar.classList.add('hidden'); bar.innerHTML = ''; BulkState.groupFilter = 'all'; return; }
+  const gf = BulkState.groupFilter === undefined ? 'all' : BulkState.groupFilter;
+  if (gf !== 'all' && !gCount.has(gf)) BulkState.groupFilter = 'all';
+  const cur = BulkState.groupFilter === undefined ? 'all' : BulkState.groupFilter;
+  const total = [...gCount.values()].reduce((a, b) => a + b, 0);
+  const chip = (id, name, color, n) => `<button type="button" class="bg-chip${cur === id ? ' on' : ''}" data-g="${id}"><i style="background:${color}"></i>${esc(name)} <small>${n}</small></button>`;
+  bar.innerHTML = chip('all', 'All groups', '#888', total) + ids.sort((a, b) => a - b).map(id => {
+    const g = gById.get(id);
+    return chip(id, id === -1 ? 'No group' : (g?.title || 'Group ' + id), TAB_GROUP_COLORS[g?.color] || '#888', gCount.get(id));
+  }).join('');
+  bar.classList.remove('hidden');
+  bar.querySelectorAll('.bg-chip').forEach(b => { b.onclick = () => { const v = b.dataset.g; BulkState.groupFilter = v === 'all' ? 'all' : parseInt(v, 10); loadBulkTabs(); }; });
+}
 async function loadBulkTabs() {
   try {
     const tabs = await chrome.tabs.query({ currentWindow: true });
     const masterRows = await getMasterRows();
     const masterUrls = new Set(masterRows.map(r => (r.url || '').toLowerCase()));
 
+    // v9.15 — Chrome tab groups: pick ONE group to hunt, the other tabs disappear from the list
+    let groups = [];
+    try { groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT }); } catch (_) {}
+    const gById = new Map(groups.map(g => [g.id, g]));
+    const gCount = new Map();
+    tabs.filter(t => t.url && /^https?:/.test(t.url) && detectTabPlatform(t.url)).forEach(t => gCount.set(t.groupId, (gCount.get(t.groupId) || 0) + 1));
+    bulkRenderGroupBar(gById, gCount);
+    const gf = BulkState.groupFilter;   // undefined / 'all' = every tab, otherwise a groupId (-1 = not in a group)
     BulkState.tabs = tabs
+      .filter(t => gf === undefined || gf === 'all' || t.groupId === gf)
       .filter(t => t.url && /^https?:/.test(t.url))
       .map(t => ({
         tabId:      t.id,
