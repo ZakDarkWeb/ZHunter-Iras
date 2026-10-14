@@ -1,6 +1,9 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Image studio: manual tools now have an engine select (Flow / ChatGPT / Gemini) in "More options" and in Edit Studio; buttons follow the engine ("Paste in …", "Latest from …", "Open …").
+- Image studio: ⏹ Stop and 🔄 Replace buttons; a Results list (before → after, status) with Redo, Revert and Replace per image; the window stays open after the run.
+- Categories: learning now remembers whole titles (similar titles → same category); single-word match rules are no longer written; commas split match words.
 - Image editing: new engines — **ChatGPT (auto)**: 2 ChatGPT tabs work at the same time; each tab re-uses its chat (new chat after every 5 images, each message says "new image, ignore the previous ones"); attach image → "Create image" + prompt → send → result read and put back automatically (same stages as Flow). **Auto** engine: ChatGPT first; on error/limit → Flow; then Gemini (manual paste). New batch task **Improve image only** (simple prompt, no background/pack change). Engine choice is remembered.
 - ChatGPT image engine: when a run finishes, the chats ZHunter created are **archived** (never deleted; only chats it made itself; "Close" does not archive).
 - ChatGPT image engine fixes: finished image was never seen (image-only answers have no message key → now found via the "ChatGPT said:" block); tab B is reserved/opened before the run (both workers used the same tab); the step window shows the current product image/title; batch-setup controls fit the side panel and unused ones are hidden.
