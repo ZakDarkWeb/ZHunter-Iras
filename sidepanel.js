@@ -13064,6 +13064,9 @@ function temuProductPhrases(title) {
 // a match is "doubtful" when the category's own name has no word in common with the title (e.g. Chili → "Garbanzo")
 function temuCatDoubtful(title, prof) {
   if (!prof || !prof.category_keyword) return true;
+  // a title you taught the extension for exactly this category is never doubtful
+  try { const cf = temuGetCfg(), sg = temuExTokens(temuCleanTitle(title, cf)).tokens.slice().sort().join(' ');
+    if ((cf.cat_examples || []).some(e => e.s === sg && (cf.category_profiles?.[e.k]?.full_path || "#") === (prof.full_path || ""))) return false; } catch (_) {}
   let list = [];
   try { list = temuScoreProfiles(temuCleanTitle(title, temuGetCfg()), temuGetCfg()); } catch (_) {}
   const me = list.find(x => x.prof === prof || (prof.id && x.prof.id === prof.id));
@@ -19567,8 +19570,11 @@ async function temuLearnCategories() {
       if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
       else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
       temuLearnExample(cfg, it.title, same ? same[0] : key);   // v9.15 — the whole title is the lesson
+      // this product gets the category you just chose, right now
+      try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = same ? same[0] : key; } } catch (_) {}
       await temuSaveCfg(cfg); saved++;
       try { temuRenderProfiles(); } catch (_) {}
+      try { await temuRenderReview(); } catch (_) {}   // ⚠ marks and category names update immediately
     }
     if (!TlcState.stop && saved) tlcSay(`✓ Done — ${saved} categor${saved > 1 ? 'ies' : 'y'} saved. Press Export again.`);
   } catch (e) {

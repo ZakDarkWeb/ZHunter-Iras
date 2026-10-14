@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: the chosen category is applied to that product at once and the product cards refresh immediately (⚠ marks go away; taught titles are never marked doubtful).
 - Image studio: manual tools now have an engine select (Flow / ChatGPT / Gemini) in "More options" and in Edit Studio; buttons follow the engine ("Paste in …", "Latest from …", "Open …").
 - Image studio: ⏹ Stop and 🔄 Replace buttons; a Results list (before → after, status) with Redo, Revert and Replace per image; the window stays open after the run.
 - Categories: learning now remembers whole titles (similar titles → same category); single-word match rules are no longer written; commas split match words.
