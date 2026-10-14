@@ -12631,6 +12631,7 @@ const TEMU_DEFAULT_CONFIG = {
   list_price_multiplier: 1.25,
   price_round_to_99: true,
   price_min: 80.0,
+  price_strategy: 'gap', ask_gap: 50, ask_gap_frozen: 85,
   price_max: 999.0,
   quantity_min: 250,
   quantity_max: 500,
@@ -13134,6 +13135,14 @@ function temuPrice(src, cfg, prof, seed) {
   const p = parseFloat(String(src ?? '').replace(/[$,]/g, ''));
   if (!isFinite(p) || p <= 0) return [null, null, null];
   const rule = temuPriceRule(cfg, prof);
+  // v9.15 — new strategy (store owner): our price = source cost + a gap (Temu then suggests a lower price and we accept it).
+  // Normal products: cost + 50 (cost 10 → 60). Frozen: cost + 85 (cost 10 → 95). Whole dollars, no .99 endings.
+  if (cfg.price_strategy !== 'legacy') {
+    const frozen = /frozen/i.test(String(seed || '') + ' ' + (prof?.full_path || '') + ' ' + (prof?.name || ''));
+    const gap = parseFloat(frozen ? (cfg.ask_gap_frozen ?? 85) : (cfg.ask_gap ?? 50)) || 0;
+    const b = Math.round(p + gap), l = Math.round(b * (cfg.list_price_multiplier || 1.25));
+    return [b, l, rule];
+  }
   let base = p * rule.px;
   // v9.15 — below the floor: do NOT give every product the same price; floor + a little that follows the cost + a stable per-product bit
   if (base < rule.min) { const top = Math.min(parseFloat(cfg.price_rand_max) || 299.99, rule.max); base = rule.min + temuSeedFrac(seed || src) * Math.max(0, top - rule.min); }   // random (stable per product) between the floor and 299.99
@@ -15074,6 +15083,7 @@ function temuFillForm() {
   set('tgW', d.weight_lb); set('tgL', d.length_in); set('tgWd', d.width_in); set('tgH', d.height_in);
   set('tgPx', cfg.price_multiplier); set('tgPx2', cfg.price_multiplier);
   set('tgListPx', cfg.list_price_multiplier ?? 1.25);
+  set('tgGap', cfg.ask_gap ?? 50); set('tgGapFz', cfg.ask_gap_frozen ?? 85);
   set('tgMinPx', cfg.price_min ?? 80); set('tgMaxPx', cfg.price_max ?? 999);
   set('tgQtyMin', cfg.quantity_min ?? 250); set('tgQtyMax', cfg.quantity_max ?? 500);
   set('tgMaxW', cfg.max_weight_lb ?? 8);
@@ -17799,6 +17809,7 @@ function initTemuExport() {
       const cfg = temuGetCfg();
       cfg.price_multiplier = px;
       { const lp = num($('tgListPx')?.value); if (lp) cfg.list_price_multiplier = lp; }
+      { const g = num($('tgGap')?.value), gf = num($('tgGapFz')?.value); if (g) cfg.ask_gap = g; if (gf) cfg.ask_gap_frozen = gf; cfg.price_strategy = cfg.price_strategy || 'gap'; }
       { const minP = num($('tgMinPx')?.value); if (minP) cfg.price_min = minP; }
       { const maxP = num($('tgMaxPx')?.value); if (maxP) cfg.price_max = maxP; }
       { const a = parseInt($('tgQtyMin')?.value, 10), b = parseInt($('tgQtyMax')?.value, 10);
