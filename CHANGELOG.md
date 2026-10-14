@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix: ⚠ no longer appears just because a title says "frozen"/"canned"/"dried" when you already taught that Temu category with such a title.
 - Fix: a title you taught in Learn categories no longer keeps the ⚠ mark (taught title is matched in raw and cleaned form).
 - Fix: Learn categories now checks only products that show the ⚠ mark (same test as the list), not every product.
 - Learn categories: Temu gets the COMPLETE title (1: paste, 2: type letter by letter, 3: manual); the first Temu suggestion is accepted automatically after 2 seconds (you can change it before that).

@@ -13188,8 +13188,11 @@ function temuCatDoubtful(title, prof) {
   const me = list.find(x => x.prof === prof || (prof.id && x.prof.id === prof.id));
   // form words must agree: a FROZEN title in a non-frozen category (or a waffle in a *Mix* category) is questionable
   { const tk = new Set(temuCatTokens(title).map(w => w.replace(/s$/, ''))); const pk = new Set(temuCatTokens((prof.full_path || '') + ' ' + (prof.name || '')).map(w => w.replace(/s$/, '')));
-    for (const w of ['frozen', 'canned', 'dried', 'deli']) if (tk.has(w) && !pk.has(w)) return true;
-    if (pk.has('mix') && !tk.has('mix')) return true; }
+    // v9.15 — if you already taught this exact category with a title that has the same form word (e.g. frozen waffles → "Waffles"), the word is no reason to doubt it
+    let taught = new Set();
+    try { const cf2 = temuGetCfg(); (cf2.cat_examples || []).forEach(e => { if ((cf2.category_profiles?.[e.k]?.full_path || '#') === (prof.full_path || '')) (e.t || []).forEach(x => taught.add(x)); }); } catch (_) {}
+    for (const w of ['frozen', 'canned', 'dried', 'deli']) if (tk.has(w) && !pk.has(w) && !taught.has(w)) return true;
+    if (pk.has('mix') && !tk.has('mix') && !taught.size) return true; }
   if (me) {
     const other = list.find(x => x.prof !== me.prof && (x.prof.id || x.name) !== (prof.id || me.name));
     if (other && other.score >= me.score - 3 && me.score < 30) return true;   // two different categories look about equally good
