@@ -7500,7 +7500,7 @@ async function startQueueHunt() {
   const flushLoop = async () => {
     BulkState._flushActive = true;
     while (BulkState.isHunting || BulkState.pendingFlush.length > 0) {
-      if (BulkState.pendingFlush.length > 0) { const rows = BulkState.pendingFlush.splice(0, 50); await appendToMasterSheet(rows); }
+      if (BulkState.pendingFlush.length > 0) { const rows = BulkState.pendingFlush.splice(0, 50); try { await appendToMasterSheet(rows); } catch (e) { BulkState.pendingFlush.unshift(...rows); console.warn('[ZHunter] Library save failed, will try again:', e); await sleep(2000); } }
       else await sleep(500);
     }
     BulkState._flushActive = false;
@@ -7773,7 +7773,8 @@ async function startBulkHunt(tabsOverride) {
     while (BulkState.isHunting || BulkState.pendingFlush.length > 0) {
       if (BulkState.pendingFlush.length > 0) {
         const rows = BulkState.pendingFlush.splice(0, 50);
-        await appendToMasterSheet(rows);
+        try { await appendToMasterSheet(rows); }
+        catch (e) { BulkState.pendingFlush.unshift(...rows); console.warn('[ZHunter] Library save failed, will try again:', e); await sleep(2000); }   // v9.15 — rows are kept, never lost
       } else {
         // Only sleep when nothing to flush — exits promptly when hunt ends
         await sleep(500);
@@ -9417,7 +9418,21 @@ async function setMasterBatches(batches) {
   await chrome.storage.local.set({ [BATCHES_KEY]: batches });
 }
 
+// v9.15 — saving hunted products must never lose rows: a closed message port (sleeping background) is retried; it is safe to repeat because the Library is re-read and URLs already saved are skipped
 async function appendToMasterSheet(rows) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 700)); try { await msg({ action: 'PING' }); } catch (_) {} }
+      return await appendToMasterSheetOnce(rows);
+    } catch (e) {
+      lastErr = e;
+      if (!/port closed|Receiving end|channel closed|Extension context|no_response|Could not establish|rate_limited|changed before|changed elsewhere|deleted elsewhere/i.test(String(e?.message || e))) break;
+    }
+  }
+  throw lastErr;
+}
+async function appendToMasterSheetOnce(rows) {
   // Strip base64 images from master storage (would explode storage)
   const existing = await getMasterRows();
   const byUrl = new Map(existing.map(r => [(r.url || '').toLowerCase(), r]));
