@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix: Library save after replace no longer fails with "message port closed" — it wakes the background and retries up to 4 times.
 - Categories: smart multi-word matching — all words of a title count together (rare words weigh more, word pairs count extra, at least 2 words must agree); learned from your taught titles, never from single words.
 - Learn categories: AUTO mode first (the extension types the title itself); if Temu shows no suggestions it falls back to MANUAL (title copied, you paste) — after 3 auto failures it stays manual. Match-word rules are gone completely: only whole titles are learned (up to 6000 examples).
 - Archive safety: a ChatGPT chat is archived only if every message in it is one of our own prompts. When every image is done (no failed ones) the image window closes by itself after 3 s; failed count is fixed after manual replace.

@@ -3267,8 +3267,20 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, histMode
 let _zhLibChain = Promise.resolve();
 function zhLibPatch(fn) {
   const p = _zhLibChain.then(async () => {
-    const saved = await getMasterRows();
-    if (fn(saved)) await setMasterRows(saved);
+    // v9.15 — the background worker can be asleep / restarted while saving a big Library: wake it and try again (each try re-reads fresh data)
+    let lastErr = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 600)); try { await msg({ action: 'PING' }); } catch (_) {} }
+        const saved = await getMasterRows();
+        if (fn(saved)) await setMasterRows(saved);
+        return;
+      } catch (e) {
+        lastErr = e;
+        if (!/port closed|Receiving end|channel closed|Extension context|no_response|Could not establish|rate_limited/i.test(String(e?.message || e))) break;
+      }
+    }
+    throw lastErr;
   });
   _zhLibChain = p.catch(() => {});
   return p;
