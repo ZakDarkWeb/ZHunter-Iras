@@ -401,6 +401,9 @@
       const form0 = document.querySelector('form[data-chatgpt-composer], form[data-type="unified-composer"]');
       const tool = (form0 && /create image/i.test(form0.innerText || '')) ? true : await pickCreateImageTool();
       const userBefore = countEl(SEL.user), botBefore = botEls().length;
+      // every generated image already on the page before we send (a new one that is not in this set is ours)
+      const genImgs = () => [...document.querySelectorAll('[data-testid="generated-image-gallery"] img, img[alt^="Generated image" i], img[alt*="generated image" i]')];
+      const seenSrc = new Set(genImgs().map(i => i.currentSrc || i.src));
       await typeIntoComposer((tool ? '' : 'Create an image. ') + job.prompt);
       await sleep(900 + Math.random() * 700);
       const btn = await waitUntil(() => { const b = document.querySelector(SEL.send); return b && !b.disabled ? b : null; }, 20000);
@@ -414,9 +417,18 @@
       }
       setImgResult(job, 'working', { note: 'ChatGPT is creating the image…' });
       await waitUntil(() => botEls().length > botBefore, 60000, 400);
-      const t0 = Date.now(); let img = null, stable = 0, lastSrc = '', quiet = 0, lastTxt = '';
+      const t0 = Date.now(); let img = null, stable = 0, lastSrc = '', quiet = 0, lastTxt = '', lastFresh = '', freshStable = 0;
       while (Date.now() - t0 < 8 * 60000) {
         await sleep(1500);
+        // fallback: a NEW generated image anywhere on the page (works even when the answer block is not recognised)
+        { const us = document.querySelectorAll(SEL.user), lastUser = us[us.length - 1];
+          const fresh = (us.length > userBefore ? genImgs() : []).filter(i => i.complete && i.naturalWidth >= 300 && !seenSrc.has(i.currentSrc || i.src) && (!lastUser || (lastUser.compareDocumentPosition(i) & 4)));
+          if (fresh.length) {
+            const cand2 = fresh.sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)[0];
+            const s2 = cand2.currentSrc || cand2.src;
+            if (s2 === lastFresh) freshStable++; else { freshStable = 0; lastFresh = s2; }
+            if (freshStable >= (document.querySelector(SEL.stop) ? 5 : 2)) { img = cand2; break; }
+          } else { freshStable = 0; lastFresh = ''; } }
         const bots = botEls();
         const bot = bots[bots.length - 1];
         if (!bot || bots.length <= botBefore) continue;

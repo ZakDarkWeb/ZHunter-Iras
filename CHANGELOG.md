@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- ChatGPT: finished image is now also found as a new generated image after our message, so the run no longer hangs on "working" when the answer block is not recognised.
 - Image studio: "🔁 Retry failed (n)" button in the Results list runs every failed / skipped image again (uses all chosen ChatGPT tabs).
 - Image studio: "ChatGPT tabs" select (1–4 tabs working together, remembered).
 - ChatGPT "Create image": the + menu rows are plain buttons — now found, pressed and checked (up to 3 tries, never closes the open menu). Group chips are square and use the extension theme. Image studio window scrolls and fits small panels; Redo/Revert stay disabled until an image is selected.
