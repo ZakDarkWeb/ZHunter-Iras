@@ -433,11 +433,25 @@
     if (!path || !/^\/c\/[\w-]+$/.test(path) || location.pathname !== path) return { ok: false, error: 'not the expected chat' };
     await waitUntil(() => document.querySelector(SEL.editor), 15000);
     await sleep(1500);
-    const btn = await waitUntil(() => document.querySelector('[data-testid="conversation-options-button"], button[aria-label="Open conversation options"], button[aria-label*="conversation options" i]'), 8000);
-    if (!btn) return { ok: false, error: 'options button not found' };
-    humanClick(btn); await sleep(900);
-    const item = await waitUntil(() => [...document.querySelectorAll('[role="menuitem"]')].find(x => /^\s*archive\s*$/i.test(x.textContent || '') || x.getAttribute('data-testid') === 'archive-chat-menu-item'), 4000);
-    if (!item) { try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (_) {} return { ok: false, error: 'Archive item not found' }; }
+    const id = path.split('/').pop();
+    const finders = [
+      () => document.querySelector('[data-app-shell-main-titlebar] button[aria-label="More"]'),
+      () => document.querySelector('header button[aria-label="More"]'),
+      () => document.querySelector('[data-testid="conversation-options-button"], button[aria-label="Open conversation options"], button[aria-label*="conversation options" i]'),
+      () => document.querySelector('[data-sidebar-chatgpt-conversation-key$=":' + id + '"] button[aria-label="Chat actions"]')
+    ];
+    const findArchive = () => [...document.querySelectorAll('[role="menuitem"]')].find(x => /^\s*archive\s*$/i.test(x.textContent || '') || x.getAttribute('data-testid') === 'archive-chat-menu-item');
+    let item = null;
+    for (const f of finders) {
+      const btn = await waitUntil(f, 3000);
+      if (!btn) continue;
+      humanClick(btn); await sleep(900);
+      item = await waitUntil(findArchive, 2500);
+      if (item) break;
+      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (_) {}
+      await sleep(400);
+    }
+    if (!item) return { ok: false, error: 'Archive item not found' };
     humanClick(item);
     const gone = await waitUntil(() => location.pathname !== path, 6000);
     return gone ? { ok: true } : { ok: false, error: 'archive not confirmed' };
