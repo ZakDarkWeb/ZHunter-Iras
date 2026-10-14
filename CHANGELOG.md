@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Archive safety: a ChatGPT chat is archived only if every message in it is one of our own prompts. When every image is done (no failed ones) the image window closes by itself after 3 s; failed count is fixed after manual replace.
 - Image studio: when the run is over the green button becomes "✔ Close & continue" (closes the window, refreshes the review list).
 - ChatGPT: finished image is now also found as a new generated image after our message, so the run no longer hangs on "working" when the answer block is not recognised.
 - Image studio: "🔁 Retry failed (n)" button in the Results list runs every failed / skipped image again (uses all chosen ChatGPT tabs).

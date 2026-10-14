@@ -3542,6 +3542,8 @@ async function gptArchiveChats(S) {
   let tabId = (S.gptSlots || []).find(x => x?.tabId)?.tabId;
   if (!(tabId && await chrome.tabs.get(tabId).catch(() => null))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
   if (!tabId) return;
+  // safety: a chat is archived only if EVERY message in it is one of our own prompts (never a chat you wrote in yourself)
+  const expect = [...new Set([S.prompt, ...(S.queue || []).flatMap(it => [it.prompt, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
   let ok = 0, bad = 0;
   for (let i = 0; i < list.length; i++) {
     temuStepSetStatus(`🗂 Archiving ChatGPT chats… ${i + 1}/${list.length}`);
@@ -3550,7 +3552,7 @@ async function gptArchiveChats(S) {
       await sleepMs(800); await gptWaitTab(tabId);
       let r = null;
       for (let t = 0; t < 3 && !r?.ok; t++) {
-        try { r = await chrome.tabs.sendMessage(tabId, { action: 'ZH_GPT_ARCHIVE', path: list[i] }); }
+        try { r = await chrome.tabs.sendMessage(tabId, { action: 'ZH_GPT_ARCHIVE', path: list[i], expect }); }
         catch (_) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['gpt_automation.js'] }); } catch (_) {} await sleepMs(1500); }
         if (r && !r.ok && /not the expected|not found/.test(r.error || '')) break;
       }
@@ -3902,6 +3904,7 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
   if (!ok) { temuStepSetStatus('⚠️ Image not applied — product not found in the list', 'error'); return false; }
   const moreStages = (!item || how === 'Auto') && current.stages && current.stageIndex + 1 < current.stages.length;
   if (!current.origUrl) current.origUrl = oldImg;
+  if ((current.status === 'failed' || current.status === 'skipped') && TemuImgStepper.stats.skipped > 0) TemuImgStepper.stats.skipped--;
   current.newUrl = finalUrl; current.status = moreStages ? 'busy' : 'done';
   if (moreStages) {
     current.imgUrl = finalUrl;
@@ -17219,6 +17222,9 @@ async function temuStepFinish() {
   if (!TemuImgStepper.running && TemuImgStepper.engine === 'gemini') $('temuImgStepperModal')?.classList.add('hidden');
   try { temuStepResultsRender(); } catch (_) {}
   await temuRenderReview();
+  // everything done → go on to the product list by itself; with failed images the window stays open (Retry failed / Redo)
+  { const S2 = TemuImgStepper; const bad = (S2.queue || []).filter(it => it.status === 'failed' || it.status === 'skipped').length;
+    if (!bad && S2.engine !== 'gemini') { setTimeout(() => { if (TemuImgStepper === S2 && !S2.running) { $('temuImgStepperModal')?.classList.add('hidden'); temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); } }, 3500); } }
   if (TemuImgStepper.engine !== 'gemini') {
     const skipped = stats?.skipped || 0;
     toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');

@@ -461,10 +461,14 @@
   }
 
   // ═══ v9.15 — Archive a chat that ZHunter created (never delete; only the exact path the panel names) ═══
-  async function runArchive(path) {
+  async function runArchive(path, expect) {
     if (!path || !/^\/c\/[\w-]+$/.test(path) || location.pathname !== path) return { ok: false, error: 'not the expected chat' };
     await waitUntil(() => document.querySelector(SEL.editor), 15000);
     await sleep(1500);
+    // safety: every user message in this chat must start from one of our own prompts, otherwise it is NOT archived
+    { const msgs = [...document.querySelectorAll(SEL.user)].map(m => (m.innerText || '').trim()).filter(Boolean);
+      const keys = (expect || []).filter(Boolean);
+      if (!keys.length || !msgs.length || !msgs.every(t => keys.some(k => t.includes(k)))) return { ok: false, error: 'not found: this chat has messages that are not ours — left alone' }; }
     const id = path.split('/').pop();
     const finders = [
       () => document.querySelector('[data-app-shell-main-titlebar] button[aria-label="More"]'),
@@ -497,7 +501,7 @@
         checkPendingAction();
       }
       if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
-      if (msg?.action === 'ZH_GPT_ARCHIVE') { runArchive(msg.path).then(r => { try { sendResponse(r); } catch (_) {} }).catch(e => { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }); return true; }
+      if (msg?.action === 'ZH_GPT_ARCHIVE') { runArchive(msg.path, msg.expect).then(r => { try { sendResponse(r); } catch (_) {} }).catch(e => { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }); return true; }
       if (msg?.action === 'ZH_GPT_MANUAL_ATTACH') {   // manual: put image + prompt in the composer, the person presses Send
         (async () => {
           try {
