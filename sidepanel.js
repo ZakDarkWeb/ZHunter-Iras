@@ -18911,7 +18911,7 @@ function zhStudioRender(dir = 0) {
               </div>
               <div class="zs-img-btns">
                 <button type="button" class="zs-btn sm" data-act="copy" title="Copy image — Ctrl+V in Flow">📋 Copy</button>
-                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Replace this slot with the image in your clipboard (no Ctrl+V needed)">🔄 Replace</button>` : ''}
+                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Fastest: in ChatGPT/Gemini right-click the image → Copy image, then press this (or Ctrl+V here). Replaces this slot with the image in your clipboard.">📥 Paste image</button>` : ''}
                 ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Newest generated image of the chosen tool into this slot">⬇ Take from ${ZH_ENG[temuStepManualEngine()].name}</button>` : ''}
                 ${s.newUrl ? `<button type="button" class="zs-btn sm" data-act="undo" title="Original wapis">↩</button>` : ''}
                 ${it.pack > 1 && (s.newUrl || isPick) ? `<button type="button" class="zs-btn sm" data-act="stamp" title="Write the red-and-black ${it.pack} PACK label on this image (undo with ◀ in the review)">🏷 ${it.pack} PACK</button>` : ''}
@@ -18981,8 +18981,9 @@ async function zsReadClipboardImage() {
   };
   try { const v = await read(); if (v) return v; } catch (e) { console.warn('[ZHunter] clipboard read:', e); }
   try {
-    const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
-    const tab = tabs.find(x => /\/project\//.test(x.url || '')) || tabs[0];
+    // v9.15 — look in the tool you are using (ChatGPT / Gemini / Flow), not only in Flow
+    const tabs = await chrome.tabs.query({ url: ZH_ENG[temuStepManualEngine()]?.url || '*://flow.google.com/*' });
+    const tab = tabs.find(x => x.active) || tabs.find(x => /\/project\//.test(x.url || '')) || tabs[0];
     if (!tab) return null;
     const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: async () => {
       try {
