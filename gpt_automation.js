@@ -336,6 +336,14 @@
     } catch (_) { return false; }
   }
 
+  // every assistant answer block (image-only answers have no data-chatgpt-search-unit-key, so the "ChatGPT said:" heading is used too)
+  function botEls() {
+    const set = new Set(document.querySelectorAll(SEL.bot));
+    document.querySelectorAll('h4[data-conversation-role="assistant"]').forEach(h => { const b = h.closest('.block-BQZwFn') || h.parentElement; if (b) set.add(b); });
+    const all = [...set];
+    return all.filter(el => !all.some(o => o !== el && o.contains(el))).sort((a, b) => (a.compareDocumentPosition(b) & 4) ? -1 : 1);
+  }
+
   // the biggest finished image inside the newest answer
   function bestAnswerImage(bot) {
     let best = null, area = 0;
@@ -372,7 +380,7 @@
       setImgResult(job, 'working', { note: 'ChatGPT: preparing…' });
       const form0 = document.querySelector('form[data-chatgpt-composer], form[data-type="unified-composer"]');
       const tool = (form0 && /create image/i.test(form0.innerText || '')) ? true : await pickCreateImageTool();
-      const userBefore = countEl(SEL.user), botBefore = countEl(SEL.bot);
+      const userBefore = countEl(SEL.user), botBefore = botEls().length;
       await typeIntoComposer((tool ? '' : 'Create an image. ') + job.prompt);
       await sleep(900 + Math.random() * 700);
       const btn = await waitUntil(() => { const b = document.querySelector(SEL.send); return b && !b.disabled ? b : null; }, 20000);
@@ -385,11 +393,11 @@
         if (!(await waitUntil(started, 5 * 60000, 500))) throw new Error('Message was not sent');
       }
       setImgResult(job, 'working', { note: 'ChatGPT is creating the image…' });
-      await waitUntil(() => countEl(SEL.bot) > botBefore, 60000, 400);
+      await waitUntil(() => botEls().length > botBefore, 60000, 400);
       const t0 = Date.now(); let img = null, stable = 0, lastSrc = '', quiet = 0, lastTxt = '';
       while (Date.now() - t0 < 8 * 60000) {
         await sleep(1500);
-        const bots = document.querySelectorAll(SEL.bot);
+        const bots = botEls();
         const bot = bots[bots.length - 1];
         if (!bot || bots.length <= botBefore) continue;
         const busy = !!document.querySelector(SEL.stop);

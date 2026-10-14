@@ -3457,11 +3457,17 @@ const GPT_SLOTS = 2;
 const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function gptEnsureSlot(S, idx) {
+  // one at a time: two workers must never pick the same ChatGPT tab
+  S._slotLock = (S._slotLock || Promise.resolve()).then(() => gptEnsureSlotInner(S, idx)).catch(e => { throw e; });
+  const r = S._slotLock; S._slotLock = r.catch(() => {});
+  return r;
+}
+async function gptEnsureSlotInner(S, idx) {
   S.gptSlots = S.gptSlots || [];
   let slot = S.gptSlots[idx];
   const alive = async (id) => { try { const t = await chrome.tabs.get(id); return /^https:\/\/chatgpt\.com\//.test(t.url || '') ? t : null; } catch (_) { return null; } };
   if (slot?.tabId && await alive(slot.tabId)) return slot;
-  const used = new Set(S.gptSlots.filter(x => x && x !== slot).map(x => x.tabId));
+  const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
   const tabs = (await chrome.tabs.query({ url: '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
   let tab = tabs.find(t => t.active) || tabs[0];
   if (!tab) {
@@ -3557,18 +3563,26 @@ async function gptArchiveChats(S) {
 }
 
 // progress text for the 2-tab runner
-function gptPoolUi() {
+function gptPoolUi() { try { gptPoolUiInner(); } catch (e) { console.log('[ZHunter] pool ui', e?.message || e); } }
+function gptPoolUiInner() {
   const S = TemuImgStepper; if (!S?.pool) return;
   const total = S.queue.length, done = S.pool.finished;
   const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round(done / Math.max(1, total) * 100) + '%';
   const bd = $('temuStepBadge'); if (bd) bd.textContent = `${done} / ${total}`;
   const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ChatGPT · ${done}/${total}`;
+  const cur = S.pool.cur;
+  if (cur) {
+    const im = $('temuStepImg'); if (im && im.getAttribute('src') !== cur.imgUrl) im.src = cur.imgUrl;
+    const nm = $('temuStepProdName'); if (nm) nm.textContent = cur.product?.title || 'Product';
+    const sb = $('temuStepSub'); if (sb) sb.textContent = `Now: ${trunc(cur.product?.title || 'Product', 40)} · Image #${cur.imgIndex + 1}`;
+  }
   const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'AB'[i]}: ${n}` : '').filter(Boolean);
   temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
 }
 
 async function gptRunItem(S, idx, item) {
   const label = () => `image #${item.imgIndex + 1} · ${trunc(item.product.title || 'Product', 28)}`;
+  S.pool.cur = item;
   let more = true;
   while (more && S.running) {
     const stageTxt = item.stages && item.stages.length > 1 ? ` (step ${item.stageIndex + 1}/${item.stages.length})` : '';
@@ -3625,6 +3639,9 @@ async function gptPoolStart() {
   const n = Math.min(GPT_SLOTS, S.queue.length);
   gptPoolUi();
   const workers = [];
+  for (let i = 0; i < n; i++) {   // reserve every tab first (tab B is opened here if only one ChatGPT tab exists)
+    try { await gptEnsureSlot(S, i); } catch (e) { console.log('[ZHunter] GPT slot error', e?.message || e); }
+  }
   for (let i = 0; i < n; i++) { workers.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }   // tab B starts a few seconds after tab A
   await Promise.all(workers);
   if (TemuImgStepper !== S || !S.running) return;
@@ -16174,7 +16191,8 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       modal.querySelector('.batch-selected-count').textContent = `${entries.filter(row => row.querySelector('.batch-pick').checked).length} selected`;
       modal.querySelector('.batch-start').disabled = !active;
       const bulkMode = modal.querySelector('.batch-bulk-mode').value;
-      modal.querySelector('.batch-bulk-qty').disabled = bulkMode === 'background' || bulkMode === 'skip' || bulkMode === 'improve';
+      const bulkOff = bulkMode === 'background' || bulkMode === 'skip' || bulkMode === 'improve';
+      modal.querySelector('.batch-bulk-qty').disabled = modal.querySelector('.batch-bulk-lbl').disabled = modal.querySelector('.batch-bulk-style').disabled = bulkOff;
     };
     modal.querySelector('.batch-search').oninput = e => {
       const term = e.target.value.trim().toLowerCase();

@@ -5934,3 +5934,16 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .temu-gpt-row.warn{background:rgba(245,158,11,.10)}
 .temu-gpt-bad{color:var(--bad);font-weight:700}
 .temu-rv-img-btn[disabled]{opacity:.3;cursor:default;pointer-events:none}
+
+/* v9.15 — batch setup: controls never run out of the side panel; unused controls are hidden */
+.flow-batch-modal .flow-batch-box { box-sizing: border-box; max-width: 100%; }
+.flow-batch-modal .batch-bulk-controls { flex-wrap: wrap; }
+.flow-batch-modal .batch-bulk-controls select { min-width: 0; max-width: 100%; flex: 1 1 150px; }
+.flow-batch-modal .batch-bulk-controls .batch-bulk-mode { flex: 1 1 100%; }
+.flow-batch-modal .batch-item-settings { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.flow-batch-modal .batch-item-settings select { min-width: 0; max-width: 100%; flex: 1 1 130px; }
+.flow-batch-modal .batch-item-settings .batch-mode { flex: 1 1 100%; }
+.flow-batch-modal .batch-bulk-controls select:disabled, .flow-batch-modal .batch-item-settings select:disabled,
+.flow-batch-modal .batch-bulk-controls label:has(> input:disabled), .flow-batch-modal .batch-item-settings label:has(> input:disabled) { display: none; }
+.flow-batch-modal .batch-tools, .flow-batch-modal .batch-items { min-width: 0; }
+.flow-batch-modal .batch-selection .btn { flex: 1 1 auto; }
