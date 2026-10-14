@@ -19687,7 +19687,7 @@ async function temuLearnCategories() {
   const { items } = temuEnrich(rows, cfg0);
   const todo = [], seen = new Set();
   // v9.15 — SAME test as the ⚠ mark in the list: only products that show ⚠ (or have no category) are checked
-  const doubtfulIt = (it, cfgX) => { try { const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
+  const doubtfulIt = (it, cfgX) => { try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
   // products with no category AND products whose category looks doubtful (the ⚠ ones) are checked against Temu's own suggestions
   items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
   if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
