@@ -1847,6 +1847,7 @@
       </div>
       <div class="tsp-ctl">
         <button id="temuStepPauseBtn" class="btn btn-ghost" type="button" title="Pause here — Resume continues from the same place">⏸ Pause</button>
+        <button id="temuStepStopBtn" class="btn btn-ghost" type="button" title="Stop the automatic work now — the window stays open, finished images stay saved, you can edit by hand">⏹ Stop</button>
         <button id="temuStepDoneBtn" class="btn btn-ghost" type="button" title="Stop now — finished images stay saved, remaining products are left as they are">✔ Done (stop here)</button>
       </div>
       <div class="tsp-actions">
@@ -1854,17 +1855,33 @@
         <button id="temuStepSendAgainBtn" class="btn btn-ghost" type="button" title="Re-open tab with this image & prompt">Send again 🔄</button>
         <button id="temuStepPasteNextBtn" class="btn btn-primary" type="button">📋 Paste &amp; Next</button>
       </div>
+      <div id="temuStepResWrap" class="tsp-res hidden">
+        <div class="tsp-res-h">Results <small>tap an image: Redo · Revert · Replace</small></div>
+        <div id="temuStepResults" class="tsp-res-list"></div>
+        <div class="tsp-res-act">
+          <button type="button" data-r="prev" title="Previous image">◀</button>
+          <span id="temuStepResSel">Select an image</span>
+          <button type="button" data-r="next" title="Next image">▶</button>
+          <button type="button" data-r="redo" title="Run this image again">🔁 Redo</button>
+          <button type="button" data-r="revert" title="Put the original image back">↩ Revert</button>
+          <button type="button" data-r="replace" title="Replace with the image in your clipboard (or the newest image of the chosen tool)">🔄 Replace</button>
+        </div>
+      </div>
       <details class="tsp-more" id="temuStepMore">
         <summary>More options <span>manual tools</span><svg class="i i-xs chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
         <div class="tsp-more-body">
           <div id="temuStepPasteZone" tabindex="0" class="tsp-drop" title="Copy the generated image and press Ctrl+V here, or drop a file">
             📋 <b>Manual:</b> copy the image and press <b class="tsp-key">Ctrl+V</b> here or drop a file — it replaces this product image
           </div>
+          <div class="tsp-eng"><label for="temuStepManualEng">✋ Manual tool</label>
+            <select id="temuStepManualEng"><option value="flow">Flow</option><option value="chatgpt">ChatGPT</option><option value="gemini">Gemini</option></select>
+            <button type="button" id="temuStepOpenEngBtn" data-m="open">↗ Open Flow</button></div>
           <div id="temuStepManualRow" class="temu-step-manual">
             <span class="temu-step-manual-lbl">✋ Manual</span>
             <button type="button" data-m="img" title="Copy this product's image — Ctrl+V in Flow">📋 Image</button>
             <button type="button" data-m="prompt" title="Prompt copy">📝 Prompt</button>
             <button type="button" id="temuStepPasteFlowBtn" data-m="flow" title="Put the image + prompt into the open Flow project's prompt box (you press Generate)">⚡ Paste in Flow</button>
+            <button type="button" id="temuStepReplaceBtn" data-m="replace" title="Replace the selected image with the image in your clipboard">🔄 Replace image</button>
             <button type="button" data-m="studio" class="studio" title="Stop auto and open Edit Studio (manual) from this product">✋ Manual Studio</button>
           </div>
           <div class="tsp-row2">

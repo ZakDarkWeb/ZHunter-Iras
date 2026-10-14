@@ -466,6 +466,32 @@
       }
       if (msg?.action === 'ZH_GPT_TITLES_START') runTitlesJob();
       if (msg?.action === 'ZH_GPT_ARCHIVE') { runArchive(msg.path).then(r => { try { sendResponse(r); } catch (_) {} }).catch(e => { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }); return true; }
+      if (msg?.action === 'ZH_GPT_MANUAL_ATTACH') {   // manual: put image + prompt in the composer, the person presses Send
+        (async () => {
+          try {
+            if (msg.imgBase64) await attachImageToComposer(msg.imgBase64);
+            const form0 = document.querySelector('form[data-chatgpt-composer], form[data-type="unified-composer"]');
+            const tool = (form0 && /create image/i.test(form0.innerText || '')) ? true : await pickCreateImageTool();
+            if (msg.prompt) await typeIntoComposer((tool ? '' : 'Create an image. ') + msg.prompt);
+            showGptHUD('ZHunter: image + prompt are ready — press Send', 'ok');
+            sendResponse({ ok: true });
+          } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+        })();
+        return true;
+      }
+      if (msg?.action === 'ZH_GPT_GRAB_LATEST') {   // manual: newest generated image of the open chat
+        (async () => {
+          try {
+            const bots = botEls();
+            for (let i = bots.length - 1; i >= 0; i--) {
+              const img = bestAnswerImage(bots[i]);
+              if (img) { const dataUrl = await readImageAsDataUrl(img); if (dataUrl) { sendResponse({ ok: true, dataUrl }); return; } }
+            }
+            sendResponse({ ok: false, error: 'No generated image in this chat' });
+          } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+        })();
+        return true;
+      }
       if (msg?.action === 'ZH_GPT_IMG_RUN') { runImgJob(msg.job); try { sendResponse({ ok: true }); } catch (_) {} }
 
     });

@@ -3577,12 +3577,13 @@ function gptPoolUiInner() {
     const sb = $('temuStepSub'); if (sb) sb.textContent = `Now: ${trunc(cur.product?.title || 'Product', 40)} · Image #${cur.imgIndex + 1}`;
   }
   const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'AB'[i]}: ${n}` : '').filter(Boolean);
+  try { temuStepResultsRender(); } catch (_) {}
   temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
 }
 
 async function gptRunItem(S, idx, item) {
   const label = () => `image #${item.imgIndex + 1} · ${trunc(item.product.title || 'Product', 28)}`;
-  S.pool.cur = item;
+  S.pool.cur = item; item.status = 'busy'; try { temuStepResultsRender(); } catch (_) {}
   let more = true;
   while (more && S.running) {
     const stageTxt = item.stages && item.stages.length > 1 ? ` (step ${item.stageIndex + 1}/${item.stages.length})` : '';
@@ -3603,7 +3604,7 @@ async function gptRunItem(S, idx, item) {
     if (!S.running) return false;
     if (!result) {
       if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; }
-      S.stats.skipped++;
+      S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) {}
       S.pool.failed.push(`${label()}: ${lastErr?.message || 'failed'}`);
       toast(`ChatGPT: ${label()} failed — ${lastErr?.message || 'error'}`, 'warn');
       return false;
@@ -3620,10 +3621,11 @@ async function gptPoolWorker(S, idx) {
     while (S.running && !S.gptDown) {
       while (S.paused && S.running) await sleepMs(500);
       if (!S.running) break;
-      const item = S.queue[S.pool.next]; S.pool.next++;
+      let item = S.pool.redo?.shift(); const isRedo = !!item;
+      if (!item) { item = S.queue[S.pool.next]; S.pool.next++; }
       if (!item) break;
       await gptRunItem(S, idx, item);
-      S.pool.finished++;
+      if (!isRedo) S.pool.finished++;
       S.pool.slotNote[idx] = ''; gptPoolUi();
       if (S.pool.next < S.queue.length && S.running && !S.gptDown) await sleepMs(3000 + Math.random() * 6000);   // human-like gap
     }
@@ -3644,7 +3646,9 @@ async function gptPoolStart() {
   }
   for (let i = 0; i < n; i++) { workers.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }   // tab B starts a few seconds after tab A
   await Promise.all(workers);
-  if (TemuImgStepper !== S || !S.running) return;
+  if (TemuImgStepper !== S) return;
+  if (S.stopped) { temuStepResultsRender(); return; }
+  if (!S.running) return;
   if (S.gptDown) {
     toast('ChatGPT limit reached: ' + (S.pool.limitMsg || 'try again later'), 'warn');
     temuStepSetStatus('⚠️ ChatGPT limit reached — ' + (S.pool.limitMsg || 'try again later') + '. Finished images are saved; run the rest later or use Flow.', 'error');
@@ -3856,7 +3860,8 @@ setInterval(async () => {
 
 // v9.10.1 — manual image for the current step (paste / drop / "Flow se latest")
 async function temuStepApplyManualImage(src, how = 'manual', item = null) {
-  if (!TemuImgStepper?.running) return false;
+  if (!TemuImgStepper?.queue) return false;
+  if (!TemuImgStepper.running && !item) return false;
   const current = item || TemuImgStepper.queue?.[TemuImgStepper.currentIndex];
   if (!current || !src) return false;
   if (!item) {   // item = ChatGPT 2-tab runner: several images are in flight, so nothing global is touched
@@ -3894,7 +3899,9 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
   }
   if (ok) zhEditsRecord(pid, idx, oldImg, finalUrl, current.product?.url || '');   // v9.12.8
   if (!ok) { temuStepSetStatus('⚠️ Image not applied — product not found in the list', 'error'); return false; }
-  const moreStages = current.stages && current.stageIndex + 1 < current.stages.length;
+  const moreStages = (!item || how === 'Auto') && current.stages && current.stageIndex + 1 < current.stages.length;
+  if (!current.origUrl) current.origUrl = oldImg;
+  current.newUrl = finalUrl; current.status = moreStages ? 'busy' : 'done';
   if (moreStages) {
     current.imgUrl = finalUrl;
     current.stageIndex++;
@@ -3906,6 +3913,7 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
     TemuImgStepper.stats.done++;
   }
   current._more = !!moreStages;
+  try { temuStepResultsRender(); } catch (_) {}
   try { await temuRenderReview(); } catch (_) {}
   toast(`✓ ${trunc(current.product?.title || 'Product', 30)} · Image #${idx + 1} replaced (${how})`, 'ok');
 
@@ -3932,7 +3940,7 @@ function _fileToDataUrl(file) {
 
 function temuStepModalOpen() {
   const m = $('temuImgStepperModal');
-  return !!(m && !m.classList.contains('hidden') && TemuImgStepper?.running);
+  return !!(m && !m.classList.contains('hidden') && TemuImgStepper?.queue);
 }
 
 document.addEventListener('paste', async (e) => {
@@ -3941,7 +3949,7 @@ document.addEventListener('paste', async (e) => {
   if (!item) return;
   e.preventDefault();
   const f = item.getAsFile();
-  if (f) await temuStepApplyManualImage(await _fileToDataUrl(f), 'Paste');
+  if (f) await temuStepManualApply(await _fileToDataUrl(f), 'Paste');
 });
 
 (function initTemuStepPasteZone() {
@@ -3953,9 +3961,9 @@ document.addEventListener('paste', async (e) => {
   z.addEventListener('drop', async (e) => {
     e.preventDefault(); z.style.borderColor = '';
     const f = Array.from(e.dataTransfer?.files || []).find(x => x.type.startsWith('image/'));
-    if (f) return temuStepApplyManualImage(await _fileToDataUrl(f), 'Drop');
+    if (f) return temuStepManualApply(await _fileToDataUrl(f), 'Drop');
     const url = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain') || '';
-    if (/^https?:\/\//i.test(url.trim())) temuStepApplyManualImage(url.trim(), 'Drop');
+    if (/^https?:\/\//i.test(url.trim())) temuStepManualApply(url.trim(), 'Drop');
   });
 })();
 
@@ -4025,6 +4033,246 @@ setInterval(async () => {
   finally { _flowPollBusy = false; }
 }, 1500);
 
+
+// ═══ v9.15 — manual tools for every engine + results list (Redo / Revert / Replace) ═══
+const ZH_ENG = {
+  flow: { name: 'Flow', url: '*://flow.google.com/*', home: 'https://flow.google.com', file: 'flow_automation.js' },
+  chatgpt: { name: 'ChatGPT', url: '*://chatgpt.com/*', home: 'https://chatgpt.com/', file: 'gpt_automation.js' },
+  gemini: { name: 'Gemini', url: '*://gemini.google.com/*', home: 'https://gemini.google.com/app', file: 'gemini_automation.js' }
+};
+let zhManualEng = '';
+try { chrome.storage.local.get('zhManualEng').then(r => { if (r?.zhManualEng && ZH_ENG[r.zhManualEng]) { zhManualEng = r.zhManualEng; temuStepManualLabels(); } }); } catch (_) {}
+function temuStepManualEngine() {
+  if (zhManualEng && ZH_ENG[zhManualEng]) return zhManualEng;
+  const e = TemuImgStepper?.engine;
+  return e === 'gemini' ? 'gemini' : e === 'flow' ? 'flow' : 'chatgpt';
+}
+function temuStepManualLabels() {
+  const n = ZH_ENG[temuStepManualEngine()].name;
+  const set = (id, t) => { const b = $(id); if (b) b.textContent = t; };
+  set('temuStepPasteFlowBtn', `⚡ Paste in ${n}`); set('temuStepGrabFlowBtn', `⬇ Latest from ${n}`); set('temuStepOpenEngBtn', `↗ Open ${n}`);
+  const sel = $('temuStepManualEng'); if (sel && sel.value !== temuStepManualEngine()) sel.value = temuStepManualEngine();
+}
+function temuStepTarget() {
+  const S = TemuImgStepper; if (!S?.queue?.length) return null;
+  return S.sel || (S.pool && S.pool.cur) || S.queue[S.currentIndex] || null;
+}
+function temuStepManualApply(src, how) {
+  const S = TemuImgStepper; if (!S?.queue?.length) return Promise.resolve(false);
+  const seqCur = (!S.pool && S.running) ? S.queue[S.currentIndex] : null;
+  const item = S.sel || (S.pool && S.pool.cur) || null;
+  if (!item && seqCur) return temuStepApplyManualImage(src, how);
+  if (!item) { toast('Tap an image in Results first', 'warn'); return Promise.resolve(false); }
+  if (item === seqCur) return temuStepApplyManualImage(src, how);
+  return temuStepApplyManualImage(src, how, item);
+}
+async function manualSend(tabId, message, file) {
+  try { const r = await chrome.tabs.sendMessage(tabId, message); if (r) return r; } catch (_) {}
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: [file] }); } catch (_) {}
+  await sleepMs(900);
+  try { return (await chrome.tabs.sendMessage(tabId, message)) || { ok: false, error: 'no answer from the tab' }; } catch (e) { return { ok: false, error: e?.message || 'tab not reachable — refresh it (F5)' }; }
+}
+async function manualPickTab(eng, create) {
+  const S = TemuImgStepper;
+  const tabs = await chrome.tabs.query({ url: ZH_ENG[eng].url });
+  const reserved = new Set((S?.running && S.gptSlots) ? S.gptSlots.filter(Boolean).map(x => x.tabId) : []);
+  const free = tabs.filter(t => !reserved.has(t.id));
+  const tab = free.find(t => t.active) || free[0];
+  if (tab || !create) return tab || null;
+  const t = await chrome.tabs.create({ url: ZH_ENG[eng].home, active: true });
+  const end = Date.now() + 25000;
+  while (Date.now() < end) { await sleepMs(500); const x = await new Promise(r => chrome.tabs.get(t.id, y => r(chrome.runtime.lastError ? null : y))); if (x && x.status === 'complete') break; }
+  await sleepMs(2500);
+  return t;
+}
+async function manualOpen(eng) {
+  const tab = await manualPickTab(eng, false);
+  if (tab) { await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {}); }
+  else await chrome.tabs.create({ url: ZH_ENG[eng].home, active: true });
+}
+// put image(s) + prompt into ChatGPT / Gemini by hand (the person presses Send)
+async function manualPasteIn(eng, imgs, prompt) {
+  try {
+    if (eng === 'chatgpt') {
+      const tab = await manualPickTab('chatgpt', true);
+      if (!tab) return { ok: false, error: 'could not open ChatGPT' };
+      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      for (let i = 0; i < imgs.length; i++) {
+        const r = await manualSend(tab.id, { action: 'ZH_GPT_MANUAL_ATTACH', imgBase64: imgs[i], prompt: i === imgs.length - 1 ? prompt : '' }, 'gpt_automation.js');
+        if (!r?.ok) return { ok: false, error: r?.error || 'image not attached' };
+        await sleepMs(500);
+      }
+      return { ok: true };
+    }
+    if (eng === 'gemini') {
+      await chrome.storage.local.set({ pendingGeminiAction: { imgBase64: imgs[0], prompt, timestamp: Date.now(), processed: false } });
+      const tab = await manualPickTab('gemini', false);
+      if (tab) {
+        await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }); } catch (_) {}
+        chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(() => {});
+      } else await chrome.tabs.create({ url: ZH_ENG.gemini.home, active: true });
+      return { ok: true };
+    }
+    return { ok: false, error: 'unknown tool' };
+  } catch (e) { return { ok: false, error: e?.message || String(e) }; }
+}
+// newest generated image of the chosen tool → data URL / URL
+async function manualLatestFrom(eng) {
+  try {
+    if (eng === 'chatgpt') {
+      const tabs = (await chrome.tabs.query({ url: ZH_ENG.chatgpt.url })).sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+      for (const t of tabs) { const r = await manualSend(t.id, { action: 'ZH_GPT_GRAB_LATEST' }, 'gpt_automation.js'); if (r?.ok && r.dataUrl) return r.dataUrl; }
+      return null;
+    }
+    if (eng === 'gemini') {
+      const tabs = (await chrome.tabs.query({ url: ZH_ENG.gemini.url })).sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+      for (const t of tabs) {
+        const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: async () => {
+          const imgs = [...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 300 && i.naturalHeight >= 300 && !i.closest('rich-textarea, .input-area-container, form'));
+          const img = imgs[imgs.length - 1]; if (!img) return null;
+          const src = img.currentSrc || img.src;
+          try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); } catch (_) {}
+          try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
+        } }).catch(() => [null]);
+        if (r?.result) return r.result;
+      }
+      return null;
+    }
+  } catch (e) { console.warn('[ZHunter] latest image failed', e); }
+  return null;
+}
+async function temuStepGrabLatest() {
+  const eng = temuStepManualEngine();
+  if (eng === 'flow') return temuStepGrabLatestFromFlow();
+  const src = await manualLatestFrom(eng);
+  if (!src) { toast(`No generated image found in ${ZH_ENG[eng].name} (open the chat with the result)`, 'warn'); return; }
+  await temuStepManualApply(src, `${ZH_ENG[eng].name} latest`);
+}
+// 🔄 Replace: clipboard image → selected item (fallback: newest image of the chosen tool)
+async function temuStepReplaceNow() {
+  const t = temuStepTarget();
+  if (!t) { toast('Tap an image in Results first', 'warn'); return; }
+  let src = null;
+  try { src = await zsReadClipboardImage(); } catch (_) {}
+  if (!src) { toast('No image in the clipboard — taking the newest from ' + ZH_ENG[temuStepManualEngine()].name, 'info'); return temuStepGrabLatest(); }
+  await temuStepManualApply(src, 'Replace');
+}
+// ⏹ Stop: all automatic work stops, the window and the results stay open
+function temuStepStopAuto() {
+  const S = TemuImgStepper; if (!S?.running) return;
+  S.stopped = true;
+  temuStepCancelActiveJob();
+  S.running = false; S.paused = false;
+  try { zhStepTimerStop(); } catch (_) {}
+  for (const it of S.queue) if (it.status === 'busy') it.status = 'wait';
+  temuStepSetStatus(`⏹ Stopped — ${S.stats?.done || 0}/${S.queue.length} images replaced and saved. Tap an image below to Redo, Revert or Replace by hand.`, 'info');
+  temuStepResultsRender();
+  temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {});
+}
+const TSP_ST = { wait: '⏳ waiting', busy: '⚙ working', done: '✓ done', failed: '✗ failed', skipped: '⏭ skipped', reverted: '↩ original' };
+let _tspResT = null;
+function temuStepResultsRender() {
+  clearTimeout(_tspResT);
+  _tspResT = setTimeout(() => {
+    const S = TemuImgStepper, wrap = $('temuStepResWrap'), box = $('temuStepResults'); if (!wrap || !box) return;
+    if (!S?.queue?.length) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    const top = box.scrollTop, blank = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    box.innerHTML = S.queue.map((it, i) => {
+      const st = it.status || 'wait';
+      return `<div class="tsp-res-item ${st}${S.sel === it ? ' sel' : ''}" data-i="${i}"><img src="${esc(it.origUrl || it.imgUrl)}" alt=""><span class="arr">→</span><img src="${esc(it.newUrl || blank)}" alt="" style="${it.newUrl ? '' : 'opacity:.2'}"><span class="nm">${esc(trunc(it.product?.title || 'Product', 26))} · #${it.imgIndex + 1}</span><span class="st">${TSP_ST[st] || st}</span></div>`;
+    }).join('');
+    box.scrollTop = top;
+    const lbl = $('temuStepResSel'); const t = S.sel;
+    if (lbl) lbl.textContent = t ? `${trunc(t.product?.title || 'Product', 22)} · #${t.imgIndex + 1}` : 'Tap an image';
+    const stopB = $('temuStepStopBtn'); if (stopB) stopB.style.display = S.running ? '' : 'none';
+    for (const id of ['temuStepPauseBtn', 'temuStepDoneBtn']) { const b = $(id); if (b) b.style.display = S.running ? '' : 'none'; }
+  }, 120);
+}
+function temuStepSelect(it) {
+  const S = TemuImgStepper; if (!S) return;
+  S.sel = (S.sel === it) ? null : it;
+  if (S.sel) {
+    const im = $('temuStepImg'); if (im) im.src = S.sel.newUrl || S.sel.imgUrl;
+    const nm = $('temuStepProdName'); if (nm) nm.textContent = S.sel.product?.title || 'Product';
+  }
+  temuStepResultsRender();
+}
+function temuStepRedoPrepare(item) {
+  const S = TemuImgStepper;
+  if (item.status === 'done' && S.stats.done > 0) S.stats.done--;
+  item.imgUrl = item.origUrl || item.imgUrl; item.stageIndex = 0;
+  if (item.stages?.length) item.prompt = item.stages[0];
+  item.tried = []; item.done = false; item.continueStage = false; item.sentAt = null; item.snap = null; item._more = false; item.status = 'busy';
+}
+async function temuStepRedo(item) {
+  const S = TemuImgStepper; if (!S || !item) { toast('Tap an image first', 'warn'); return; }
+  if (item.status === 'busy') { toast('This image is working right now', 'info'); return; }
+  if (S.running && S.pool) {   // 2-tab run still going: a free tab takes it next
+    temuStepRedoPrepare(item); (S.pool.redo = S.pool.redo || []).push(item);
+    temuStepResultsRender(); toast('🔁 Queued — it runs on the next free ChatGPT tab', 'ok'); return;
+  }
+  if (S.running) { toast('Press ⏹ Stop first (or wait), then Redo', 'warn'); return; }
+  temuStepRedoPrepare(item);
+  S.running = true; S.stopped = false; S.paused = false; S.gptDown = false; S.heldAdvance = false;
+  temuStepResultsRender();
+  if (S.pool) {
+    S.pool.redo = [item]; S.pool.next = S.queue.length;
+    temuStepSetStatus('🔁 Redo: ' + trunc(item.product?.title || 'Product', 30) + ' …');
+    try { await gptEnsureSlot(S, 0); await gptPoolWorker(S, 0); } catch (e) { console.warn('[ZHunter] redo error', e); }
+    S.running = false;
+    temuStepSetStatus('✓ Redo finished — tap another image or close with ✕', 'ok');
+    temuStepResultsRender();
+    return;
+  }
+  S.redoOnly = true; S.currentIndex = S.queue.indexOf(item);
+  await temuStepProcessCurrent();
+}
+async function temuStepRevert(item) {
+  const S = TemuImgStepper; if (!S || !item) { toast('Tap an image first', 'warn'); return; }
+  if (item.status === 'busy') { toast('This image is working right now — Stop first', 'info'); return; }
+  if (!item.origUrl) { toast('No original saved for this image', 'warn'); return; }
+  const pid = item.product?.id, idx = item.imgIndex;
+  const cur = _imgEntryUrl(item.product?.images?.[idx]);
+  if (cur === item.origUrl) { toast('Already the original', 'info'); return; }
+  const ok = await replaceProductImage(pid, idx, item.origUrl, null);
+  if (Array.isArray(item.product?.images)) { const e = item.product.images[idx]; item.product.images[idx] = typeof e === 'string' || e == null ? item.origUrl : { ...e, url: item.origUrl }; }
+  zhEditsRecord(pid, idx, cur, item.origUrl, item.product?.url || '');
+  if (item.status === 'done' && S.stats.done > 0) S.stats.done--;
+  item.newUrl = null; item.imgUrl = item.origUrl; item.status = 'reverted';
+  temuStepResultsRender();
+  try { await temuRenderReview(); } catch (_) {}
+  toast(`↩ ${trunc(item.product?.title || 'Product', 28)} · #${idx + 1} is the original again`, 'ok');
+}
+function temuStepBindResults() {
+  const S = TemuImgStepper;
+  const box = $('temuStepResults');
+  if (box && !box._b) { box._b = 1; box.addEventListener('click', (e) => { const r = e.target.closest('.tsp-res-item'); if (!r || !TemuImgStepper) return; temuStepSelect(TemuImgStepper.queue[+r.dataset.i]); }); }
+  document.querySelectorAll('#temuStepResWrap [data-r]').forEach(b => {
+    b.onclick = async () => {
+      const St = TemuImgStepper; if (!St) return;
+      const r = b.dataset.r, i = St.queue.indexOf(St.sel);
+      if (r === 'prev' || r === 'next') {
+        const n = Math.min(St.queue.length - 1, Math.max(0, (i < 0 ? St.queue.indexOf(temuStepTarget()) : i) + (r === 'next' ? 1 : -1)));
+        St.sel = null; temuStepSelect(St.queue[n]);
+      }
+      else if (r === 'redo') await temuStepRedo(St.sel);
+      else if (r === 'revert') await temuStepRevert(St.sel);
+      else if (r === 'replace') await temuStepReplaceNow();
+    };
+  });
+  const stop = $('temuStepStopBtn'); if (stop) stop.onclick = () => temuStepStopAuto();
+  const sel = $('temuStepManualEng');
+  if (sel) {
+    sel.value = temuStepManualEngine();
+    sel.onchange = () => { zhManualEng = sel.value; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); };
+  }
+  if (S) S.sel = null;
+  temuStepManualLabels();
+  temuStepResultsRender();
+}
+
 // Newest generated image in the open Flow project (skips uploads and prompt-box chips)
 async function temuStepGrabLatestFromFlow() {
   const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
@@ -4053,9 +4301,9 @@ async function temuStepGrabLatestFromFlow() {
     src = r?.result || null;
   } catch (e) { console.warn('[ZHunter] Grab from Flow failed:', e); }
   if (!src) { toast('No generated image found in Flow', 'warn'); return; }
-  await temuStepApplyManualImage(src, 'Flow latest');
+  await temuStepManualApply(src, 'Flow latest');
 }
-$('temuStepGrabFlowBtn')?.addEventListener('click', () => temuStepGrabLatestFromFlow());
+$('temuStepGrabFlowBtn')?.addEventListener('click', () => temuStepGrabLatest());
 
 // v9.10.1 — backup delivery: the Flow tab also writes the result into storage.
 // onFlowResult removes the job synchronously, so a result is never applied twice.
@@ -12711,6 +12959,29 @@ function temuCatForms(w) {
 function temuCatTokens(s) {
   return String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/[‘’']/g, '').split(/[^a-z0-9]+/).filter(Boolean);
 }
+// v9.15 — categories are also learned from whole TITLES (examples), not from single words:
+// a new title is compared with every title you taught the extension; shared product words (not brand/numbers) decide.
+function temuExTokens(title) {
+  const canon = (w) => [...temuCatForms(w)].sort((a, b) => a.length - b.length)[0];
+  const ok = (w) => w.length > 2 && !/\d/.test(w) && !TEMU_CAT_STOP.has(w) && !(typeof TLC_STOP !== 'undefined' && TLC_STOP.has(w));
+  const t = String(title || '').replace(/^\s*\d+\s*pack\s*[-–]\s*/i, '');
+  const seg = t.split(/[,;|\u2013\u2014]| - | with | \(/i)[0];
+  const head = temuCatTokens(seg).filter(ok).map(canon).slice(-1)[0] || '';
+  const tokens = [...new Set(temuCatTokens(t).filter(ok).map(canon))].slice(0, 40);
+  return { tokens, head };
+}
+function temuLearnExample(cfg, title, key) {
+  try {
+    const { tokens, head } = temuExTokens(title);
+    if (tokens.length < 2 || !key) return;
+    cfg.cat_examples = cfg.cat_examples || [];
+    const sig = tokens.slice().sort().join(' ');
+    const i = cfg.cat_examples.findIndex(e => e.s === sig);
+    if (i >= 0) cfg.cat_examples.splice(i, 1);
+    cfg.cat_examples.push({ k: key, t: tokens, h: head, s: sig });
+    if (cfg.cat_examples.length > 1500) cfg.cat_examples.splice(0, cfg.cat_examples.length - 1500);
+  } catch (_) {}
+}
 function temuScoreProfiles(title, cfg) {
   const tt = temuCatTokens(title);
   if (!tt.length) return [];
@@ -12754,6 +13025,28 @@ function temuScoreProfiles(title, cfg) {
       const hit = res.find(x => x.name === key);
       if (hit) { if (sc > hit.score) { hit.score = sc; hit.phrase = ph; } }
       else res.push({ name: key, prof: p, score: sc, order: 99999, phrase: ph });
+    }
+  } catch (_) {}
+  // taught titles (examples): similar product words → same category (no single-word rule involved)
+  try {
+    const exs = cfg.cat_examples || [];
+    if (exs.length) {
+      const mine = temuExTokens(title), mset = new Set(mine.tokens), profs = cfg.category_profiles || {};
+      const bestBy = new Map();
+      for (const ex of exs) {
+        if (!profs[ex.k]) continue;
+        let inter = 0; for (const w of ex.t) if (mset.has(w)) inter++;
+        if (inter < 2) continue;
+        const sim = inter / (ex.t.length + mset.size - inter);
+        if (sim < 0.2 && inter < 3) continue;   // 2+ shared product words (e.g. beef + jerky) are enough
+        const sc = 22 + Math.round(40 * sim) + Math.min(inter, 5) * 2;
+        if (sc > (bestBy.get(ex.k) || 0)) bestBy.set(ex.k, sc);
+      }
+      for (const [key, sc] of bestBy) {
+        const hit = res.find(x => x.name === key);
+        if (hit) { if (sc > hit.score) { hit.score = sc; hit.phrase = 'similar title'; } }
+        else res.push({ name: key, prof: profs[key], score: sc, order: 99998, phrase: 'similar title' });
+      }
     }
   } catch (_) {}
   res.sort((a, b) => b.score - a.score || a.order - b.order);
@@ -15082,7 +15375,8 @@ async function temuRenderReview() {
           profs[key] = { id: '', name: leaf, category_keyword: leaf, full_path: full, match: [leaf], keyword_attributes: '', weight_lb: 1, length_in: 8, width_in: 6, height_in: 3 };
         }
         cfg2.cat_overrides[temuSourceIdentity(r.url)] = key;
-        { cfg2.cat_learned = cfg2.cat_learned || {}; temuProductPhrases(temuCleanTitle(r.title || '', cfg2)).forEach(ph => { cfg2.cat_learned[ph] = key; });
+        temuLearnExample(cfg2, temuCleanTitle(r.title || '', cfg2), key);
+        { cfg2.cat_learned = cfg2.cat_learned || {}; temuProductPhrases(temuCleanTitle(r.title || '', cfg2)).filter(ph => /\s/.test(ph)).forEach(ph => { cfg2.cat_learned[ph] = key; });
           const ks = Object.keys(cfg2.cat_learned); if (ks.length > 600) ks.slice(0, ks.length - 600).forEach(k => delete cfg2.cat_learned[k]); }
         const sv = await temuSaveCfg(cfg2); if (sv !== true) { toast('Could not save category: ' + (sv || 'error'), 'bad'); return; }
         TemuLast = null;
@@ -15110,7 +15404,8 @@ async function temuRenderReview() {
           const key = sel.value; if (!key) return;
           const cfg2 = temuGetCfg(); cfg2.cat_overrides = cfg2.cat_overrides || {};
           cfg2.cat_overrides[temuSourceIdentity(r.url)] = key;
-          { cfg2.cat_learned = cfg2.cat_learned || {}; temuProductPhrases(temuCleanTitle(r.title || '', cfg2)).forEach(ph => { cfg2.cat_learned[ph] = key; });   // remember this kind of product
+          temuLearnExample(cfg2, temuCleanTitle(r.title || '', cfg2), key);
+          { cfg2.cat_learned = cfg2.cat_learned || {}; temuProductPhrases(temuCleanTitle(r.title || '', cfg2)).filter(ph => /\s/.test(ph)).forEach(ph => { cfg2.cat_learned[ph] = key; });   // remember this kind of product
             const ks = Object.keys(cfg2.cat_learned); if (ks.length > 600) ks.slice(0, ks.length - 600).forEach(k => delete cfg2.cat_learned[k]); }
           await temuSaveCfg(cfg2); TemuLast = null;
           const p = (cfg2.category_profiles || {})[key] || {};
@@ -16285,7 +16580,7 @@ async function temuStartBulkImageEdit(opts = {}) {
       const key = r.id + '#' + idx;
       if (!allImgs[idx] || seen.has(key)) return;
       seen.add(key);
-      queue.push({ product: r, imgUrl: allImgs[idx], imgIndex: idx, jobId: null });
+      queue.push({ product: r, imgUrl: allImgs[idx], origUrl: allImgs[idx], imgIndex: idx, jobId: null, status: 'wait' });
     });
   });
 
@@ -16407,21 +16702,34 @@ function temuStepManualAttn(on) {
 // Manual tools for the current step
 async function temuStepManualAction(act) {
   const S = TemuImgStepper;
-  const cur = S?.queue?.[S.currentIndex];
-  if (!cur) return;
+  const cur = temuStepTarget();
+  if (!cur) { toast('Tap an image in Results first', 'warn'); return; }
   const prompt = cur.prompt || S.prompt || '';
+  const eng = temuStepManualEngine();
+  if (act === 'open') { manualOpen(eng).catch(() => {}); return; }
+  if (act === 'replace') { await temuStepReplaceNow(); return; }
   if (act === 'img') {
     toast('📋 Copying image…', 'info');
-    if (await zhCopyImage(cur.imgUrl)) toast('📋 Image copied — press Ctrl+V in the Flow prompt box', 'ok');
+    if (await zhCopyImage(cur.newUrl || cur.imgUrl)) toast('📋 Image copied — press Ctrl+V in the Flow prompt box', 'ok');
     else toast('Copy failed — click once on the side panel and try again', 'warn');
   } else if (act === 'prompt') {
     if (await zhCopyText(prompt)) toast('📝 Prompt copied', 'ok'); else toast('Prompt was not copied', 'warn');
+  } else if (act === 'flow' && eng !== 'flow') {
+    if (!S.pool && cur === S.queue[S.currentIndex]) temuStepCancelActiveJob();
+    const btn = $('temuStepPasteFlowBtn'); if (btn) btn.disabled = true;
+    try {
+      const b64 = await flowPrefetchImage(cur.newUrl || cur.imgUrl);
+      if (!b64) { toast('Image could not be downloaded', 'warn'); return; }
+      const r = await manualPasteIn(eng, [b64], prompt);
+      if (r.ok) { temuStepSetStatus(`✋ Manual: image + prompt are in ${ZH_ENG[eng].name} — press Send/Generate, then "⬇ Latest from ${ZH_ENG[eng].name}" or copy the image and press Ctrl+V here.`); toast(`✓ Added in ${ZH_ENG[eng].name}`, 'ok'); }
+      else toast(`${ZH_ENG[eng].name}: ` + (r.error || 'image not applied'), 'warn');
+    } finally { if (btn) btn.disabled = false; }
   } else if (act === 'flow') {
-    temuStepCancelActiveJob();   // auto stops for this step; result comes via Ctrl+V / "Flow se latest"
+    if (!S.pool && cur === S.queue[S.currentIndex]) temuStepCancelActiveJob();   // auto stops for this step; result comes via Ctrl+V / "Latest from Flow"
     const btn = $('temuStepPasteFlowBtn');
     if (btn) btn.disabled = true;
     try {
-      const b64 = await flowPrefetchImage(cur.imgUrl);
+      const b64 = await flowPrefetchImage(cur.newUrl || cur.imgUrl);
       if (!b64) { toast('Image could not be downloaded', 'warn'); return; }
       const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
       const tab = tabs.find(t => /\/project\//.test(t.url || ''));
@@ -16444,7 +16752,7 @@ async function temuStepManualAction(act) {
   } else if (act === 'studio') {
     const pid = cur.product?.id;
     temuStepCancelActiveJob();
-    S.running = false;
+    S.running = false; S.stopped = true; zhStepTimerStop();
     $('temuImgStepperModal')?.classList.add('hidden');
     await zhStudioOpen(pid);
     toast('✋ Manual Studio — start from this product', 'info');
@@ -16454,7 +16762,15 @@ async function temuStepManualAction(act) {
 async function temuStepAdvance() {
   const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
   if (current?.continueStage) current.continueStage = false;
-  else TemuImgStepper.currentIndex++;
+  else {
+    if (TemuImgStepper.redoOnly) {   // one image was run again by hand — stop after it
+      TemuImgStepper.redoOnly = false; TemuImgStepper.running = false; TemuImgStepper.currentIndex = TemuImgStepper.queue.length;
+      zhStepTimerStop(); temuStepResultsRender();
+      temuStepSetStatus('✓ Redo finished — tap another image or close with ✕', 'ok');
+      return;
+    }
+    TemuImgStepper.currentIndex++;
+  }
   if (TemuImgStepper.currentIndex < TemuImgStepper.queue.length) {
     await temuStepProcessCurrent();
   } else {
@@ -16515,7 +16831,7 @@ function temuStepOpenModal() {
         toast('Select a PNG, JPG or WebP image', 'warn'); return;
       }
       deviceBtn.disabled = true;
-      try { await temuStepApplyManualImage(await _fileToDataUrl(file), 'Device'); }
+      try { await temuStepManualApply(await _fileToDataUrl(file), 'Device'); }
       catch (e) { toast('Image not applied: ' + (e?.message || e), 'warn'); }
       finally { deviceBtn.disabled = false; deviceInput.value = ''; }
     };
@@ -16524,13 +16840,15 @@ function temuStepOpenModal() {
     skipBtn.onclick = async () => {
       temuStepCancelActiveJob();
       const current = TemuImgStepper.queue[TemuImgStepper.currentIndex];
-      if (current) current.continueStage = false;
+      if (current) { current.continueStage = false; if (current.status !== 'done') current.status = 'skipped'; }
       TemuImgStepper.stats.skipped++;
       await temuStepAdvance();
     };
   }
 
   $('temuStepManualRow')?.querySelectorAll('button[data-m]').forEach(b => { b.onclick = () => temuStepManualAction(b.dataset.m); });
+  { const ob = $('temuStepOpenEngBtn'); if (ob) ob.onclick = () => temuStepManualAction('open'); }
+  temuStepBindResults();
   const againBtn = $('temuStepSendAgainBtn');
   if (againBtn) {
     againBtn.onclick = async () => {
@@ -16567,6 +16885,8 @@ async function temuStepProcessCurrent() {
   if (subEl && current.stages) subEl.textContent += ` · ${current.batchMode === 'improve' ? 'Improve' : current.batchMode === 'background' || current.stageIndex === 1 ? 'Background' : 'Pack ' + current.packQty} · ${current.stageIndex + 1}/${current.stages.length}`;
   if (imgEl) imgEl.src = current.imgUrl;
   if (nameEl) nameEl.textContent = current.product.title || 'Product';
+  if (current.status !== 'done') current.status = 'busy';
+  try { temuStepResultsRender(); } catch (_) {}
   temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine === 'auto' ? 'Auto' : TemuImgStepper.engine}...`);
 
   // Paste & Next is only for the manual engines
@@ -16786,7 +17106,8 @@ async function temuStepFinish() {
     const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · Done ✅`;
     await new Promise(r => setTimeout(r, 2500));
   }
-  if (!TemuImgStepper.running) $('temuImgStepperModal')?.classList.add('hidden');
+  if (!TemuImgStepper.running && TemuImgStepper.engine === 'gemini') $('temuImgStepperModal')?.classList.add('hidden');
+  try { temuStepResultsRender(); } catch (_) {}
   await temuRenderReview();
   if (TemuImgStepper.engine !== 'gemini') {
     const skipped = stats?.skipped || 0;
@@ -18402,8 +18723,8 @@ function zhStudioRender(dir = 0) {
               </div>
               <div class="zs-img-btns">
                 <button type="button" class="zs-btn sm" data-act="copy" title="Copy image — Ctrl+V in Flow">📋 Copy</button>
-                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Clipboard image into this slot (no Ctrl+V needed)">📥 Paste</button>` : ''}
-                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Newest Flow image into this slot">⬇ Take from Flow</button>` : ''}
+                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm paste" data-act="paste" title="Replace this slot with the image in your clipboard (no Ctrl+V needed)">🔄 Replace</button>` : ''}
+                ${isPick || s.newUrl ? `<button type="button" class="zs-btn sm" data-act="flow" title="Newest generated image of the chosen tool into this slot">⬇ Take from ${ZH_ENG[temuStepManualEngine()].name}</button>` : ''}
                 ${s.newUrl ? `<button type="button" class="zs-btn sm" data-act="undo" title="Original wapis">↩</button>` : ''}
                 ${it.pack > 1 && (s.newUrl || isPick) ? `<button type="button" class="zs-btn sm" data-act="stamp" title="Write the red-and-black ${it.pack} PACK label on this image (undo with ◀ in the review)">🏷 ${it.pack} PACK</button>` : ''}
               </div>
@@ -18412,11 +18733,12 @@ function zhStudioRender(dir = 0) {
         </div>
       </div>
       <div class="zs-flowbar">
-        <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in Flow (${it.pasteSel.size})</button>
+        <select id="zsEng" class="zs-btn" title="Which tool the buttons use">${Object.entries(ZH_ENG).map(([k, v]) => `<option value="${k}"${k === temuStepManualEngine() ? ' selected' : ''}>${v.name}</option>`).join('')}</select>
+        <button type="button" class="zs-btn primary" id="zsPasteFlow">⚡ Paste in ${ZH_ENG[temuStepManualEngine()].name} (${it.pasteSel.size})</button>
         <label class="zs-tick"><input type="checkbox" id="zsWithPrompt" ${ZhStudio.withPrompt ? 'checked' : ''}/> + prompt</label>
         <label class="zs-tick" title="This product only: write the red-and-black 'N PACK' label at the top-right of pack images"><input type="checkbox" id="zsPackLabel" ${it.packLabel ? 'checked' : ''}/> PACK label (this product)</label>
         <label class="zs-tick" title="After the last picked image of a product is replaced, go to the next product"><input type="checkbox" id="zsAutoNext" ${ZhStudio.autoNext !== false ? 'checked' : ''}/> auto next</label>
-        <button type="button" class="zs-btn" id="zsOpenFlow">↗ Open Flow</button>
+        <button type="button" class="zs-btn" id="zsOpenFlow">↗ Open ${ZH_ENG[temuStepManualEngine()].name}</button>
       </div>
     </div>`;
   body.querySelector('.zs-fold')?.addEventListener('toggle', e => { ZhStudio.promptOpen = e.target.open; });
@@ -18556,6 +18878,14 @@ async function zsPasteInFlow(it) {
   try {
     const imgs = (await Promise.all(idx.map(i => flowPrefetchImage(all[i])))).filter(Boolean);
     if (!imgs.length) { toast('Images could not be downloaded', 'warn'); return; }
+    const eng = temuStepManualEngine();
+    if (eng !== 'flow') {
+      const pr = ZhStudio.withPrompt ? (($('zsPrompt')?.value) || it.prompts[it.promptMode] || '') : '';
+      const r = await manualPasteIn(eng, eng === 'gemini' ? imgs.slice(0, 1) : imgs, pr);
+      if (r.ok) toast(`✓ ${ZH_ENG[eng].name}: image${imgs.length > 1 && eng !== 'gemini' ? 's' : ''}${pr ? ' + prompt' : ''} ready — press Send, then "Take from ${ZH_ENG[eng].name}"`, 'ok');
+      else toast(`${ZH_ENG[eng].name}: ` + (r.error || 'not applied'), 'warn');
+      return;
+    }
     const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
     const tab = tabs.find(t => /\/project\//.test(t.url || ''));
     if (!tab) {
@@ -18592,6 +18922,7 @@ function zsGo(delta) {
 }
 
 (function initZhStudio() {
+  $('zhStudioBody')?.addEventListener('change', (e) => { if (e.target?.id === 'zsEng') { zhManualEng = e.target.value; chrome.storage.local.set({ zhManualEng }).catch(() => {}); zhStudioRender(); } });
   $('zhStudioCloseBtn')?.addEventListener('click', zhStudioClose);
   $('zhStudioPrevBtn')?.addEventListener('click', () => zsGo(-1));
   $('zhStudioNextBtn')?.addEventListener('click', () => zsGo(1));
@@ -18619,7 +18950,7 @@ function zsGo(delta) {
     if (e.target.dataset.paste != null) {
       const i = +e.target.dataset.paste;
       e.target.checked ? it.pasteSel.add(i) : it.pasteSel.delete(i);
-      const b = $('zsPasteFlow'); if (b) b.textContent = `⚡ Paste in Flow (${it.pasteSel.size})`;
+      const b = $('zsPasteFlow'); if (b) b.textContent = `⚡ Paste in ${ZH_ENG[temuStepManualEngine()].name} (${it.pasteSel.size})`;
     } else if (e.target.id === 'zsAutoNext') {
       ZhStudio.autoNext = e.target.checked;
       chrome.storage.local.set({ zhStudioAutoNext: e.target.checked });
@@ -18661,7 +18992,7 @@ function zsGo(delta) {
     if (t.id === 'zsCopyPrompt') { if (await zhCopyText(it.prompts[it.promptMode] || '')) toast('📝 Prompt copied', 'ok'); return; }
     if (t.id === 'zsShowAll') { it.showAll = !it.showAll; zhStudioRender(); return; }
     if (t.id === 'zsPasteFlow') { await zsPasteInFlow(it); return; }
-    if (t.id === 'zsOpenFlow') { focusOrOpenFlowTab().catch(() => {}); return; }
+    if (t.id === 'zsOpenFlow') { const e2 = temuStepManualEngine(); if (e2 === 'flow') focusOrOpenFlowTab().catch(() => {}); else manualOpen(e2).catch(() => {}); return; }
     const card = t.closest('.zs-img');
     if (!card || t.closest('.zs-tick')) return;
     const i = +card.dataset.i;
@@ -18682,6 +19013,10 @@ function zsGo(delta) {
       const src = await zsReadClipboardImage();
       if (!src) { toast('No image in the clipboard — right-click the image in Flow → Copy image', 'warn'); return; }
       await zsApply(it, i, src, 'Paste');
+    } else if (act === 'flow' && temuStepManualEngine() !== 'flow') {
+      const e2 = temuStepManualEngine(), src2 = await manualLatestFrom(e2);
+      if (!src2) { toast(`No generated image found in ${ZH_ENG[e2].name} (open the chat with the result)`, 'warn'); return; }
+      await zsApply(it, i, src2, ZH_ENG[e2].name);
     } else if (act === 'flow') {
       const g = await flowLatestGenerated(ZhStudio.usedFlowIds);
       if (!g) { toast('No new generated image found in Flow (keep the Flow project tab open)', 'warn'); return; }
@@ -19224,11 +19559,14 @@ async function temuLearnCategories() {
       cfg = temuGetCfg(); cfg.category_profiles = cfg.category_profiles || {};
       let key = leaf.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'category';
       let n = 2; while (cfg.category_profiles[key]) key = key.replace(/_\d+$/, '') + '_' + n++;
-      const words = pick.match ? [pick.match] : [];
+      // v9.15 — match words: only phrases of 2+ words (a single word would pull every product into this category); commas split phrases
+      const words = String(pick.match || '').split(/[,;]+/).map(w => w.replace(/[^a-z0-9' \-]+/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase()).filter(w => w.split(' ').length >= 2);
+      if (pick.match && !words.length) toast('Single word not saved as a rule — the full title is remembered instead', 'info');
       // the same Temu category may already exist (same path) → just add the new match words to it
       const same = Object.entries(cfg.category_profiles).find(([, p]) => (p.full_path || '') === pick.path);
       if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
       else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
+      temuLearnExample(cfg, it.title, same ? same[0] : key);   // v9.15 — the whole title is the lesson
       await temuSaveCfg(cfg); saved++;
       try { temuRenderProfiles(); } catch (_) {}
     }
