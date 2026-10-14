@@ -1099,7 +1099,29 @@ function scrapeAmazon() {
   const r = { title: '', price: '', images: [], videos: [], variants: [] };
 
   const titleEl = document.querySelector('#productTitle, #title span, h1.a-size-large, #title_feature_div #title');
-  if (titleEl) r.title = titleEl.innerText.trim();
+  if (titleEl) r.title = (titleEl.innerText || titleEl.textContent || '').replace(/\s+/g, ' ').trim();
+  // v9.15 — more ways to find the Amazon title (other layouts, hidden spans, structured data, tab title)
+  if (!r.title) {
+    for (const sel of ['#productTitle', '#title', '#titleSection h1', '#dp-container h1', '#ppd h1', 'h1[id*="title" i]', 'h1 span', 'h1', '[data-feature-name="title"] span', '#mobileTitle', '#fresh-title']) {
+      const el = document.querySelector(sel);
+      const t = el && (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t && t.length > 3) { r.title = t; break; }
+    }
+  }
+  if (!r.title) {
+    try {
+      for (const sc of document.querySelectorAll('script[type="application/ld+json"]')) {
+        const j = JSON.parse(sc.textContent || 'null');
+        const list = Array.isArray(j) ? j : [j];
+        const p = list.find(x => x && /product/i.test(String(x['@type'] || '')) && x.name);
+        if (p) { r.title = String(p.name).trim(); break; }
+      }
+    } catch (_) {}
+  }
+  if (!r.title) {
+    const dt = (document.title || '').replace(/^\s*amazon(\.[a-z.]+)?\s*[:\-–|]\s*/i, '').replace(/\s*[:\-–|]\s*amazon(\.[a-z.]+)?\s*$/i, '').trim();
+    if (dt && !/^(amazon|robot check|sorry|page not found|adding to cart|cart)/i.test(dt)) r.title = dt;
+  }
   // If DOM title is empty (e.g. page still loading), try og:title — never fall back to document.title
   // because Amazon sets it to "Adding to Cart..." during cart operations.
   if (!r.title) {
