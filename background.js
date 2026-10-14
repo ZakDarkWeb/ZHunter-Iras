@@ -4,6 +4,8 @@
 // ============================================================
 'use strict';
 importScripts('sourcing_sync.js', 'audit_storage.js', 'product_url_gate.js');
+try { importScripts('sourcing_default.js'); } catch (_) {}   // optional built-in sheet connection
+
 
 // Har download "ZHunter Export/YYYY-MM-DD/" folder mein (Downloads ke andar). Setting: zhExportFolder (default on).
 let _zhExportFolder = true;
@@ -2072,3 +2074,16 @@ async function cdpClickSelector(tabId, selector) {
     return false;
   }
 }
+
+// built-in Google Sheet: connect by itself in every new Chrome profile (no manual setup)
+async function zhSourcingAutoConnect() {
+  try {
+    const d = self.ZH_SOURCING_DEFAULT; if (!d) return;
+    const have = (await chrome.storage.local.get('zhSourcingConnection')).zhSourcingConnection;
+    if (have) return;
+    await chrome.storage.local.set({ zhSourcingConnection: { endpoint: zhSourcingEndpoint(d.endpoint), token: d.token, spreadsheetId: zhSourcingSheetId(d.spreadsheetId) } });
+    try { zhSourcingRetry(false); } catch (_) {}
+  } catch (e) { console.warn('[ZHunter] auto sheet connect failed', e?.message || e); }
+}
+zhSourcingAutoConnect();
+try { chrome.runtime.onInstalled.addListener(() => zhSourcingAutoConnect()); chrome.runtime.onStartup.addListener(() => zhSourcingAutoConnect()); } catch (_) {}

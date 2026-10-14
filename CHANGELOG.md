@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Google Sheet sync: built-in connection (sourcing_default.js, private, not in GitHub) — a new Chrome profile connects by itself, no manual setup.
 - Pricing strategy: price = source cost + a gap that depends on the cost (tiers 10:50, 25:45, 60:40, 120:60, then 40%; cost 10 = ~60), Frozen +35 extra (~95). Random stable cents (67.94, 43.48), never only .99. Tiers editable in Settings.
 - Learn categories: the chosen category is applied to that product at once and the product cards refresh immediately (⚠ marks go away; taught titles are never marked doubtful).
 - Image studio: manual tools now have an engine select (Flow / ChatGPT / Gemini) in "More options" and in Edit Studio; buttons follow the engine ("Paste in …", "Latest from …", "Open …").
