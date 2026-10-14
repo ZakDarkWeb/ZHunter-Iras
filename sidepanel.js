@@ -7131,7 +7131,16 @@ async function huntPageGuard(tabId, expectUrl, rowId, nav) {
     if (expectProduct && typeof ZhGate !== 'undefined') {
       const now = await new Promise(r => chrome.tabs.get(tabId, t => r(chrome.runtime.lastError ? null : t)));
       if (!now) return { ok: false, code: 'tab_closed', ...flags };
-      if (now.url && /^https?:/i.test(now.url) && !ZhGate.isProductUrl(now.url)) {
+      let looksProduct = false;
+      if (now.url && /^https?:/i.test(now.url) && !ZhGate.isProductUrl(now.url) && /amazon\./i.test(now.url)) {
+        // v9.15 — Amazon sometimes shows a real product page on an odd-looking address: judge by the page itself
+        try {
+          const [pr] = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector('#productTitle, #add-to-cart-button, #buy-now-button, #corePrice_feature_div, #ppd') });
+          looksProduct = !!pr?.result;
+        } catch (_) {}
+      }
+      if (!looksProduct && now.url && /^https?:/i.test(now.url) && !ZhGate.isProductUrl(now.url)) {
+        console.warn('[ZHunter] redirected away from the product:', expectUrl, '→', now.url);
         if (!flags.redirected && nav) {
           flags.redirected = true;
           setBulkRowMeta(rowId, 'Site redirected away — opening the link again…');
@@ -8437,7 +8446,7 @@ async function scrapeOneTab(tabInfo) {
         let finish = (v) => { if (!done) { done = true; resolve(v); } };
         // Check cancelled flag every 200ms so cancel responds quickly
         let cancelCheck = setInterval(() => { if (BulkState.isCancelled) finish(null); }, 200);
-        const t = setTimeout(() => finish(null), BulkState.TAB_TIMEOUT);
+        const t = setTimeout(() => finish(null), /amazon\./i.test(tabInfo.url) ? 15000 : BulkState.TAB_TIMEOUT)   // v9.15 — Amazon pages are slower to read;
         const origFinish = finish;
         finish = (v) => { clearTimeout(t); clearInterval(cancelCheck); origFinish(v); };
         try {

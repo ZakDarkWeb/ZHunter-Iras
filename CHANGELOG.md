@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix: Amazon hunt — real product pages on odd addresses are no longer called "redirected away", and Amazon pages get 15s (not 4s) to be read before "timeout".
 - Fix: Amazon hunt "title not found" — title is now also read from hidden spans, other layouts, product data and the tab title.
 - Fix: Library save after replace no longer fails with "message port closed" — it wakes the background and retries up to 4 times.
 - Categories: smart multi-word matching — all words of a title count together (rare words weigh more, word pairs count extra, at least 2 words must agree); learned from your taught titles, never from single words.
