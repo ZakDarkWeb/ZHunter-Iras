@@ -13838,7 +13838,7 @@ async function temuRunExport(opts = {}) {
       say(`✗ No Temu template file selected for store "${sn}".\n→ Select the Temu general template (.xlsx) once in the "Template" box above (Temu → Add products via upload → General template → Download).`);
       toast('Select the Temu template for this store', 'warn'); return;
     }
-    const cfg = temuGetCfg();
+    let cfg = temuGetCfg();
     // Live-read the modal fields — whatever is visible applies, even without Save
     { const v = $('tgWords')?.value; if (v !== undefined && v !== null) cfg.title_remove_words = v.split(',').map(x => x.trim()).filter(Boolean); }
     { const sk = $('tgSkipListed'); if (sk) cfg.skip_listed = !!sk.checked; }
@@ -13902,7 +13902,16 @@ async function temuRunExport(opts = {}) {
       await zhLibPatch(saved => { let changed = false; for (const row of rows) { const m = saved.find(x => x.id === row.id || x.url === row.url); if (m) { m.images = [...row.images]; changed = true; } } return changed; });
     }
 
-    const { items, skipped } = temuEnrich(rows, cfg);
+    let enr = temuEnrich(rows, cfg);
+    // v9.15 — products without a category: learn them from Temu automatically (first suggestion), then carry on with the export
+    if (enr.items.some(it => it.warn.includes('NO_CATEGORY_PROFILE')) && !TlcState?.running) {
+      const nNo = enr.items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE')).length;
+      say(`${nNo} product(s) have no category — learning categories from Temu automatically…`);
+      try { await temuLearnCategories(); } catch (e) { say('Category learning stopped: ' + (e?.message || e)); }
+      cfg = temuGetCfg();
+      enr = temuEnrich(rows, cfg);
+    }
+    const { items, skipped } = enr;
     if (!items.length) {
       say('No new products:\n' + (skipped.length ? skipped.map(x => '• ' + x).join('\n') : '(the list is empty)') +
         '\n\nTo list them again, turn off the "Skip already listed" checkbox.');
