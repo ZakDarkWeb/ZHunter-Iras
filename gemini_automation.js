@@ -410,10 +410,12 @@
             showGeminiHUD('ZHunter: attaching image…', 'info');
             let n = 0;
             if (imgs.length) n = await attachMany(imgs);
+            showGeminiHUD('ZHunter: image attached ✓ — typing prompt…', 'info');
             if (msg.prompt) {
               await ensureCreateImage();
               await typePrompt(msg.prompt);
             }
+            showGeminiHUD('ZHunter: prompt ready — sending…', 'info');
             let sent = false;
             if (msg.send) {
               sent = await sendNow();

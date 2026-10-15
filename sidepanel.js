@@ -3622,7 +3622,14 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
   const t0 = Date.now();
   try {
     onNote?.('attaching image…');
-    const r = await manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js');
+    const tA = Date.now(), tick = setInterval(() => onNote?.(`attaching image… ${Math.round((Date.now() - tA) / 1000)}s`), 1000);
+    let r;
+    try {
+      r = await Promise.race([
+        manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js'),
+        new Promise(res => setTimeout(() => res({ ok: false, error: 'Gemini tab did not answer in 120s — press F5 on it, then Retry failed' }), 120000))
+      ]);
+    } finally { clearInterval(tick); }
     if (!r?.ok) throw new Error(r?.error || 'image not attached');
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
     const end = Date.now() + 9 * 60000;

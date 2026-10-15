@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Gemini 2nd image stuck on "attaching image…":** the tab line now counts the seconds, Gemini's HUD shows each step (attached → typing → sending), and if the Gemini tab does not answer in 120 s the item fails with a clear message (F5 + Retry failed) so the run moves on.
 - **Gemini/ChatGPT tab in another window:** the run now prefers tabs of the window where the side panel is, and moves a tab from another Chrome window into this one so you can see it.
 - **Gemini multi-account fix:** new chats now open on the SAME Google account the tab uses (`/u/1/app` stays account #2, no fallback to `/app`); all tabs of a run use one account. When Gemini says the image limit is reached, the run stops at once with "Gemini limit reached on this account — switch account, then Retry failed" instead of waiting.
 - Gemini diagnostics: the tab line now says what is happening ("image received (KB) — saving… Ns"), Gemini shows "image found ✓", and the page is polled every 8 s. Tested the finder on your saved Gemini page: it finds the image there.
