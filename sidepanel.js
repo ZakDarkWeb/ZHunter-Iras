@@ -16802,16 +16802,16 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       <div class="batch-tools">
         <input class="batch-search" type="search" placeholder="Search products…" aria-label="Search products">
         <div class="batch-selection"><button type="button" class="btn btn-ghost batch-select-all">Select visible</button><button type="button" class="btn btn-ghost batch-select-none">Clear selection</button><span class="batch-selected-count"></span></div>
-        <div class="batch-bulk-controls"><select class="batch-bulk-mode" aria-label="Bulk image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option><option value="skip">Skip / keep original</option></select>
+        <div class="batch-bulk-card"><div class="batch-card-title">1 · Pick a task, then press “Apply to selected” (or “Apply to all”)</div><div class="batch-bulk-controls"><div class="batch-chips"></div><select class="batch-bulk-mode" aria-label="Bulk image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option><option value="skip">Skip / keep original</option></select>
         <label>Qty <input class="batch-bulk-qty" type="number" min="2" max="24" value="2" disabled aria-label="Bulk pack quantity"></label>
         <label title="Write the red-and-black N PACK label on the pack image"><input type="checkbox" class="batch-bulk-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
         <select class="batch-bulk-style" aria-label="Pack prompt"><option value="new">Pack prompt: New (original background)</option><option value="old">Pack prompt: Old (white background)</option></select></div>
-        <div class="batch-selection"><button type="button" class="btn btn-primary batch-apply-selected">Apply to selected</button><button type="button" class="btn btn-ghost batch-apply-all">Apply to all</button></div>
+        <div class="batch-selection batch-apply-row"><button type="button" class="btn btn-primary batch-apply-selected">Apply to selected</button><button type="button" class="btn btn-ghost batch-apply-all">Apply to all</button></div></div>
       </div>
       <div class="batch-items">${queue.map((q, i) => `<div data-batch="${i}" class="batch-item">
-        <div class="batch-item-heading"><input type="checkbox" class="batch-pick" aria-label="Select image ${i + 1}"><img src="${esc(q.imgUrl)}" loading="lazy" alt=""><span title="${esc(q.product.title || '')}">${esc(trunc(q.product.title || 'Product', 65))}<small>Image #${q.imgIndex + 1}</small></span><button class="btn btn-ghost batch-product" type="button" title="Select all images of this product">Product</button></div>
+        <div class="batch-item-heading"><input type="checkbox" class="batch-pick" aria-label="Select image ${i + 1}"><img src="${esc(q.imgUrl)}" loading="lazy" alt=""><span title="${esc(q.product.title || '')}">${esc(trunc(q.product.title || 'Product', 65))}<small>Image #${q.imgIndex + 1}${queue.filter(z => z.product.id === q.product.id).length > 1 ? ` · ${queue.filter(z => z.product.id === q.product.id).length} images of this product` : ""}</small><em class="batch-task-now"></em></span><button class="btn btn-ghost batch-product" type="button" title="Select all images of this product">Product</button></div>
         <div class="batch-item-settings">
-        <select class="batch-mode" aria-label="Image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option></select>
+        <div class="batch-chips"></div><select class="batch-mode" aria-label="Image task"><option value="improve">Improve image only</option><option value="background">Background only</option><option value="pack">Pack only</option><option value="pack_background">Pack → Background</option></select>
         <label>Qty <input class="batch-qty" type="number" min="2" max="24" value="2" disabled aria-label="Pack quantity"></label>
         <label title="Write the red-and-black N PACK label"><input type="checkbox" class="batch-lbl" ${zhPackLabelOn ? 'checked' : ''}> PACK label</label>
         <select class="batch-style" aria-label="Pack prompt"><option value="new">New</option><option value="old">Old (white bg)</option></select></div>
@@ -16830,10 +16830,18 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       for (const e of libEntries) sel.add(new Option('✨ Prompt: ' + e.name, 'lib:' + e.id));
     }
     modal.querySelector('.batch-bulk-mode').value = defMode;
+    const chipText = (o) => ({ improve: 'Improve', background: 'Background', pack: 'Pack', pack_background: 'Pack + Background', skip: 'Skip' }[o.value] || String(o.textContent).replace(/^✨ Prompt:\s*/, ''));
+    const buildChips = (sel) => {
+      const box = sel.previousElementSibling; if (!box || !box.classList.contains('batch-chips')) return;
+      box.innerHTML = '';
+      [...sel.options].forEach(o => { const b = document.createElement('button'); b.type = 'button'; b.className = 'batch-chip'; b.dataset.v = o.value; b.textContent = chipText(o); b.onclick = () => { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }; box.appendChild(b); });
+    };
+    buildChips(modal.querySelector('.batch-bulk-mode'));
     entries.forEach(row => {
       row.querySelector('.batch-mode').add(new Option('Skip / keep original', 'skip'));
       row.querySelector('.batch-mode').value = defMode;
       { const pk = packFromTitle(queue[Number(row.dataset.batch)].product.title); if (pk > 1) { row.querySelector('.batch-mode').value = Number(row.dataset.batch) >= 0 && queue[Number(row.dataset.batch)].imgIndex === 0 ? 'pack_background' : 'background'; if (row.querySelector('.batch-mode').value === 'pack_background') row.querySelector('.batch-qty').value = String(pk); } }
+      buildChips(row.querySelector('.batch-mode'));
       row.querySelector('.batch-product').onclick = () => {
         const pid = queue[Number(row.dataset.batch)].product.id;
         const on = !row.querySelector('.batch-pick').checked;
@@ -16842,6 +16850,8 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       };
     });
     const update = () => {
+      modal.querySelectorAll('.batch-chips').forEach(box => { const sel = box.nextElementSibling; if (!sel) return; box.querySelectorAll('.batch-chip').forEach(b => b.classList.toggle('on', b.dataset.v === sel.value)); });
+      entries.forEach(row => { const sel = row.querySelector('.batch-mode'), el = row.querySelector('.batch-task-now'); if (el) el.textContent = sel.value === 'skip' ? 'Skipped' : (sel.options[sel.selectedIndex]?.textContent || '').replace(/^✨ Prompt:\s*/, ''); });
       let steps = 0, active = 0;
       const anyPick = entries.some(r => r.querySelector('.batch-pick').checked);   // something ticked → ONLY the ticked images run
       entries.forEach(row => {

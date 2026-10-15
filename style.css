@@ -5993,3 +5993,28 @@ body.light-mode .zs-cnt { color: var(--ok); }
 /* v9.15 — prompt library picker inside Edit Studio */
 .zs-sel { background: rgba(255,255,255,.06); color: inherit; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 5px 8px; font-size: 11px; max-width: 170px; }
 .zs-sel option { color: #111; }
+
+/* ── Image batch setup: clearer layout, task chips, bigger thumbnails (v9.15) ── */
+.flow-batch-modal .batch-bulk-card { border: 1px solid var(--line-2); border-radius: 12px; padding: 10px; background: rgba(0,229,255,.04); display: grid; gap: 8px; }
+.flow-batch-modal .batch-card-title { font-size: 11.5px; font-weight: 700; color: var(--accent); letter-spacing: .01em; }
+.flow-batch-modal .batch-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+.flow-batch-modal .batch-chip { padding: 8px 12px; border-radius: 999px; font-size: 12px; line-height: 1.1; border: 1px solid #384a64; background: #101c30; color: #e2e8f0; cursor: pointer; transition: background .12s, border-color .12s; }
+.flow-batch-modal .batch-chip:hover { border-color: var(--accent); }
+.flow-batch-modal .batch-chip.on { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 700; }
+.flow-batch-modal .batch-bulk-controls > select.batch-bulk-mode, .flow-batch-modal .batch-item-settings > select.batch-mode { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; }
+.flow-batch-modal .batch-apply-row { display: flex; gap: 8px; }
+.flow-batch-modal .batch-apply-row .btn { padding: 10px 12px; font-size: 12.5px; font-weight: 700; }
+.flow-batch-modal .batch-item-heading img { width: 64px; height: 64px; border-radius: 8px; }
+.flow-batch-modal .batch-item-heading span { font-size: 12px; }
+.flow-batch-modal .batch-item-heading small { font-size: 11px; }
+.flow-batch-modal .batch-task-now { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-style: normal; font-size: 10.5px; font-weight: 700; background: rgba(0,229,255,.14); color: var(--accent); }
+.flow-batch-modal .batch-skipped .batch-task-now { background: rgba(148,163,184,.18); color: #94a3b8; }
+.flow-batch-modal .batch-pick { width: 20px; height: 20px; flex-shrink: 0; }
+.flow-batch-modal .batch-item { padding: 12px; border-radius: 12px; }
+.flow-batch-modal .batch-item-settings { gap: 8px; }
+.flow-batch-modal .batch-footer { background: var(--surface-2); }
+.flow-batch-modal .batch-summary { font-size: 12.5px; }
+.flow-batch-modal .batch-start { min-width: 150px; padding: 11px 14px; font-size: 13px; font-weight: 700; }
+.flow-batch-modal .batch-item .batch-chips { gap: 5px; }
+.flow-batch-modal .batch-item .batch-chip { padding: 5px 9px; font-size: 11px; }
+.flow-batch-modal .batch-tools { max-height: 46vh; overflow-y: auto; }
