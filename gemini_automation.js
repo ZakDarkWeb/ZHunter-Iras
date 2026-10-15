@@ -268,16 +268,53 @@
   }
   async function typePrompt(text) {
     const ed = composerEl(); if (!ed) throw new Error('Gemini composer not found');
-    ed.focus();
-    try { document.execCommand('selectAll', false, null); document.execCommand('delete', false, null); } catch (_) {}
+    const clear = () => { ed.focus(); try { document.execCommand('selectAll', false, null); document.execCommand('delete', false, null); } catch (_) {} };
+    const len = () => (ed.innerText || '').replace(/\s+/g, '').length;
+    const want = String(text).replace(/\s+/g, '').length;
+    clear();
     let done = false;
     try { done = document.execCommand('insertText', false, text); } catch (_) {}
-    if (!done || !(ed.innerText || '').trim()) {
-      ed.textContent = text;
-      ed.classList.remove('ql-blank');
+    await sleep(250);
+    if (!done || len() < want * 0.95) {   // multi-line text was cut: type it line by line
+      clear();
+      const lines = String(text).split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i]) { try { document.execCommand('insertText', false, lines[i]); } catch (_) {} }
+        if (i < lines.length - 1) { try { document.execCommand('insertParagraph', false, null); } catch (_) {} }
+      }
+      await sleep(250);
+    }
+    if (len() < want * 0.95) {
+      ed.textContent = text; ed.classList.remove('ql-blank');
       ed.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     }
     await sleep(200);
+  }
+  function findSend() {
+    const cands = [...document.querySelectorAll('button[aria-label*="Send message" i], button[aria-label="Send" i], button.send-button, .send-button-container button')];
+    return cands.find(b => b.offsetParent !== null) || null;
+  }
+  const seenGen = new Set();
+  function markSeen() { generatedImages().forEach(i => seenGen.add(i.currentSrc || i.src)); }
+  // click Send as soon as it is enabled (it stays disabled while the image is still uploading)
+  async function sendNow() {
+    markSeen();
+    const userBefore = document.querySelectorAll('user-query').length;
+    const end = Date.now() + 45000;
+    let btn = null;
+    while (Date.now() < end) {
+      btn = findSend();
+      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true') break;
+      btn = null; await sleep(400);
+    }
+    if (!btn) return false;
+    await sleep(400 + Math.random() * 500);
+    try { btn.click(); } catch (_) {}
+    for (let i = 0; i < 16; i++) {
+      await sleep(250);
+      if (document.querySelectorAll('user-query').length > userBefore || composerEl()?.classList.contains('ql-blank')) return true;
+    }
+    return false;
   }
   // make sure "Create image" is on (so Gemini draws instead of answering with text)
   async function ensureCreateImage() {
@@ -306,11 +343,11 @@
     const sel = 'generated-image img.image, generated-image img, .attachment-container.generated-images img';
     return [...document.querySelectorAll(sel)].filter(i => i.complete && i.naturalWidth >= 200 && !i.closest('.pending, user-query, user-query-file-preview, user-query-file-carousel, rich-textarea'));
   }
-  async function grabLatest(waitMs) {
+  async function grabLatest(waitMs, fresh) {
     const end = Date.now() + (waitMs || 0);
     for (;;) {
       const pending = document.querySelector('.attachment-container.generated-images.pending, generated-image .loader, response-element.pending');
-      const imgs = generatedImages();
+      const imgs = generatedImages().filter(i => !fresh || !seenGen.has(i.currentSrc || i.src));
       if (imgs.length && !pending) {
         const d = await readImg(imgs[imgs.length - 1]);
         if (d) return d;
@@ -334,8 +371,12 @@
               await ensureCreateImage();
               await typePrompt(msg.prompt);
             }
-            showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
-            sendResponse({ ok: true, attached: n });
+            let sent = false;
+            if (msg.send) {
+              sent = await sendNow();
+              showGeminiHUD(sent ? 'ZHunter: sent — waiting for the image…' : 'ZHunter: press Send yourself — I will take the image', sent ? 'info' : 'warn');
+            } else showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
+            sendResponse({ ok: true, attached: n, sent });
           } catch (e) { showGeminiHUD(e?.message || 'failed', 'warn'); try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;
@@ -343,7 +384,7 @@
       if (msg?.action === 'ZH_GEM_GRAB_LATEST') {
         (async () => {
           try {
-            const dataUrl = await grabLatest(msg.waitMs || 0);
+            const dataUrl = await grabLatest(msg.waitMs || 0, !!msg.fresh);
             sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, error: 'No generated image in this chat yet' });
           } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();

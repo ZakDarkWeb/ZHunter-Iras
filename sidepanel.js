@@ -17276,10 +17276,35 @@ async function temuStepSendCurrent() {
       g.since++;
       gtext = need ? current.setup.text : ZH_SETUP_SHORT;
     }
-    if (statusEl) statusEl.textContent = '⏳ Putting the image in Gemini…';
-    const gr = await manualPasteIn('gemini', [base64Data], gtext);
-    if (!gr.ok) { toast('Gemini: ' + (gr.error || 'not applied'), 'warn'); if (statusEl) statusEl.textContent = '⚠ Gemini: ' + (gr.error || 'image not attached') + ' — press "Send Again" or paste it yourself'; return; }
-    if (statusEl) statusEl.textContent = '✓ Image' + (gtext === ZH_SETUP_SHORT ? '' : ' + prompt') + ' ready in Gemini — press Send, copy the result, then click "Paste & Next".';
+    temuStepCancelActiveJob();
+    const token = {}; S.gptToken = token; current.done = false; current.sentAt = Date.now();
+    temuStepSetStatus('⏳ Sending to Gemini…');
+    (async () => {
+      try {
+        const tab = await manualPickTab('gemini', true);
+        if (!tab) throw new Error('could not open Gemini');
+        await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        const r = await manualSend(tab.id, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [base64Data], prompt: gtext, send: true }, 'gemini_automation.js');
+        if (!r?.ok) throw new Error(r?.error || 'image not attached');
+        temuStepSetStatus(r.sent ? '⏳ Gemini is creating the image…' : '👉 Press Send in Gemini — the image is taken automatically');
+        const end = Date.now() + 9 * 60000; let url = null;
+        while (Date.now() < end) {
+          if (S.gptToken !== token || !S.running || current.done) return;
+          const g = await manualSend(tab.id, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 20000 }, 'gemini_automation.js');
+          if (g?.ok && g.dataUrl) { url = g.dataUrl; break; }
+          await sleepMs(1500);
+        }
+        if (!url) throw new Error('Gemini image did not appear in time');
+        if (S.gptToken !== token || current.done || !S.running) return;
+        current.done = true;
+        await temuStepApplyManualImage(url, 'Auto');
+      } catch (e) {
+        if (S.gptToken !== token || !S.running) return;
+        S.gptToken = null;
+        temuStepSetStatus('⚠️ Gemini: ' + (e.message || 'failed') + ' — press "Send Again", "Skip" or paste the image yourself', 'error');
+        temuStepManualAttn(true);
+      }
+    })();
   } else if (engine === 'chatgpt') {
     // v9.15 — Auto engine: one ChatGPT tab (chat re-used), result comes back by itself
     temuStepCancelActiveJob();

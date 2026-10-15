@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini Auto is now fully automatic: image + prompt go in, Send is pressed when ready (after the upload finishes), the NEW generated image is taken and applied, then the next one starts. Long prompts are typed line by line if Gemini cuts them. If Send cannot be clicked, press it yourself and the image is still taken.
+
 - Prompt names made clear: "Old prompt — new background" vs "NEW Full pile — alternate / plain / with count text".
 
 - Abundance prompts are sent ONCE per chat (with the first image); next images in the same ChatGPT/Gemini chat go as image only ("New product image."), and the full prompt is sent again every 10 images. ChatGPT chats with these prompts hold 10 images before a new chat. Gemini auto now puts the image (+ prompt) in via the new attach code. Flow still gets the full prompt every time.
