@@ -2969,16 +2969,24 @@ const ZH_ABUND_TEMPLATE = (rule) => `Act as a Senior Commercial E-commerce Image
 5. TEXT: ${rule}
 
 6. ZERO CHAT TEXT: no explanation, greeting or caption. Output ONLY the image.`;
+// "send once" version: the chat keeps the rules, later messages are just the image
+const ZH_ABUND_SETUP = (rule) => ZH_ABUND_TEMPLATE(rule)
+  .replace('Using the attached product photo', 'Using the attached product photo (and every later product photo I upload in this chat WITHOUT any instructions — apply these same rules automatically)')
+  .replace('create ONE high-converting 1:1 square listing image', 'create ONE high-converting 1:1 square listing image for each photo');
+const ZH_TEXT_RULE_ALT = 'ALTERNATE between images: the FIRST image of this chat (this message) = Turn A, the next = Turn B, then A, B, ... Turn A: ' + ZH_TEXT_RULE_NONE + ' Turn B: ' + ZH_TEXT_RULE_COUNT;
+const ZH_SETUP_SHORT = 'New product image.';
 const ZH_LIB_BUILTIN = [
   { id: 'scene', name: 'Scene / background (default)', text: null, builtin: true },
-  { id: 'abund-alt', name: 'Abundance pile — alternate text / no text', text: ZH_ABUND_TEMPLATE('{{TEXT_RULE}}'), builtin: true, tag: 'abund' },
-  { id: 'abund-none', name: 'Abundance pile — no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' },
-  { id: 'abund-text', name: 'Abundance pile — with count text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
+  { id: 'abund-alt', name: 'Abundance pile — alternate text / no text', text: ZH_ABUND_TEMPLATE('{{TEXT_RULE}}'), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_ALT), builtin: true, tag: 'abund' },
+  { id: 'abund-none', name: 'Abundance pile — no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' },
+  { id: 'abund-text', name: 'Abundance pile — with count text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
 ];
 let ZhLibCustom = [];      // [{id,name,text}]
 let ZhLibActive = 'scene';
 function zhLibAll() { return [...ZH_LIB_BUILTIN.map(e => e.id === 'scene' ? { ...e, text: DEFAULT_AI_COMMERCIAL_PROMPT } : e), ...ZhLibCustom]; }
 function zhLibGet(id) { return zhLibAll().find(e => e.id === id) || null; }
+function zhSetupFor(id) { const e = zhLibGet(id); return e && e.setup ? { key: e.id, text: e.setup, every: ZH_RESEND_EVERY } : null; }
+const ZH_RESEND_EVERY = 10;   // the full prompt is sent again after this many images in one chat
 // {{TEXT_RULE}} → no text on odd products, count text on even ones (n = product number)
 function zhLibResolveText(text, n = 0) {
   return String(text || '').split('{{TEXT_RULE}}').join((Number(n) || 0) % 2 === 1 ? ZH_TEXT_RULE_COUNT : ZH_TEXT_RULE_NONE);
@@ -3590,18 +3598,24 @@ async function gptWaitTab(tabId, ms = 40000) {
   return false;
 }
 // send one image to a slot and wait for the edited image (resolves with a data: URL)
-async function gptSendAndWait(S, idx, b64, prompt, onNote) {
+async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
   const slot = await gptEnsureSlot(S, idx);
   const id = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const key = 'zhGptRes_' + id;
-  if (slot.n >= GPT_CHAT_EVERY) {
+  if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
     onNote?.('opening a new chat…');
     await chrome.tabs.update(slot.tabId, { url: 'https://chatgpt.com/', active: true });
     await sleepMs(800);
     await gptWaitTab(slot.tabId);
     slot.n = 0;
   } else await chrome.tabs.update(slot.tabId, { active: true }).catch(() => {});
-  const text = (slot.n > 0 ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
+  let text;
+  if (setup) {   // rules once per chat, later messages = just the image (full prompt again every `every` images)
+    const need = slot.n === 0 || slot.primeKey !== setup.key || (slot.since || 0) >= setup.every;
+    if (need) { slot.primeKey = setup.key; slot.since = 0; }
+    slot.since = (slot.since || 0) + 1;
+    text = need ? setup.text : ZH_SETUP_SHORT;
+  } else text = (slot.n > 0 ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
   slot.n++;
   return new Promise((resolve, reject) => {
     let done = false;
@@ -3643,7 +3657,7 @@ async function gptArchiveChats(S) {
   if (!(tabId && await chrome.tabs.get(tabId).catch(() => null))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
   if (!tabId) return;
   // safety: a chat is archived only if EVERY message in it is one of our own prompts (never a chat you wrote in yourself)
-  const expect = [...new Set([S.prompt, ...(S.queue || []).flatMap(it => [it.prompt, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
+  const expect = [...new Set([S.prompt, ZH_SETUP_SHORT, ...(S.queue || []).flatMap(it => [it.prompt, it.setup?.text, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
   let ok = 0, bad = 0;
   for (let i = 0; i < list.length; i++) {
     temuStepSetStatus(`🗂 Archiving ChatGPT chats… ${i + 1}/${list.length}`);
@@ -3697,7 +3711,7 @@ async function gptRunItem(S, idx, item) {
         if (!b64 && item.imgUrl?.startsWith('data:')) b64 = item.imgUrl;
         if (!b64) throw new Error('Image could not be downloaded');
         if (attempt > 0 && S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;   // retry in a fresh chat
-        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(); });
+        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(); }, item.setup);
       } catch (e) {
         lastErr = e;
         if (e.aborted || e.limit) break;
@@ -16804,7 +16818,7 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
           const label = row.querySelector('.batch-lbl').checked, style = row.querySelector('.batch-style').value;
           return { index: Number(row.dataset.batch), mode, qty, label, style, stages: temuBatchStages(mode, qty, backgroundPrompt, label, style, Math.max(0, zhProductOrdinal(queue, queue[Number(row.dataset.batch)].product))) };
         });
-        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0] }));
+        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0], setup: String(s.mode).startsWith('lib:') ? zhSetupFor(String(s.mode).slice(4)) : null }));
         queue.splice(0, queue.length, ...activeQueue);
         modal.remove(); resolve(true);
       } catch (e) { modal.querySelector('.batch-error').textContent = e.message; }
@@ -16873,7 +16887,8 @@ async function temuStartBulkImageEdit(opts = {}) {
     return;
   }
 
-  if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });   // Gemini: library prompt as it is; alternate text per product
+  if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });
+  { const ae = zhLibGet(ZhLibActive); if (engine === 'gemini' && ae?.setup && prompt.trim() === ae.text.trim()) queue.forEach(q => { q.setup = zhSetupFor(ae.id); }); }   // Gemini: library prompt as it is; alternate text per product
   if (engine !== 'gemini' && !(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : 'Auto (ChatGPT → Flow → Gemini)'))) return;
 
   TemuImgStepper = {
@@ -17251,24 +17266,20 @@ async function temuStepSendCurrent() {
         });
       } catch (_) {}
     }
-    await chrome.storage.local.set({
-      pendingGeminiAction: {
-        imgBase64: base64Data,
-        prompt: current.prompt || prompt,
-        timestamp: Date.now(),
-        processed: false
-      }
-    });
-    chrome.tabs.query({ url: '*://gemini.google.com/*' }, (existingTabs) => {
-      if (existingTabs && existingTabs.length > 0) {
-        chrome.tabs.update(existingTabs[0].id, { active: true });
-        chrome.scripting.executeScript({ target: { tabId: existingTabs[0].id }, files: ['gemini_automation.js'] }).catch(() => {});
-        chrome.tabs.sendMessage(existingTabs[0].id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(() => {});
-      } else {
-        chrome.tabs.create({ url: 'https://gemini.google.com/app', active: true });
-      }
-    });
-    if (statusEl) statusEl.textContent = '✓ Gemini opened with image & prompt! Generate, copy the result, then click "Paste & Next".';
+    // v9.15 — rules once per Gemini chat; later images = image only (full prompt again every N images)
+    const S = TemuImgStepper;
+    let gtext = current.prompt || prompt;
+    if (current.setup) {
+      const g = S.gemPrime || (S.gemPrime = { key: null, since: 0 });
+      const need = g.key !== current.setup.key || g.since >= current.setup.every;
+      if (need) { g.key = current.setup.key; g.since = 0; }
+      g.since++;
+      gtext = need ? current.setup.text : ZH_SETUP_SHORT;
+    }
+    if (statusEl) statusEl.textContent = '⏳ Putting the image in Gemini…';
+    const gr = await manualPasteIn('gemini', [base64Data], gtext);
+    if (!gr.ok) { toast('Gemini: ' + (gr.error || 'not applied'), 'warn'); if (statusEl) statusEl.textContent = '⚠ Gemini: ' + (gr.error || 'image not attached') + ' — press "Send Again" or paste it yourself'; return; }
+    if (statusEl) statusEl.textContent = '✓ Image' + (gtext === ZH_SETUP_SHORT ? '' : ' + prompt') + ' ready in Gemini — press Send, copy the result, then click "Paste & Next".';
   } else if (engine === 'chatgpt') {
     // v9.15 — Auto engine: one ChatGPT tab (chat re-used), result comes back by itself
     temuStepCancelActiveJob();
@@ -17282,7 +17293,7 @@ async function temuStepSendCurrent() {
         let b64 = await flowPrefetchImage(current.imgUrl);
         if (!b64 && current.imgUrl?.startsWith('data:')) b64 = current.imgUrl;
         if (!b64) throw new Error('Image could not be downloaded');
-        const url = await gptSendAndWait(S, 0, b64, ((current.prompt || prompt) + '').trim(), (n) => { if (S.gptToken === token) temuStepSetStatus('⏳ ChatGPT: ' + n); });
+        const url = await gptSendAndWait(S, 0, b64, ((current.prompt || prompt) + '').trim(), (n) => { if (S.gptToken === token) temuStepSetStatus('⏳ ChatGPT: ' + n); }, current.setup);
         if (S.gptToken !== token || current.done || !S.running) return;
         current.done = true;
         await temuStepApplyManualImage(url, 'Auto');

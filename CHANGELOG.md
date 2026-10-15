@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Abundance prompts are sent ONCE per chat (with the first image); next images in the same ChatGPT/Gemini chat go as image only ("New product image."), and the full prompt is sent again every 10 images. ChatGPT chats with these prompts hold 10 images before a new chat. Gemini auto now puts the image (+ prompt) in via the new attach code. Flow still gets the full prompt every time.
+
 - Prompt library: new "Prompt" picker in AI Image Studio (Scene default, Abundance pile — alternate / no text / with count text, plus your own saved prompts with 💾 Save / 🗑 Delete). Works in Auto (Flow, ChatGPT, Gemini: pick "✨ Prompt: …" per image in the batch setup, default = the chosen prompt) and in the manual Edit Studio ("📚 Library" picker per product). "Alternate" gives no-text / count-text on every other product.
 
 - Edit Studio "Paste in ChatGPT/Gemini/Flow" is faster: product images are downloaded in the background as soon as the product opens (and the next one), and big images are shrunk (max 1600px) before going to ChatGPT/Gemini.
