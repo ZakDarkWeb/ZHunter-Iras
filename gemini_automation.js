@@ -202,6 +202,156 @@
     });
   } catch (_) {}
 
+
+  // ───────── Manual helpers (the person presses Send) ─────────
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  function composerEl() {
+    return document.querySelector('rich-textarea .ql-editor[role="textbox"], rich-textarea .ql-editor, .ql-editor[role="textbox"], div[contenteditable="true"][role="textbox"]');
+  }
+  function attachedCount() {
+    return document.querySelectorAll('uploader-file-preview-container [data-test-id*="file"], uploader-file-preview, .file-preview-container uploader-file-preview, .attachment-preview-wrapper img, input-area-v2 uploader-file-preview').length;
+  }
+  function findFileInput() {
+    return document.querySelector('images-files-uploader input[type="file"], input[type="file"].hidden-file-input, input[type="file"]');
+  }
+  async function openPlusMenu() {
+    const plus = document.querySelector('button[aria-label="Upload & tools"], button[aria-label*="Upload"], .simplified-input-menu button');
+    if (!plus) return false;
+    if (plus.getAttribute('aria-expanded') !== 'true') plus.click();
+    await sleep(350);
+    return true;
+  }
+  function closeMenus() {
+    try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true })); } catch (_) {}
+  }
+  // attach one or several images (data URLs) to the composer
+  async function attachMany(imgs) {
+    const files = imgs.map((u, i) => dataUrlToFile(u, 'zhunter_' + (i + 1) + '.png')).filter(Boolean);
+    if (!files.length) throw new Error('image could not be read');
+    const editor = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 15000);
+    if (!editor) throw new Error('Gemini composer not found — open a chat first');
+    await sleep(500);
+    const before = attachedCount();
+    const dt = new DataTransfer(); files.forEach(f => dt.items.add(f));
+    const ok = () => attachedCount() >= before + 1;
+    // 1) the hidden file input (appears after the "+" menu is opened once)
+    let inp = findFileInput();
+    if (!inp) { await openPlusMenu(); await sleep(250); inp = findFileInput(); }
+    if (inp) {
+      try {
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        for (let i = 0; i < 16 && !ok(); i++) await sleep(250);
+        closeMenus();
+        if (ok()) return files.length;
+      } catch (_) {}
+    }
+    // 2) paste event on the composer
+    try {
+      editor.focus();
+      const pe = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+      editor.dispatchEvent(pe);
+      for (let i = 0; i < 12 && !ok(); i++) await sleep(250);
+      if (ok()) return files.length;
+    } catch (_) {}
+    // 3) drag & drop on the page
+    try {
+      const target = document.querySelector('.xap-uploader-dropzone') || document.querySelector('input-container') || editor;
+      const o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight / 2) };
+      target.dispatchEvent(new DragEvent('dragenter', o)); target.dispatchEvent(new DragEvent('dragover', o));
+      await sleep(60); target.dispatchEvent(new DragEvent('drop', o));
+      for (let i = 0; i < 12 && !ok(); i++) await sleep(250);
+      if (ok()) return files.length;
+    } catch (_) {}
+    throw new Error('image was not attached — check the Gemini page (F5) and try again');
+  }
+  async function typePrompt(text) {
+    const ed = composerEl(); if (!ed) throw new Error('Gemini composer not found');
+    ed.focus();
+    try { document.execCommand('selectAll', false, null); document.execCommand('delete', false, null); } catch (_) {}
+    let done = false;
+    try { done = document.execCommand('insertText', false, text); } catch (_) {}
+    if (!done || !(ed.innerText || '').trim()) {
+      ed.textContent = text;
+      ed.classList.remove('ql-blank');
+      ed.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    }
+    await sleep(200);
+  }
+  // make sure "Create image" is on (so Gemini draws instead of answering with text)
+  async function ensureCreateImage() {
+    try {
+      const find = () => [...document.querySelectorAll('button[role="menuitemcheckbox"]')].find(b => /create image/i.test(b.innerText || b.getAttribute('aria-label') || ''));
+      // already selected? (a chip near the composer)
+      if ([...document.querySelectorAll('.toolbox-drawer-item-button, .tool-chip, [class*="selected-tool"]')].some(e => /create image/i.test(e.innerText || ''))) return true;
+      let b = find();
+      if (!b) { await openPlusMenu(); await sleep(300); b = find(); }
+      if (b) {
+        if (b.getAttribute('aria-checked') !== 'true') { b.click(); await sleep(400); }
+        closeMenus();
+        return true;
+      }
+      closeMenus();
+    } catch (_) {}
+    return false;
+  }
+  // blob:/https image → data URL
+  async function readImg(img) {
+    const src = img.currentSrc || img.src;
+    try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); }); } catch (_) {}
+    try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
+  }
+  function generatedImages() {
+    const sel = 'generated-image img.image, generated-image img, .attachment-container.generated-images img';
+    return [...document.querySelectorAll(sel)].filter(i => i.complete && i.naturalWidth >= 200 && !i.closest('.pending, user-query, user-query-file-preview, user-query-file-carousel, rich-textarea'));
+  }
+  async function grabLatest(waitMs) {
+    const end = Date.now() + (waitMs || 0);
+    for (;;) {
+      const pending = document.querySelector('.attachment-container.generated-images.pending, generated-image .loader, response-element.pending');
+      const imgs = generatedImages();
+      if (imgs.length && !pending) {
+        const d = await readImg(imgs[imgs.length - 1]);
+        if (d) return d;
+      }
+      if (Date.now() > end) break;
+      await sleep(700);
+    }
+    return null;
+  }
+
+  try {
+    chrome.runtime?.onMessage?.addListener((msg, _s, sendResponse) => {
+      if (msg?.action === 'ZH_GEM_MANUAL_ATTACH') {
+        (async () => {
+          try {
+            const imgs = (msg.imgs && msg.imgs.length) ? msg.imgs : (msg.imgBase64 ? [msg.imgBase64] : []);
+            showGeminiHUD('ZHunter: attaching image…', 'info');
+            let n = 0;
+            if (imgs.length) n = await attachMany(imgs);
+            if (msg.prompt) {
+              await ensureCreateImage();
+              await typePrompt(msg.prompt);
+            }
+            showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
+            sendResponse({ ok: true, attached: n });
+          } catch (e) { showGeminiHUD(e?.message || 'failed', 'warn'); try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+        })();
+        return true;
+      }
+      if (msg?.action === 'ZH_GEM_GRAB_LATEST') {
+        (async () => {
+          try {
+            const dataUrl = await grabLatest(msg.waitMs || 0);
+            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, error: 'No generated image in this chat yet' });
+          } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+        })();
+        return true;
+      }
+    });
+  } catch (_) {}
+
   // Run immediately
   checkPendingAction();
 

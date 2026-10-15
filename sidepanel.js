@@ -4121,13 +4121,11 @@ async function manualPasteIn(eng, imgs, prompt) {
       return { ok: true };
     }
     if (eng === 'gemini') {
-      await chrome.storage.local.set({ pendingGeminiAction: { imgBase64: imgs[0], prompt, timestamp: Date.now(), processed: false } });
-      const tab = await manualPickTab('gemini', false);
-      if (tab) {
-        await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-        try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }); } catch (_) {}
-        chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(() => {});
-      } else await chrome.tabs.create({ url: ZH_ENG.gemini.home, active: true });
+      const tab = await manualPickTab('gemini', true);
+      if (!tab) return { ok: false, error: 'could not open Gemini' };
+      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      const r = await manualSend(tab.id, { action: 'ZH_GEM_MANUAL_ATTACH', imgs, prompt }, 'gemini_automation.js');
+      if (!r?.ok) return { ok: false, error: r?.error || 'image not attached' };
       return { ok: true };
     }
     return { ok: false, error: 'unknown tool' };
@@ -4143,16 +4141,7 @@ async function manualLatestFrom(eng) {
     }
     if (eng === 'gemini') {
       const tabs = (await chrome.tabs.query({ url: ZH_ENG.gemini.url })).sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
-      for (const t of tabs) {
-        const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: async () => {
-          const imgs = [...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 300 && i.naturalHeight >= 300 && !i.closest('rich-textarea, .input-area-container, form'));
-          const img = imgs[imgs.length - 1]; if (!img) return null;
-          const src = img.currentSrc || img.src;
-          try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); } catch (_) {}
-          try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
-        } }).catch(() => [null]);
-        if (r?.result) return r.result;
-      }
+      for (const t of tabs) { const r = await manualSend(t.id, { action: 'ZH_GEM_GRAB_LATEST' }, 'gemini_automation.js'); if (r?.ok && r.dataUrl) return r.dataUrl; }
       return null;
     }
   } catch (e) { console.warn('[ZHunter] latest image failed', e); }
@@ -19101,8 +19090,8 @@ async function zsPasteInFlow(it) {
     const eng = temuStepManualEngine();
     if (eng !== 'flow') {
       const pr = ZhStudio.withPrompt ? (($('zsPrompt')?.value) || it.prompts[it.promptMode] || '') : '';
-      const r = await manualPasteIn(eng, eng === 'gemini' ? imgs.slice(0, 1) : imgs, pr);
-      if (r.ok) toast(`✓ ${ZH_ENG[eng].name}: image${imgs.length > 1 && eng !== 'gemini' ? 's' : ''}${pr ? ' + prompt' : ''} ready — press Send, then "Take from ${ZH_ENG[eng].name}"`, 'ok');
+      const r = await manualPasteIn(eng, imgs, pr);
+      if (r.ok) toast(`✓ ${ZH_ENG[eng].name}: image${imgs.length > 1 ? 's' : ''}${pr ? ' + prompt' : ''} ready — press Send, then "Take from ${ZH_ENG[eng].name}"`, 'ok');
       else toast(`${ZH_ENG[eng].name}: ` + (r.error || 'not applied'), 'warn');
       return;
     }

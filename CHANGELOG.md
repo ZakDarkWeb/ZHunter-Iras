@@ -1,6 +1,8 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+
+- Gemini manual mode reworked: attaches ALL chosen images (not just 1) through Gemini's hidden upload input (paste/drop fallbacks), turns on "Create image", types the prompt, you press Send; "Take from Gemini" now reads the real generated image (waits while it is still rendering, ignores your uploaded previews).
 - Manual studio: a pasted / taken image shows AT ONCE; saving to the Library and the public link run in the background (one at a time).
 - Fix: "Hunt + close tabs" no longer closes the browser window — when the last tab of a window would be closed, a New Tab is opened first.
 - Bulk hunt: the page being hunted comes back to the front even if you switched to another tab (the front is no longer "held" by a tab that is not actually in front).
