@@ -7170,7 +7170,8 @@ async function huntPageGuard(tabId, expectUrl, rowId, nav) {
 async function huntTakeFront(tabId) {
   if (BulkState._front && BulkState._front !== tabId) {
     const alive = await new Promise(r => chrome.tabs.get(BulkState._front, t => r(chrome.runtime.lastError ? null : t)));
-    if (alive) return false;
+    // v9.15 — the current front tab only keeps the front while it really IS in front; if you (or Chrome) switched to another tab, the page being hunted takes it back
+    if (alive && alive.active) return false;
   }
   BulkState._front = tabId;
   try { await chrome.tabs.update(tabId, { active: true }); } catch (_) {}
