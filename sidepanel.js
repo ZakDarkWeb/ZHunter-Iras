@@ -19715,9 +19715,8 @@ function temuSyncSrcSeg() {
     if (!sel) return;
     const want = b.dataset.src;
     if (want === 'sheet') {
-      const o = sel.querySelector('option[value="sheet"]');
-      if (o && !o.hidden && sel.value !== 'sheet') { sel.value = 'sheet'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
-      else $('temuSheetFile')?.click(); // pick (or re-pick) a sheet
+      // v9.15 — "Import sheet" ALWAYS opens the file window (an already loaded sheet no longer blocks a new one)
+      $('temuSheetFile')?.click();
       return;
     }
     if (want === 'master') {

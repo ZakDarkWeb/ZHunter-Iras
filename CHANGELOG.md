@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu Export: the "Import sheet" button always opens the file window, even when a sheet is already loaded.
 - Temu Export: when a sheet is loaded, "Choose another sheet" and "Remove loaded sheet" buttons appear under Products source (the Import sheet tab only switched back to the old sheet).
 - Temu upload: if Temu does not react to the file in a background tab, the tab is brought forward after 12 s and the file is chosen once more after 35 s (before giving up at 90 s).
 - Pricing: products with a copied store price (not recalculated before) are now raised to the 2× / Frozen 3× floor of their source price, in the list and in the export; a price you type yourself is never changed. Source→multiple chip works on them too.
