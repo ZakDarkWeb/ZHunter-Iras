@@ -215,6 +215,21 @@
     if (named.length) return named.length;
     return [...area.querySelectorAll('img')].filter(i => i.offsetWidth >= 24 && i.offsetHeight >= 24).length;
   }
+  // Gemini asks once per account: "Creating content from images and files" → Cancel / Agree. The person must press Agree (we never accept terms for them).
+  function consentOpen() {
+    return [...document.querySelectorAll('mat-dialog-container, [role="dialog"], .mat-mdc-dialog-container, dialog')].some(d => /creating content from images and files/i.test(d.innerText || ''));
+  }
+  async function waitConsent() {
+    if (!consentOpen()) return false;
+    showGeminiHUD('ZHunter: press “Agree” in this Gemini tab (one time) — I continue after that', 'warn');
+    const end = Date.now() + 5 * 60000;
+    while (consentOpen() && Date.now() < end) await sleep(500);
+    await sleep(1500);
+    return true;
+  }
+  async function waitOk(ok, iters) {   // wait until the attachment shows up; pause while the consent box is open
+    for (let i = 0; i < iters && !ok(); i++) { if (consentOpen()) { await waitConsent(); i = 0; } await sleep(250); }
+  }
   // Gemini shows a red "!" / red file name when an upload failed → true if any attached file in the composer is in error
   function attachFailed() {
     const area = inputArea();
@@ -223,9 +238,9 @@
     const items = [...area.querySelectorAll('uploader-file-preview, [data-test-id*="file-preview"], .file-preview, .attachment-preview-wrapper, [class*="preview" i]')];
     for (const it of items) {
       if (it.querySelector('mat-icon[fonticon*="error" i], [data-mat-icon-name*="error" i], [class*="error" i], [aria-label*="error" i], [aria-label*="fail" i]')) return true;
-      if ([...it.querySelectorAll('*')].some(e => e.children.length === 0 && /zhunter_\d/i.test(e.textContent || '') && red(e))) return true;
+      if ([...it.querySelectorAll('*')].some(e => e.children.length === 0 && /zhunter_/i.test(e.textContent || '') && red(e))) return true;
     }
-    return [...area.querySelectorAll('*')].some(e => e.children.length === 0 && /^zhunter_\d/i.test((e.textContent || '').trim()) && red(e));
+    return [...area.querySelectorAll('*')].some(e => e.children.length === 0 && /^zhunter_/i.test((e.textContent || '').trim()) && red(e));
   }
   // remove files that are still waiting in the composer from an earlier (failed) try
   async function clearAttachments() {
@@ -252,7 +267,8 @@
   }
   // attach one or several images (data URLs) to the composer
   async function attachOnce(imgs) {
-    const files = imgs.map((u, i) => dataUrlToFile(u, 'zhunter_' + (i + 1) + '.png')).filter(Boolean);
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);   // Gemini refuses a second file with the same name in one chat
+    const files = imgs.map((u, i) => dataUrlToFile(u, 'zhunter_' + stamp + '_' + (i + 1) + '.png')).filter(Boolean);
     if (!files.length) throw new Error('image could not be read');
     const editor = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 15000);
     if (!editor) throw new Error('Gemini composer not found — open a chat first');
@@ -269,7 +285,7 @@
         inp.files = dt.files;
         inp.dispatchEvent(new Event('input', { bubbles: true }));
         inp.dispatchEvent(new Event('change', { bubbles: true }));
-        for (let i = 0; i < 60 && !ok(); i++) await sleep(250);   // up to 15 s (new chats upload slowly)
+        await waitOk(ok, 60);   // up to 15 s (new chats upload slowly)
         closeMenus();
         if (ok()) return files.length;
       } catch (_) {}
@@ -279,7 +295,7 @@
       editor.focus();
       const pe = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
       editor.dispatchEvent(pe);
-      for (let i = 0; i < 12 && !ok(); i++) await sleep(250);
+      await waitOk(ok, 12);
       if (ok()) return files.length;
     } catch (_) {}
     // 3) drag & drop on the page
@@ -288,7 +304,7 @@
       const o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight / 2) };
       target.dispatchEvent(new DragEvent('dragenter', o)); target.dispatchEvent(new DragEvent('dragover', o));
       await sleep(60); target.dispatchEvent(new DragEvent('drop', o));
-      for (let i = 0; i < 12 && !ok(); i++) await sleep(250);
+      await waitOk(ok, 12);
       if (ok()) return files.length;
     } catch (_) {}
     await clearAttachments();
@@ -300,6 +316,7 @@
     for (let t = 1; t <= 3; t++) {
       try {
         const n = await attachOnce(imgs);
+        await waitConsent();
         await sleep(2500);   // a failed upload turns red a moment later
         if (!attachFailed()) return n;
         showGeminiHUD('ZHunter: upload failed — trying again (' + t + '/3)…', 'warn');

@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Gemini upload failures — real causes:** (1) Gemini refuses a 2nd file with the same name in one chat ("You've already uploaded a file named zhunter_1.png") → every upload now has a unique name. (2) A new account shows "Creating content from images and files — Agree" once: the extension waits and tells you to press Agree (it never accepts terms for you), then continues.
 - **Gemini failed-upload fix (from the saved page):** the remove button of an attachment is labelled "close <file>" — it was never clicked, so a failed file stayed and blocked Send. Now it is removed, and failed uploads are recognised by Gemini's own markers (has-error / error icon).
 - **Gemini upload failed (red "!" on the attachment):** detected — the failed file is removed and uploaded again (up to 3 tries), also if it fails after the prompt was typed; if it keeps failing the item fails with a clear message instead of waiting for you to press Send.
 - **Use the open tab:** ChatGPT / Gemini — if a tab is already open, the run keeps working in its current chat (no new chat first; rules are sent once at the start). A new tab + new chat is created only when no tab is open. Flow already worked this way (an open project tab is reused).
