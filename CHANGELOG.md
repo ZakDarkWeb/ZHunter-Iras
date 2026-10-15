@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini Auto fixes: the finished image is now detected (Gemini keeps an empty "loader" element in finished images — it was read as "still working"), and the "Tabs" setting now works for Gemini too (each tab = its own Gemini chat, several images at the same time).
+
 - Gemini Auto is now fully automatic: image + prompt go in, Send is pressed when ready (after the upload finishes), the NEW generated image is taken and applied, then the next one starts. Long prompts are typed line by line if Gemini cuts them. If Send cannot be clicked, press it yourself and the image is still taken.
 
 - Prompt names made clear: "Old prompt — new background" vs "NEW Full pile — alternate / plain / with count text".

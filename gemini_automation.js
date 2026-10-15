@@ -341,12 +341,14 @@
   }
   function generatedImages() {
     const sel = 'generated-image img.image, generated-image img, .attachment-container.generated-images img';
-    return [...document.querySelectorAll(sel)].filter(i => i.complete && i.naturalWidth >= 200 && !i.closest('.pending, user-query, user-query-file-preview, user-query-file-carousel, rich-textarea'));
+    return [...document.querySelectorAll(sel)].filter(i => i.complete && i.naturalWidth >= 200 && !(i.classList.contains('image') && !i.classList.contains('loaded')) && !i.closest('.pending, user-query, user-query-file-preview, user-query-file-carousel, rich-textarea'));
   }
   async function grabLatest(waitMs, fresh) {
     const end = Date.now() + (waitMs || 0);
     for (;;) {
-      const pending = document.querySelector('.attachment-container.generated-images.pending, generated-image .loader, response-element.pending');
+      // NOTE: the empty <div class="loader"> stays in finished images — only a visible loader / a .pending class means "still working"
+      const pending = document.querySelector('.attachment-container.generated-images.pending, response-element.pending, generated-image.pending')
+        || [...document.querySelectorAll('generated-image .loader')].some(l => { const r = l.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(l).visibility !== 'hidden'; });
       const imgs = generatedImages().filter(i => !fresh || !seenGen.has(i.currentSrc || i.src));
       if (imgs.length && !pending) {
         const d = await readImg(imgs[imgs.length - 1]);

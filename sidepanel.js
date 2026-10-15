@@ -3573,14 +3573,16 @@ async function gptEnsureSlot(S, idx) {
 async function gptEnsureSlotInner(S, idx) {
   S.gptSlots = S.gptSlots || [];
   let slot = S.gptSlots[idx];
-  const alive = async (id) => { try { const t = await chrome.tabs.get(id); return /^https:\/\/chatgpt\.com\//.test(t.url || '') ? t : null; } catch (_) { return null; } };
+  const gem = S.engine === 'gemini';
+  const hostRe = gem ? /^https:\/\/gemini\.google\.com\//i : /^https:\/\/chatgpt\.com\//;
+  const alive = async (id) => { try { const t = await chrome.tabs.get(id); return hostRe.test(t.url || '') ? t : null; } catch (_) { return null; } };
   if (slot?.tabId && await alive(slot.tabId)) return slot;
   const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
-  const tabs = (await chrome.tabs.query({ url: '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
+  const tabs = (await chrome.tabs.query({ url: gem ? '*://gemini.google.com/*' : '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
   let tab = tabs.find(t => t.active) || tabs[0];
   if (!tab) {
     const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;
-    tab = await chrome.tabs.create({ url: 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
+    tab = await chrome.tabs.create({ url: gem ? 'https://gemini.google.com/app' : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
     await gptWaitTab(tab.id);
     slot = { tabId: tab.id, n: 0, fresh: true };
   } else slot = { tabId: tab.id, n: Infinity, fresh: false };   // existing tab: first job starts a new chat
@@ -3598,13 +3600,32 @@ async function gptWaitTab(tabId, ms = 40000) {
   return false;
 }
 // send one image to a slot and wait for the edited image (resolves with a data: URL)
+// Gemini: attach image + prompt in this tab, press Send, wait for the NEW generated image
+async function gemRunOnTab(S, tabId, b64, text, onNote) {
+  let aborted = false; const abort = () => { aborted = true; };
+  (S.gptAborts = S.gptAborts || new Set()).add(abort);
+  try {
+    onNote?.('attaching image…');
+    const r = await manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js');
+    if (!r?.ok) throw new Error(r?.error || 'image not attached');
+    onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
+    const end = Date.now() + 9 * 60000;
+    while (Date.now() < end) {
+      if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
+      const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 20000 }, 'gemini_automation.js');
+      if (g?.ok && g.dataUrl) return g.dataUrl;
+      await sleepMs(1500);
+    }
+    throw new Error('Gemini image did not appear in time');
+  } finally { S.gptAborts?.delete(abort); }
+}
 async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
   const slot = await gptEnsureSlot(S, idx);
   const id = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const key = 'zhGptRes_' + id;
   if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
     onNote?.('opening a new chat…');
-    await chrome.tabs.update(slot.tabId, { url: 'https://chatgpt.com/', active: true });
+    await chrome.tabs.update(slot.tabId, { url: S.engine === 'gemini' ? 'https://gemini.google.com/app' : 'https://chatgpt.com/', active: true });
     await sleepMs(800);
     await gptWaitTab(slot.tabId);
     slot.n = 0;
@@ -3617,6 +3638,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     text = need ? setup.text : ZH_SETUP_SHORT;
   } else text = (slot.n > 0 ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
   slot.n++;
+  if (S.engine === 'gemini') return gemRunOnTab(S, slot.tabId, b64, text, onNote);
   return new Promise((resolve, reject) => {
     let done = false;
     const fin = (fn, v) => {
@@ -16905,7 +16927,7 @@ async function temuStartBulkImageEdit(opts = {}) {
 
   temuStepOpenModal();
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
-  if (engine === 'chatgpt') { await gptPoolStart(); return; }   // v9.15 — 2 ChatGPT tabs at the same time
+  if (engine === 'chatgpt' || engine === 'gemini') { await gptPoolStart(); return; }   // v9.15 — 2 ChatGPT tabs at the same time
   await temuStepProcessCurrent();
 }
 
