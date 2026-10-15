@@ -3576,7 +3576,7 @@ async function gptEnsureSlotInner(S, idx) {
   let slot = S.gptSlots[idx];
   const gem = S.engine === 'gemini';
   const hostRe = gem ? /^https:\/\/gemini\.google\.com\//i : /^https:\/\/chatgpt\.com\//;
-  const alive = async (id) => { try { const t = await chrome.tabs.get(id); return hostRe.test(t.url || '') ? t : null; } catch (_) { return null; } };
+  const alive = async (id) => { try { const t = await chrome.tabs.get(id); return (hostRe.test(t.url || '') || ZH_SORRY_RE.test(t.url || '')) ? t : null; } catch (_) { return null; } };
   if (slot?.tabId && await alive(slot.tabId)) return slot;
   const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
   const tabs = (await chrome.tabs.query({ url: gem ? '*://gemini.google.com/*' : '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
@@ -3599,6 +3599,12 @@ async function gptEnsureSlotInner(S, idx) {
   } else slot = { tabId: tab.id, n: 0, fresh: false, reused: true };   // v9.15 — a tab is already open: keep working in ITS chat (no new chat); a new chat only starts after the chat limit
   S.gptSlots[idx] = slot;
   return slot;
+}
+// Google's "unusual traffic / I'm not a robot" page — only the person can solve it (the extension never touches CAPTCHAs)
+const ZH_SORRY_RE = /^https:\/\/(www\.)?google\.[a-z.]+\/sorry\//i;
+async function zhCheckCaptcha(tabId) {
+  const t = await chrome.tabs.get(tabId).catch(() => null);
+  if (t && ZH_SORRY_RE.test(t.url || '')) throw Object.assign(new Error('Google is asking "I\'m not a robot" in the Gemini tab — solve it yourself there, wait a few minutes, then press Retry failed'), { limit: true });
 }
 // Gemini: keep the Google account the tab is using (gemini.google.com/u/1/app → account #2), never fall back to /app (= account #1)
 function gemHomeFor(url) {
@@ -3638,6 +3644,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     let gemErr = false;
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
+      await zhCheckCaptcha(tabId);
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
       if (g?.limit) throw new Error('Gemini limit reached on this account — switch account in a Gemini tab, then Retry failed');
       if (g?.gemErr) { gemErr = true; break; }
@@ -3653,6 +3660,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
 }
 async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
   const slot = await gptEnsureSlot(S, idx);
+  await zhCheckCaptcha(slot.tabId);   // stop at once instead of reloading a page that shows the robot check
   const id = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const key = 'zhGptRes_' + id;
   if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
