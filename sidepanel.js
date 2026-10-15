@@ -18860,6 +18860,7 @@ function zhStudioRender(dir = 0) {
   if (!it || !body) return;
   const { done, total } = zsStats();
   const n = ZhStudio.items.length;
+  try { for (const k of [it, ZhStudio.items[ZhStudio.page + 1]]) if (k) _allImgUrls(k.product).slice(0, 8).forEach(u => flowPrefetchImage(u)); } catch (_) {}   // warm up so Paste is instant
   $('zhStudioSub').textContent = `Product ${ZhStudio.page + 1} / ${n} · ${done}/${total} images replaced`;
   $('zhStudioBar').style.width = `${total ? Math.round(done / total * 100) : 0}%`;
   $('zhStudioPrevBtn').disabled = ZhStudio.page === 0;
@@ -19078,6 +19079,20 @@ async function zsUndo(it, i) {
   toast(`↩ P${it.pNo} · Image #${i + 1} original`, 'info');
 }
 
+// big images are re-encoded (max 1600px, JPEG) so they travel to ChatGPT/Gemini fast
+async function zsShrinkForSend(d) {
+  try {
+    if (!d || d.length < 700000) return d;
+    const bmp = await createImageBitmap(await (await fetch(d)).blob());
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0, c.width, c.height);
+    try { bmp.close(); } catch (_) {}
+    const o = c.toDataURL('image/jpeg', 0.92);
+    return o.length < d.length ? o : d;
+  } catch (_) { return d; }
+}
+
 async function zsPasteInFlow(it) {
   const all = _allImgUrls(it.product);
   const idx = [...it.pasteSel].sort((a, b) => a - b).filter(i => all[i]);
@@ -19090,7 +19105,8 @@ async function zsPasteInFlow(it) {
     const eng = temuStepManualEngine();
     if (eng !== 'flow') {
       const pr = ZhStudio.withPrompt ? (($('zsPrompt')?.value) || it.prompts[it.promptMode] || '') : '';
-      const r = await manualPasteIn(eng, imgs, pr);
+      const small = await Promise.all(imgs.map(zsShrinkForSend));
+      const r = await manualPasteIn(eng, small, pr);
       if (r.ok) toast(`✓ ${ZH_ENG[eng].name}: image${imgs.length > 1 ? 's' : ''}${pr ? ' + prompt' : ''} ready — press Send, then "Take from ${ZH_ENG[eng].name}"`, 'ok');
       else toast(`${ZH_ENG[eng].name}: ` + (r.error || 'not applied'), 'warn');
       return;

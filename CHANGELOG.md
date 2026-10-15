@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Edit Studio "Paste in ChatGPT/Gemini/Flow" is faster: product images are downloaded in the background as soon as the product opens (and the next one), and big images are shrunk (max 1600px) before going to ChatGPT/Gemini.
+
 - Gemini manual mode reworked: attaches ALL chosen images (not just 1) through Gemini's hidden upload input (paste/drop fallbacks), turns on "Create image", types the prompt, you press Send; "Take from Gemini" now reads the real generated image (waits while it is still rendering, ignores your uploaded previews).
 - Manual studio: a pasted / taken image shows AT ONCE; saving to the Library and the public link run in the background (one at a time).
 - Fix: "Hunt + close tabs" no longer closes the browser window — when the last tab of a window would be closed, a New Tab is opened first.
