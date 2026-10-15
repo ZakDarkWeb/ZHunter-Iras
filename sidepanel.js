@@ -13450,6 +13450,15 @@ function temuParseTiers(str) {
   if (!steps.length) return temuParseTiers(def);
   return { steps, pct };
 }
+// v9.15 — minimum multiple of the SOURCE price (2×, Frozen 3×). Also used for rows that carry a copied store price.
+function temuFloorX(cfg, frozen) { return frozen ? (parseFloat(cfg?.price_floor_frozen_x ?? 3) || 0) : (parseFloat(cfg?.price_floor_x ?? 2) || 0); }
+function temuIsFrozen(...parts) { return /frozen/i.test(parts.filter(Boolean).join(' ')); }
+function temuFloored(price, cost, cfg, frozen) {
+  const p = parseFloat(price), c = parseFloat(String(cost ?? '').replace(/[$,]/g, ''));
+  if (!(p > 0) || !(c > 0)) return price;
+  const f = c * temuFloorX(cfg, frozen);
+  return p >= f ? price : Math.round((Math.floor(f) + 1 + (temuSeedFrac(String(cost) + String(price)) * 0.97)) * 100) / 100;
+}
 function temuPrice(src, cfg, prof, seed) {
   const p = parseFloat(String(src ?? '').replace(/[$,]/g, ''));
   if (!isFinite(p) || p <= 0) return [null, null, null];
@@ -13543,9 +13552,12 @@ function temuEnrich(rows, cfg) {
       const tb = parseFloat(String(r.temuBase).replace(/[$,]/g, ''));
       if (isFinite(tb) && tb > 0) {
         base = Math.round(tb * 100) / 100;
+        const fz = temuIsFrozen(tl, prof?.full_path, prof?.name), costF = temuCostOf(r.price, r.title);
+        if (!r.temuManual) base = temuFloored(base, costF, cfg, fz);   // copied store price is raised to 2× (Frozen 3×) the source price
         list = Math.round(base * (cfg.list_price_multiplier || 1.25) * 100) / 100;
         if (cfg.price_round_to_99 !== false) list = Math.floor(list) + 0.99;
         { const tl2 = parseFloat(String(r.temuList || '').replace(/[$,]/g, '')); if (isFinite(tl2) && tl2 >= base) list = Math.round(tl2 * 100) / 100; }   // v9.15 store sheet: list price as-is
+        if (!r.temuManual) list = temuFloored(list, costF, cfg, fz);
       }
     }
     const supplier = new URL(url).hostname.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9]/gi, '').toUpperCase();
@@ -15621,7 +15633,9 @@ async function temuRenderReview() {
     const [catKey, catProf] = temuCatFor(r.url, temuCleanTitle(title, cfg), cfg);
     const catWeak = temuCatDoubtful(title, catProf);
     const _tb = parseFloat(String(r.temuBase || '').replace(/[$,]/g, ''));   // store-export rows keep the source store's base price as-is
-    const displayPrice = r.copyCat !== undefined && _tb > 0 ? _tb.toFixed(2) : calcBase !== null ? calcBase.toFixed(2) : (r.price ? String(r.price).replace(/^[^\d.]*/, '') : '—');
+    const _fz = temuIsFrozen(catProf?.full_path, catProf?.name, title);
+    const _tbF = (_tb > 0 && !r.temuManual) ? parseFloat(temuFloored(_tb, temuCostOf(r.price, title), cfg, _fz)) : _tb;
+    const displayPrice = r.copyCat !== undefined && _tb > 0 ? _tbF.toFixed(2) : calcBase !== null ? calcBase.toFixed(2) : (r.price ? String(r.price).replace(/^[^\d.]*/, '') : '—');
     const len = title.length;
     const lenCls = len <= 240 ? 'ok' : len <= 500 ? 'warn' : 'over';
     const excluded = TemuReviewExcluded.has(r.id);
@@ -15631,7 +15645,8 @@ async function temuRenderReview() {
     card.dataset.idx = idx;
     card.dataset.id = r.id || '';
     card.dataset.rawPrice = (r.copyCat !== undefined && r.temuBase) ? '' : (r.price || '');
-    card.dataset.frozen = /frozen/i.test((catProf?.full_path || '') + ' ' + (catProf?.name || '') + ' ' + title) ? '1' : '';
+    card.dataset.frozen = _fz ? '1' : '';
+    card.dataset.costPrice = r.price || '';
     setTimeout(() => temuUpdateRatio(card), 0);
 
     // Image gallery HTML (compact, fixed height, horizontal scroll)
@@ -15886,16 +15901,16 @@ async function temuRenderReview() {
     priceInp?.addEventListener('change', async e => {
       const val = parseFloat(e.target.value.replace(/[$,]/g, ''));
       if (isFinite(val) && val > 0) {
-        r.temuBase = val;
+        r.temuBase = val; r.temuManual = true;
         card.dataset.customPrice = '1';
         const b = card.querySelector('.temu-rv-price-badge');
         if (b) b.textContent = '$' + val.toFixed(2);
         temuUpdateRatio(card);
       }
-      if (!isFinite(val) || val <= 0) { delete r.temuBase; }
-      const override = r.temuBase ?? '';
-      for (const copy of _productRowsById(r.id)) copy.temuBase = override;
-      await zhLibPatch(saved => { const m = saved.find(x => x.id === r.id || x.url === r.url); if (!m) return false; m.temuBase = override; return true; });
+      if (!isFinite(val) || val <= 0) { delete r.temuBase; delete r.temuManual; }
+      const override = r.temuBase ?? '', man = !!r.temuManual;
+      for (const copy of _productRowsById(r.id)) { copy.temuBase = override; copy.temuManual = man; }
+      await zhLibPatch(saved => { const m = saved.find(x => x.id === r.id || x.url === r.url); if (!m) return false; m.temuBase = override; m.temuManual = man; return true; });
       TemuLast = null;
     });
 
@@ -16093,7 +16108,7 @@ async function temuRenderReview() {
 function temuUpdateRatio(card) {
   const chip = card?.querySelector('.temu-rv-ratio'); if (!chip) return;
   const ttl = card.querySelector('.temu-rv-title-inp')?.value || card.querySelector('.temu-rv-title-snippet')?.textContent || '';
-  const cost = parseFloat(String(temuCostOf(card.dataset.rawPrice, ttl) ?? '').replace(/[$,]/g, ''));
+  const cost = parseFloat(String(temuCostOf(card.dataset.costPrice || card.dataset.rawPrice, ttl) ?? '').replace(/[$,]/g, ''));
   const sell = parseFloat(String(card.querySelector('.temu-rv-price-inp')?.value || card.querySelector('.temu-rv-price-badge')?.textContent || '').replace(/[$,]/g, ''));
   if (!(cost > 0) || !(sell > 0)) { chip.textContent = ''; chip.style.display = 'none'; return; }
   const x = sell / cost, floor = card.dataset.frozen ? 3 : 2;
