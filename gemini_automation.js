@@ -385,6 +385,12 @@
         const resp = lu && lu.closest('.conversation-container')?.querySelector('model-response');
         if (resp && /limit resets|reached (your|the) .{0,40}limit|can create more images as soon/i.test(resp.innerText || '')) { window.__zhGemLimit = true; return null; }
       }
+      if (fresh && window.__zhGemUserBase != null && !imgs.length) {   // Gemini answered with an error instead of a picture
+        const us3 = document.querySelectorAll('user-query'), lu3 = us3[us3.length - 1];
+        const resp3 = lu3 && lu3.closest('.conversation-container')?.querySelector('model-response');
+        const tx = (resp3?.innerText || '').trim();
+        if (tx && !document.querySelector('button[aria-label*="Stop" i]') && /encountered an error|something went wrong|please try again|could you try again/i.test(tx)) { window.__zhGemErr = tx.slice(0, 120); return null; }
+      }
       console.log('[ZHunter Gemini] waiting for image', { found: imgs.length, pending: !!pending, users: document.querySelectorAll('user-query').length, base: window.__zhGemUserBase });
       if (imgs.length) {
         const im = imgs[imgs.length - 1], src = im.currentSrc || im.src;
@@ -429,9 +435,9 @@
       if (msg?.action === 'ZH_GEM_GRAB_LATEST') {
         (async () => {
           try {
-            window.__zhGemLimit = false;
+            window.__zhGemLimit = false; window.__zhGemErr = '';
             const dataUrl = await grabLatest(msg.waitMs || 0, !!msg.fresh);
-            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, limit: !!window.__zhGemLimit, error: window.__zhGemLimit ? 'Gemini limit reached on this account' : 'No generated image in this chat yet' });
+            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, gemErr: !!window.__zhGemErr, limit: !!window.__zhGemLimit, error: window.__zhGemLimit ? 'Gemini limit reached on this account' : 'No generated image in this chat yet' });
           } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;

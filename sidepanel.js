@@ -3326,8 +3326,9 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, histMode
     // v9.12.8 — fresh read-modify-write of ONLY this image, one write at a time.
     // (Pehle purani in-memory Library poori likh di jati thi, aur do saves ek saath hon to
     //  doosra pehle wale ki image mita deta tha — is liye edit hui images wapas purani ho jati thin.)
+    // v9.15 — the edited image is also kept in the small journal (zhEditsRecord below), so the slow whole-Library write runs in the background and no longer holds up the next image
     try {
-      await zhLibPatch(saved => {
+      zhLibPatch(saved => {
         const row = saved.find(x => x.id === productId) || (pUrl ? saved.find(x => x.url === pUrl) : null);
         if (!row || !Array.isArray(row.images) || idx < 0 || idx >= row.images.length) return false;
         const cur = _imgEntryUrl(row.images[idx]);
@@ -3335,7 +3336,7 @@ async function replaceProductImage(productId, idx, newUrl, expectedUrl, histMode
         if (expectedUrl && cur !== expectedUrl && cur !== oldUrl) return false;
         zhSetEditedImage(row, idx, newUrl, hmode);
         return true;
-      });
+      }).catch(e => console.warn('[ZHunter] Library save after replace failed:', e));
     } catch (e) { console.warn('[ZHunter] Library save after replace failed:', e); }
     if (shift) {
       zhShiftImageEditors(productId, shift);
@@ -3621,7 +3622,8 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
   (S.gptAborts = S.gptAborts || new Set()).add(abort);
   const t0 = Date.now();
   try {
-    onNote?.('attaching image…');
+    for (let attempt = 1; attempt <= 3; attempt++) {   // Gemini sometimes answers "I encountered an error" → send the same message again (max 3 tries)
+    onNote?.(attempt > 1 ? `Gemini error — sending again (${attempt}/3)…` : 'attaching image…');
     const tA = Date.now(), tick = setInterval(() => onNote?.(`attaching image… ${Math.round((Date.now() - tA) / 1000)}s`), 1000);
     let r;
     try {
@@ -3633,12 +3635,18 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     if (!r?.ok) throw new Error(r?.error || 'image not attached');
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
     const end = Date.now() + 9 * 60000;
+    let gemErr = false;
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
       if (g?.limit) throw new Error('Gemini limit reached on this account — switch account in a Gemini tab, then Retry failed');
+      if (g?.gemErr) { gemErr = true; break; }
       if (g?.ok && g.dataUrl) { onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
       await sleepMs(1500);
+    }
+    if (!gemErr) break;
+    if (attempt === 3) throw new Error('Gemini keeps answering "I encountered an error" — try again later');
+    await sleepMs(1500);
     }
     throw new Error('Gemini image did not appear in time');
   } finally { S.gptAborts?.delete(abort); }
