@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **All prompts in the dropdown:** Improve image only · Background only · Pack only · Pack → Background · ⭐ Multipack with count. Picking a task there makes it the default in "Image batch setup" (pack numbers are still set there per product). "Old prompt" and "Background only" were the same job and are now one ("Background only (new background)").
+- Removed the "Multipack — plain, no text" prompt (library now: Old prompt + ⭐ Multipack with count).
 - Prompt names: "⭐ Multipack with count" (full pile + count text on every image) and "Multipack — plain, no text".
 - **Count text on every image:** the star prompt no longer alternates plain / count — every image now gets the count text on top. The duplicate "with count text" prompt was merged into it; "plain, no text" stays as the second choice.
 - **Same image uploaded 4–10 times:** the Gemini/ChatGPT scripts were injected again whenever a tab was slow to answer, and every copy handled every message. Now an old copy is removed first, a busy tab refuses a second attach, and upload methods no longer stack on each other.

@@ -2976,14 +2976,17 @@ const ZH_ABUND_SETUP = (rule) => ZH_ABUND_TEMPLATE(rule)
 const ZH_TEXT_RULE_ALT = 'ALTERNATE between images: the FIRST image of this chat (this message) = Turn A, the next = Turn B, then A, B, ... Turn A: ' + ZH_TEXT_RULE_NONE + ' Turn B: ' + ZH_TEXT_RULE_COUNT;
 const ZH_SETUP_SHORT = 'New product image.';
 const ZH_LIB_BUILTIN = [
-  { id: 'scene', name: 'Old prompt — new background', text: null, builtin: true },
-  { id: 'abund-alt', name: '⭐ Multipack with count', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' },
-  { id: 'abund-none', name: 'Multipack — plain, no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' }
+  // task prompts (they run through the "Image batch setup" window, where pack numbers etc. are set) — pick one here to make it the default there
+  { id: 'improve', name: 'Improve image only', mode: 'improve', text: null, builtin: true },
+  { id: 'scene', name: 'Background only (new background)', mode: 'background', text: null, builtin: true },
+  { id: 'pack', name: 'Pack only (N PACK image)', mode: 'pack', text: null, builtin: true },
+  { id: 'pack_background', name: 'Pack → Background (2 steps)', mode: 'pack_background', text: null, builtin: true },
+  { id: 'abund-alt', name: '⭐ Multipack with count', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
 ];
 let ZhLibCustom = [];      // [{id,name,text}]
 let ZhLibActive = 'scene';
-function zhLibAll() { return [...ZH_LIB_BUILTIN.map(e => e.id === 'scene' ? { ...e, text: DEFAULT_AI_COMMERCIAL_PROMPT } : e), ...ZhLibCustom]; }
-function zhLibGet(id) { if (id === 'abund-text') id = 'abund-alt'; return zhLibAll().find(e => e.id === id) || null; }   // 'abund-text' was merged into 'abund-alt' (count on every image)
+function zhLibAll() { return [...ZH_LIB_BUILTIN.map(e => e.id === 'scene' ? { ...e, text: DEFAULT_AI_COMMERCIAL_PROMPT } : e.id === 'improve' ? { ...e, text: ZH_GPT_IMPROVE_PROMPT } : e.mode ? { ...e, text: '' } : e), ...ZhLibCustom]; }
+function zhLibGet(id) { if (id === 'abund-text' || id === 'abund-none') id = 'abund-alt'; return zhLibAll().find(e => e.id === id) || null; }   // 'abund-text' was merged into 'abund-alt' (count on every image)
 function zhSetupFor(id) { const e = zhLibGet(id); return e && e.setup ? { key: e.id, text: e.setup, every: ZH_RESEND_EVERY } : null; }
 const ZH_RESEND_EVERY = 10;   // the full prompt is sent again after this many images in one chat
 // {{TEXT_RULE}} → no text on odd products, count text on even ones (n = product number)
@@ -3017,7 +3020,7 @@ function zhLibRenderSel() {
     s.addEventListener('change', async () => {
       const e = zhLibGet(s.value); if (!e) return;
       ZhLibActive = e.id; await zhLibSave();
-      const ta = $('temuAiImgPromptInp'); if (ta) { ta.value = e.text; chrome.storage.local.set({ zhunterAiImagePrompt: e.text }).catch(() => {}); }
+      const ta = $('temuAiImgPromptInp'); if (ta && (!e.mode || e.mode === 'background')) { ta.value = e.text; chrome.storage.local.set({ zhunterAiImagePrompt: e.text }).catch(() => {}); }   // pack / improve entries only choose the task, they never overwrite the background prompt
       zhLibRenderSel(); toast('✓ Prompt: ' + e.name, 'ok');
     });
     $('temuAiImgPromptSaveBtn')?.addEventListener('click', async () => {
@@ -16821,7 +16824,8 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
     document.body.appendChild(modal);
     const entries = [...modal.querySelectorAll('[data-batch]')];
     const libEntries = zhLibAll().filter(e => !e.builtin || e.tag);   // abundance + your own prompts
-    const defMode = (ZhLibActive !== 'scene' && zhLibGet(ZhLibActive)) ? 'lib:' + ZhLibActive : (engineName === 'Flow' ? 'background' : 'improve');
+    const ae0 = zhLibGet(ZhLibActive);
+    const defMode = ae0?.mode ? ae0.mode : (ae0 && ae0.id !== 'scene') ? 'lib:' + ZhLibActive : (engineName === 'Flow' ? 'background' : 'improve');
     for (const sel of [modal.querySelector('.batch-bulk-mode'), ...modal.querySelectorAll('.batch-mode')]) {
       for (const e of libEntries) sel.add(new Option('✨ Prompt: ' + e.name, 'lib:' + e.id));
     }
@@ -19100,7 +19104,7 @@ function zhStudioRender(dir = 0) {
             <button type="button" data-ps="new" class="${it.packStyle === 'new' ? 'on' : ''}">Naya</button>
             <button type="button" data-ps="old" class="${it.packStyle === 'old' ? 'on' : ''}">Purana (white bg)</button>
           </div>` : ''}
-          <select id="zsLibSel" class="zs-sel" title="Use a prompt from your library for THIS product"><option value="">📚 Library…</option>${zhLibAll().map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
+          <select id="zsLibSel" class="zs-sel" title="Use a prompt from your library for THIS product"><option value="">📚 Library…</option>${zhLibAll().filter(e => e.text).map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
           <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>
         </div>
         <textarea id="zsPrompt" class="zs-prompt" rows="3" spellcheck="false">${esc(prompt)}</textarea>
