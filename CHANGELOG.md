@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Manual studio: a pasted / taken image shows AT ONCE; saving to the Library and the public link run in the background (one at a time).
 - Fix: "Hunt + close tabs" no longer closes the browser window — when the last tab of a window would be closed, a New Tab is opened first.
 - Bulk hunt: the page being hunted comes back to the front even if you switched to another tab (the front is no longer "held" by a tab that is not actually in front).
 - Fix: "Import sheet" with a sheet made by this extension (CH-AMAZON/CH-WALMART/CH-SAMSCLUB SKUs) now shows the products as review cards (title, images, category, price) instead of only a report.

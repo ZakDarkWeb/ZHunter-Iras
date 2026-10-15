@@ -19022,6 +19022,7 @@ async function zsReadClipboardImage() {
   } catch (_) { return null; }
 }
 
+let _zsPersistChain = Promise.resolve();
 async function zsApply(it, i, src, how = 'Paste') {
   const s = it.slots[i] || (it.slots[i] = {});
   if (!src || s.busy) return;
@@ -19038,7 +19039,7 @@ async function zsApply(it, i, src, how = 'Paste') {
     // v9.15 — a pasted picture can be several MB: shrink it first (1500px, high-quality JPEG) so saving to the Library is fast
     if (/^data:image\//i.test(finalUrl) && finalUrl.length > 450000) { try { const c = await compressBase64Image(finalUrl, 1500, 0.9); if (c && c.length < finalUrl.length) finalUrl = c; } catch (_) {} }
     const pid = it.product.id;
-    await replaceProductImage(pid, i, finalUrl, null);
+    // v9.15 — show the new image AT ONCE; saving to the Library (slow, big data) continues in the background, one at a time
     if (Array.isArray(it.product.images)) {
       const e = it.product.images[i];
       it.product.images[i] = typeof e === 'string' || e == null ? finalUrl : { ...e, url: finalUrl };
@@ -19046,18 +19047,21 @@ async function zsApply(it, i, src, how = 'Paste') {
     s.newUrl = finalUrl;
     if (!it.picked.includes(i)) it.picked.push(i), it.picked.sort((a, b) => a - b);
     toast(`✓ P${it.pNo} · Image #${i + 1} replaced (${how})`, 'ok');
-    if (/^data:image\//i.test(finalUrl)) {
-      (async () => {
-        const pub = await uploadImageToPublicHost(finalUrl);
-        if (pub && /^https?:\/\//i.test(pub) && s.newUrl === finalUrl) {
-          await replaceProductImage(pid, i, pub, finalUrl);
-          const e = it.product.images?.[i];
-          if (e === finalUrl) it.product.images[i] = pub;
-          else if (e && e.url === finalUrl) it.product.images[i] = { ...e, url: pub };
-          s.newUrl = pub;
+    _zsPersistChain = _zsPersistChain.then(async () => {
+      try {
+        await replaceProductImage(pid, i, finalUrl, null);
+        if (/^data:image\//i.test(finalUrl)) {
+          const pub = await uploadImageToPublicHost(finalUrl);
+          if (pub && /^https?:\/\//i.test(pub) && s.newUrl === finalUrl) {
+            await replaceProductImage(pid, i, pub, finalUrl);
+            const e = it.product.images?.[i];
+            if (e === finalUrl) it.product.images[i] = pub;
+            else if (e && e.url === finalUrl) it.product.images[i] = { ...e, url: pub };
+            s.newUrl = pub;
+          }
         }
-      })();
-    }
+      } catch (err) { toast('Saving image to Library failed: ' + (err?.message || err), 'warn'); }
+    });
     const next = it.picked.find(x => x > i && !it.slots[x]?.newUrl) ?? it.picked.find(x => !it.slots[x]?.newUrl);
     if (next != null) it.active = next;
     advance = next == null && ZhStudio.autoNext !== false && ZhStudio.page < ZhStudio.items.length - 1 && zsCur() === it;
@@ -19073,6 +19077,7 @@ async function zsApply(it, i, src, how = 'Paste') {
 async function zsUndo(it, i) {
   const s = it.slots[i];
   if (!s?.newUrl || !s.orig) return;
+  try { await _zsPersistChain; } catch (_) {}   // let pending saves finish first
   await replaceProductImage(it.product.id, i, s.orig, null);
   if (Array.isArray(it.product.images)) {
     const e = it.product.images[i];
