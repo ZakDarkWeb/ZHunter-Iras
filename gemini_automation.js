@@ -300,6 +300,7 @@
   async function sendNow() {
     markSeen();
     const userBefore = document.querySelectorAll('user-query').length;
+    window.__zhGemUserBase = userBefore;
     const end = Date.now() + 45000;
     let btn = null;
     while (Date.now() < end) {
@@ -349,7 +350,12 @@
       // NOTE: the empty <div class="loader"> stays in finished images — only a visible loader / a .pending class means "still working"
       const pending = document.querySelector('.attachment-container.generated-images.pending, response-element.pending, generated-image.pending')
         || [...document.querySelectorAll('generated-image .loader')].some(l => { const r = l.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(l).visibility !== 'hidden'; });
-      const imgs = generatedImages().filter(i => !fresh || !seenGen.has(i.currentSrc || i.src));
+      let imgs = generatedImages().filter(i => !fresh || !seenGen.has(i.currentSrc || i.src));
+      if (fresh && window.__zhGemUserBase != null) {   // position check: only images AFTER the message we just sent
+        const us = document.querySelectorAll('user-query'), lastU = us[us.length - 1];
+        imgs = (us.length > window.__zhGemUserBase && lastU) ? generatedImages().filter(i => (lastU.compareDocumentPosition(i) & 4)) : [];
+      }
+      console.log('[ZHunter Gemini] waiting for image', { found: imgs.length, pending: !!pending, users: document.querySelectorAll('user-query').length, base: window.__zhGemUserBase });
       if (imgs.length && !pending) {
         const d = await readImg(imgs[imgs.length - 1]);
         if (d) return d;
