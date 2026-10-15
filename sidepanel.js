@@ -2976,10 +2976,10 @@ const ZH_ABUND_SETUP = (rule) => ZH_ABUND_TEMPLATE(rule)
 const ZH_TEXT_RULE_ALT = 'ALTERNATE between images: the FIRST image of this chat (this message) = Turn A, the next = Turn B, then A, B, ... Turn A: ' + ZH_TEXT_RULE_NONE + ' Turn B: ' + ZH_TEXT_RULE_COUNT;
 const ZH_SETUP_SHORT = 'New product image.';
 const ZH_LIB_BUILTIN = [
-  { id: 'scene', name: 'Scene / background (default)', text: null, builtin: true },
-  { id: 'abund-alt', name: 'Abundance pile — alternate text / no text', text: ZH_ABUND_TEMPLATE('{{TEXT_RULE}}'), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_ALT), builtin: true, tag: 'abund' },
-  { id: 'abund-none', name: 'Abundance pile — no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' },
-  { id: 'abund-text', name: 'Abundance pile — with count text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
+  { id: 'scene', name: 'Old prompt — new background', text: null, builtin: true },
+  { id: 'abund-alt', name: '⭐ NEW Full pile — alternate (plain / count)', text: ZH_ABUND_TEMPLATE('{{TEXT_RULE}}'), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_ALT), builtin: true, tag: 'abund' },
+  { id: 'abund-none', name: 'NEW Full pile — plain, no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' },
+  { id: 'abund-text', name: 'NEW Full pile — with count text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
 ];
 let ZhLibCustom = [];      // [{id,name,text}]
 let ZhLibActive = 'scene';
