@@ -3585,9 +3585,13 @@ async function gptEnsureSlotInner(S, idx) {
   const acct = (u) => (/^https:\/\/gemini\.google\.com\/(u\/\d+)\//i.exec(u || '') || [])[1] || '';
   let pool = tabs;
   if (gem && refUrl) { const same = tabs.filter(t => acct(t.url) === acct(refUrl)); pool = same; }
-  let tab = pool.find(t => t.active) || pool[0];
+  const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;   // the window this side panel is in
+  let tab = pool.find(t => t.windowId === win && t.active) || pool.find(t => t.windowId === win) || pool.find(t => t.active) || pool[0];
+  if (tab && win && tab.windowId !== win) {   // Gemini/ChatGPT tab sits in ANOTHER Chrome window → bring it here so it is visible
+    const mv = await chrome.tabs.move(tab.id, { windowId: win, index: -1 }).catch(() => null);
+    if (mv) tab = Array.isArray(mv) ? mv[0] : mv;
+  }
   if (!tab) {
-    const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;
     tab = await chrome.tabs.create({ url: gem ? gemHomeFor(refUrl) : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
     await gptWaitTab(tab.id);
     slot = { tabId: tab.id, n: 0, fresh: true };
