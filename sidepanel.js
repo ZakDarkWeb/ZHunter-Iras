@@ -6867,12 +6867,23 @@ async function huntEnsureTab(t) {
   return created;
 }
 
+let _huntCloseChain = Promise.resolve();
 // v9.12.4 — close a hunted tab once its link is complete (first pass, recovery rounds and manual retry)
 async function huntCloseTab(t) {
   if (!t || !BulkState.AUTO_CLOSE_TABS || !Number.isFinite(t.tabId) || t._closed) return false;
   const alive = await new Promise(res => chrome.tabs.get(t.tabId, x => res(chrome.runtime.lastError ? null : x)));
   if (!alive) { t._closed = true; return false; }
-  try { await chrome.tabs.remove(t.tabId); } catch (_) { return false; }
+  // v9.15 — never let the browser window close: if this is the LAST tab of its window, a fresh New Tab is opened first (one at a time, so two closes can't empty the window)
+  const prev = _huntCloseChain;
+  let done; _huntCloseChain = new Promise(r => { done = r; });
+  try {
+    await prev;
+    const now = await new Promise(res => chrome.tabs.get(t.tabId, x => res(chrome.runtime.lastError ? null : x)));
+    if (!now) { t._closed = true; return false; }
+    const inWin = await new Promise(res => chrome.tabs.query({ windowId: now.windowId }, a => res(chrome.runtime.lastError ? [] : a)));
+    if (inWin.length <= 1) { try { await chrome.tabs.create({ windowId: now.windowId, url: 'chrome://newtab/', active: true }); } catch (_) { try { await chrome.tabs.create({ windowId: now.windowId, active: true }); } catch (_2) {} } }
+    try { await chrome.tabs.remove(t.tabId); } catch (_) { return false; }
+  } finally { done(); }
   t._closed = true;
   BulkState.tabsClosed = (BulkState.tabsClosed || 0) + 1;
   markBulkRowClosed(t.tabId);
