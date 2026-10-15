@@ -349,9 +349,10 @@
     try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); }); } catch (_) {}
     try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
   }
+  // every big picture in the chat that is not YOUR upload (the exact Gemini class names change, so size + place decide)
   function generatedImages() {
-    const sel = 'generated-image img.image, generated-image img, .attachment-container.generated-images img';
-    return [...document.querySelectorAll(sel)].filter(i => i.complete && i.naturalWidth >= 200 && !(i.classList.contains('image') && !i.classList.contains('loaded')) && !i.closest('.pending, user-query, user-query-file-preview, user-query-file-carousel, rich-textarea'));
+    return [...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 400 && i.naturalHeight >= 400
+      && !i.closest('user-query, user-query-file-preview, user-query-file-carousel, rich-textarea, input-area-v2, .input-area-container, side-navigation-v2, bard-sidenav, mat-sidenav, nav'));
   }
   async function grabLatest(waitMs, fresh) {
     const end = Date.now() + (waitMs || 0);
@@ -365,9 +366,13 @@
         imgs = (us.length > window.__zhGemUserBase && lastU) ? generatedImages().filter(i => (lastU.compareDocumentPosition(i) & 4)) : [];
       }
       console.log('[ZHunter Gemini] waiting for image', { found: imgs.length, pending: !!pending, users: document.querySelectorAll('user-query').length, base: window.__zhGemUserBase });
-      if (imgs.length && !pending) {
-        const d = await readImg(imgs[imgs.length - 1]);
-        if (d) return d;
+      if (imgs.length) {
+        const im = imgs[imgs.length - 1], src = im.currentSrc || im.src;
+        await sleep(pending ? 2500 : 900);   // the same picture still there after a moment = finished
+        if (im.isConnected && im.complete && (im.currentSrc || im.src) === src) {
+          const d = await readImg(im);
+          if (d) return d;
+        }
       }
       if (Date.now() > end) break;
       await sleep(700);

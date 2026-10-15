@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini result detection rewritten: any big picture in the chat (not your upload, not the side menu) is taken once it stays unchanged for a moment — no dependence on Gemini's changing class names. Fixes "No generated image found in Gemini" / timeouts.
+
 - Gemini no longer selects the whole page text when typing the prompt; fewer than 5 images → only 1 tab is used (ChatGPT and Gemini); ChatGPT chat archiving is switched off.
 
 - Gemini: the new image is now found by its POSITION (after the message just sent), not only by a list of old images; console log "[ZHunter Gemini] waiting for image" helps debugging.
