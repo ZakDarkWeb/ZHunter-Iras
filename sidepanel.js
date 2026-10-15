@@ -3734,8 +3734,8 @@ async function gptArchiveChats(S) {
 }
 
 // progress text for the 2-tab runner
-function gptPoolUi() { try { gptPoolUiInner(); } catch (e) { console.log('[ZHunter] pool ui', e?.message || e); } }
-function gptPoolUiInner() {
+function gptPoolUi(light) { try { gptPoolUiInner(light); } catch (e) { console.log('[ZHunter] pool ui', e?.message || e); } }
+function gptPoolUiInner(light) {
   const S = TemuImgStepper; if (!S?.pool) return;
   const total = S.queue.length, done = S.pool.finished;
   const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round(done / Math.max(1, total) * 100) + '%';
@@ -3748,7 +3748,7 @@ function gptPoolUiInner() {
     const sb = $('temuStepSub'); if (sb) sb.textContent = `Now: ${trunc(cur.product?.title || 'Product', 40)} · Image #${cur.imgIndex + 1}`;
   }
   const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'ABCDEF'[i]}: ${n}` : '').filter(Boolean);
-  try { temuStepResultsRender(); } catch (_) {}
+  if (!light) { try { temuStepResultsRender(); } catch (_) {} }   // the results list holds big images: rebuilding it every second made Chrome slow
   temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
 }
 
@@ -3767,7 +3767,7 @@ async function gptRunItem(S, idx, item) {
         if (!b64) throw new Error('Image could not be downloaded');
         if (attempt > 0 && S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;   // retry in a fresh chat
         const tSend = Date.now();
-        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(); }, item.setup);
+        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(true); }, item.setup);
         item._tAi = Date.now() - tSend;
       } catch (e) {
         lastErr = e;
@@ -3783,7 +3783,7 @@ async function gptRunItem(S, idx, item) {
       return false;
     }
     const tSave = Date.now();
-    const tick = setInterval(() => { S.pool.slotNote[idx] = `saving image… ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi(); }, 1000);
+    const tick = setInterval(() => { S.pool.slotNote[idx] = `saving image… ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi(true); }, 1000);
     let ok; try { ok = await temuStepApplyManualImage(result, 'Auto', item); } finally { clearInterval(tick); }
     if (!ok) { S.stats.skipped++; return false; }
     S.pool.slotNote[idx] = `done — AI ${Math.round((item._tAi || 0) / 1000)}s · save ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi();
