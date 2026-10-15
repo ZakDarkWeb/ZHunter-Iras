@@ -17095,7 +17095,7 @@ async function temuStepManualAction(act) {
   if (act === 'img') {
     toast('📋 Copying image…', 'info');
     if (await zhCopyImage(cur.newUrl || cur.imgUrl)) toast('📋 Image copied — press Ctrl+V in the Flow prompt box', 'ok');
-    else toast('Copy failed — click once on the side panel and try again', 'warn');
+    else toast('Copy failed (' + (zhCopyImage.lastError || 'unknown') + ') — click once on the side panel and try again', 'warn');
   } else if (act === 'prompt') {
     if (await zhCopyText(prompt)) toast('📝 Prompt copied', 'ok'); else toast('Prompt was not copied', 'warn');
   } else if (act === 'flow' && eng !== 'flow') {
@@ -18994,11 +18994,34 @@ async function zhImageToPngBlob(src) {
   return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('png convert fail')), 'image/png'));
 }
 async function zhCopyImage(src) {
+  // v9.15 — 3 ways: (1) promise-in-ClipboardItem, (2) finished blob after focus, (3) write from the open AI tab
+  let lastErr = null;
   try {
-    // Promise inside ClipboardItem keeps the click's permission while the image downloads
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': zhImageToPngBlob(src) })]);
     return true;
-  } catch (e) { console.warn('[ZHunter] Copy image failed:', e); return false; }
+  } catch (e) { lastErr = e; console.warn('[ZHunter] Copy image (1) failed:', e); }
+  let blob = null;
+  try {
+    blob = await zhImageToPngBlob(src);
+    try { window.focus(); } catch (_) {}
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    return true;
+  } catch (e) { lastErr = e; console.warn('[ZHunter] Copy image (2) failed:', e); }
+  try {
+    if (blob) {
+      const dataUrl = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(blob); });
+      const tabs = await chrome.tabs.query({ url: ZH_ENG[temuStepManualEngine()]?.url || '*://flow.google.com/*' });
+      const tab = tabs.find(x => x.active) || tabs[0];
+      if (tab) {
+        const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, args: [dataUrl], func: async (u) => {
+          try { const b = await (await fetch(u)).blob(); await navigator.clipboard.write([new ClipboardItem({ [b.type]: b })]); return true; } catch (_) { return false; }
+        } });
+        if (r?.result) return true;
+      }
+    }
+  } catch (e) { lastErr = e; console.warn('[ZHunter] Copy image (3) failed:', e); }
+  zhCopyImage.lastError = lastErr?.message || String(lastErr || '');
+  return false;
 }
 async function zhCopyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch (_) { return false; }
@@ -19458,7 +19481,7 @@ function zsGo(delta) {
       const src = _allImgUrls(it.product)[i];
       toast('📋 Copying…', 'info');
       if (await zhCopyImage(src)) toast(`📋 P${it.pNo} · #${i + 1} copied — Ctrl+V in Flow`, 'ok');
-      else toast('Copy failed — click once on the side panel and try again', 'warn');
+      else toast('Copy failed (' + (zhCopyImage.lastError || 'unknown') + ') — click once on the side panel and try again', 'warn');
     } else if (act === 'paste') {
       const src = await zsReadClipboardImage();
       if (!src) { toast('No image in the clipboard — right-click the image in Flow → Copy image', 'warn'); return; }
@@ -19485,6 +19508,18 @@ function zsGo(delta) {
     } else if (act === 'undo') {
       await zsUndo(it, i);
     }
+  });
+
+  // v9.15 — right-click on an image in the studio = copy it (works even when the browser's own "Copy image" fails)
+  body.addEventListener('contextmenu', async (e) => {
+    const img = e.target.closest?.('.zs-pair img'); if (!img) return;
+    const it = zsCur(); const card = img.closest('.zs-img'); if (!it || !card) return;
+    e.preventDefault();
+    const i = +card.dataset.i;
+    const src = img.classList.contains('zs-orig') ? _allImgUrls(it.product)[i] : (it.slots[i]?.newUrl || img.src);
+    toast('📋 Copying…', 'info');
+    if (await zhCopyImage(src)) toast(`📋 P${it.pNo} · #${i + 1} copied — Ctrl+V in the chat`, 'ok');
+    else toast('Copy failed (' + (zhCopyImage.lastError || 'unknown') + ')', 'warn');
   });
 
   document.addEventListener('paste', async (e) => {
