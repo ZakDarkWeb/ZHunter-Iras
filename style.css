@@ -6027,3 +6027,7 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .temu-rv-ratio{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid rgba(255,255,255,.14);color:#9fb3c8;background:rgba(255,255,255,.04)}
 .temu-rv-ratio.ok{color:#6ee7a8;border-color:rgba(110,231,168,.4);background:rgba(110,231,168,.08)}
 .temu-rv-ratio.low{color:#ff8a8a;border-color:rgba(255,138,138,.5);background:rgba(255,80,80,.12)}
+
+/* v9.15 — loaded-sheet actions under the Products source */
+.temu-src-sheetacts{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
+.temu-src-sheetacts .btn{border-radius:4px}

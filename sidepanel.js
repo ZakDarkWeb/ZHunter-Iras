@@ -18110,7 +18110,16 @@ function initTemuExport() {
     if (e.target.closest('#temuStoreExportBtn')) temuStoreExport();
     if (e.target.closest('#temuLearnCatBtn')) temuLearnCategories();
     if (e.target.closest('#temuFailedBtn')) temuReadFailed({});
-    if (e.target.closest('#temuSheetBtn')) $('temuSheetFile')?.click();
+    if (e.target.closest('#temuSheetBtn') || e.target.closest('#temuSheetAnother')) $('temuSheetFile')?.click();
+    if (e.target.closest('#temuSheetClear')) {
+      TemuSheetRows = null; TemuLast = null;
+      const sel = $('temuSource');
+      const o = sel?.querySelector('option[value="sheet"]'); if (o) o.hidden = true;
+      if (sel) { sel.value = 'bulk'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
+      try { temuUpdateSrcInfo(); temuSyncSrcSeg(); temuRenderReview(); } catch (_) {}
+      toast('Loaded sheet removed — pick a source or import a new sheet', 'ok');
+    }
     if (e.target.closest('#temuHistClear')) (async () => { if (!confirm('Clear Temu upload history?')) return; await new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r)); temuRenderHistory(); })();
     if (e.target.closest('#tcSaveBtn')) temuSaveProfileFromForm();
     if (e.target.closest('#tgUnmarkLast')) (async () => {
@@ -19663,6 +19672,12 @@ function temuSyncSrcSeg() {
     const opt = sel.selectedOptions?.[0];
     note.textContent = v === 'library_sel' || v === 'sheet' ? (opt?.textContent || '') : '';
     note.classList.toggle('show', !!note.textContent);
+    // v9.15 — a sheet is loaded: always offer "choose another sheet" and "remove this sheet"
+    let acts = $('temuSrcSheetActs');
+    if (!acts) { acts = document.createElement('div'); acts.id = 'temuSrcSheetActs'; acts.className = 'temu-src-sheetacts'; note.after(acts); }
+    const hasSheet = !!sel.querySelector('option[value="sheet"]:not([hidden])');
+    acts.innerHTML = hasSheet ? '<button type="button" id="temuSheetAnother" class="btn btn-xs">📂 Choose another sheet</button><button type="button" id="temuSheetClear" class="btn btn-ghost btn-xs">✕ Remove loaded sheet</button>' : '';
+    acts.style.display = hasSheet ? '' : 'none';
   }
   const pv = $('temuSrcPxVal');
   if (pv) pv.textContent = ($('tgPx2')?.value || $('tgPx')?.value || '5');
