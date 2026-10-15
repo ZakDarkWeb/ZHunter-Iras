@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini no longer selects the whole page text when typing the prompt; fewer than 5 images → only 1 tab is used (ChatGPT and Gemini); ChatGPT chat archiving is switched off.
+
 - Gemini: the new image is now found by its POSITION (after the message just sent), not only by a list of old images; console log "[ZHunter Gemini] waiting for image" helps debugging.
 
 - Gemini Auto fixes: the finished image is now detected (Gemini keeps an empty "loader" element in finished images — it was read as "still working"), and the "Tabs" setting now works for Gemini too (each tab = its own Gemini chat, several images at the same time).

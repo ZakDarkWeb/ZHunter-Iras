@@ -268,7 +268,15 @@
   }
   async function typePrompt(text) {
     const ed = composerEl(); if (!ed) throw new Error('Gemini composer not found');
-    const clear = () => { ed.focus(); try { document.execCommand('selectAll', false, null); document.execCommand('delete', false, null); } catch (_) {} };
+    const clear = () => {   // only the composer text — never select the whole page
+      try { ed.focus({ preventScroll: true }); } catch (_) { try { ed.focus(); } catch (_) {} }
+      if (!(ed.innerText || '').trim()) return;
+      try {
+        const r = document.createRange(); r.selectNodeContents(ed);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        document.execCommand('delete', false, null);
+      } catch (_) {}
+    };
     const len = () => (ed.innerText || '').replace(/\s+/g, '').length;
     const want = String(text).replace(/\s+/g, '').length;
     clear();
@@ -288,6 +296,7 @@
       ed.textContent = text; ed.classList.remove('ql-blank');
       ed.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     }
+    try { window.getSelection()?.removeAllRanges(); } catch (_) {}
     await sleep(200);
   }
   function findSend() {

@@ -3776,7 +3776,7 @@ async function gptPoolStart() {
   S.pool = { next: 0, finished: 0, slotNote: ['', '', '', '', '', ''], failed: [] };
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = 'none'; }
   const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = 'pre-line';
-  const wanted = Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || GPT_SLOTS));
+  const wanted = S.queue.length < 5 ? 1 : Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || GPT_SLOTS));   // fewer than 5 images → 1 tab is enough
   const n = Math.min(wanted, S.queue.length);
   gptPoolUi();
   const workers = [];
@@ -17448,7 +17448,7 @@ async function temuStepFinish() {
   const { stats, queue } = TemuImgStepper;
   TemuImgStepper.running = false;
   const timeTxt = zhStepTimerStop();
-  try { await gptArchiveChats(TemuImgStepper); } catch (e) { console.log('[ZHunter] archive error', e?.message || e); }
+  // v9.15 — chat archiving is OFF (chats are left as they are)
   if (TemuImgStepper.engine !== 'gemini') {
     const sk = stats?.skipped || 0;
     temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
