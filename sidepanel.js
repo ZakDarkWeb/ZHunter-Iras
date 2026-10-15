@@ -15631,6 +15631,8 @@ async function temuRenderReview() {
     card.dataset.idx = idx;
     card.dataset.id = r.id || '';
     card.dataset.rawPrice = (r.copyCat !== undefined && r.temuBase) ? '' : (r.price || '');
+    card.dataset.frozen = /frozen/i.test((catProf?.full_path || '') + ' ' + (catProf?.name || '') + ' ' + title) ? '1' : '';
+    setTimeout(() => temuUpdateRatio(card), 0);
 
     // Image gallery HTML (compact, fixed height, horizontal scroll)
     const pickedIdx = new Set(temuImgTargetIndices(r));
@@ -15670,6 +15672,7 @@ async function temuRenderReview() {
         ${thumb ? `<img class="temu-rv-thumb" src="${esc(thumb)}" alt="" loading="lazy" />` : `<span class="temu-rv-thumb temu-rv-no-thumb">📦</span>`}
         <span class="temu-rv-title-snippet">${esc(title)}</span>
         ${catWeak ? '<span class="temu-rv-catwarn" title="Category looks doubtful — open the card and check">⚠</span>' : ''}
+        <span class="temu-rv-ratio" title="Source price → how many times the Temu price is of it"></span>
         <span class="temu-rv-price-badge">${calcBase !== null ? '$' + displayPrice : '—'}</span>
         <button class="temu-rv-del-btn" title="Delete product" type="button">🗑</button>
         <svg class="i temu-rv-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
@@ -15887,6 +15890,7 @@ async function temuRenderReview() {
         card.dataset.customPrice = '1';
         const b = card.querySelector('.temu-rv-price-badge');
         if (b) b.textContent = '$' + val.toFixed(2);
+        temuUpdateRatio(card);
       }
       if (!isFinite(val) || val <= 0) { delete r.temuBase; }
       const override = r.temuBase ?? '';
@@ -16085,6 +16089,20 @@ async function temuRenderReview() {
   });
 }
 
+// v9.15 — "$source → N.N×" chip on every product row (red = below the 2× floor, 3× for Frozen)
+function temuUpdateRatio(card) {
+  const chip = card?.querySelector('.temu-rv-ratio'); if (!chip) return;
+  const ttl = card.querySelector('.temu-rv-title-inp')?.value || card.querySelector('.temu-rv-title-snippet')?.textContent || '';
+  const cost = parseFloat(String(temuCostOf(card.dataset.rawPrice, ttl) ?? '').replace(/[$,]/g, ''));
+  const sell = parseFloat(String(card.querySelector('.temu-rv-price-inp')?.value || card.querySelector('.temu-rv-price-badge')?.textContent || '').replace(/[$,]/g, ''));
+  if (!(cost > 0) || !(sell > 0)) { chip.textContent = ''; chip.style.display = 'none'; return; }
+  const x = sell / cost, floor = card.dataset.frozen ? 3 : 2;
+  chip.style.display = '';
+  chip.textContent = `$${cost.toFixed(2)} → ${x.toFixed(1)}×`;
+  chip.classList.toggle('low', x + 0.005 < floor);
+  chip.classList.toggle('ok', x + 0.005 >= floor);
+  chip.title = `Source $${cost.toFixed(2)} → Temu $${sell.toFixed(2)} = ${x.toFixed(2)}× (minimum ${floor}×${floor === 3 ? ', Frozen' : ''})`;
+}
 function temuRefreshReviewPrices() {
   const cfg = temuGetCfg();
   const px = parseFloat($('tgPx')?.value || $('tgPx2')?.value || cfg.price_multiplier);
@@ -16101,6 +16119,7 @@ function temuRefreshReviewPrices() {
       const inp = card.querySelector('.temu-rv-price-inp');
       if (inp) inp.value = calcBase.toFixed(2);
     }
+    temuUpdateRatio(card);
   });
 }
 
