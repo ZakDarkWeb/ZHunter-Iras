@@ -13585,10 +13585,22 @@ function temuZcParse(buf) {
   for (let r = 4; r < aoa.length; r++) {
     const row = aoa[r] || []; const g = k => { const i = idx(k)[0]; return i === undefined ? '' : String(row[i] ?? '').trim(); };
     const sku = g('seller_sku'); if (!sku && !g('item_name')) continue;
-    const m = sku.match(/^ZC-(\d{8,})-/); if (!m) return null;   // mixed / other file → normal path
+    let m = sku.match(/^ZC-(\d{8,})-/), rid, rurl, rplat = 'temu';
+    if (m) { rid = 'zc_' + m[1]; rurl = `https://www.temu.com/goods.html?goods_id=${m[1]}`; }
+    else {
+      // v9.15 — a sheet made by this extension's own export ("CH-AMAZON-B0…", "CH-WALMART-1196…", "CH-SAMSCLUB-1549…"): rebuild the source link so the products show as review cards
+      const c = sku.match(/^[A-Za-z]+-([A-Za-z]+)-([A-Za-z0-9]+)(?:-|$)/); if (!c) return null;   // other file → normal path
+      const sup = c[1].toUpperCase(), sid = c[2];
+      if (sup === 'AMAZON') { rurl = `https://www.amazon.com/dp/${sid}`; rplat = 'amazon'; }
+      else if (sup === 'WALMART') { rurl = `https://www.walmart.com/ip/${sid}`; rplat = 'walmart'; }
+      else if (sup === 'SAMSCLUB') { rurl = `https://www.samsclub.com/p/item/${sid}`; rplat = 'samsclub'; }
+      else return null;
+      rid = 'sh_' + sup.toLowerCase() + '_' + sid;
+      if (rows.some(x => x.id === rid)) continue;   // same product listed twice (variants) → one card
+    }
     const imgs = [g('main_image_url'), ...idx('other_image_url').map(i => String(row[i] ?? '').trim())].filter(u => /^https?:\/\//i.test(u));
     rows.push({
-      id: 'zc_' + m[1], title: g('item_name'), url: `https://www.temu.com/goods.html?goods_id=${m[1]}`, platform: 'temu',
+      id: rid, title: g('item_name'), url: rurl, platform: rplat,
       brand: g('brand'), color: g('Variation_Variants_1'), copyColor: g('Variation_Variants_1'),
       weight: g('item_weight'), dimL: g('item_length'), dimW: g('item_width'), dimH: g('item_height'),
       bullets: idx('item_note').map(i => String(row[i] ?? '').trim()).filter(Boolean), description: g('item_description'),

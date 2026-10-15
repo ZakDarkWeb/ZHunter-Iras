@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Fix: "Import sheet" with a sheet made by this extension (CH-AMAZON/CH-WALMART/CH-SAMSCLUB SKUs) now shows the products as review cards (title, images, category, price) instead of only a report.
 - Manual studio: pasted images are shrunk (1500px JPEG) before saving, so Paste is much faster.
 - Manual studio: "Replace" is now "Paste image" (copy the image in ChatGPT/Gemini, press it) and it can read the clipboard through the ChatGPT/Gemini tab, not only Flow.
 - Fix: Manual studio now opens with the engine you picked (ChatGPT / Gemini / Flow) instead of always remembering Flow.
