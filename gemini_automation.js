@@ -215,6 +215,17 @@
     if (named.length) return named.length;
     return [...area.querySelectorAll('img')].filter(i => i.offsetWidth >= 24 && i.offsetHeight >= 24).length;
   }
+  // Gemini shows a red "!" / red file name when an upload failed → true if any attached file in the composer is in error
+  function attachFailed() {
+    const area = inputArea();
+    const red = (el) => { try { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(el).color || ''); return !!m && +m[1] > 150 && +m[2] < 90 && +m[3] < 90; } catch (_) { return false; } };
+    const items = [...area.querySelectorAll('uploader-file-preview, [data-test-id*="file-preview"], .file-preview, .attachment-preview-wrapper, [class*="preview" i]')];
+    for (const it of items) {
+      if (it.querySelector('mat-icon[fonticon*="error" i], [data-mat-icon-name*="error" i], [class*="error" i], [aria-label*="error" i], [aria-label*="fail" i]')) return true;
+      if ([...it.querySelectorAll('*')].some(e => e.children.length === 0 && /zhunter_\d/i.test(e.textContent || '') && red(e))) return true;
+    }
+    return [...area.querySelectorAll('*')].some(e => e.children.length === 0 && /^zhunter_\d/i.test((e.textContent || '').trim()) && red(e));
+  }
   // remove files that are still waiting in the composer from an earlier (failed) try
   async function clearAttachments() {
     for (let round = 0; round < 6; round++) {
@@ -238,7 +249,7 @@
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true })); } catch (_) {}
   }
   // attach one or several images (data URLs) to the composer
-  async function attachMany(imgs) {
+  async function attachOnce(imgs) {
     const files = imgs.map((u, i) => dataUrlToFile(u, 'zhunter_' + (i + 1) + '.png')).filter(Boolean);
     if (!files.length) throw new Error('image could not be read');
     const editor = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 15000);
@@ -280,6 +291,21 @@
     } catch (_) {}
     await clearAttachments();
     throw new Error('image was not attached — check the Gemini page (F5) and try again');
+  }
+  // attach, and if Gemini marks the upload as failed (red "!"), remove it and upload again (3 tries)
+  async function attachMany(imgs) {
+    let last = null;
+    for (let t = 1; t <= 3; t++) {
+      try {
+        const n = await attachOnce(imgs);
+        await sleep(2500);   // a failed upload turns red a moment later
+        if (!attachFailed()) return n;
+        showGeminiHUD('ZHunter: upload failed — trying again (' + t + '/3)…', 'warn');
+      } catch (e) { last = e; }
+      try { await clearAttachments(); } catch (_) {}
+      await sleep(1500);
+    }
+    throw last || new Error('Gemini could not upload the image (red "!") — check the Gemini page and Retry failed');
   }
   async function typePrompt(text) {
     const ed = composerEl(); if (!ed) throw new Error('Gemini composer not found');
@@ -425,6 +451,13 @@
             let sent = false;
             if (msg.send) {
               sent = await sendNow();
+              for (let rt = 0; !sent && attachFailed() && rt < 2; rt++) {   // upload failed after typing: clear it, upload again, send again
+                showGeminiHUD('ZHunter: upload failed — uploading again…', 'warn');
+                await clearAttachments(); await sleep(1200);
+                await attachMany(imgs); await typePrompt(msg.prompt || '');
+                sent = await sendNow();
+              }
+              if (!sent && attachFailed()) throw new Error('Gemini upload keeps failing (red "!") — check the Gemini page, then Retry failed');
               showGeminiHUD(sent ? 'ZHunter: sent — waiting for the image…' : 'ZHunter: press Send yourself — I will take the image', sent ? 'info' : 'warn');
             } else showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
             sendResponse({ ok: true, attached: n, sent });
