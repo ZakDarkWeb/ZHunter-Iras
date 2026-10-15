@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Gemini failed-upload fix (from the saved page):** the remove button of an attachment is labelled "close <file>" — it was never clicked, so a failed file stayed and blocked Send. Now it is removed, and failed uploads are recognised by Gemini's own markers (has-error / error icon).
 - **Gemini upload failed (red "!" on the attachment):** detected — the failed file is removed and uploaded again (up to 3 tries), also if it fails after the prompt was typed; if it keeps failing the item fails with a clear message instead of waiting for you to press Send.
 - **Use the open tab:** ChatGPT / Gemini — if a tab is already open, the run keeps working in its current chat (no new chat first; rules are sent once at the start). A new tab + new chat is created only when no tab is open. Flow already worked this way (an open project tab is reused).
 - **Less CPU:** the panel's endless decorative animations (grid, glow, scan line, shimmer — 47 of them) are now OFF by default (measured ~7% CPU idle → ~0.2%). Can be restored with the `zhFx` setting ('full' / 'subtle').

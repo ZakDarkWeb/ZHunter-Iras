@@ -219,6 +219,7 @@
   function attachFailed() {
     const area = inputArea();
     const red = (el) => { try { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(el).color || ''); return !!m && +m[1] > 150 && +m[2] < 90 && +m[3] < 90; } catch (_) { return false; } };
+    if (area.querySelector('.has-error, .gem-attachment-loading-error, mat-icon[data-mat-icon-name="error"]')) return true;
     const items = [...area.querySelectorAll('uploader-file-preview, [data-test-id*="file-preview"], .file-preview, .attachment-preview-wrapper, [class*="preview" i]')];
     for (const it of items) {
       if (it.querySelector('mat-icon[fonticon*="error" i], [data-mat-icon-name*="error" i], [class*="error" i], [aria-label*="error" i], [aria-label*="fail" i]')) return true;
@@ -229,7 +230,8 @@
   // remove files that are still waiting in the composer from an earlier (failed) try
   async function clearAttachments() {
     for (let round = 0; round < 6; round++) {
-      const btns = [...inputArea().querySelectorAll('button')].filter(b => /remove|delete|clear/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-test-id') || '')) && !/voice|mic/i.test(b.getAttribute('aria-label') || ''));
+      const btns = [...inputArea().querySelectorAll('button')].filter(b => (/remove|delete|clear/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-test-id') || '')) && !/voice|mic/i.test(b.getAttribute('aria-label') || ''))
+        || /^close\s+\S/i.test(b.getAttribute('aria-label') || '') || !!b.closest('.gem-attachment-close-button'));   // Gemini's remove button on an attachment chip is labelled "close <file name>"
       if (!btns.length) break;
       try { btns[0].click(); } catch (_) {}
       await sleep(350);
