@@ -3579,15 +3579,26 @@ async function gptEnsureSlotInner(S, idx) {
   if (slot?.tabId && await alive(slot.tabId)) return slot;
   const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
   const tabs = (await chrome.tabs.query({ url: gem ? '*://gemini.google.com/*' : '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
-  let tab = tabs.find(t => t.active) || tabs[0];
+  // Gemini: all tabs of one run must use the SAME Google account (the one of the first slot / the active tab)
+  let refUrl = '';
+  if (gem) { for (const x of S.gptSlots) { if (x?.tabId) { const t0 = await chrome.tabs.get(x.tabId).catch(() => null); if (t0?.url) { refUrl = t0.url; break; } } } }
+  const acct = (u) => (/^https:\/\/gemini\.google\.com\/(u\/\d+)\//i.exec(u || '') || [])[1] || '';
+  let pool = tabs;
+  if (gem && refUrl) { const same = tabs.filter(t => acct(t.url) === acct(refUrl)); pool = same; }
+  let tab = pool.find(t => t.active) || pool[0];
   if (!tab) {
     const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;
-    tab = await chrome.tabs.create({ url: gem ? 'https://gemini.google.com/app' : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
+    tab = await chrome.tabs.create({ url: gem ? gemHomeFor(refUrl) : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
     await gptWaitTab(tab.id);
     slot = { tabId: tab.id, n: 0, fresh: true };
   } else slot = { tabId: tab.id, n: Infinity, fresh: false };   // existing tab: first job starts a new chat
   S.gptSlots[idx] = slot;
   return slot;
+}
+// Gemini: keep the Google account the tab is using (gemini.google.com/u/1/app → account #2), never fall back to /app (= account #1)
+function gemHomeFor(url) {
+  const m = /^https:\/\/gemini\.google\.com\/(u\/\d+\/)/i.exec(url || '');
+  return 'https://gemini.google.com/' + (m ? m[1] : '') + 'app';
 }
 async function gptWaitTab(tabId, ms = 40000) {
   const end = Date.now() + ms;
@@ -3614,6 +3625,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
+      if (g?.limit) throw new Error('Gemini limit reached on this account — switch account in a Gemini tab, then Retry failed');
       if (g?.ok && g.dataUrl) { onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
       await sleepMs(1500);
     }
@@ -3626,7 +3638,8 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
   const key = 'zhGptRes_' + id;
   if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
     onNote?.('opening a new chat…');
-    await chrome.tabs.update(slot.tabId, { url: S.engine === 'gemini' ? 'https://gemini.google.com/app' : 'https://chatgpt.com/', active: true });
+    const curUrl = (await chrome.tabs.get(slot.tabId).catch(() => null))?.url || '';
+    await chrome.tabs.update(slot.tabId, { url: S.engine === 'gemini' ? gemHomeFor(curUrl) : 'https://chatgpt.com/', active: true });
     await sleepMs(800);
     await gptWaitTab(slot.tabId);
     slot.n = 0;

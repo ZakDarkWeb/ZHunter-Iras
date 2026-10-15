@@ -380,6 +380,11 @@
         const us = document.querySelectorAll('user-query'), lastU = us[us.length - 1];
         imgs = (us.length > window.__zhGemUserBase && lastU) ? generatedImages().filter(i => (lastU.compareDocumentPosition(i) & 4)) : [];
       }
+      if (fresh && window.__zhGemUserBase != null) {   // usage limit of this Google account reached → stop waiting at once
+        const us2 = document.querySelectorAll('user-query'), lu = us2[us2.length - 1];
+        const resp = lu && lu.closest('.conversation-container')?.querySelector('model-response');
+        if (resp && /limit resets|reached (your|the) .{0,40}limit|can create more images as soon/i.test(resp.innerText || '')) { window.__zhGemLimit = true; return null; }
+      }
       console.log('[ZHunter Gemini] waiting for image', { found: imgs.length, pending: !!pending, users: document.querySelectorAll('user-query').length, base: window.__zhGemUserBase });
       if (imgs.length) {
         const im = imgs[imgs.length - 1], src = im.currentSrc || im.src;
@@ -422,8 +427,9 @@
       if (msg?.action === 'ZH_GEM_GRAB_LATEST') {
         (async () => {
           try {
+            window.__zhGemLimit = false;
             const dataUrl = await grabLatest(msg.waitMs || 0, !!msg.fresh);
-            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, error: 'No generated image in this chat yet' });
+            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, limit: !!window.__zhGemLimit, error: window.__zhGemLimit ? 'Gemini limit reached on this account' : 'No generated image in this chat yet' });
           } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;
