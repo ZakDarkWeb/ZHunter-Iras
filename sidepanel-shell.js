@@ -5,6 +5,10 @@
 // ============================================================
 'use strict';
 
+// Animations are OFF by default (they kept Chrome busy: ~7% CPU idle vs ~0.2% off in a measurement).
+// To get the glow back: in the panel's console run  chrome.storage.local.set({zhFx:'full'})  (or 'subtle'), then Reload.
+try { chrome.storage.local.get('zhFx', r => { const v = r && r.zhFx; if (v === 'full' || v === 'subtle' || v === 'off') document.documentElement.dataset.fx = v; }); } catch (_) {}
+
 (function () {
   const $ = id => document.getElementById(id);
   const $$ = sel => [...document.querySelectorAll(sel)];
