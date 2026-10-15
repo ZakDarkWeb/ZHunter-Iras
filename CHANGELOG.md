@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Faster replace after the AI image arrives: big PNGs are shrunk to JPEG before saving, the product list is redrawn after a short delay instead of blocking each image, and each tab line now shows timing ("AI 40s · save 2s").
+
 - Gemini: a failed try no longer leaves its image in the box (the next product's image used to be added to it and both were sent in one message). Old waiting files are removed before each attach; attach check waits up to 15 s and uses several signals.
 
 - Gemini result detection rewritten: any big picture in the chat (not your upload, not the side menu) is taken once it stays unchanged for a moment — no dependence on Gemini's changing class names. Fixes "No generated image found in Gemini" / timeouts.

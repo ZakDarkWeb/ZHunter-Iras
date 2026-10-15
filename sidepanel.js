@@ -3733,7 +3733,9 @@ async function gptRunItem(S, idx, item) {
         if (!b64 && item.imgUrl?.startsWith('data:')) b64 = item.imgUrl;
         if (!b64) throw new Error('Image could not be downloaded');
         if (attempt > 0 && S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;   // retry in a fresh chat
+        const tSend = Date.now();
         result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(); }, item.setup);
+        item._tAi = Date.now() - tSend;
       } catch (e) {
         lastErr = e;
         if (e.aborted || e.limit) break;
@@ -3747,8 +3749,10 @@ async function gptRunItem(S, idx, item) {
       toast(`ChatGPT: ${label()} failed — ${lastErr?.message || 'error'}`, 'warn');
       return false;
     }
+    const tSave = Date.now();
     const ok = await temuStepApplyManualImage(result, 'Auto', item);
     if (!ok) { S.stats.skipped++; return false; }
+    S.pool.slotNote[idx] = `done — AI ${Math.round((item._tAi || 0) / 1000)}s · save ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi();
     more = !!item._more;
   }
   return true;
@@ -4028,6 +4032,7 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
   if (how === 'Auto' && current.packQty > 1 && current.batchMode !== 'background' && current.batchMode !== 'improve' && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
     finalUrl = await zhStampPackLabel(finalUrl, current.packQty, current.packLabel !== false);
   }
+  if (/^data:image\//i.test(finalUrl) && finalUrl.length > 700000) { try { finalUrl = await zsShrinkForSend(finalUrl); } catch (_) {} }   // big PNG from the AI tool → JPEG: saves and uploads much faster
   const pid = current.product?.id, idx = current.imgIndex;
   const oldImg = _imgEntryUrl(current.product?.images?.[idx]);
   let ok = await replaceProductImage(pid, idx, finalUrl, null);
@@ -4054,7 +4059,7 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
   }
   current._more = !!moreStages;
   try { temuStepResultsRender(); } catch (_) {}
-  try { await temuRenderReview(); } catch (_) {}
+  clearTimeout(window._zhRvT); window._zhRvT = setTimeout(() => { try { temuRenderReview(); } catch (_) {} }, 300);   // redraw the list later (it used to block every image)
   toast(`✓ ${trunc(current.product?.title || 'Product', 30)} · Image #${idx + 1} replaced (${how})`, 'ok');
 
   // data: image → public link in the background (Temu needs a URL)
