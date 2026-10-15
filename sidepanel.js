@@ -3596,7 +3596,7 @@ async function gptEnsureSlotInner(S, idx) {
     tab = await chrome.tabs.create({ url: gem ? gemHomeFor(refUrl) : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
     await gptWaitTab(tab.id);
     slot = { tabId: tab.id, n: 0, fresh: true };
-  } else slot = { tabId: tab.id, n: Infinity, fresh: false };   // existing tab: first job starts a new chat
+  } else slot = { tabId: tab.id, n: 0, fresh: false, reused: true };   // v9.15 — a tab is already open: keep working in ITS chat (no new chat); a new chat only starts after the chat limit
   S.gptSlots[idx] = slot;
   return slot;
 }
@@ -3669,7 +3669,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     if (need) { slot.primeKey = setup.key; slot.since = 0; }
     slot.since = (slot.since || 0) + 1;
     text = need ? setup.text : ZH_SETUP_SHORT;
-  } else text = (slot.n > 0 ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
+  } else text = ((slot.n > 0 || slot.reused) ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
   slot.n++;
   if (S.engine === 'gemini') return gemRunOnTab(S, slot.tabId, b64, text, onNote);
   return new Promise((resolve, reject) => {

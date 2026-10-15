@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Use the open tab:** ChatGPT / Gemini — if a tab is already open, the run keeps working in its current chat (no new chat first; rules are sent once at the start). A new tab + new chat is created only when no tab is open. Flow already worked this way (an open project tab is reused).
 - **Less CPU:** the panel's endless decorative animations (grid, glow, scan line, shimmer — 47 of them) are now OFF by default (measured ~7% CPU idle → ~0.2%). Can be restored with the `zhFx` setting ('full' / 'subtle').
 - **Chrome slowdown fix:** the per-second timers (attaching / saving seconds) no longer rebuild the results list (it holds big images) every second — only the status text changes.
 - **Faster Gemini run:** replacing an image no longer waits for the big Library write (it runs in the background; the edit is already kept in the small journal) — was ~29 s per image. If Gemini answers "I encountered an error", the same message is sent again (max 3 tries) instead of waiting forever.
