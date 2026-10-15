@@ -2946,6 +2946,94 @@ async function getSavedAiImagePrompt() {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// v9.15 — Prompt library: pick which prompt to use (all products, or per product)
+// ═════════════════════════════════════════════════════════════════
+const ZH_TEXT_RULE_NONE = 'NO text, words or numbers added on the image at all (only what is already printed on the pack and units).';
+const ZH_TEXT_RULE_COUNT = 'Add bold, hand-lettered marker/brush display text at the very top: line 1 = the exact count printed on the pack with its unit (e.g. "60 SINGLE SERVE CUPS!" or "110 PIECES!"); line 2 = a short TRUE catchy line, like the number of flavors ("4 FLAVORS!") or "SO MUCH CANDY!". Thick outline + drop shadow, human-designed look, NOT generic AI typography. Keep the top 15% free of the pack so the text never covers it.';
+const ZH_ABUND_TEMPLATE = (rule) => `Act as a Senior Commercial E-commerce Image Editor and Consumer Psychology Specialist. Using the attached product photo (any multipack consumable: candy, chocolate, snacks, coffee pods, tea bags, bars, sachets, drinks, supplements), create ONE high-converting 1:1 square listing image with these STRICT RULES:
+
+1. PACK (keep exact, but SMALL):
+- Keep the original pack's artwork, logo, colors and ALL printed text exactly as in the photo. Never invent or misspell text on it.
+- The pack takes only about 30% of the image height, slightly above center, NESTED INTO the pile (lower third buried, pieces touching it on all sides). Never standing alone.
+
+2. MASSIVE ABUNDANCE (most important):
+- Wide, pulled-back camera shot, like a bulk bin or warehouse pile. Every individual unit (piece, pod, pouch, bar, bag) is SMALL in the frame (about 1/12 of the image width or smaller), so 200 to 300 separate units are clearly visible at once.
+- A giant overflowing mountain of loose individual units fills the ENTIRE image edge to edge: left, right, behind the pack and up to the top corners. No empty areas, no clean floor, no white space.
+- Use ONLY the varieties/flavors printed on the pack, with each flavor's color/label clearly readable on the units.
+
+3. FOREGROUND APPETITE:
+- Along the bottom edge: spilled units plus 4-6 opened/unwrapped units or ready-to-enjoy servings showing texture (for drinks: a steaming cup; for snacks: cross-sections), and the real ingredients/flavor items shown on the pack art (fruits, nuts, chocolate, cupcake, donut...). Dark glossy wooden table, crisp studio lighting, rich saturated colors, warm festive blurred background.
+
+4. STRICT 1:1 SQUARE.
+
+5. TEXT: ${rule}
+
+6. ZERO CHAT TEXT: no explanation, greeting or caption. Output ONLY the image.`;
+const ZH_LIB_BUILTIN = [
+  { id: 'scene', name: 'Scene / background (default)', text: null, builtin: true },
+  { id: 'abund-alt', name: 'Abundance pile — alternate text / no text', text: ZH_ABUND_TEMPLATE('{{TEXT_RULE}}'), builtin: true, tag: 'abund' },
+  { id: 'abund-none', name: 'Abundance pile — no text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_NONE), builtin: true, tag: 'abund' },
+  { id: 'abund-text', name: 'Abundance pile — with count text', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
+];
+let ZhLibCustom = [];      // [{id,name,text}]
+let ZhLibActive = 'scene';
+function zhLibAll() { return [...ZH_LIB_BUILTIN.map(e => e.id === 'scene' ? { ...e, text: DEFAULT_AI_COMMERCIAL_PROMPT } : e), ...ZhLibCustom]; }
+function zhLibGet(id) { return zhLibAll().find(e => e.id === id) || null; }
+// {{TEXT_RULE}} → no text on odd products, count text on even ones (n = product number)
+function zhLibResolveText(text, n = 0) {
+  return String(text || '').split('{{TEXT_RULE}}').join((Number(n) || 0) % 2 === 1 ? ZH_TEXT_RULE_COUNT : ZH_TEXT_RULE_NONE);
+}
+async function zhLibLoad() {
+  try {
+    const r = await chrome.storage.local.get(['zhPromptLib', 'zhPromptActive']);
+    ZhLibCustom = Array.isArray(r?.zhPromptLib) ? r.zhPromptLib.filter(e => e && e.id && e.text) : [];
+    ZhLibActive = zhLibGet(r?.zhPromptActive) ? r.zhPromptActive : 'scene';
+  } catch (_) {}
+}
+async function zhLibSave() { try { await chrome.storage.local.set({ zhPromptLib: ZhLibCustom.slice(-30), zhPromptActive: ZhLibActive }); } catch (_) {} }
+function zhLibOptionsHtml(sel) { return zhLibAll().map(e => `<option value="${esc(e.id)}"${e.id === sel ? ' selected' : ''}>${esc(e.name)}</option>`).join(''); }
+// per-product number (1,2,3…) so "alternate" really alternates between products
+function zhProductOrdinal(queueOrItems, product) {
+  const ids = []; for (const q of queueOrItems) { const id = (q.product || q).id; if (!ids.includes(id)) ids.push(id); }
+  return ids.indexOf((product || {}).id);
+}
+zhLibLoad().then(() => { try { zhLibRenderSel(); } catch (_) {} });
+function zhLibRenderSel() {
+  const s = $('temuAiImgPromptSel'); if (!s) return;
+  s.innerHTML = zhLibOptionsHtml(ZhLibActive);
+  const del = $('temuAiImgPromptDelBtn'); if (del) del.disabled = !!zhLibGet(ZhLibActive)?.builtin;
+}
+(function zhLibInit() {
+  const go = () => {
+    const s = $('temuAiImgPromptSel'); if (!s || s._zh) return; s._zh = 1;
+    zhLibRenderSel();
+    s.addEventListener('change', async () => {
+      const e = zhLibGet(s.value); if (!e) return;
+      ZhLibActive = e.id; await zhLibSave();
+      const ta = $('temuAiImgPromptInp'); if (ta) { ta.value = e.text; chrome.storage.local.set({ zhunterAiImagePrompt: e.text }).catch(() => {}); }
+      zhLibRenderSel(); toast('✓ Prompt: ' + e.name, 'ok');
+    });
+    $('temuAiImgPromptSaveBtn')?.addEventListener('click', async () => {
+      const ta = $('temuAiImgPromptInp'); const txt = (ta?.value || '').trim(); if (!txt) { toast('Prompt is empty', 'warn'); return; }
+      const cur = zhLibGet(ZhLibActive);
+      const name = (window.prompt('Name for this prompt:', cur && !cur.builtin ? cur.name : '') || '').trim(); if (!name) return;
+      const ex = ZhLibCustom.find(e => e.name.toLowerCase() === name.toLowerCase());
+      if (ex) ex.text = txt; else { const id = 'c_' + Date.now().toString(36); ZhLibCustom.push({ id, name, text: txt }); ZhLibActive = id; }
+      if (ex) ZhLibActive = ex.id;
+      await zhLibSave(); zhLibRenderSel(); toast('✓ Prompt saved: ' + name, 'ok');
+    });
+    $('temuAiImgPromptDelBtn')?.addEventListener('click', async () => {
+      const cur = zhLibGet(ZhLibActive); if (!cur || cur.builtin) return;
+      if (!window.confirm('Delete prompt "' + cur.name + '"?')) return;
+      ZhLibCustom = ZhLibCustom.filter(e => e.id !== cur.id); ZhLibActive = 'scene'; await zhLibSave();
+      const ta = $('temuAiImgPromptInp'); if (ta) { ta.value = DEFAULT_AI_COMMERCIAL_PROMPT; chrome.storage.local.set({ zhunterAiImagePrompt: ta.value }).catch(() => {}); }
+      zhLibRenderSel();
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+})();
+
+// ═════════════════════════════════════════════════════════════════
 // v9.9.0 — Google Flow image jobs
 // Every image sent to Flow is a JOB with its own id. flow_automation.js returns the
 // generated image with that same id, and only a known job can change a product image:
@@ -3038,7 +3126,7 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
     .replace(/\s*[-–|].*$/, '')
     .trim();
-  const flowPrompt = (prompt || '').trim() || await getSavedAiImagePrompt();
+  const flowPrompt = zhLibResolveText((prompt || '').trim() || await getSavedAiImagePrompt(), 0);
 
   toast('Preparing image & prompt for Flow…', 'info');
 
@@ -16602,8 +16690,13 @@ function temuInitReviewToggle() {
 // ═════════════════════════════════════════════════════════════════
 // v9.15 — simple "just make it better" prompt (no background / pack change)
 const ZH_GPT_IMPROVE_PROMPT = 'Make this image interesting as much as you can. Act as a human psychology specialist and image editor specialist. Improve and edit the image as much as you can, but keep the exact same product, packaging, labels and number of units. Do not change the pack count. Do not add any new text, number, label or badge. Output a square 1:1 image.';
-function temuBatchStages(mode, quantity, backgroundPrompt, label = zhPackLabelOn, style = zhPackStyle) {
+function temuBatchStages(mode, quantity, backgroundPrompt, label = zhPackLabelOn, style = zhPackStyle, ordinal = 0) {
   const n = Number(quantity);
+  if (String(mode).startsWith('lib:')) {   // a prompt from the library, sent as it is
+    const id = String(mode).slice(4), e = zhLibGet(id);
+    if (!e) throw new Error('Prompt not found');
+    return [zhLibResolveText(id === ZhLibActive && backgroundPrompt ? backgroundPrompt : e.text, ordinal)];
+  }
   if (!['background', 'pack', 'pack_background', 'improve'].includes(mode)) throw new Error('Invalid image mode');
   if (mode !== 'background' && (!Number.isInteger(n) || n < 2 || n > 24)) throw new Error('Pack quantity must be between 2 and 24');
   const keepLabel = ' Do not add any new text, number, label or badge; keep the scene clean.' + (label ? ' ' + ZH_KEEP_PACK_LABEL : '');
@@ -16645,7 +16738,11 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
     </div>`;
     document.body.appendChild(modal);
     const entries = [...modal.querySelectorAll('[data-batch]')];
-    const defMode = engineName === 'Flow' ? 'background' : 'improve';
+    const libEntries = zhLibAll().filter(e => !e.builtin || e.tag);   // abundance + your own prompts
+    const defMode = (ZhLibActive !== 'scene' && zhLibGet(ZhLibActive)) ? 'lib:' + ZhLibActive : (engineName === 'Flow' ? 'background' : 'improve');
+    for (const sel of [modal.querySelector('.batch-bulk-mode'), ...modal.querySelectorAll('.batch-mode')]) {
+      for (const e of libEntries) sel.add(new Option('✨ Prompt: ' + e.name, 'lib:' + e.id));
+    }
     modal.querySelector('.batch-bulk-mode').value = defMode;
     entries.forEach(row => {
       row.querySelector('.batch-mode').add(new Option('Skip / keep original', 'skip'));
@@ -16662,8 +16759,8 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       let steps = 0, active = 0;
       entries.forEach(row => {
         const mode = row.querySelector('.batch-mode').value;
-        row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip' || mode === 'improve';
-        row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip' || mode === 'improve';
+        row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip' || mode === 'improve' || mode.startsWith('lib:');
+        row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip' || mode === 'improve' || mode.startsWith('lib:');
         row.classList.toggle('batch-skipped', mode === 'skip');
         row.classList.toggle('batch-selected', row.querySelector('.batch-pick').checked);
         if (mode !== 'skip') { active++; steps += mode === 'pack_background' ? 2 : 1; }
@@ -16672,7 +16769,7 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
       modal.querySelector('.batch-selected-count').textContent = `${entries.filter(row => row.querySelector('.batch-pick').checked).length} selected`;
       modal.querySelector('.batch-start').disabled = !active;
       const bulkMode = modal.querySelector('.batch-bulk-mode').value;
-      const bulkOff = bulkMode === 'background' || bulkMode === 'skip' || bulkMode === 'improve';
+      const bulkOff = bulkMode === 'background' || bulkMode === 'skip' || bulkMode === 'improve' || bulkMode.startsWith('lib:');
       modal.querySelector('.batch-bulk-qty').disabled = modal.querySelector('.batch-bulk-lbl').disabled = modal.querySelector('.batch-bulk-style').disabled = bulkOff;
     };
     modal.querySelector('.batch-search').oninput = e => {
@@ -16705,7 +16802,7 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
           const mode = row.querySelector('.batch-mode').value;
           const qty = Number(row.querySelector('.batch-qty').value);
           const label = row.querySelector('.batch-lbl').checked, style = row.querySelector('.batch-style').value;
-          return { index: Number(row.dataset.batch), mode, qty, label, style, stages: temuBatchStages(mode, qty, backgroundPrompt, label, style) };
+          return { index: Number(row.dataset.batch), mode, qty, label, style, stages: temuBatchStages(mode, qty, backgroundPrompt, label, style, Math.max(0, zhProductOrdinal(queue, queue[Number(row.dataset.batch)].product))) };
         });
         const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0] }));
         queue.splice(0, queue.length, ...activeQueue);
@@ -16755,7 +16852,8 @@ async function temuStartBulkImageEdit(opts = {}) {
   }
 
   const engine = $('temuAiImgEngineSel')?.value || 'flow';
-  const prompt = opts.prompt || ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
+  const promptRaw = opts.prompt || ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
+  const prompt = promptRaw;
 
   // Queue of { product, imgUrl, imgIndex } — the exact slot each result must go back to
   const queue = [];
@@ -16775,6 +16873,7 @@ async function temuStartBulkImageEdit(opts = {}) {
     return;
   }
 
+  if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });   // Gemini: library prompt as it is; alternate text per product
   if (engine !== 'gemini' && !(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : 'Auto (ChatGPT → Flow → Gemini)'))) return;
 
   TemuImgStepper = {
@@ -17321,7 +17420,7 @@ async function temuOpenGeminiModal(imgUrl, productTitle, productId = null, image
   if (preview) preview.src = imgUrl;
 
   try {
-    const promptVal = await getSavedAiImagePrompt();
+    const promptVal = zhLibResolveText(await getSavedAiImagePrompt(), 0);
     if (promptTxt) promptTxt.value = promptVal;
   } catch (_) {
     if (promptTxt) promptTxt.value = DEFAULT_AI_COMMERCIAL_PROMPT;
@@ -18824,7 +18923,7 @@ async function zhStudioOpen(startProductId = null) {
       product: r, pNo: i + 1, picked, showAll: false, pack,
       packLabel: zhPackLabelOn, packStyle: zhPackStyle,
       promptMode: pack > 1 ? 'pack' : 'image',
-      prompts: { image: zhWithKeepLabel(basePrompt), pack: packImagePrompt(Math.max(2, pack), zhPackLabelOn, zhPackStyle) },
+      prompts: { image: zhWithKeepLabel(zhLibResolveText(basePrompt, i)), pack: packImagePrompt(Math.max(2, pack), zhPackLabelOn, zhPackStyle) },
       slots: {}, pasteSel: new Set(picked), active: picked[0] ?? 0
     };
   });
@@ -18897,6 +18996,7 @@ function zhStudioRender(dir = 0) {
             <button type="button" data-ps="new" class="${it.packStyle === 'new' ? 'on' : ''}">Naya</button>
             <button type="button" data-ps="old" class="${it.packStyle === 'old' ? 'on' : ''}">Purana (white bg)</button>
           </div>` : ''}
+          <select id="zsLibSel" class="zs-sel" title="Use a prompt from your library for THIS product"><option value="">📚 Library…</option>${zhLibAll().map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
           <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>
         </div>
         <textarea id="zsPrompt" class="zs-prompt" rows="3" spellcheck="false">${esc(prompt)}</textarea>
@@ -19172,6 +19272,11 @@ function zsGo(delta) {
 
   body.addEventListener('change', (e) => {
     const it = zsCur(); if (!it) return;
+    if (e.target.id === 'zsLibSel') {
+      const en = zhLibGet(e.target.value); if (!en) return;
+      it.prompts.image = en.id === 'scene' ? zhWithKeepLabel(DEFAULT_AI_COMMERCIAL_PROMPT) : zhLibResolveText(en.text, ZhStudio.items.indexOf(it));
+      it.promptMode = 'image'; zhStudioRender(); toast('✓ Prompt: ' + en.name, 'ok'); return;
+    }
     if (e.target.dataset.paste != null) {
       const i = +e.target.dataset.paste;
       e.target.checked ? it.pasteSel.add(i) : it.pasteSel.delete(i);

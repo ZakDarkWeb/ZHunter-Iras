@@ -1104,6 +1104,10 @@
                   </select>
                 </div>
                 <div class="temu-img-sel-wrap">
+                  <label class="temu-img-sel-label" title="Which prompt Edit Images uses (you can still change it per product)">Prompt</label>
+                  <select id="temuAiImgPromptSel" class="temu-img-sel"><option value="scene">Scene / background (default)</option></select>
+                </div>
+                <div class="temu-img-sel-wrap">
                   <label class="temu-img-sel-label">Images</label>
                   <select id="temuAiImgCountSel" class="temu-img-sel">
                     <option value="1">Main only (1)</option>
@@ -1119,6 +1123,10 @@
               </div>
               <div id="temuAiImgPromptWrap" class="temu-img-prompt-wrap hidden">
                 <textarea id="temuAiImgPromptInp" class="inp inp-ta temu-img-prompt-ta" placeholder="Enter commercial photography AI prompt..."></textarea>
+                <div style="display:flex;gap:6px;margin-top:6px">
+                  <button id="temuAiImgPromptSaveBtn" class="temu-img-pick-btn" type="button" title="Save the text above as a new prompt in your library">💾 Save as new prompt</button>
+                  <button id="temuAiImgPromptDelBtn" class="temu-img-pick-btn" type="button" title="Delete the selected custom prompt">🗑 Delete</button>
+                </div>
               </div>
               </div>
             </div>

@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Prompt library: new "Prompt" picker in AI Image Studio (Scene default, Abundance pile — alternate / no text / with count text, plus your own saved prompts with 💾 Save / 🗑 Delete). Works in Auto (Flow, ChatGPT, Gemini: pick "✨ Prompt: …" per image in the batch setup, default = the chosen prompt) and in the manual Edit Studio ("📚 Library" picker per product). "Alternate" gives no-text / count-text on every other product.
+
 - Edit Studio "Paste in ChatGPT/Gemini/Flow" is faster: product images are downloaded in the background as soon as the product opens (and the next one), and big images are shrunk (max 1600px) before going to ChatGPT/Gemini.
 
 - Gemini manual mode reworked: attaches ALL chosen images (not just 1) through Gemini's hidden upload input (paste/drop fallbacks), turns on "Create image", types the prompt, you press Send; "Take from Gemini" now reads the real generated image (waits while it is still rendering, ignores your uploaded previews).

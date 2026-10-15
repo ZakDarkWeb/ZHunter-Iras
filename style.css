@@ -5989,3 +5989,7 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .tsp-retry{margin-left:auto;padding:4px 9px;font-size:11px;font-weight:600;border-radius:7px;border:1px solid #f87171;background:rgba(248,113,113,.1);color:#fca5a5;cursor:pointer}
 .tsp-retry:hover{background:rgba(248,113,113,.2)}
 .tsp-retry.hidden{display:none}
+
+/* v9.15 — prompt library picker inside Edit Studio */
+.zs-sel { background: rgba(255,255,255,.06); color: inherit; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 5px 8px; font-size: 11px; max-width: 170px; }
+.zs-sel option { color: #111; }
