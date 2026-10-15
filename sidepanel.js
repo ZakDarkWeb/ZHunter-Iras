@@ -2981,13 +2981,13 @@ const ZH_LIB_BUILTIN = [
   { id: 'scene', name: 'Background only (new background)', mode: 'background', text: null, builtin: true },
   { id: 'pack', name: 'Pack only (N PACK image)', mode: 'pack', text: null, builtin: true },
   { id: 'pack_background', name: 'Pack → Background (2 steps)', mode: 'pack_background', text: null, builtin: true },
-  { id: 'abund-alt', name: '⭐ Multipack with count', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), builtin: true, tag: 'abund' }
+  { id: 'abund-alt', name: '⭐ Multipack with count', text: ZH_ABUND_TEMPLATE(ZH_TEXT_RULE_COUNT), setup: ZH_ABUND_SETUP(ZH_TEXT_RULE_COUNT), short: 'New product image — apply the same rules again, and write the bold count text at the very top (line 1 = the exact count printed on the pack with its unit, line 2 = a short true catchy line).', every: 5, builtin: true, tag: 'abund' }
 ];
 let ZhLibCustom = [];      // [{id,name,text}]
 let ZhLibActive = 'scene';
 function zhLibAll() { return [...ZH_LIB_BUILTIN.map(e => e.id === 'scene' ? { ...e, text: DEFAULT_AI_COMMERCIAL_PROMPT } : e.id === 'improve' ? { ...e, text: ZH_GPT_IMPROVE_PROMPT } : e.mode ? { ...e, text: '' } : e), ...ZhLibCustom]; }
 function zhLibGet(id) { if (id === 'abund-text' || id === 'abund-none') id = 'abund-alt'; return zhLibAll().find(e => e.id === id) || null; }   // 'abund-text' was merged into 'abund-alt' (count on every image)
-function zhSetupFor(id) { const e = zhLibGet(id); return e && e.setup ? { key: e.id, text: e.setup, every: ZH_RESEND_EVERY } : null; }
+function zhSetupFor(id) { const e = zhLibGet(id); return e && e.setup ? { key: e.id, text: e.setup, short: e.short || '', every: e.every || ZH_RESEND_EVERY } : null; }
 const ZH_RESEND_EVERY = 10;   // the full prompt is sent again after this many images in one chat
 // {{TEXT_RULE}} → no text on odd products, count text on even ones (n = product number)
 function zhLibResolveText(text, n = 0) {
@@ -3678,7 +3678,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     const need = slot.n === 0 || slot.primeKey !== setup.key || (slot.since || 0) >= setup.every;
     if (need) { slot.primeKey = setup.key; slot.since = 0; }
     slot.since = (slot.since || 0) + 1;
-    text = need ? setup.text : ZH_SETUP_SHORT;
+    text = need ? setup.text : (setup.short || ZH_SETUP_SHORT);
   } else text = ((slot.n > 0 || slot.reused) ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
   slot.n++;
   if (S.engine === 'gemini') return gemRunOnTab(S, slot.tabId, b64, text, onNote);
@@ -3722,7 +3722,7 @@ async function gptArchiveChats(S) {
   if (!(tabId && await chrome.tabs.get(tabId).catch(() => null))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
   if (!tabId) return;
   // safety: a chat is archived only if EVERY message in it is one of our own prompts (never a chat you wrote in yourself)
-  const expect = [...new Set([S.prompt, ZH_SETUP_SHORT, ...(S.queue || []).flatMap(it => [it.prompt, it.setup?.text, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
+  const expect = [...new Set([S.prompt, ZH_SETUP_SHORT, ...(S.queue || []).flatMap(it => [it.prompt, it.setup?.text, it.setup?.short, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
   let ok = 0, bad = 0;
   for (let i = 0; i < list.length; i++) {
     temuStepSetStatus(`🗂 Archiving ChatGPT chats… ${i + 1}/${list.length}`);
@@ -17358,7 +17358,7 @@ async function temuStepSendCurrent() {
       const need = g.key !== current.setup.key || g.since >= current.setup.every;
       if (need) { g.key = current.setup.key; g.since = 0; }
       g.since++;
-      gtext = need ? current.setup.text : ZH_SETUP_SHORT;
+      gtext = need ? current.setup.text : (current.setup.short || ZH_SETUP_SHORT);
     }
     temuStepCancelActiveJob();
     const token = {}; S.gptToken = token; current.done = false; current.sentAt = Date.now();

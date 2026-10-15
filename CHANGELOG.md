@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Count text missing after the first image:** the short follow-up message ("New product image.") made Gemini drop the count text. For ⭐ Multipack with count the follow-up now repeats the count rule, and the full prompt is re-sent every 5 images (was 10).
 - **Square buttons:** no pill / round buttons — the new batch-setup task buttons and the older pill chips (filters, chips, category buttons) are now rectangular with small corners.
 - **Image batch setup — redesign:** tasks are now one-tap buttons (Improve · Background · Pack · Pack + Background · Skip · ⭐ Multipack with count) instead of dropdowns; clear step-1 card for "apply to many"; bigger thumbnails with the current task and "N images of this product"; bigger Apply / Start buttons.
 - **Image batch setup window for every engine** (Flow, ChatGPT and now Gemini too — pack number, PACK label etc.). **Ticked = runs:** if you tick some images in that window, ONLY those run (before, unticked ones were processed too); nothing ticked = all run as before.
