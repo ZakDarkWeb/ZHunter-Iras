@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Same image uploaded 4–10 times:** the Gemini/ChatGPT scripts were injected again whenever a tab was slow to answer, and every copy handled every message. Now an old copy is removed first, a busy tab refuses a second attach, and upload methods no longer stack on each other.
 - **Google "I'm not a robot" page:** the run now stops at once with a clear message (it never touches the CAPTCHA and no longer keeps reloading/opening tabs). Solve it yourself, wait a few minutes, then Retry failed.
 - **Gemini upload failures — real causes:** (1) Gemini refuses a 2nd file with the same name in one chat ("You've already uploaded a file named zhunter_1.png") → every upload now has a unique name. (2) A new account shows "Creating content from images and files — Agree" once: the extension waits and tells you to press Agree (it never accepts terms for you), then continues.
 - **Gemini failed-upload fix (from the saved page):** the remove button of an attachment is labelled "close <file>" — it was never clicked, so a failed file stayed and blocked Send. Now it is removed, and failed uploads are recognised by Gemini's own markers (has-error / error icon).

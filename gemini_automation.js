@@ -5,6 +5,12 @@
 (() => {
   'use strict';
 
+  // The panel re-injects this file when a tab does not answer — without this, every injection added one more listener and each message was handled several times (many uploads of the same image)
+  try { window.__zhGemOff && window.__zhGemOff(); } catch (_) {}
+  const __zhGemListeners = [];
+  const addGemListener = (fn) => { try { chrome.runtime?.onMessage?.addListener(fn); __zhGemListeners.push(fn); } catch (_) {} };
+  window.__zhGemOff = () => { __zhGemListeners.forEach(fn => { try { chrome.runtime.onMessage.removeListener(fn); } catch (_) {} }); };
+
   console.log('[ZHunter Gemini] Automation script active on', location.href);
 
   // Floating Toast HUD on Gemini page
@@ -195,7 +201,7 @@
   window.__zhunterGeminiExecute = checkPendingAction;
 
   try {
-    chrome.runtime?.onMessage?.addListener((msg) => {
+    addGemListener((msg) => {
       if (msg?.action === 'TRIGGER_GEMINI_IMAGE') {
         checkPendingAction();
       }
@@ -292,6 +298,7 @@
     }
     // 2) paste event on the composer
     try {
+      await clearAttachments();   // never stack a second copy on top of a first one
       editor.focus();
       const pe = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
       editor.dispatchEvent(pe);
@@ -300,6 +307,7 @@
     } catch (_) {}
     // 3) drag & drop on the page
     try {
+      await clearAttachments();
       const target = document.querySelector('.xap-uploader-dropzone') || document.querySelector('input-container') || editor;
       const o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight / 2) };
       target.dispatchEvent(new DragEvent('dragenter', o)); target.dispatchEvent(new DragEvent('dragover', o));
@@ -453,8 +461,10 @@
   }
 
   try {
-    chrome.runtime?.onMessage?.addListener((msg, _s, sendResponse) => {
+    addGemListener((msg, _s, sendResponse) => {
       if (msg?.action === 'ZH_GEM_MANUAL_ATTACH') {
+        if (window.__zhGemBusy && Date.now() - window.__zhGemBusy < 6 * 60000) { try { sendResponse({ ok: false, error: 'Gemini tab is still busy with the previous image' }); } catch (_) {} return true; }
+        window.__zhGemBusy = Date.now();
         (async () => {
           try {
             const imgs = (msg.imgs && msg.imgs.length) ? msg.imgs : (msg.imgBase64 ? [msg.imgBase64] : []);
@@ -479,8 +489,9 @@
               if (!sent && attachFailed()) throw new Error('Gemini upload keeps failing (red "!") — check the Gemini page, then Retry failed');
               showGeminiHUD(sent ? 'ZHunter: sent — waiting for the image…' : 'ZHunter: press Send yourself — I will take the image', sent ? 'info' : 'warn');
             } else showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
+            window.__zhGemBusy = 0;
             sendResponse({ ok: true, attached: n, sent });
-          } catch (e) { showGeminiHUD(e?.message || 'failed', 'warn'); try { await clearAttachments(); } catch (_) {} try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+          } catch (e) { window.__zhGemBusy = 0; showGeminiHUD(e?.message || 'failed', 'warn'); try { await clearAttachments(); } catch (_) {} try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;
       }

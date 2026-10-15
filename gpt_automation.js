@@ -5,6 +5,11 @@
 (() => {
   'use strict';
 
+  // re-injection (or an extension reload) must not leave several copies of the message listener: each message would run several times
+  try { window.__zhGptOff && window.__zhGptOff(); } catch (_) {}
+  const __zhGptListeners = [];
+  window.__zhGptOff = () => { __zhGptListeners.forEach(fn => { try { chrome.runtime.onMessage.removeListener(fn); } catch (_) {} }); };
+
   console.log('[ZHunter GPT] Automation script active on', location.href);
 
   // Floating Toast HUD on ChatGPT page
@@ -496,7 +501,7 @@
   window.__zhunterGptExecute = checkPendingAction;
 
   try {
-    chrome.runtime?.onMessage?.addListener((msg, sender, sendResponse) => {
+    const __gptOnMsg = (msg, sender, sendResponse) => {
       if (msg?.action === 'TRIGGER_GPT_IMAGE') {
         checkPendingAction();
       }
@@ -530,7 +535,8 @@
       }
       if (msg?.action === 'ZH_GPT_IMG_RUN') { runImgJob(msg.job); try { sendResponse({ ok: true }); } catch (_) {} }
 
-    });
+    };
+    chrome.runtime?.onMessage?.addListener(__gptOnMsg); __zhGptListeners.push(__gptOnMsg);
   } catch (_) {}
 
   // Run immediately
