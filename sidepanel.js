@@ -13467,12 +13467,15 @@ function temuPrice(src, cfg, prof, seed) {
     const key = String(seed || src);
     const jitter = temuSeedFrac(key + '|j') * Math.min(6, Math.max(1, gap * 0.12));   // small stable wiggle upwards (gap never gets smaller)
     const cents = 1 + Math.floor(temuSeedFrac(key + '|c') * 97);                      // .01 – .98
-    const b = Math.round((Math.floor(p + gap + jitter) + cents / 100) * 100) / 100;
+    // v9.15 — never below 2× the source price (cfg.price_floor_x, default 2): the gap alone is too low for costs above ~$40
+    const floorX = parseFloat(cfg.price_floor_x ?? 2) || 0;
+    const sell = Math.max(p + gap + jitter, p * floorX + jitter);
+    const b = Math.round((Math.floor(sell) + cents / 100) * 100) / 100;
     const lc = 1 + Math.floor(temuSeedFrac(key + '|l') * 97);
     const l = Math.round((Math.floor(b * (cfg.list_price_multiplier || 1.25)) + lc / 100) * 100) / 100;
     return [b, l, rule];
   }
-  let base = p * rule.px;
+  let base = Math.max(p * rule.px, p * (parseFloat(cfg.price_floor_x ?? 2) || 0));   // v9.15 — never below 2× source
   // v9.15 — below the floor: do NOT give every product the same price; floor + a little that follows the cost + a stable per-product bit
   if (base < rule.min) { const top = Math.min(parseFloat(cfg.price_rand_max) || 299.99, rule.max); base = rule.min + temuSeedFrac(seed || src) * Math.max(0, top - rule.min); }   // random (stable per product) between the floor and 299.99
   if (base > rule.max) base = rule.max;
