@@ -2,6 +2,7 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- **Image batch setup window for every engine** (Flow, ChatGPT and now Gemini too — pack number, PACK label etc.). **Ticked = runs:** if you tick some images in that window, ONLY those run (before, unticked ones were processed too); nothing ticked = all run as before.
 - **All prompts in the dropdown:** Improve image only · Background only · Pack only · Pack → Background · ⭐ Multipack with count. Picking a task there makes it the default in "Image batch setup" (pack numbers are still set there per product). "Old prompt" and "Background only" were the same job and are now one ("Background only (new background)").
 - Removed the "Multipack — plain, no text" prompt (library now: Old prompt + ⭐ Multipack with count).
 - Prompt names: "⭐ Multipack with count" (full pile + count text on every image) and "Multipack — plain, no text".

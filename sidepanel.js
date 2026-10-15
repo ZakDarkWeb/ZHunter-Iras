@@ -16843,15 +16843,16 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
     });
     const update = () => {
       let steps = 0, active = 0;
+      const anyPick = entries.some(r => r.querySelector('.batch-pick').checked);   // something ticked → ONLY the ticked images run
       entries.forEach(row => {
         const mode = row.querySelector('.batch-mode').value;
         row.querySelector('.batch-qty').disabled = mode === 'background' || mode === 'skip' || mode === 'improve' || mode.startsWith('lib:');
         row.querySelector('.batch-lbl').disabled = row.querySelector('.batch-style').disabled = mode === 'background' || mode === 'skip' || mode === 'improve' || mode.startsWith('lib:');
         row.classList.toggle('batch-skipped', mode === 'skip');
         row.classList.toggle('batch-selected', row.querySelector('.batch-pick').checked);
-        if (mode !== 'skip') { active++; steps += mode === 'pack_background' ? 2 : 1; }
+        if (mode !== 'skip' && (!anyPick || row.querySelector('.batch-pick').checked)) { active++; steps += mode === 'pack_background' ? 2 : 1; }
       });
-      modal.querySelector('.batch-summary').textContent = `${active}/${queue.length} images · ${steps} generations · ${queue.length - active} skipped`;
+      modal.querySelector('.batch-summary').textContent = `${active}/${queue.length} images · ${steps} generations · ${queue.length - active} skipped` + (anyPick ? ' · only the ticked images will run' : '');
       modal.querySelector('.batch-selected-count').textContent = `${entries.filter(row => row.querySelector('.batch-pick').checked).length} selected`;
       modal.querySelector('.batch-start').disabled = !active;
       const bulkMode = modal.querySelector('.batch-bulk-mode').value;
@@ -16882,7 +16883,8 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
     modal.querySelector('.batch-cancel').onclick = () => { modal.remove(); resolve(false); };
     modal.querySelector('.batch-start').onclick = () => {
       try {
-        const activeEntries = entries.filter(row => row.querySelector('.batch-mode').value !== 'skip');
+        const anyPick = entries.some(r => r.querySelector('.batch-pick').checked);
+        const activeEntries = entries.filter(row => row.querySelector('.batch-mode').value !== 'skip' && (!anyPick || row.querySelector('.batch-pick').checked));
         if (!activeEntries.length) throw new Error('Choose at least one image task');
         const settings = activeEntries.map(row => {
           const mode = row.querySelector('.batch-mode').value;
@@ -16961,7 +16963,7 @@ async function temuStartBulkImageEdit(opts = {}) {
 
   if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });
   { const ae = zhLibGet(ZhLibActive); if (engine === 'gemini' && ae?.setup && prompt.trim() === ae.text.trim()) queue.forEach(q => { q.setup = zhSetupFor(ae.id); }); }   // Gemini: library prompt as it is; alternate text per product
-  if (engine !== 'gemini' && !(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : 'Auto (ChatGPT → Flow → Gemini)'))) return;
+  if (!(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : engine === 'gemini' ? 'Gemini' : 'Auto (ChatGPT → Flow → Gemini)'))) return;   // the setup window now opens for every engine (Flow, ChatGPT, Gemini)
 
   TemuImgStepper = {
     queue,
