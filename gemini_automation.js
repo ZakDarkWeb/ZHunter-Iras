@@ -335,9 +335,9 @@
     if (!btn) return false;
     await sleep(400 + Math.random() * 500);
     try { btn.click(); } catch (_) {}
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 32; i++) {
       await sleep(250);
-      if (document.querySelectorAll('user-query').length > userBefore || composerEl()?.classList.contains('ql-blank')) return true;
+      if (document.querySelectorAll('user-query').length > userBefore || composerEl()?.classList.contains('ql-blank') || document.querySelector('button[aria-label*="Stop" i]')) return true;
     }
     return false;
   }
@@ -367,7 +367,7 @@
   // every big picture in the chat that is not YOUR upload (the exact Gemini class names change, so size + place decide)
   function generatedImages() {
     return [...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 400 && i.naturalHeight >= 400
-      && !i.closest('user-query, user-query-file-preview, user-query-file-carousel, rich-textarea, input-area-v2, .input-area-container, side-navigation-v2, bard-sidenav, mat-sidenav, nav'));
+      && !i.closest('user-query, user-query-file-preview, user-query-file-carousel, rich-textarea, input-area-v2, .input-area-container, bard-sidenav'));   // (the chat itself sits inside <side-navigation-v2>, so that one must NOT be excluded)
   }
   async function grabLatest(waitMs, fresh) {
     const end = Date.now() + (waitMs || 0);
