@@ -13823,6 +13823,46 @@ function temuSourcingSnapshot() {
   return { id: TemuLast.sourcingId || (TemuLast.sourcingId = 'src_' + crypto.randomUUID()), t: Date.now(), store: TemuLast.store || temuActiveStoreName(), items: TemuLast.items.map(it => ({ title: it.title, url: it.url, sourcingPrice: it.sourcingPrice, list: it.list })) };
 }
 
+// v9.15 — the extension FOLLOWS the store that is open in Temu: read the store name from an open seller.temu.com tab and, if that store
+// exists in the extension, make it the active one (template, categories, listed history and prices of that store are used from then on).
+let _zhStoreSyncBusy = false;
+async function temuSyncStoreFromTemu(opts = {}) {
+  if (_zhStoreSyncBusy) return null;
+  _zhStoreSyncBusy = true;
+  try {
+    const stores = temuStores();
+    if (!Object.keys(stores).length) return null;
+    const tabs = await chrome.tabs.query({ url: '*://seller.temu.com/*' });
+    if (!tabs.length) return null;
+    const tab = tabs.find(t => t.active) || tabs.find(t => /upload-goods/.test(t.url || '')) || tabs[0];
+    const r = await new Promise(res => { try { chrome.tabs.sendMessage(tab.id, { action: 'TEMU_GET_STORE' }, x => { void chrome.runtime.lastError; res(x); }); } catch (_) { res(null); } });
+    const name = String(r?.name || '').trim();
+    if (!name) return null;
+    const key = Object.keys(stores).find(k => k.trim().toLowerCase() === name.toLowerCase());
+    if (!key) {
+      if (_zhStoreSyncBusy && !opts.quiet && temuSyncStoreFromTemu._warned !== name) { temuSyncStoreFromTemu._warned = name; toast(`Temu is on "${name}", but that store is not added in the extension`, 'warn'); }
+      return { name, matched: false };
+    }
+    if (key === temuActiveStoreName()) return { name: key, matched: true, changed: false };
+    if ((await temuSaveStores(stores, key)) !== true) return { name: key, matched: true, changed: false };
+    TemuLast = null;
+    try { temuRenderStoreBar(); temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm(); updateTopTemuStorePill(); temuUpdateSrcInfo(); } catch (_) {}
+    try { temuRenderReview(); } catch (_) {}
+    toast(`Store switched to ${key} (the one open in Temu)`, 'ok');
+    return { name: key, matched: true, changed: true };
+  } catch (e) { console.warn('[ZHunter] store sync failed', e); return null; }
+  finally { _zhStoreSyncBusy = false; }
+}
+// follow Temu while you work: when a Temu seller tab is opened / loaded / focused
+(() => {
+  let t = null;
+  const kick = () => { clearTimeout(t); t = setTimeout(() => { temuSyncStoreFromTemu({ quiet: true }); }, 900); };
+  try {
+    chrome.tabs.onActivated.addListener(kick);
+    chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete' && /^https:\/\/seller\.temu\.com\//i.test(tab?.url || '')) kick(); });
+    window.addEventListener('focus', kick);
+  } catch (_) {}
+})();
 async function temuRunExport(opts = {}) {
   const rep = $('temuReport');
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) {} } };
@@ -13832,6 +13872,7 @@ async function temuRunExport(opts = {}) {
     return;
   }
   try {
+    await temuSyncStoreFromTemu();   // follow the store that is open in Temu before anything is built
     const b64 = temuActiveStore()?.templateB64 || await temuBuiltinTemplateB64();
     if (!b64) {
       const sn = temuActiveStoreName() || '(no store selected)';

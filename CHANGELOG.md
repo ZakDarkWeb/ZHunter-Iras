@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu store sync (reversed): the extension now FOLLOWS the store open in Temu — on Export/Upload and whenever a Temu seller tab is opened/loaded/focused it reads the store name and switches its active store to the same one (if added). If no Temu tab is open, the old fallback (switch Temu to the extension's store) still applies.
 - Temu upload: if the store open in Temu is not the extension's store, the extension switches it automatically (header menu → Switch → store card), checks the name, reopens the upload page and goes on; it stops with a clear message if the store is not in the account.
 - Export + Upload: products already listed on the active store now stop the upload with a warning (list shown) instead of being skipped silently.
 - Export: products with no category now start "Learn categories" automatically (Temu's first suggestion is taken), then the export continues.
