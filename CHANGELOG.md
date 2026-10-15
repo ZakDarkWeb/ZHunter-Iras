@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini diagnostics: the tab line now says what is happening ("image received (KB) — saving… Ns"), Gemini shows "image found ✓", and the page is polled every 8 s. Tested the finder on your saved Gemini page: it finds the image there.
+
 - Gemini FIX (real cause found in the saved page): the whole chat sits inside Gemini's <side-navigation-v2> element, and my "ignore the side menu" rule ignored every picture. Only the real menu is ignored now, so the finished image is found and replaced.
 
 - Faster replace after the AI image arrives: big PNGs are shrunk to JPEG before saving, the product list is redrawn after a short delay instead of blocking each image, and each tab line now shows timing ("AI 40s · save 2s").

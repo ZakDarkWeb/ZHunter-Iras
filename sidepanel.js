@@ -3604,6 +3604,7 @@ async function gptWaitTab(tabId, ms = 40000) {
 async function gemRunOnTab(S, tabId, b64, text, onNote) {
   let aborted = false; const abort = () => { aborted = true; };
   (S.gptAborts = S.gptAborts || new Set()).add(abort);
+  const t0 = Date.now();
   try {
     onNote?.('attaching image…');
     const r = await manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js');
@@ -3612,8 +3613,8 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     const end = Date.now() + 9 * 60000;
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
-      const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 20000 }, 'gemini_automation.js');
-      if (g?.ok && g.dataUrl) return g.dataUrl;
+      const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
+      if (g?.ok && g.dataUrl) { onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
       await sleepMs(1500);
     }
     throw new Error('Gemini image did not appear in time');
@@ -3750,7 +3751,8 @@ async function gptRunItem(S, idx, item) {
       return false;
     }
     const tSave = Date.now();
-    const ok = await temuStepApplyManualImage(result, 'Auto', item);
+    const tick = setInterval(() => { S.pool.slotNote[idx] = `saving image… ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi(); }, 1000);
+    let ok; try { ok = await temuStepApplyManualImage(result, 'Auto', item); } finally { clearInterval(tick); }
     if (!ok) { S.stats.skipped++; return false; }
     S.pool.slotNote[idx] = `done — AI ${Math.round((item._tAi || 0) / 1000)}s · save ${Math.round((Date.now() - tSave) / 1000)}s`; gptPoolUi();
     more = !!item._more;

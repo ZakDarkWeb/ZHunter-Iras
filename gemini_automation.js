@@ -386,7 +386,8 @@
         await sleep(pending ? 2500 : 900);   // the same picture still there after a moment = finished
         if (im.isConnected && im.complete && (im.currentSrc || im.src) === src) {
           const d = await readImg(im);
-          if (d) return d;
+          if (d) { showGeminiHUD('ZHunter: image found ✓ (' + Math.round(d.length / 1024) + ' KB)', 'ok'); return d; }
+          console.warn('[ZHunter Gemini] image found but could not be read', src);
         }
       }
       if (Date.now() > end) break;
