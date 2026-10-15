@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Pricing: the 2× floor also applies to the list price; Frozen items use a 3× floor (`price_floor_frozen_x`, default 3).
 - Pricing: selling price is never below 2× the source price (any category, incl. N Pack = source × N). Setting `price_floor_x` (default 2).
 - Edit Studio Copy: when the background cannot download the image (asleep / over 6 MB), the side panel now downloads it itself — fixes "image could not be downloaded".
 - Edit Studio: image Copy made reliable (3 fallbacks, shows the real error) and right-click on any studio image now copies it.
