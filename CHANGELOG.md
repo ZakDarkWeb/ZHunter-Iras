@@ -1,6 +1,8 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu upload: if the store open in Temu is not the extension's store, the extension switches it automatically (header menu → Switch → store card), checks the name, reopens the upload page and goes on; it stops with a clear message if the store is not in the account.
+- Export + Upload: products already listed on the active store now stop the upload with a warning (list shown) instead of being skipped silently.
 - Export: products with no category now start "Learn categories" automatically (Temu's first suggestion is taken), then the export continues.
 - Temu Export: the "Import sheet" button always opens the file window, even when a sheet is already loaded.
 - Temu Export: when a sheet is loaded, "Choose another sheet" and "Remove loaded sheet" buttons appear under Products source (the Import sheet tab only switched back to the old sheet).

@@ -13912,6 +13912,17 @@ async function temuRunExport(opts = {}) {
       enr = temuEnrich(rows, cfg);
     }
     const { items, skipped } = enr;
+    // v9.15 — products already listed on THIS store: warn and stop the upload (nothing is sent)
+    if (opts.forUpload) {
+      const dup = skipped.filter(x => /^already listed/i.test(x));
+      if (dup.length) {
+        const st = temuActiveStoreName() || 'this store';
+        say(`⚠ ${dup.length} product(s) were already listed on "${st}" — upload STOPPED, nothing was sent:\n` + dup.slice(0, 40).map(x => '• ' + x).join('\n') +
+          `\n\nUntick / delete these products in the list, or turn off "Skip already listed" in Settings if you really want to list them again. Then press Export + Upload again.`);
+        toast(`${dup.length} product(s) already listed on ${st} — upload stopped`, 'warn');
+        return;
+      }
+    }
     if (!items.length) {
       say('No new products:\n' + (skipped.length ? skipped.map(x => '• ' + x).join('\n') : '(the list is empty)') +
         '\n\nTo list them again, turn off the "Skip already listed" checkbox.');

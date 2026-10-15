@@ -1333,6 +1333,33 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
     if (!ready) { report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
     report.push('✓ Temu page ready');
 
+    // v9.15 — the store open in Temu must be the extension's store: switch it automatically (header menu → Switch → store card)
+    if (expectStore) {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      const curName = async () => { const r = await tabsSend(tab.id, { action: 'TEMU_GET_STORE' }); return r && r.name ? r.name : ''; };
+      const before = await curName();
+      if (before && !same(before, expectStore)) {
+        report.push(`• Temu is on "${before}" — switching to "${expectStore}"…`);
+        const sw = await tabsSend(tab.id, { action: 'TEMU_SWITCH_STORE', target: expectStore });
+        if (sw && sw.ok === false) { report.push('✗ ' + sw.error); return finish({ success: false, report }); }
+        let okSw = false;
+        for (let i = 0; i < 45 && !okSw; i++) { await sleep(1000); okSw = same(await curName(), expectStore); }
+        if (!okSw) { report.push(`✗ Could not switch Temu to "${expectStore}" (it still shows "${await curName() || '?'}"). Switch it by hand and try again.`); return finish({ success: false, report }); }
+        report.push(`✓ Switched Temu store to "${expectStore}"`);
+        // the page may have reloaded or moved to another page: open the upload page again and wait for it
+        try { await chrome.tabs.update(tab.id, { url: 'https://seller.temu.com/upload-goods-multiple.html' }); } catch (_) {}
+        ready = false;
+        for (let i = 0; i < 50 && !ready; i++) {
+          await sleep(i === 0 ? 2000 : 500);
+          const r = await tabsSend(tab.id, { action: 'PING' });
+          ready = !!(r && r.ready) && same(await curName(), expectStore);
+        }
+        if (!ready) { report.push('✗ Temu upload page did not load after the store switch'); return finish({ success: false, report }); }
+        report.push('✓ Temu page ready (new store)');
+      }
+    }
+
     const result = await tabsSend(tab.id, {
       action: 'TEMU_UPLOAD_FILE', b64, filename: filename || 'temu_upload.xlsx', expectStore,
       waitForUpload: true, hiddenMode: false

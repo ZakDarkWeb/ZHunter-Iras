@@ -2839,6 +2839,34 @@ function temuTopHistorySignature() {
   } catch (_) { return 'err'; }
 }
 
+
+// v9.15 — Temu store switcher (DOM seen on seller.temu.com): header store name → popover with "Switch" → modal "Switch stores" with cards (.itemStoreCard > .shopName)
+function temuCurrentStoreName() { return (document.querySelector('[class*="mall_name"]')?.textContent || '').trim(); }
+async function temuSwitchStoreTo(target) {
+  const norm = x => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (norm(temuCurrentStoreName()) === norm(target)) return { ok: true, already: true };
+  const trigger = document.querySelector('[class*="mall_name"]');
+  if (!trigger) return { ok: false, error: 'Store name not found on the Temu page' };
+  const holder = trigger.closest('section') || trigger.parentElement || trigger;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const findSwitch = () => [...document.querySelectorAll('[class*="optionBtn"]')].find(b => /^\s*switch\s*$/i.test(b.textContent || '') && temuVisible(b));
+  const fire = (el, types) => types.forEach(t => { try { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); } catch (_) {} });
+  let sw = findSwitch();
+  if (!sw) { for (const el of [trigger, holder]) fire(el, ['pointerover', 'mouseover', 'mouseenter', 'mousemove']); sw = await temuWait(findSwitch, 1500); }
+  if (!sw) { for (const el of [trigger, holder]) { try { el.click(); } catch (_) {} } sw = await temuWait(findSwitch, 2500); }
+  if (!sw) return { ok: false, error: 'Temu store menu did not open (Switch button not found)' };
+  sw.click();
+  const cards = await temuWait(() => { const c = [...document.querySelectorAll('[class*="itemStoreCard"]')]; return c.length ? c : null; }, 5000);
+  if (!cards) return { ok: false, error: 'Temu "Switch stores" list did not open' };
+  const nameOf = c => norm((c.querySelector('[class*="shopName"]')?.childNodes[0]?.textContent) || c.querySelector('[class*="shopName"]')?.textContent || '');
+  const card = cards.find(c => nameOf(c) === norm(target));
+  if (!card) return { ok: false, error: `Store "${target}" is not in this Temu account's store list (${cards.map(nameOf).join(', ')})` };
+  if (/current/i.test(card.className)) return { ok: true, already: true };
+  await sleep(300);
+  card.click();
+  return { ok: true, clicked: true };
+}
+
 async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, hiddenMode }) {
   const report = [];
   const ok = (m) => report.push('✓ ' + m);
@@ -3475,6 +3503,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.action === 'PING') {
       sendResponse({ success: true, ready: true });
+      return true;
+    }
+    if (message?.action === 'TEMU_GET_STORE') {
+      sendResponse({ success: true, name: temuCurrentStoreName() });
+      return true;
+    }
+    if (message?.action === 'TEMU_SWITCH_STORE') {
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ ok: false, error: 'Not a Temu seller page' }); return true; }
+      temuSwitchStoreTo(String(message.target || '')).then(sendResponse).catch(e => sendResponse({ ok: false, error: e?.message || 'switch failed' }));
       return true;
     }
     if (message?.action === 'TEMU_UPLOAD_FILE') {
