@@ -18978,13 +18978,24 @@ function packImagePrompt(n, label, style) { return packMasterPrompt(n, label ===
 async function zhImageToPngBlob(src) {
   let dataUrl = src;
   if (!/^data:/i.test(src)) {
-    const r = /^https:\/\/flow-content\.google\//i.test(src)
-      ? await msg({ action: 'FETCH_FLOW_IMAGE', url: src })
-      : await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
-    if (r?.success && r.base64) dataUrl = r.base64;
+    try {
+      const r = /^https:\/\/flow-content\.google\//i.test(src)
+        ? await msg({ action: 'FETCH_FLOW_IMAGE', url: src })
+        : await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
+      if (r?.success && r.base64) dataUrl = r.base64;
+    } catch (_) {}
   }
-  if (!/^data:/i.test(dataUrl)) throw new Error('image could not be downloaded');
-  const blob = await (await fetch(dataUrl)).blob();
+  let blob = null;
+  if (!/^data:/i.test(dataUrl)) {
+    // v9.15 — background could not get it (asleep / over 6 MB / blocked): the side panel downloads it itself
+    for (const opt of [{ credentials: 'omit' }, { credentials: 'omit', referrerPolicy: 'no-referrer' }, { credentials: 'include' }]) {
+      try {
+        const r = await fetch(src, { ...opt, signal: AbortSignal.timeout(30000) });
+        if (r.ok) { const b = await r.blob(); if (/^image\//i.test(b.type) && b.size) { blob = b; break; } }
+      } catch (_) {}
+    }
+    if (!blob) throw new Error('image could not be downloaded (check internet / the link may have expired)');
+  } else blob = await (await fetch(dataUrl)).blob();
   if (blob.type === 'image/png') return blob;
   const bmp = await createImageBitmap(blob);
   const c = document.createElement('canvas');

@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Edit Studio Copy: when the background cannot download the image (asleep / over 6 MB), the side panel now downloads it itself — fixes "image could not be downloaded".
 - Edit Studio: image Copy made reliable (3 fallbacks, shows the real error) and right-click on any studio image now copies it.
 
 - **Count text missing after the first image:** the short follow-up message ("New product image.") made Gemini drop the count text. For ⭐ Multipack with count the follow-up now repeats the count rule, and the full prompt is re-sent every 5 images (was 10).
