@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu upload: if Temu does not react to the file in a background tab, the tab is brought forward after 12 s and the file is chosen once more after 35 s (before giving up at 90 s).
 - Pricing: products with a copied store price (not recalculated before) are now raised to the 2× / Frozen 3× floor of their source price, in the list and in the export; a price you type yourself is never changed. Source→multiple chip works on them too.
 - Temu Export: every product row shows "$source → N.N×" (green = at/above the 2× floor, 3× Frozen; red = below).
 - Pricing: the 2× floor also applies to the list price; Frozen items use a 3× floor (`price_floor_frozen_x`, default 3).

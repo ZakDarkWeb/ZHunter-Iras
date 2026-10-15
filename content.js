@@ -2977,11 +2977,26 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
       try { chrome.runtime.sendMessage({ action: 'TEMU_UPLOAD_PROGRESS', phase, secs: Math.round((Date.now() - t0) / 1000), ...extra }, () => void chrome.runtime.lastError); } catch (_) {}
     };
     // phase 1: Temu ne file uthaa li — progress text / Cancel button / naya Upload ID / nayi history row — max 90s
-    let accepted = false, uploadId = null, lastNote = 0;
+    let accepted = false, uploadId = null, lastNote = 0, nudged = false, reattached = false;
     while (Date.now() - t0 < 90000) {
       await new Promise(r => setTimeout(r, 700));
       uploadId = newId();
       if (progressText() !== null || uploadId || cancelVisible() || temuTopHistorySignature() !== beforeSig) { accepted = true; break; }
+      // v9.15 — Temu sometimes ignores a file chosen in a background tab: bring the tab forward after 12 s, and choose the file once more after 35 s
+      if (!nudged && Date.now() - t0 > 12000 && document.visibilityState === 'hidden') {
+        nudged = true; report.push('• Temu has not reacted yet — bringing its tab to the front');
+        try { await new Promise(res => chrome.runtime.sendMessage({ action: 'TEMU_NEED_VISIBLE' }, () => { void chrome.runtime.lastError; res(); })); } catch (_) {}
+      }
+      if (!reattached && Date.now() - t0 > 35000) {
+        reattached = true; report.push('• Still nothing — choosing the file again');
+        try {
+          const bytes2 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          const dt2 = new DataTransfer(); dt2.items.add(new File([bytes2], filename || 'temu_upload.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+          const inp2 = pickInput() || input;
+          inp2.files = dt2.files;
+          inp2.dispatchEvent(new Event('input', { bubbles: true })); inp2.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (_) {}
+      }
       progress('uploading');
       if (Date.now() - lastNote > 30000) { lastNote = Date.now(); report.push(`• Uploading file… (${Math.round((Date.now() - t0) / 1000)}s)`); }
     }
