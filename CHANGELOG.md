@@ -2,6 +2,8 @@
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 
+- Gemini: a failed try no longer leaves its image in the box (the next product's image used to be added to it and both were sent in one message). Old waiting files are removed before each attach; attach check waits up to 15 s and uses several signals.
+
 - Gemini result detection rewritten: any big picture in the chat (not your upload, not the side menu) is taken once it stays unchanged for a moment — no dependence on Gemini's changing class names. Fixes "No generated image found in Gemini" / timeouts.
 
 - Gemini no longer selects the whole page text when typing the prompt; fewer than 5 images → only 1 tab is used (ChatGPT and Gemini); ChatGPT chat archiving is switched off.

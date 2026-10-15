@@ -208,8 +208,21 @@
   function composerEl() {
     return document.querySelector('rich-textarea .ql-editor[role="textbox"], rich-textarea .ql-editor, .ql-editor[role="textbox"], div[contenteditable="true"][role="textbox"]');
   }
-  function attachedCount() {
-    return document.querySelectorAll('uploader-file-preview-container [data-test-id*="file"], uploader-file-preview, .file-preview-container uploader-file-preview, .attachment-preview-wrapper img, input-area-v2 uploader-file-preview').length;
+  function inputArea() { return document.querySelector('input-area-v2, input-container, .input-area-container') || document.body; }
+  function attachedCount() {   // previews of attached files in the composer area (names/classes change, so look at several signals)
+    const area = inputArea();
+    const named = area.querySelectorAll('uploader-file-preview, [data-test-id*="file-preview"], .file-preview, .attachment-preview-wrapper');
+    if (named.length) return named.length;
+    return [...area.querySelectorAll('img')].filter(i => i.offsetWidth >= 24 && i.offsetHeight >= 24).length;
+  }
+  // remove files that are still waiting in the composer from an earlier (failed) try
+  async function clearAttachments() {
+    for (let round = 0; round < 6; round++) {
+      const btns = [...inputArea().querySelectorAll('button')].filter(b => /remove|delete|clear/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-test-id') || '')) && !/voice|mic/i.test(b.getAttribute('aria-label') || ''));
+      if (!btns.length) break;
+      try { btns[0].click(); } catch (_) {}
+      await sleep(350);
+    }
   }
   function findFileInput() {
     return document.querySelector('images-files-uploader input[type="file"], input[type="file"].hidden-file-input, input[type="file"]');
@@ -231,9 +244,10 @@
     const editor = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 15000);
     if (!editor) throw new Error('Gemini composer not found — open a chat first');
     await sleep(500);
+    await clearAttachments();
     const before = attachedCount();
     const dt = new DataTransfer(); files.forEach(f => dt.items.add(f));
-    const ok = () => attachedCount() >= before + 1;
+    const ok = () => attachedCount() >= before + 1 || (before === 0 && !!findSend() && !findSend().disabled);
     // 1) the hidden file input (appears after the "+" menu is opened once)
     let inp = findFileInput();
     if (!inp) { await openPlusMenu(); await sleep(250); inp = findFileInput(); }
@@ -242,7 +256,7 @@
         inp.files = dt.files;
         inp.dispatchEvent(new Event('input', { bubbles: true }));
         inp.dispatchEvent(new Event('change', { bubbles: true }));
-        for (let i = 0; i < 16 && !ok(); i++) await sleep(250);
+        for (let i = 0; i < 60 && !ok(); i++) await sleep(250);   // up to 15 s (new chats upload slowly)
         closeMenus();
         if (ok()) return files.length;
       } catch (_) {}
@@ -264,6 +278,7 @@
       for (let i = 0; i < 12 && !ok(); i++) await sleep(250);
       if (ok()) return files.length;
     } catch (_) {}
+    await clearAttachments();
     throw new Error('image was not attached — check the Gemini page (F5) and try again');
   }
   async function typePrompt(text) {
@@ -399,7 +414,7 @@
               showGeminiHUD(sent ? 'ZHunter: sent — waiting for the image…' : 'ZHunter: press Send yourself — I will take the image', sent ? 'info' : 'warn');
             } else showGeminiHUD('ZHunter: image' + (n > 1 ? 's' : '') + (msg.prompt ? ' + prompt' : '') + ' ready — press Send', 'ok');
             sendResponse({ ok: true, attached: n, sent });
-          } catch (e) { showGeminiHUD(e?.message || 'failed', 'warn'); try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
+          } catch (e) { showGeminiHUD(e?.message || 'failed', 'warn'); try { await clearAttachments(); } catch (_) {} try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;
       }
