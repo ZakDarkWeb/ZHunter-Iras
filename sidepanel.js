@@ -3720,6 +3720,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     await gptWaitTab(slot.tabId);
     slot.n = 0;
   } else await chrome.tabs.update(slot.tabId, { active: true }).catch(() => {});
+  if (S.engine === 'gemini' && typeof prompt === 'string') prompt = prompt.split(ZH_GPT_IMPROVE_PROMPT).join(ZH_GEM_IMPROVE_PROMPT);   // v9.15 — Gemini needs a more direct, scene-style wording
   let text;
   if (setup) {   // rules once per chat, later messages = just the image (full prompt again every `every` images)
     const need = slot.n === 0 || slot.primeKey !== setup.key || (slot.since || 0) >= setup.every;
@@ -16960,6 +16961,7 @@ function temuInitReviewToggle() {
 // ═══ Bulk AI Image Studio Pipeline ═══
 // ═════════════════════════════════════════════════════════════════
 // v9.15 — simple "just make it better" prompt (no background / pack change)
+const ZH_GEM_IMPROVE_PROMPT = 'Create a new, eye-catching premium e-commerce photo from the attached product image. Keep the product EXACTLY the same: same package, shape, colors, logo, printed labels and the same number of units (do not change the pack count). Change everything around it: place it in a rich, realistic, appetizing lifestyle scene with a fitting background, props and surface, warm cinematic lighting, soft natural shadows, depth of field, sharp focus on the product and vivid, high-contrast colors that make a shopper stop scrolling. Make it look like a professional advertising photograph, clearly different and much more attractive than the original. Do not add any new text, numbers, labels, badges or watermarks. Output a square 1:1 image.';
 const ZH_GPT_IMPROVE_PROMPT = 'Make this image interesting as much as you can. Act as a human psychology specialist and image editor specialist. Improve and edit the image as much as you can, but keep the exact same product, packaging, labels and number of units. Do not change the pack count. Do not add any new text, number, label or badge. Output a square 1:1 image.';
 function temuBatchStages(mode, quantity, backgroundPrompt, label = zhPackLabelOn, style = zhPackStyle, ordinal = 0) {
   const n = Number(quantity);
