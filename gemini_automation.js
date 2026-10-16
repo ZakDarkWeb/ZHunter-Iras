@@ -415,6 +415,11 @@
   async function readImg(img) {
     const src = img.currentSrc || img.src;
     try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); }); } catch (_) {}
+    const blobToUrl = b => new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); });
+    // v9.15 — Google's image server sometimes needs the login cookies
+    try { const r = await fetch(src, { credentials: 'include' }); if (r.ok) { const d = await blobToUrl(await r.blob()); if (d) return d; } } catch (_) {}
+    // the extension's background fetches it with its own host permission (no CORS limit)
+    try { const r = await chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url: src }); const d = r?.dataUrl || r?.base64 || r?.data; if (typeof d === 'string' && d.startsWith('data:')) return d; } catch (_) {}
     try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
   }
   // every big picture in the chat that is not YOUR upload (the exact Gemini class names change, so size + place decide)
