@@ -15699,6 +15699,7 @@ function _allImgUrls(r) {
   return r.images.map(img => (typeof img === 'string' ? img : img?.url || '')).filter(Boolean);
 }
 
+const TemuRvOpen = new Set();   // v9.15 — which product cards are expanded (kept across list redraws)
 async function temuRenderReview() {
   const list = $('temuReviewList');
   const countEl = $('temuReviewCount');
@@ -15716,6 +15717,7 @@ async function temuRenderReview() {
   const px = parseFloat($('tgPx')?.value || $('tgPx2')?.value || cfg.price_multiplier);
   if (isFinite(px) && px > 0) cfg.price_multiplier = px;
 
+  const _rvScroll = list.scrollTop;
   list.innerHTML = '';
   { // v9.12.5 — sticky mini toolbar (list now scrolls inside its own box)
     const tools = document.createElement('div');
@@ -15735,6 +15737,7 @@ async function temuRenderReview() {
       const b = e.target.closest('button[data-t]');
       if (!b) return;
       if (b.dataset.t === 'close') {
+        TemuRvOpen.clear();
         list.querySelectorAll('.temu-rv-card.open').forEach(c => {
           c.classList.remove('open');
           c.querySelector('.temu-rv-expanded')?.classList.add('hidden');
@@ -16223,10 +16226,13 @@ async function temuRenderReview() {
       expanded?.classList.toggle('hidden');
       card.classList.toggle('open');
       if (chev) chev.style.transform = card.classList.contains('open') ? 'rotate(180deg)' : '';
+      if (r.id) { if (card.classList.contains('open')) TemuRvOpen.add(r.id); else TemuRvOpen.delete(r.id); }
     });
+    if (r.id && TemuRvOpen.has(r.id)) { card.classList.add('open'); expanded?.classList.remove('hidden'); if (chev) chev.style.transform = 'rotate(180deg)'; }
 
     list.appendChild(card);
   });
+  list.scrollTop = _rvScroll;
 }
 
 // v9.15 — "$source → N.N×" chip on every product row (red = below the 2× floor, 3× for Frozen)

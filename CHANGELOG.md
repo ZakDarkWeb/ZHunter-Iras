@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Temu Export list: replacing/changing an image no longer collapses all product cards — expanded cards and scroll position are kept; only 'Collapse All' closes them.
 - Hunt: products already in the Library are skipped before any tab is opened (queue and open tabs), with a message.
 - Library cap: max 300 products; above that the OLDEST are removed with a warning (the extension gets slow with more).
 - Gemini: when an account hits its limit, the tab moves to the next signed-in Google account (/u/N) and the same image is sent again.
