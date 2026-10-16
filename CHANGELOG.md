@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Gemini automation: Chrome freezes a Gemini tab that stays in the background, so images got stuck until the tab was opened. Now, if an image takes longer than ~25 s (or attaching takes >20 s), the extension brings that Gemini tab forward for ~3 s, then returns you to the tab you were on (one tab at a time, every 30 s at most).
 - Temu Export list: replacing/changing an image no longer collapses all product cards — expanded cards and scroll position are kept; only 'Collapse All' closes them.
 - Hunt: products already in the Library are skipped before any tab is opened (queue and open tabs), with a message.
 - Library cap: max 300 products; above that the OLDEST are removed with a warning (the extension gets slow with more).

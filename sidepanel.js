@@ -3645,6 +3645,20 @@ async function gptWaitTab(tabId, ms = 40000) {
 }
 // send one image to a slot and wait for the edited image (resolves with a data: URL)
 // Gemini: attach image + prompt in this tab, press Send, wait for the NEW generated image
+// v9.15 — Chrome freezes Gemini tabs that sit in the background: the image never finishes until the tab is opened.
+// While waiting, bring the tab forward for a few seconds (one tab at a time), then give focus back.
+async function gemPeekTab(S, tabId, hold = 3500) {
+  if (S._peekBusy) return;
+  S._peekBusy = true;
+  try {
+    const t = await chrome.tabs.get(tabId);
+    const [prev] = await chrome.tabs.query({ active: true, windowId: t.windowId });
+    if (prev && prev.id === tabId) return;   // already in front
+    await chrome.tabs.update(tabId, { active: true });
+    await sleepMs(hold);
+    if (prev?.id != null) await chrome.tabs.update(prev.id, { active: true }).catch(() => {});
+  } catch (_) {} finally { S._peekBusy = false; }
+}
 async function gemRunOnTab(S, tabId, b64, text, onNote) {
   let aborted = false; const abort = () => { aborted = true; };
   (S.gptAborts = S.gptAborts || new Set()).add(abort);
@@ -3653,13 +3667,13 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     for (let attempt = 1; attempt <= 3; attempt++) {   // Gemini sometimes answers "I encountered an error" → send the same message again (max 3 tries)
     onNote?.(attempt > 1 ? `Gemini error — sending again (${attempt}/3)…` : 'attaching image…');
     const tA = Date.now(), tick = setInterval(() => onNote?.(`attaching image… ${Math.round((Date.now() - tA) / 1000)}s`), 1000);
-    let r;
+    let r; const peekT = setTimeout(() => gemPeekTab(S, tabId), 20000);
     try {
       r = await Promise.race([
         manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js'),
         new Promise(res => setTimeout(() => res({ ok: false, error: 'Gemini tab did not answer in 120s — press F5 on it, then Retry failed' }), 120000))
       ]);
-    } finally { clearInterval(tick); }
+    } finally { clearInterval(tick); clearTimeout(peekT); }
     if (!r?.ok) throw new Error(r?.error || 'image not attached');
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
     const end = Date.now() + 9 * 60000;
@@ -3667,6 +3681,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
       await zhCheckCaptcha(tabId);
+      if (Date.now() - t0 > 25000 && Date.now() - (S._gemPeekAt?.[tabId] || 0) > 30000) { (S._gemPeekAt = S._gemPeekAt || {})[tabId] = Date.now(); onNote?.('opening the Gemini tab for a moment so it keeps working…'); await gemPeekTab(S, tabId); }
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
       if (g?.limit) {
         // v9.15 — limit on this Google account → move this tab to the next account (/u/N+1) and send again
