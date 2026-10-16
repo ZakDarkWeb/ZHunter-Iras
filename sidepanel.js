@@ -3565,6 +3565,13 @@ function temuStepFallback(reason) {
 // same chat (each message says "new image, ignore the previous ones"), then starts a fresh chat again.
 const GPT_CHAT_EVERY = 5;
 const GPT_SLOTS = 2;
+// v9.15 — "Auto": up to 10 images → 1 tab, 11–25 → 2 tabs, more than 25 → 3 tabs. A number picked by hand always wins.
+function gptTabsFor(count) {
+  const v = $('temuGptTabsSel')?.value;
+  const manual = parseInt(v, 10);
+  const n = manual >= 1 ? Math.min(4, manual) : (count <= 10 ? 1 : count <= 25 ? 2 : 3);
+  return Math.max(1, Math.min(n, count));
+}
 const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function gptEnsureSlot(S, idx) {
@@ -3872,8 +3879,7 @@ async function gptPoolStart() {
   S.pool = { next: 0, finished: 0, slotNote: ['', '', '', '', '', ''], failed: [] };
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = 'none'; }
   const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = 'pre-line';
-  const wanted = S.queue.length < 5 ? 1 : Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || GPT_SLOTS));   // fewer than 5 images → 1 tab is enough
-  const n = Math.min(wanted, S.queue.length);
+  const n = gptTabsFor(S.queue.length);
   gptPoolUi();
   const workers = [];
   for (let i = 0; i < n; i++) {   // reserve every tab first (tab B is opened here if only one ChatGPT tab exists)
@@ -4476,7 +4482,7 @@ async function temuStepRetryFailed() {
     S.pool.redo = list.slice(); S.pool.next = S.queue.length;
     temuStepSetStatus(`🔁 Retrying ${list.length} failed image${list.length > 1 ? 's' : ''}…`);
     try {
-      const n = Math.min(Math.max(1, Math.min(4, parseInt($('temuGptTabsSel')?.value, 10) || 2)), list.length);
+      const n = Math.min(gptTabsFor(S.queue.length), list.length);
       for (let i = 0; i < n; i++) await gptEnsureSlot(S, i);
       const w = []; for (let i = 0; i < n; i++) { w.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }
       await Promise.all(w);
@@ -16929,7 +16935,7 @@ function temuInitReviewToggle() {
   { const ts = $('temuGptTabsSel');   // how many ChatGPT tabs work together
     if (ts) {
       chrome.storage.local.get(['zhGptTabs']).then(r => { if (r?.zhGptTabs && [...ts.options].some(o => o.value === String(r.zhGptTabs))) ts.value = String(r.zhGptTabs); }).catch(() => {});
-      ts.addEventListener('change', () => chrome.storage.local.set({ zhGptTabs: parseInt(ts.value, 10) }).catch(() => {}));
+      ts.addEventListener('change', () => chrome.storage.local.set({ zhGptTabs: ts.value }).catch(() => {}));
     } }
   { const es = $('temuAiImgEngineSel');
     if (es) {
