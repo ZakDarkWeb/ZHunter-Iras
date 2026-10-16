@@ -1,6 +1,10 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Hunt: products already in the Library are skipped before any tab is opened (queue and open tabs), with a message.
+- Library cap: max 300 products; above that the OLDEST are removed with a warning (the extension gets slow with more).
+- Gemini: when an account hits its limit, the tab moves to the next signed-in Google account (/u/N) and the same image is sent again.
+- Gemini results: large PNG results are saved as high-quality JPEG (0.95, up to 4096px) to save memory.
 - Temu store sync (reversed): the extension now FOLLOWS the store open in Temu — on Export/Upload and whenever a Temu seller tab is opened/loaded/focused it reads the store name and switches its active store to the same one (if added). If no Temu tab is open, the old fallback (switch Temu to the extension's store) still applies.
 - Temu upload: if the store open in Temu is not the extension's store, the extension switches it automatically (header menu → Switch → store card), checks the name, reopens the upload page and goes on; it stops with a clear message if the store is not in the account.
 - Export + Upload: products already listed on the active store now stop the upload with a warning (list shown) instead of being skipped silently.

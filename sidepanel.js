@@ -3613,6 +3613,26 @@ function gemHomeFor(url) {
   const m = /^https:\/\/gemini\.google\.com\/(u\/\d+\/)/i.exec(url || '');
   return 'https://gemini.google.com/' + (m ? m[1] : '') + 'app';
 }
+// v9.15 — Gemini limit: try the next signed-in Google account (/u/N). Returns the new account number or 0.
+async function gemRotateAccount(S, tabId) {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    const m = /^https:\/\/gemini\.google\.com\/u\/(\d+)\//i.exec(t.url || '');
+    const cur = m ? parseInt(m[1], 10) : 0;
+    (S._gemLimited = S._gemLimited || new Set()).add(cur);
+    for (let n = 0; n <= 6; n++) {
+      if (S._gemLimited.has(n)) continue;
+      const url = 'https://gemini.google.com/' + (n ? 'u/' + n + '/' : '') + 'app';
+      await chrome.tabs.update(tabId, { url });
+      await gptWaitTab(tabId, 30000);
+      const t2 = await chrome.tabs.get(tabId).catch(() => null);
+      const ok = t2 && (n ? new RegExp('^https://gemini\\.google\\.com/u/' + n + '/').test(t2.url || '') : /^https:\/\/gemini\.google\.com\/app/i.test(t2.url || ''));
+      if (ok) { S._gemRotated = true; await sleepMs(1500); return n + 1; }
+      S._gemLimited.add(n);   // not signed in / redirected to the sign-in page → skip this number
+    }
+  } catch (_) {}
+  return 0;
+}
 async function gptWaitTab(tabId, ms = 40000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -3643,16 +3663,28 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     if (!r?.ok) throw new Error(r?.error || 'image not attached');
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
     const end = Date.now() + 9 * 60000;
-    let gemErr = false;
+    let gemErr = false, rotated = false;
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
       await zhCheckCaptcha(tabId);
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
-      if (g?.limit) throw new Error('Gemini limit reached on this account — switch account in a Gemini tab, then Retry failed');
+      if (g?.limit) {
+        // v9.15 — limit on this Google account → move this tab to the next account (/u/N+1) and send again
+        const next = await gemRotateAccount(S, tabId);
+        if (!next) throw new Error('Gemini limit reached on all signed-in accounts — switch account in a Gemini tab, then Retry failed');
+        onNote?.(`Gemini limit → switched to account #${next}…`);
+        rotated = true; break;
+      }
       if (g?.gemErr) { gemErr = true; break; }
-      if (g?.ok && g.dataUrl) { onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
+      if (g?.ok && g.dataUrl) {
+        // v9.15 — big PNG results → high-quality JPEG (0.95, never shrunk below 4096px) to save memory
+        if (/^data:image\/png/i.test(g.dataUrl) && g.dataUrl.length > 700000) {
+          try { const j = await compressBase64Image(g.dataUrl, 4096, 0.95); if (j && /^data:image\/jpeg/i.test(j) && j.length < g.dataUrl.length) g.dataUrl = j; } catch (_) {}
+        }
+        onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
       await sleepMs(1500);
     }
+    if (rotated) { attempt--; continue; }   // new account → same image again, no try used
     if (!gemErr) break;
     if (attempt === 3) throw new Error('Gemini keeps answering "I encountered an error" — try again later');
     await sleepMs(1500);
@@ -6172,6 +6204,7 @@ const HUNT_STATE_KEY = 'zhunterHuntState'; // for auto-resume
 
 const BULK_QUEUE_KEY = 'zhunterBulkQueue'; // persistent queue of URLs to hunt sequentially
 
+const LIBRARY_MAX = 300; // v9.15
 const MASTER_KEY  = 'zhunterMasterSheet';
 const BATCHES_KEY = 'zhunterMasterBatches';
 
@@ -7644,12 +7677,34 @@ function downloadQueuePdf() {
   downloadPdfCatalog(rows, 'Queue Hunt Catalog');
 }
 
+// v9.15 — products already in the Library are skipped before any tab is opened
+async function huntSplitLibraryDupes(list, urlOf) {
+  try {
+    const rows = await getMasterRows();
+    const have = new Set((rows || []).map(r => temuSourceIdentity(r.url || '')).filter(x => x && !/\|$/.test(x)));
+    if (!have.size) return { keep: list, dupes: [] };
+    const keep = [], dupes = [], seen = new Set();
+    for (const it of list) {
+      const id = temuSourceIdentity(urlOf(it) || '');
+      if (id && !/\|$/.test(id) && (have.has(id) || seen.has(id))) dupes.push(it);
+      else { keep.push(it); if (id) seen.add(id); }
+    }
+    return { keep, dupes };
+  } catch (_) { return { keep: list, dupes: [] }; }
+}
+
 async function startQueueHunt() {
   if (BulkState.isHunting) return;
   const selectedItems = QueueState.items.filter(i => i.checked && !i.hunted);
   // v9.14 — only real product pages are hunted (home / store / mall / search pages are dropped from the queue)
-  const toHunt = selectedItems.filter(i => typeof ZhGate === 'undefined' || ZhGate.isProductUrl(i.url));
-  const notProduct = selectedItems.filter(i => !toHunt.includes(i));
+  const toHuntAll = selectedItems.filter(i => typeof ZhGate === 'undefined' || ZhGate.isProductUrl(i.url));
+  const { keep: toHunt, dupes: libDupes } = await huntSplitLibraryDupes(toHuntAll, i => i.url);
+  if (libDupes.length) {
+    libDupes.forEach(i => { i.checked = false; i.status = 'error'; i.error = 'already in Library'; });
+    saveBulkQueue();
+    toast(`${libDupes.length} product${libDupes.length > 1 ? 's' : ''} skipped — already in your Library.`, 'warn');
+  }
+  const notProduct = selectedItems.filter(i => !toHuntAll.includes(i));
   if (notProduct.length) {
     notProduct.forEach(i => { i.checked = false; i.status = 'error'; i.error = 'not a product page'; });
     saveBulkQueue();
@@ -7914,9 +7969,11 @@ async function startBulkHunt(tabsOverride) {
   const selectedTabsAll = (Array.isArray(tabsOverride) ? tabsOverride : null)
     || BulkState.tabs.filter(t => BulkState.selectedIds.has(t.tabId));
   // v9.14 — only real product pages are hunted
-  const selectedTabs = selectedTabsAll.filter(t => typeof ZhGate === 'undefined' || ZhGate.isProductUrl(t.url));
-  if (selectedTabs.length !== selectedTabsAll.length) {
-    const n = selectedTabsAll.length - selectedTabs.length;
+  const selectedTabsP = selectedTabsAll.filter(t => typeof ZhGate === 'undefined' || ZhGate.isProductUrl(t.url));
+  const { keep: selectedTabs, dupes: tabDupes } = await huntSplitLibraryDupes(selectedTabsP, t => t.url);
+  if (tabDupes.length) toast(`${tabDupes.length} tab${tabDupes.length > 1 ? 's' : ''} skipped — already in your Library.`, 'warn');
+  if (selectedTabsP.length !== selectedTabsAll.length) {
+    const n = selectedTabsAll.length - selectedTabsP.length;
     toast(`${n} tab${n > 1 ? 's' : ''} ignored — not product pages.`, 'warn');
   }
   if (!selectedTabs.length) { BulkState.isHunting = false; return; }
@@ -9670,7 +9727,14 @@ async function appendToMasterSheetOnce(rows) {
     scrapedAt:    r.scrapedAt,
     lastRehunted: ''
   }));
-  await setMasterRows([...existing, ...lean], existing);
+  let merged = [...existing, ...lean];
+  // v9.15 — Library cap: too many products make the extension slow → the oldest ones are removed
+  if (merged.length > LIBRARY_MAX) {
+    const cut = merged.length - LIBRARY_MAX;
+    merged = merged.slice(cut);
+    try { toast(`Library is limited to ${LIBRARY_MAX} products (the extension gets slow above this). ${cut} oldest product${cut > 1 ? 's were' : ' was'} removed — export first next time.`, 'warn'); } catch (_) {}
+  }
+  await setMasterRows(merged, existing);
 
   await zhRecordHuntBatch(rows);
 }
