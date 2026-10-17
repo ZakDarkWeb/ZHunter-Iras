@@ -94,9 +94,58 @@ function updateStatusLine() {
   }
   if (rightEl) {
     const now = new Date();
-    rightEl.textContent = `Synced ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    rightEl.textContent = `Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;   // v9.15.1 — no cloud sync exists ("Synced" was misleading)
   }
 }
+
+// ═══ v9.15.1 — Jobs patti: running hunt / Temu upload / image edit in the status line (click = open that window) ═══
+let _zhUploadProg = null;    // last TEMU_UPLOAD_PROGRESS of the running upload
+let _zhLateWatch = false;    // temuLateConfirm is still watching Temu
+function zhJobsNow() {
+  const jobs = [];
+  try {
+    if (BulkState?.isHunting) {
+      const total = BulkState.huntTotal || 0;
+      const done = Math.min(total || Infinity, new Set((BulkState.results || []).map(r => r.tabId)).size);
+      jobs.push({ k: 'hunt', txt: `🔎 Hunting ${done}/${total || '?'}` });
+    }
+  } catch (_) {}
+  try {
+    if (TemuUploadBusy || _zhLateWatch) {
+      const p = _zhUploadProg;
+      const st = p?.phase === 'processing' ? `processing ${p.pct ?? 0}%` : p?.phase === 'uploading' ? 'sending the file' : p?.phase === 'finishing' ? 'reading the result' : _zhLateWatch ? 'processing (watching)' : 'preparing';
+      jobs.push({ k: 'upload', txt: `⬆ Temu ${st}` });
+    }
+  } catch (_) {}
+  try {
+    const S = TemuImgStepper;
+    if (S?.running) {
+      const n = (S.queue || []).length, d = (S.stats?.done || 0) + (S.stats?.skipped || 0);
+      const eng = { gemini: 'Gemini', chatgpt: 'ChatGPT', flow: 'Flow', auto: 'Auto' }[S.engine] || 'Images';
+      jobs.push({ k: 'img', txt: `🖼 ${eng} ${d}/${n}` });
+    }
+  } catch (_) {}
+  return jobs;
+}
+function zhRenderJobs() {
+  const textEl = $('statusLineText'), foot = document.querySelector('.status-line');
+  if (!textEl || !foot) return;
+  const jobs = zhJobsNow();
+  foot.classList.toggle('zh-job', jobs.length > 0);
+  if (!jobs.length) { if (foot.dataset.hadJob) { delete foot.dataset.hadJob; updateStatusLine(); } return; }
+  foot.dataset.hadJob = '1';
+  const html = jobs.map(j => `<button type="button" class="zh-job-chip" data-job="${j.k}" title="Open">${j.txt.replace(/[<>&]/g, '')}</button>`).join('');
+  if (textEl.innerHTML !== html) textEl.innerHTML = html;
+}
+setInterval(zhRenderJobs, 1000);
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('.zh-job-chip'); if (!b) return;
+  try {
+    if (b.dataset.job === 'hunt') $('bulkProgressModal')?.classList.remove('hidden');
+    else if (b.dataset.job === 'upload') { if ($('temuModal')?.classList.contains('hidden')) openTemuModal(); temuSwitchTab('upload'); $('temuSteps')?.scrollIntoView({ block: 'nearest' }); }
+    else if (b.dataset.job === 'img') temuStepOpenModal();
+  } catch (_) {}
+});
 
 // ── DOM Helper ───────────────────────────────────────────────
 function $(id) { return document.getElementById(id); }
@@ -3060,16 +3109,16 @@ async function focusOrOpenFlowTab() {
   const tabs = await chrome.tabs.query({ url: '*://flow.google.com/*' });
   if (tabs && tabs.length > 0) {
     // Reuse the project already open so all images land in one Flow project
-    const targetTab = tabs.find(t => t.url && t.url.includes('/project/')) || tabs[0];
+    // v9.15.1 — the Flow tab works in the "ZHunter AI" window: it is made active THERE, your window keeps its focus
+    const targetTab = await zhIntoAiWindow(tabs.find(t => t.url && t.url.includes('/project/')) || tabs[0]);
     await chrome.tabs.update(targetTab.id, { active: true });
-    if (targetTab.windowId) chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
     try {
       await chrome.scripting.executeScript({ target: { tabId: targetTab.id }, files: ['flow_automation.js'] });
     } catch (_) {}
     try { await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
     return 'focused';
   }
-  await chrome.tabs.create({ url: 'https://flow.google.com', active: true });
+  await zhAiNewTab('https://flow.google.com');
   return 'opened';
 }
 
@@ -3544,19 +3593,25 @@ async function uploadImageToPublicHost(source) {
 }
 window.uploadImageToPublicHost = uploadImageToPublicHost;
 
-// v9.15 — engine of the CURRENT step ("auto" picks per image: ChatGPT → Flow → Gemini)
-function stepEng() { const S = TemuImgStepper; return (S && (S.curEngine || (S.engine !== 'auto' ? S.engine : 'chatgpt'))) || 'flow'; }
-const ZH_AUTO_ORDER = ['chatgpt', 'flow', 'gemini'];
+// v9.15 — engine of the CURRENT step ("auto" picks per image: Gemini → Flow since v9.15.1)
+function stepEng() { const S = TemuImgStepper; return (S && (S.curEngine || (S.engine !== 'auto' ? S.engine : 'gemini'))) || 'flow'; }
+// v9.15.1 — Auto = Gemini first, then Flow (ChatGPT stays available as its own engine, not in Auto)
+const ZH_AUTO_ORDER = ['gemini', 'flow'];
+// an engine that is "down" for this run (limit on all accounts) is not tried again for the next images
+const zhEngineDown = (S, e) => (e === 'chatgpt' && S?.gptDown) || (e === 'gemini' && S?.gemDown);
+// which AI site the ChatGPT/Gemini runner talks to right now (Auto sets curEngine per image)
+const zhIsGem = (S) => (S?.curEngine || S?.engine) === 'gemini';
 // Auto: this engine failed → try the next one for the same image. Returns true if it moved on.
 function temuStepFallback(reason) {
   const S = TemuImgStepper;
   if (!S?.running || S.engine !== 'auto') return false;
   const cur = S.queue?.[S.currentIndex];
   if (!cur || cur.done) return false;
-  const next = ZH_AUTO_ORDER.find(e => !(cur.tried || []).includes(e) && !(e === 'chatgpt' && S.gptDown));
+  const next = ZH_AUTO_ORDER.find(e => !(cur.tried || []).includes(e) && !zhEngineDown(S, e));
   if (!next) return false;
   temuStepCancelActiveJob();
   toast(`${reason} — trying ${next === 'chatgpt' ? 'ChatGPT' : next === 'flow' ? 'Flow' : 'Gemini'} instead`, 'info');
+  S.curEngine = next;
   setTimeout(() => { if (TemuImgStepper === S && S.running && S.queue[S.currentIndex] === cur && !cur.done) temuStepSendCurrent(); }, 1500);
   return true;
 }
@@ -3574,6 +3629,46 @@ function gptTabsFor(count) {
 }
 const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 
+// ═══ v9.15.1 — "ZHunter AI" window: Gemini / ChatGPT / Flow tabs work in their own Chrome window ═══
+// Switching tabs there never touches the window you work in. Keep it VISIBLE (side by side or on a 2nd screen):
+// Chrome slows down tabs of a minimized / fully covered window.
+let _zhAiWinId = null, _zhAiWinTold = false;
+async function zhAiWindowId(create = false, firstTabId = null) {
+  const ok = async id => { try { const w = await chrome.windows.get(id); return w && w.type === 'normal' ? w.id : null; } catch (_) { return null; } };
+  if (_zhAiWinId != null && await ok(_zhAiWinId) != null) return _zhAiWinId;
+  try { const st = (await chrome.storage.local.get('zhAiWindowId')).zhAiWindowId; if (st != null && await ok(st) != null) return (_zhAiWinId = st); } catch (_) {}
+  if (!create) return null;
+  const w = await chrome.windows.create({ ...(firstTabId != null ? { tabId: firstTabId } : { url: 'about:blank' }), focused: false, state: 'normal', width: 1000, height: 820 });
+  _zhAiWinId = w.id;
+  try { await chrome.storage.local.set({ zhAiWindowId: w.id }); } catch (_) {}
+  if (!_zhAiWinTold) { _zhAiWinTold = true; toast('ZHunter AI window opened — keep it visible (side by side or on a 2nd screen), do not minimize it', 'info'); }
+  return w.id;
+}
+// move a tab into the AI window (creating the window with this tab if there is none); returns the tab
+async function zhIntoAiWindow(tab) {
+  try {
+    const wid = await zhAiWindowId(false);
+    if (tab.windowId === wid) return tab;
+    // never take the LAST tab out of a window (Chrome would close that window — maybe the one with this side panel)
+    if ((await chrome.tabs.query({ windowId: tab.windowId })).length <= 1) return tab;
+    if (wid == null) { await zhAiWindowId(true, tab.id); return await chrome.tabs.get(tab.id); }
+    if (tab.windowId === wid) return tab;
+    const mv = await chrome.tabs.move(tab.id, { windowId: wid, index: -1 });
+    return Array.isArray(mv) ? mv[0] : mv;
+  } catch (e) { console.log('[ZHunter] AI window move', e?.message || e); return tab; }
+}
+// open a new tab in the AI window (the window is made if needed)
+async function zhAiNewTab(url) {
+  const wid = await zhAiWindowId(false);
+  if (wid == null) {
+    const nw = await zhAiWindowId(true);
+    const [blank] = await chrome.tabs.query({ windowId: nw });
+    if (blank && (!blank.url || /^about:blank/.test(blank.url || blank.pendingUrl || ''))) { await chrome.tabs.update(blank.id, { url }); return await chrome.tabs.get(blank.id); }
+    return await chrome.tabs.create({ windowId: nw, url, active: true });
+  }
+  return await chrome.tabs.create({ windowId: wid, url, active: true });   // "active" inside the AI window only
+}
+
 async function gptEnsureSlot(S, idx) {
   // one at a time: two workers must never pick the same ChatGPT tab
   S._slotLock = (S._slotLock || Promise.resolve()).then(() => gptEnsureSlotInner(S, idx)).catch(e => { throw e; });
@@ -3583,7 +3678,7 @@ async function gptEnsureSlot(S, idx) {
 async function gptEnsureSlotInner(S, idx) {
   S.gptSlots = S.gptSlots || [];
   let slot = S.gptSlots[idx];
-  const gem = S.engine === 'gemini';
+  const gem = zhIsGem(S);
   const hostRe = gem ? /^https:\/\/gemini\.google\.com\//i : /^https:\/\/chatgpt\.com\//;
   const alive = async (id) => { try { const t = await chrome.tabs.get(id); return (hostRe.test(t.url || '') || ZH_SORRY_RE.test(t.url || '')) ? t : null; } catch (_) { return null; } };
   if (slot?.tabId && await alive(slot.tabId)) return slot;
@@ -3595,14 +3690,12 @@ async function gptEnsureSlotInner(S, idx) {
   const acct = (u) => (/^https:\/\/gemini\.google\.com\/(u\/\d+)\//i.exec(u || '') || [])[1] || '';
   let pool = tabs;
   if (gem && refUrl) { const same = tabs.filter(t => acct(t.url) === acct(refUrl)); pool = same; }
-  const win = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.windowId;   // the window this side panel is in
-  let tab = pool.find(t => t.windowId === win && t.active) || pool.find(t => t.windowId === win) || pool.find(t => t.active) || pool[0];
-  if (tab && win && tab.windowId !== win) {   // Gemini/ChatGPT tab sits in ANOTHER Chrome window → bring it here so it is visible
-    const mv = await chrome.tabs.move(tab.id, { windowId: win, index: -1 }).catch(() => null);
-    if (mv) tab = Array.isArray(mv) ? mv[0] : mv;
-  }
+  // v9.15.1 — Gemini / ChatGPT tabs run in the separate "ZHunter AI" window, so your own window never loses its tab
+  const aiWin = await zhAiWindowId(false);
+  let tab = pool.find(t => t.windowId === aiWin && t.active) || pool.find(t => t.windowId === aiWin) || pool.find(t => t.active) || pool[0];
+  if (tab) tab = await zhIntoAiWindow(tab);
   if (!tab) {
-    tab = await chrome.tabs.create({ url: gem ? gemHomeFor(refUrl) : 'https://chatgpt.com/', active: false, ...(win ? { windowId: win } : {}) });
+    tab = await zhAiNewTab(gem ? gemHomeFor(refUrl) : 'https://chatgpt.com/');
     await gptWaitTab(tab.id);
     slot = { tabId: tab.id, n: 0, fresh: true };
   } else slot = { tabId: tab.id, n: 0, fresh: false, reused: true };   // v9.15 — a tab is already open: keep working in ITS chat (no new chat); a new chat only starts after the chat limit
@@ -3613,7 +3706,7 @@ async function gptEnsureSlotInner(S, idx) {
 const ZH_SORRY_RE = /^https:\/\/(www\.)?google\.[a-z.]+\/sorry\//i;
 async function zhCheckCaptcha(tabId) {
   const t = await chrome.tabs.get(tabId).catch(() => null);
-  if (t && ZH_SORRY_RE.test(t.url || '')) throw Object.assign(new Error('Google is asking "I\'m not a robot" in the Gemini tab — solve it yourself there, wait a few minutes, then press Retry failed'), { limit: true });
+  if (t && ZH_SORRY_RE.test(t.url || '')) throw Object.assign(new Error('Google is asking "I\'m not a robot" in the Gemini tab — solve it yourself there, wait a few minutes, then press Retry failed'), { limit: true, captcha: true });
 }
 // Gemini: keep the Google account the tab is using (gemini.google.com/u/1/app → account #2), never fall back to /app (= account #1)
 function gemHomeFor(url) {
@@ -3693,7 +3786,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
       if (g?.limit) {
         // v9.15 — limit on this Google account → move this tab to the next account (/u/N+1) and send again
         const next = await gemRotateAccount(S, tabId);
-        if (!next) throw new Error('Gemini limit reached on all signed-in accounts — switch account in a Gemini tab, then Retry failed');
+        if (!next) throw Object.assign(new Error('Gemini limit reached on all signed-in accounts'), { limit: true });   // v9.15.1 — flagged: the rest goes to Flow
         onNote?.(`Gemini limit → switched to account #${next}…`);
         rotated = true; break;
       }
@@ -3722,12 +3815,12 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
   if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
     onNote?.('opening a new chat…');
     const curUrl = (await chrome.tabs.get(slot.tabId).catch(() => null))?.url || '';
-    await chrome.tabs.update(slot.tabId, { url: S.engine === 'gemini' ? gemHomeFor(curUrl) : 'https://chatgpt.com/', active: true });
+    await chrome.tabs.update(slot.tabId, { url: zhIsGem(S) ? gemHomeFor(curUrl) : 'https://chatgpt.com/', active: true });
     await sleepMs(800);
     await gptWaitTab(slot.tabId);
     slot.n = 0;
   } else await chrome.tabs.update(slot.tabId, { active: true }).catch(() => {});
-  if (S.engine === 'gemini' && typeof prompt === 'string') prompt = prompt.split(ZH_GPT_IMPROVE_PROMPT).join(ZH_GEM_IMPROVE_PROMPT);   // v9.15 — Gemini needs a more direct, scene-style wording
+  if (zhIsGem(S) && typeof prompt === 'string') prompt = prompt.split(ZH_GPT_IMPROVE_PROMPT).join(ZH_GEM_IMPROVE_PROMPT);   // v9.15 — Gemini needs a more direct, scene-style wording
   let text;
   if (setup) {   // rules once per chat, later messages = just the image (full prompt again every `every` images)
     const need = slot.n === 0 || slot.primeKey !== setup.key || (slot.since || 0) >= setup.every;
@@ -3736,7 +3829,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     text = need ? setup.text : (setup.short || ZH_SETUP_SHORT);
   } else text = ((slot.n > 0 || slot.reused) ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
   slot.n++;
-  if (S.engine === 'gemini') return gemRunOnTab(S, slot.tabId, b64, text, onNote);
+  if (zhIsGem(S)) return gemRunOnTab(S, slot.tabId, b64, text, onNote);
   return new Promise((resolve, reject) => {
     let done = false;
     const fin = (fn, v) => {
@@ -3841,7 +3934,7 @@ async function gptRunItem(S, idx, item) {
     }
     if (!S.running) return false;
     if (!result) {
-      if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; }
+      if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; if (lastErr.captcha) S.captchaDown = true; else if (zhIsGem(S)) S.gemDown = true; }
       S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) {}
       S.pool.failed.push(`${label()}: ${lastErr?.message || 'failed'}`);
       toast(`ChatGPT: ${label()} failed — ${lastErr?.message || 'error'}`, 'warn');
@@ -3890,11 +3983,36 @@ async function gptPoolStart() {
   if (TemuImgStepper !== S) return;
   if (S.stopped) { temuStepResultsRender(); return; }
   if (!S.running) return;
+  if (S.gemDown && !S.captchaDown) {
+    // v9.15.1 — Gemini limit on every signed-in account → the images that are not done yet continue in Flow by themselves
+    const rest = S.queue.filter(it => it.status !== 'done');
+    if (rest.length) { await zhHandoffToFlow(S, rest); return; }
+  }
   if (S.gptDown) {
-    toast('ChatGPT limit reached: ' + (S.pool.limitMsg || 'try again later'), 'warn');
-    temuStepSetStatus('⚠️ ChatGPT limit reached — ' + (S.pool.limitMsg || 'try again later') + '. Finished images are saved; run the rest later or use Flow.', 'error');
+    const who = zhIsGem(S) ? 'Gemini' : 'ChatGPT';
+    toast(`${who}: ` + (S.pool.limitMsg || 'limit reached — try again later'), 'warn');
+    temuStepSetStatus(`⚠️ ${who}: ` + (S.pool.limitMsg || 'limit reached — try again later') + '. Finished images are saved; press Retry failed later.', 'error');
+    await sleepMs(1500);
   } else if (S.pool.failed.length) console.log('[ZHunter] GPT failed items:', S.pool.failed);
   await temuStepFinish();
+}
+
+// v9.15.1 — continue the unfinished images of a Gemini run in Flow (one at a time, same prompts / pack stages)
+async function zhHandoffToFlow(S, rest) {
+  const doneBefore = S.stats?.done || 0;
+  S.running = false; S.handoff = true;
+  try { await temuStepFinish(); } catch (_) {}   // closes the Gemini part quietly (no summary for a handoff)
+  rest.forEach(it => { it.status = 'wait'; it.jobId = null; it.done = false; it.tried = []; it.sentAt = null; it.continueStage = false; });
+  TemuImgStepper = { queue: rest, currentIndex: 0, engine: 'flow', prompt: S.prompt || '', activeJobId: null, running: true, startedAt: Date.now(), stats: { done: 0, skipped: 0 }, fromGemini: doneBefore };
+  zhImgQueueSave(TemuImgStepper);
+  zhStepTimerStart();
+  temuStepOpenModal();
+  for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
+  const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = '';
+  toast(`Gemini limit on all accounts — ${doneBefore} done in Gemini, the other ${rest.length} continue in Flow`, 'warn');
+  temuStepSetStatus(`↪ Gemini limit (all accounts) — ${rest.length} image${rest.length > 1 ? 's' : ''} continue in Flow…`);
+  await sleepMs(1200);
+  await temuStepProcessCurrent();
 }
 
 function temuStepSetStatus(text, kind = 'info') {
@@ -5401,7 +5519,7 @@ function initSettingsPanel() {
         btn.classList.toggle('zh-fcol-active', (btn.dataset.color || '').toLowerCase() === col.toLowerCase());
       });
 
-      const w = x?.zhFrameWidth != null ? x.zhFrameWidth : 5.5;
+      const w = x?.zhFrameWidth != null ? x.zhFrameWidth : 3;   // v9.15.1 — thinner default
       if ($('zhFrameWidthSlider')) $('zhFrameWidthSlider').value = w;
       if ($('zhFrameWidthVal')) $('zhFrameWidthVal').textContent = `${w}px`;
 
@@ -7703,7 +7821,9 @@ function downloadQueuePdf() {
 async function huntSplitLibraryDupes(list, urlOf) {
   try {
     const rows = await getMasterRows();
-    const have = new Set((rows || []).map(r => temuSourceIdentity(r.url || '')).filter(x => x && !/\|$/.test(x)));
+    // v9.15.1 — only COMPLETE Library products are skipped; partial / failed ones (no images, no real title) are hunted again
+    const complete = r => !['partial', 'fail', 'error', 'needs_retry'].includes(r.status) && Array.isArray(r.images) && r.images.length > 0 && r.title && !/^https?:\/\//i.test(String(r.title));
+    const have = new Set((rows || []).filter(complete).map(r => temuSourceIdentity(r.url || '')).filter(x => x && !/\|$/.test(x)));
     if (!have.size) return { keep: list, dupes: [] };
     const keep = [], dupes = [], seen = new Set();
     for (const it of list) {
@@ -7748,15 +7868,7 @@ async function startQueueHunt() {
   $('bulkQueueHuntBtn').disabled = true;
   await savePendingHunt(fakeTabs);
   msg({ action: 'START_KEEPALIVE' }).catch(() => {});
-  const flushLoop = async () => {
-    BulkState._flushActive = true;
-    while (BulkState.isHunting || BulkState.pendingFlush.length > 0) {
-      if (BulkState.pendingFlush.length > 0) { const rows = BulkState.pendingFlush.splice(0, 50); try { await appendToMasterSheet(rows); } catch (e) { BulkState.pendingFlush.unshift(...rows); console.warn('[ZHunter] Library save failed, will try again:', e); await sleep(2000); } }
-      else await sleep(500);
-    }
-    BulkState._flushActive = false;
-  };
-  flushLoop();
+  zhRunFlushLoop();
   try {
     bpSetPhase('hunt');
     updateBulkProgressTitle('Hunting products', `Processing ${toHunt.length} queued links…`);
@@ -8021,21 +8133,7 @@ async function startBulkHunt(tabsOverride) {
   // (it terminates after ~30s of inactivity otherwise, aborting all FETCH_BASE64 calls)
   msg({ action: 'START_KEEPALIVE' }).catch(() => {});
 
-  const flushLoop = async () => {
-    BulkState._flushActive = true;
-    while (BulkState.isHunting || BulkState.pendingFlush.length > 0) {
-      if (BulkState.pendingFlush.length > 0) {
-        const rows = BulkState.pendingFlush.splice(0, 50);
-        try { await appendToMasterSheet(rows); }
-        catch (e) { BulkState.pendingFlush.unshift(...rows); console.warn('[ZHunter] Library save failed, will try again:', e); await sleep(2000); }   // v9.15 — rows are kept, never lost
-      } else {
-        // Only sleep when nothing to flush — exits promptly when hunt ends
-        await sleep(500);
-      }
-    }
-    BulkState._flushActive = false;
-  };
-  flushLoop();
+  zhRunFlushLoop();
 
   // v9.11.0 — Chrome must not put the hunted tabs back to sleep while we work
   const huntTabIds = selectedTabs.map(t => t.tabId).filter(id => Number.isFinite(id));
@@ -9701,17 +9799,22 @@ async function appendToMasterSheetOnce(rows) {
     ex.batchIds = [...new Set([...(ex.batchIds || []), ex.batchId, BulkState.currentBatchId].filter(Boolean))].slice(-50);
     upgraded++;
     if (huntResultScore(r) > huntResultScore(ex)) {
+      // v9.15.1 — a partial row gets the missing title / images / bullets / description from the better result;
+      // anything already filled (your own edits) is never replaced
+      const blank = v => v == null || v === '' || (Array.isArray(v) && !v.length);
+      const newImgs = Array.isArray(r.images) ? r.images.filter(u => typeof u === 'string' && u).slice(0, 10) : [];
+      const images = blank(ex.images) && newImgs.length ? newImgs : ex.images;
       Object.assign(ex, {
-        title: ex.title,
+        title: (blank(ex.title) || /^https?:\/\//i.test(String(ex.title))) && r.title ? r.title : ex.title,
         price: r.price || ex.price,
         platform: r.platform || ex.platform,
-        description: ex.description,
+        description: blank(ex.description) && r.description ? r.description : ex.description,
         variants: (r.variants || []).length ? r.variants.join(', ') : ex.variants,
-        imageCount: Array.isArray(r.images) && r.images.length ? r.images.length : ex.imageCount,
-        images: ex.images,
+        imageCount: Array.isArray(images) && images.length ? images.length : (newImgs.length || ex.imageCount),
+        images,
         brand: r.brand || ex.brand, color: r.color || ex.color, weight: r.weight || ex.weight,
         dimL: r.dimL || ex.dimL, dimW: r.dimW || ex.dimW, dimH: r.dimH || ex.dimH,
-        bullets: ex.bullets,
+        bullets: blank(ex.bullets) && Array.isArray(r.bullets) && r.bullets.length ? r.bullets.slice(0, 6) : ex.bullets,
         _sourceFacts: zhCaptureSourceFacts(r),
         status: r.status,
         lastRehunted: new Date().toISOString()
@@ -9750,16 +9853,74 @@ async function appendToMasterSheetOnce(rows) {
     lastRehunted: ''
   }));
   let merged = [...existing, ...lean];
-  // v9.15 — Library cap: too many products make the extension slow → the oldest ones are removed
+  // v9.15.1 — Library cap: above LIBRARY_MAX you are ASKED first (once per hunt); starred products are never removed.
+  // "Cancel" keeps everything (the Library just gets slower).
   if (merged.length > LIBRARY_MAX) {
     const cut = merged.length - LIBRARY_MAX;
-    merged = merged.slice(cut);
-    try { toast(`Library is limited to ${LIBRARY_MAX} products (the extension gets slow above this). ${cut} oldest product${cut > 1 ? 's were' : ' was'} removed — export first next time.`, 'warn'); } catch (_) {}
+    const removable = existing.filter(x => !x.starred).slice(0, cut);   // oldest first; new rows are never removed
+    const askKey = BulkState.currentBatchId || 'single';
+    if (removable.length && BulkState._libCapAsked !== askKey) {
+      BulkState._libCapAsked = askKey;
+      let yes = false;
+      try { yes = confirm(`Library has more than ${LIBRARY_MAX} products (the extension gets slow above this).\n\nDelete the ${removable.length} OLDEST product${removable.length > 1 ? 's' : ''}? Starred products are never deleted.\n\nOK = delete them · Cancel = keep everything`); } catch (_) {}
+      if (yes) {
+        const drop = new Set(removable.map(x => x.id));
+        merged = merged.filter(x => !drop.has(x.id));
+        try { toast(`${drop.size} oldest product${drop.size > 1 ? 's' : ''} removed from the Library`, 'warn'); } catch (_) {}
+      } else {
+        try { toast(`Library now has ${merged.length} products — nothing was deleted. Export and clean up old products when you can.`, 'warn'); } catch (_) {}
+      }
+    }
   }
   await setMasterRows(merged, existing);
 
   await zhRecordHuntBatch(rows);
 }
+
+// v9.15.1 — hunted rows that could not be saved to the Library are kept in storage (zhPendingFlush) as well as in memory,
+// so closing the panel never loses them; they are saved automatically the next time the panel opens.
+const ZH_PENDING_FLUSH_KEY = 'zhPendingFlush';
+async function zhPendingFlushSave(rows) {
+  try {
+    if (rows && rows.length) await chrome.storage.local.set({ [ZH_PENDING_FLUSH_KEY]: { t: Date.now(), batchId: BulkState.currentBatchId || null, rows: JSON.parse(JSON.stringify(rows.slice(0, 2000))) } });
+    else await chrome.storage.local.remove(ZH_PENDING_FLUSH_KEY);
+  } catch (e) { console.warn('[ZHunter] could not keep unsaved rows', e); }
+}
+async function zhRunFlushLoop() {
+  BulkState._flushActive = true;
+  let fails = 0;
+  try {
+    while (BulkState.isHunting || BulkState.pendingFlush.length > 0) {
+      if (BulkState.pendingFlush.length > 0) {
+        const rows = BulkState.pendingFlush.splice(0, 50);
+        try { await appendToMasterSheet(rows); if (fails) await zhPendingFlushSave(BulkState.pendingFlush); fails = 0; }
+        catch (e) {
+          BulkState.pendingFlush.unshift(...rows); fails++;
+          console.warn('[ZHunter] Library save failed, will try again:', e);
+          await zhPendingFlushSave(BulkState.pendingFlush);
+          if (fails === 8) toast(`Library save keeps failing (${String(e?.message || e).slice(0, 80)}). ${BulkState.pendingFlush.length} hunted product(s) are kept safely and will be saved when the panel is opened again.`, 'err');
+          if (fails >= 8 && !BulkState.isHunting) break;   // hunt over: stop retrying, the rows wait in storage
+          await sleep(fails >= 8 ? 15000 : 2000 * Math.min(fails, 5));
+        }
+      } else {
+        await sleep(500);   // only sleep when nothing to flush — exits promptly when the hunt ends
+      }
+    }
+  } finally { BulkState._flushActive = false; }
+}
+// panel opened: save rows left over from an earlier session
+setTimeout(async () => {
+  try {
+    const saved = (await chrome.storage.local.get(ZH_PENDING_FLUSH_KEY))[ZH_PENDING_FLUSH_KEY];
+    const rows = Array.isArray(saved?.rows) ? saved.rows : [];
+    if (!rows.length || BulkState.isHunting) return;
+    const prevBatch = BulkState.currentBatchId; BulkState.currentBatchId = saved.batchId || prevBatch;
+    try { await appendToMasterSheet(rows); } finally { BulkState.currentBatchId = prevBatch; }
+    await chrome.storage.local.remove(ZH_PENDING_FLUSH_KEY);
+    toast(`${rows.length} hunted product(s) from an earlier session were saved to the Library`, 'ok');
+    try { updateMasterStats(); } catch (_) {}
+  } catch (e) { console.warn('[ZHunter] earlier unsaved rows still waiting', e); }
+}, 3000);
 
 async function zhRecordHuntBatch(rows) {
   if (!BulkState.currentBatchId) return;
@@ -13177,7 +13338,12 @@ function temuSourceId(url) {
   let m = String(url).match(/-g-(\d{8,})\.html/); if (m) return m[1];        // Temu product
   m = String(url).match(/goods_id=(\d{6,})/); if (m) return m[1];              // Temu goods link
   m = String(url).match(/\/dp\/([A-Z0-9]{10})/); if (m) return m[1];
+  // v9.15.1 — more product link forms (before, these got a junk id and were skipped as "invalid product url")
+  m = String(url).match(/\/(?:dp|gp\/product|gp\/aw\/d|exec\/obidos\/asin|d)\/([A-Z0-9]{10})(?:[\/?#]|$)/i); if (m && /amazon\./i.test(String(url))) return m[1].toUpperCase();   // Amazon /gp/product/…
   m = String(url).match(/\/ip\/(?:[^\/]+\/)?(\d{6,})/); if (m) return m[1];
+  m = String(url).match(/\/prod(\d{6,})(?:[\/?#]|$)/i); if (m) return m[1];                 // Sam's Club …/prod24350305
+  m = String(url).match(/\/(?:item|i)\/(\d{6,})\.html/i); if (m) return m[1];              // AliExpress /item/1005….html
+  m = String(url).match(/\/A-(\d{6,})(?:[\/?#]|$)/); if (m) return m[1];                   // Target …/-/A-12345678
   m = String(url).match(/\/(\d{6,})(?:[\/?]|$)/); if (m) return m[1];
   return String(url).replace(/\W+/g, '').slice(-12);
 }
@@ -13489,10 +13655,9 @@ function temuCatMultiWord(title, cfg) {
   for (const [name, p] of Object.entries(cfg.category_profiles || {})) {
     const core = [...new Set(temuCatTokens([p.name, p.category_keyword, ...(p.match || [])].join(' ')).filter(w => w.length > 2 && !TEMU_CAT_STOP.has(w)))];
     const path = [...new Set(temuCatTokens(p.full_path || '').filter(w => w.length > 3 && !TEMU_CAT_STOP.has(w) && !core.includes(w)))];
-    const GEN = new Set(['frozen','canned','dried','fresh','organic','seasoned','breaded','cooked','whole','mixes','mix','snacks','foods','food','style','original','classic','natural','premium','large','small','medium']);
-    const c = core.filter(w => hit(w) && !GEN.has(w)).length, x = path.filter(w => hit(w) && !GEN.has(w)).length;
+    const c = core.filter(hit).length, x = path.filter(hit).length;
     if (!c || c + x < 2) continue;   // at least one category word + a second agreeing word
-    if (c < 2 || c < core.filter(w => !GEN.has(w)).length * 0.6) continue;   // two words of the category's own name/keywords must be in the title (path words alone never count)   // a wrong category is worse than none: two category words, or the whole short name + a path word
+    if (c < 2 && !(core.length && c === core.length && x >= 1)) continue;   // a wrong category is worse than none: two category words, or the whole short name + a path word
     const sc = c * 3 + x + (core.length && c === core.length ? 2 : 0);
     if (!best || sc > best.score) { second = best ? best.score : 0; best = { name, prof: p, score: sc }; } else if (sc > second) second = sc;
   }
@@ -13705,6 +13870,9 @@ function temuEnrich(rows, cfg) {
       else { const sw = parseFloat(r.weight); if (isFinite(sw) && sw >= 0.1 && sw <= (cfg.max_weight_lb || 8)) { weight = Math.round(sw * 10) / 10; wsrc = 'scraped'; } }
     }
     if (weight == null) { weight = d.weight_lb; wsrc = 'default'; }
+    // v9.15.1 — your own "N Pack - " title (made with the Pack buttons) ships N units: weight × N (price already uses source × N)
+    { const packN = temuPackCount(r.title);
+      if (packN > 1 && Number.isFinite(+weight) && +weight > 0) { weight = Math.round(+weight * packN * 10) / 10; wsrc += ` ×${packN} pack`; } }
     if (cfg.max_weight_lb && weight > cfg.max_weight_lb) { skipped.push(`too heavy (${weight} lb from ${wsrc}): ` + title.slice(0, 40)); return; }
     if (wsrc === 'default') warn.push('DEFAULT_WEIGHT');
 
@@ -13928,6 +14096,18 @@ let TemuSheetRows = null; // v9.7.0: Temu window mein import ki hui sheet ke row
 function temuSourcingSnapshot() {
   return { id: TemuLast.sourcingId || (TemuLast.sourcingId = 'src_' + crypto.randomUUID()), t: Date.now(), store: TemuLast.store || temuActiveStoreName(), items: TemuLast.items.map(it => ({ title: it.title, url: it.url, sourcingPrice: it.sourcingPrice, list: it.list })) };
 }
+// v9.15.1 — the Google Sheet sourcing record is written ONLY for products Temu confirmed (never for a failed / unconfirmed upload)
+async function temuSourcingRecord(items, store) {
+  const list = (items || []).filter(it => it && it.url && it.title);
+  if (!list.length) return '';
+  try {
+    const snap = { id: 'src_' + crypto.randomUUID(), t: Date.now(), store: store || temuActiveStoreName(), items: list.map(it => ({ title: it.title, url: it.url, sourcingPrice: it.sourcingPrice, list: it.list })) };
+    const q = await msg({ action: 'SOURCING_QUEUE', snapshot: snap });
+    if (!q?.success) return 'Sourcing record not saved: ' + (q?.error || 'unknown error');
+    const r = await msg({ action: 'SOURCING_RETRY' });
+    return r?.success ? `Sourcing records saved to Google Sheet (${list.length})` : (r?.error || 'Sourcing sync pending (saved locally, retried automatically)');
+  } catch (e) { return 'Sourcing record: ' + (e?.message || e); }
+}
 
 // v9.15 — the extension FOLLOWS the store that is open in Temu: read the store name from an open seller.temu.com tab and, if that store
 // exists in the extension, make it the active one (template, categories, listed history and prices of that store are used from then on).
@@ -14120,15 +14300,19 @@ async function temuAutoUpload() {
   if (TemuUploadBusy) { toast('Upload already running', 'info'); return; }
   TemuUploadBusy = true;
   const button = $('temuAutoBtn'); if (button) button.disabled = true;
+  _zhUploadProg = null;
   try { await temuAutoUploadJob(); }
-  finally { TemuUploadBusy = false; if (button) button.disabled = false; }
+  finally { TemuUploadBusy = false; _zhUploadProg = null; if (button) button.disabled = false; temuScheduleReady(); }
 }
 async function temuAutoUploadJob() {
   const rep = $('temuReport');
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
   // Build fresh if nothing exported yet in this session
+  temuStepsReset(); temuStep('file', 'run', 'building the Temu file…');
   if (!TemuLast?.asIs) { TemuLast = null; await temuRunExport({ forUpload: true }); }
-  if (!TemuLast) return;
+  if (!TemuLast) { temuStep('file', 'err', 'not built — see Details'); return; }
+  temuStep('file', 'ok', `${TemuLast.n} product${TemuLast.n === 1 ? '' : 's'}`);
+  temuStep('store', 'run', `checking ${TemuLast.store || temuActiveStoreName() || ''}…`);
   { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
   const sourcingSnapshot = temuSourcingSnapshot();
   const uploadSnapshot = { ...TemuLast, bytes: new Uint8Array(TemuLast.bytes).slice(), items: JSON.parse(JSON.stringify(TemuLast.items)), skipped: [...(TemuLast.skipped || [])] };
@@ -14152,14 +14336,28 @@ async function temuAutoUploadJob() {
       if (p.phase === 'finishing')  return `⏳ Processing finished — reading the result${id}${t}…`;
       return `⏳ ${p.phase}${t}…`;
     };
-    const onProg = (m) => { if (m?.action === 'TEMU_UPLOAD_PROGRESS' && rep) rep.textContent = base + '\n' + fmtProg(m); };
+    const onProg = (m) => {
+      if (m?.action !== 'TEMU_UPLOAD_PROGRESS') return;
+      _zhUploadProg = m;
+      if (rep) rep.textContent = base + '\n' + fmtProg(m);
+      temuStep('store', 'ok', TemuLast?.store || '');   // the page only uploads after the store was verified
+      temuStep('proc', 'run', m.phase === 'processing' ? `${m.pct != null ? m.pct : 0}%` : m.phase === 'uploading' ? 'sending the file…' : m.phase === 'finishing' ? 'reading the result…' : 'Temu received the file');
+    };
     try { chrome.runtime.onMessage.addListener(onProg); } catch (_) {}
     let result;
     try { result = await msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: temuBatchFile(), expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }); }
     finally { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} }
     if (result?.recoveryRequired) {
-      say('Previous upload was interrupted. Check Temu upload history before retrying.');
-      if (confirm('Check the previous upload in Temu first. Have you reviewed its result? This unlocks future uploads without resending this file.')) {
+      // v9.15.1 — show WHICH upload was interrupted (store, file, how long ago)
+      const pv = result.previous || {};
+      const when = pv.t ? new Date(pv.t).toLocaleString() : 'unknown time';
+      const what = `"${pv.filename || 'temu_upload.xlsx'}" → store "${pv.store || '?'}" (${when}, ${pv.ageMin ?? '?'} min ago)`;
+      say(`Previous upload was interrupted: ${what}.\nCheck Temu → Add products via upload → Upload history before retrying.`);
+      temuStep('store', 'warn', 'previous upload needs review');
+      const q = pv.stale
+        ? `The upload ${what} was interrupted more than 30 minutes ago and is no longer running.\n\nOK = I checked it on Temu, continue (this file is NOT sent now — press Export + Upload again).`
+        : `The upload ${what} was interrupted.\n\nCheck it in Temu's Upload history first. Have you reviewed its result? OK unlocks future uploads (this file is NOT sent now).`;
+      if (confirm(q)) {
         const acknowledged = await msg({action:'TEMU_UPLOAD_REVIEWED'});
         if (!acknowledged?.success) throw new Error(acknowledged?.error || 'Could not unlock upload');
         say('Previous upload review saved. Select only products that still need uploading.');
@@ -14167,6 +14365,16 @@ async function temuAutoUploadJob() {
       return;
     }
     if (rep) rep.textContent = base; // drop the live ⏳ line
+    { // v9.15.1 — step view (File → Store → Processing → Result)
+      const lines = (result?.report || []).join('\n');
+      const storeBad = /✗[^\n]*(store|wrong store)/i.test(lines);
+      if (storeBad) temuStep('store', 'err', 'wrong / unknown store — nothing sent');
+      else if (result?.success) temuStep('store', 'ok', /Store switched/i.test(lines) ? 'switched to ' + (uploadSnapshot.store || '') : (uploadSnapshot.store || ''));
+      else if (/Store verified|Store switched/i.test(lines)) temuStep('store', 'ok', uploadSnapshot.store || '');
+      if (!result?.success) { if (!storeBad) temuStep('proc', 'err', 'upload failed — see Details'); temuStep('result', 'err', 'nothing listed'); }
+      else if (!result.confirmed) { temuStep('proc', 'warn', 'still processing on Temu'); temuStep('result', 'run', 'waiting for Temu…'); }
+      else { const e = Number(result.errors) || 0; temuStep('proc', 'ok', result.status || 'done'); temuStep('result', e ? 'warn' : 'ok', `${result.added ?? '?'} added${e ? ` · ${e} error${e > 1 ? 's' : ''}` : ''}`); }
+    }
     // v9.4.3 — result numbers from the report ("Completed: 28 records processed, 28 added, 0 errors")
     const rl = (result?.report || []).join('\n');
     const rm = rl.match(/(\d+) records processed, (\d+) added, (\d+) errors/);
@@ -14190,6 +14398,7 @@ async function temuAutoUploadJob() {
     if (completeBatch) {
       if (!uploadSnapshot.marked) { await temuMarkListed(uploadSnapshot.items, uploadSnapshot.store, 'accepted'); uploadSnapshot.marked = true; }
       say((rep?.textContent || '') + `\n✓ ${uploadSnapshot.items.length} products saved to accepted history (verify the live listing status on Temu)`);
+      { const sm = await temuSourcingRecord(uploadSnapshot.items, uploadSnapshot.store); if (sm) say((rep?.textContent || '') + '\n' + sm); }
       temuUpdateSrcInfo();
       // v9.6.0: errors hon to Temu ka "View failed details" khud parh kar wajah dikhao
       if (rm && +rm[3] > 0) {
@@ -14239,6 +14448,8 @@ async function temuLateConfirm({ uploadId, items, store, histId }) {
   const show = t => { if (rep && rep.textContent.startsWith(base)) rep.textContent = base + '\n' + t; };
   const t0 = Date.now(); let miss = 0, reloaded = false;
   show('⏳ Temu is still processing — ZHunter keeps watching…');
+  _zhLateWatch = true;
+  try {
   while (Date.now() - t0 < 25 * 60000) {
     await new Promise(r => setTimeout(r, 8000 + Math.random() * 5000));
     const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/upload-goods-multiple.html*'] });
@@ -14252,12 +14463,16 @@ async function temuLateConfirm({ uploadId, items, store, histId }) {
       if (miss > 14) break;
       continue;
     }
-    if (info.state === 'processing') { show(`⏳ Temu processing${info.pct != null ? ' ' + info.pct + '%' : ''}… (${Math.round((Date.now() - t0) / 1000)}s)`); continue; }
+    if (info.state === 'processing') { show(`⏳ Temu processing${info.pct != null ? ' ' + info.pct + '%' : ''}… (${Math.round((Date.now() - t0) / 1000)}s)`); temuStep('proc', 'run', info.pct != null ? info.pct + '%' : 'processing…'); continue; }
+    temuStep('proc', 'ok', info.status || 'done');
     if (rep && rep.textContent.startsWith(base)) rep.textContent = base;
+    _zhLateWatch = false;
     await temuFinishConfirmed({ info, items, store, histId, uploadId, tabId: usedTab?.id ?? null });
     return;
   }
+  } finally { _zhLateWatch = false; }
   show('• Could not confirm automatically — when Temu shows it as Completed, press "Mark as listed" (or open this Temu tab and press Upload errors).');
+  temuStep('result', 'warn', 'not confirmed — check Temu');
   const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${items.length} as listed`; }
 }
 // Temu has finished. All good → accepted. Errors / Action required → read failures, skip duplicates (listed),
@@ -14272,16 +14487,44 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
   if (clean) {
     await temuMarkListed(items, store, 'accepted');
     add(`✓ Temu confirmed: ${added ?? items.length} products added, 0 errors — marked as accepted`);
+    temuStep('result', 'ok', `${added ?? items.length} added · 0 errors`);
+    { const sm = await temuSourcingRecord(items, store); if (sm) add(sm); }
     temuUpdateSrcInfo(); toast('Temu confirmed — products marked', 'ok');
     return;
   }
   add(`• Temu finished: ${added ?? '?'} added, ${errs} error(s)${info?.status ? ' · ' + info.status : ''}`);
-  if (errs === 0 && added != null && added < items.length) { add(`• Temu added only ${added} of ${items.length} and reported no errors — NOT marked. Check "View processing results" on Temu.`); return; }
-  if (errs > 0) await temuReadFailed({ tabId, uploadId, silent: true });            // duplicates → listed history
+  if (errs === 0 && added != null && added < items.length) { add(`• Temu added only ${added} of ${items.length} and reported no errors — NOT marked. Check "View processing results" on Temu.`); temuStep('result', 'warn', `${added} of ${items.length} added — check Temu`); return; }
+  if (errs > 0) {
+    const fr = await temuReadFailed({ tabId, uploadId, silent: true, items, store });            // duplicates → listed history (of THIS upload's store)
+    // v9.15.1 — products are marked ONLY when Temu's complete result list was read; otherwise nothing is marked (a failed product could be marked by mistake)
+    const nFailed = (fr?.failed || []).length;
+    const fullList = fr?.mode === 'results'
+      ? !!fr.success && fr.complete && fr.matched && fr.rows.length === items.length   // every line of this file read and matched to a product
+      : !!fr?.success && nFailed >= errs && (!fr.total || nFailed >= fr.total);
+    if (fullList && fr.mode === 'results') {
+      const okR = fr.addedItems || [];
+      if (okR.length) { await temuMarkListed(okR, store, 'accepted'); add(`✓ ${okR.length} product(s) that Temu added are marked`); const sm = await temuSourcingRecord(okR, store); if (sm) add(sm); }
+      const badR = items.length - okR.length;
+      if (badR) add(`• ${badR} product(s) not added on Temu (duplicates are already in the store; others are NOT marked and will show again in the next export)`);
+      temuStep('result', badR ? 'warn' : 'ok', `${okR.length} added${badR ? ` · ${badR} not added` : ''}`);
+      temuUpdateSrcInfo();
+      add('⏳ Fixing drafts automatically…');
+      await temuFixDrafts();
+      return;
+    }
+    if (!fullList) {
+      add(`✗ Temu reported ${errs} error(s) but ZHunter could read only ${nFailed} failed product(s)${fr?.total ? ` of ${fr.total}` : ''} — NO product was marked as listed. Check "View processing results" on Temu, then press "Mark as listed" for the ones that went through.`);
+      const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = false; mb.textContent = `Mark ${items.length} as listed`; }
+      temuStep('result', 'warn', `${errs} error(s) — nothing marked, check Temu`);
+      temuUpdateSrcInfo();
+      return;
+    }
+  }
   const okItems = items.filter(it => !TemuLastFailed.has(temuNormTitle(it.title)));
-  if (okItems.length) { await temuMarkListed(okItems, store, 'accepted'); add(`✓ ${okItems.length} product(s) that Temu accepted are marked`); }
+  if (okItems.length) { await temuMarkListed(okItems, store, 'accepted'); add(`✓ ${okItems.length} product(s) that Temu accepted are marked`); const sm = await temuSourcingRecord(okItems, store); if (sm) add(sm); }
   const bad = items.length - okItems.length;
   if (bad) add(`• ${bad} product(s) failed on Temu (duplicates are already in the store; others are NOT marked and will show again in the next export)`);
+  temuStep('result', bad ? 'warn' : 'ok', `${okItems.length} accepted${bad ? ` · ${bad} failed` : ''}`);
   temuUpdateSrcInfo();
   add('⏳ Fixing drafts automatically…');
   await temuFixDrafts();
@@ -14292,18 +14535,37 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
 // Temu matches its words to the real options ("3 Years+", "Wood", "Use Without Electricity"). So we put the RIGHT option words there, per product.
 const TEMU_AGE_YEARS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18];
 const TEMU_AGE_MONTHS = [1, 3, 4, 5, 6, 10, 12, 18];
+// v9.15.1 — an age is read only when the title talks about an age / child ("Ages 4-8", "Kids", "3 years old", "8+ years");
+// warranty / supply / anniversary / aged-food numbers are ignored ("2 Year Warranty" was read as "2 Years+").
+function temuAgeClean(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\b\d{1,2}\s*-?\s*(?:years?|yrs?|months?|mos?)\s*(?:limited\s+|manufacturer\s+)?(?:warranty|guarantee|anniversary|supply|subscription|shelf[- ]life|protection|plan)\b/g, ' ')
+    .replace(/\b(?:warranty|guarantee)\s*(?:of\s*)?\d{1,2}\s*-?\s*(?:years?|yrs?|months?)\b/g, ' ')
+    .replace(/\b\d{1,2}\s*-?\s*(?:years?|yrs?)\s*(?:old\s+|aged\s+)?(?:whisk(?:e)?y|scotch|bourbon|rum|wine|cheddar|cheese|parmesan|balsamic)\b/g, ' ')
+    .replace(/\baged\s*(?:for\s*)?\d{1,2}\s*-?\s*(?:years?|yrs?|months?)\b/g, ' ');
+}
+function temuAgeContext(t) {
+  return /\b(ages?|kids?|child|children|toddlers?|baby|babies|infants?|newborns?|boys?|girls?|teens?|youth|preschool|toys?)\b/.test(t)
+    || /\b(?:years?|yrs?)\s*old\b/.test(t) || /\b\d{1,2}\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?|y)\b/.test(t);
+}
 function temuAgeFromTitle(title) {
-  const t = String(title || '').toLowerCase();
+  const t = temuAgeClean(title);
+  if (!temuAgeContext(t)) return '';
   let m = t.match(/(\d{1,2})\s*(?:-\s*\d{1,2}\s*)?months?\b/);
   if (m) { const v = parseInt(m[1], 10); const o = [...TEMU_AGE_MONTHS].reverse().find(x => x <= v); return o ? `${o} Months+` : '0-5M'; }
-  m = t.match(/(\d{1,2})\s*-\s*\d{1,2}\s*(?:years?|yrs?)/) || t.match(/(?:ages?|for)\s*(\d{1,2})\s*(?:\+|and up|& up|plus|years?|yrs?|-)/) || t.match(/(\d{1,2})\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?)?\b/) || t.match(/(\d{1,2})\s*(?:years?|yrs?)(?:\s*(?:old|\+|and up|& up))?/) || t.match(/\b(\d{1,2})\s*\+(?!\d)/);
+  m = t.match(/(\d{1,2})\s*-\s*\d{1,2}\s*(?:years?|yrs?)/) || t.match(/(?:ages?|for)\s*(\d{1,2})\s*(?:\+|and up|& up|plus|years?|yrs?|-)/) || t.match(/(\d{1,2})\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?)\b/) || t.match(/(\d{1,2})\s*(?:years?|yrs?)(?:\s*(?:old|\+|and up|& up))?/) || (/\bages?\b/.test(t) ? t.match(/\b(\d{1,2})\s*\+(?!\d)/) : null);
   if (m) { const v = parseInt(m[1], 10); if (v >= 18) return '18 Years+'; if (v <= 1) return '12 Months+'; const o = [...TEMU_AGE_YEARS].reverse().find(x => x <= v); return o ? `${o} Years+` : ''; }
   if (/\b(newborn|infant)\b/.test(t)) return '0 Year+';
   if (/\btoddler/.test(t)) return '18 Months+';
   return '';
 }
+// v9.15.1 — phrases where a material word is NOT the material ("Cotton Candy", "Iron Man", "Glass Cleaner", "Plastic-free", "Shaving Foam" …)
+function temuMaterialClean(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\bcotton\s*candy\b|\biron\s*man\b|\bglass(?:es)?\s*(?:cleaner|cleaning|wipes?|case)\b|\bglass\s*slipper\b|\bplastic[- ]free\b|\b(?:shaving|cleansing|bath|hand)\s*foam\b|\bfoaming\b|\bwood[- ](?:fired|smoked|grain(?:\s*look)?|look)\b|\bmetal(?:lic)?\s*(?:look|finish|colou?r)\b|\bsteel\s*(?:blue|grey|gray)\b|\brubber\s*duck(?:y|ie)?\b|\bpaper\s*(?:thin|white)\b|\bleather\s*(?:look|cleaner|conditioner)\b|\bfaux\s*leather\b/g, ' ');
+}
 function temuMaterialFromTitle(title) {
-  const t = String(title || '').toLowerCase();
+  const t = temuMaterialClean(title);
   const map = [[/\b(wood|wooden)\b/, 'Wood'], [/\bstainless steel\b/, 'Stainless Steel'], [/\b(metal|aluminum|iron)\b/, 'Metal'], [/\b(plastic|abs)\b/, 'Plastic'], [/\bsilicone\b/, 'Silicone'], [/\b(cotton)\b/, 'Cotton'], [/\bpolyester\b/, 'Polyester'], [/\bglass\b/, 'Glass'], [/\bceramic\b/, 'Ceramic'], [/\brubber\b/, 'Rubber'], [/\b(paper|cardboard)\b/, 'Paper'], [/\bfoam\b/, 'Foam'], [/\bleather\b/, 'Leather'], [/\b(plush|fabric)\b/, 'Fabric']];
   const hit = map.find(([re]) => re.test(t)); return hit ? hit[1] : '';
 }
@@ -14432,19 +14694,9 @@ async function temuFixDrafts() {
       { action: 'TEMU_FIX_DRAFTS', rules, defaults, autoSubmit: cfg.draft_auto_submit !== false, expectStore: temuActiveStoreName() },
       r => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : r)));
     say((result?.report || []).join('\n'));
-    if (result?.success && !result.stillEmpty) {
-      try {
-        const hl = await temuHistGet(); const store = temuActiveStoreName() || '';
-        const rec = hl.find(h => h.kind === 'upload' && !h.fixedAt && (!store || (h.store || '') === store) && (h.errors > 0 || h.uploadId || !h.confirmed));
-        if (rec) {
-          rec.fixedAt = Date.now(); rec.errors = 0; rec.confirmed = true;
-          await new Promise(r => chrome.storage.local.set({ temuUploadHistory: hl }, r));
-          const its = (rec.items || []).filter(it => it && it.url && !TemuLastFailed.has(temuNormTitle(it.title)));
-          if (its.length) await temuMarkListed(its, rec.store || undefined, 'listed');
-          temuRenderHistory(); temuUpdateSrcInfo();
-        }
-      } catch (_) {}
-    }
+    // v9.15.1 — Fix drafts no longer marks any upload record / products as "listed": pressing Submit does not prove Temu accepted the draft,
+    // and the newest unfixed history record is not necessarily the upload these drafts came from. Check Temu, then use "Mark as listed".
+    if (result?.success && !result.stillEmpty) say((rep?.textContent || '') + '\n\n• Drafts submitted — check them on Temu. Nothing was marked as listed automatically.');
     toast(result?.success ? (result.stillEmpty ? `${result.stillEmpty} field(s) still empty — see the report` : `Drafts: ${result.changed ?? 0} fields set; ${result.submitted ?? 0} submit clicks — verify the result on Temu`) : 'Fix drafts failed — see the report', result?.success && !result.stillEmpty ? 'ok' : 'warn');
   } catch (e) {
     say('✗ ' + (e?.message || e));
@@ -14491,7 +14743,7 @@ async function temuLearnAttributes() {
 // Duplicate ("Contribution SKU duplicated") wale products = store mein pehle se listed → listed-history mein mark.
 let TemuLastFailed = new Set();
 const temuNormTitle = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-async function temuReadFailed({ tabId = null, uploadId = null, silent = false } = {}) {
+async function temuReadFailed({ tabId = null, uploadId = null, silent = false, items: upItems = null, store: upStore = null } = {}) {
   const rep = $('temuReport');
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
   const add = t => say((rep?.textContent || '') + '\n' + t);
@@ -14522,6 +14774,29 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false } 
     try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
     (result?.report || []).forEach(add);
     if (!result?.success) return result;
+    // v9.15.1 — new "Processing results" popup: no names, "Line" = spreadsheet row (row 5 = first product of the uploaded file)
+    if (result.mode === 'results') {
+      const items = upItems || TemuLast?.items || [];
+      const itemOf = line => items[line - 5] || null;
+      const store = upStore || temuActiveStoreName() || undefined;   // C4 — duplicates belong to the store this file was uploaded to
+      const notAdded = (result.failed || []).map(f => ({ ...f, item: itemOf(f.line) }));
+      result.addedItems = (result.rows || []).filter(r => r.added).map(r => itemOf(r.line)).filter(Boolean);
+      result.matched = items.length > 0 && (result.rows || []).every(r => !!itemOf(r.line));
+      TemuLastFailed = new Set(notAdded.map(f => f.item ? temuNormTitle(f.item.title) : '').filter(Boolean));
+      for (const f of notAdded) {
+        const why = f.duplicate ? 'DUPLICATE — already in the store' + (f.dupGoodsId ? ` (Goods ${f.dupGoodsId})` : '') : `${f.status}${f.reason ? ' — ' + f.reason : ''}`;
+        add(`✗ ${f.item ? f.item.title.slice(0, 55) : 'Line ' + f.line + ' (no product of this export)'} → ${why}`);
+      }
+      const dupItems = notAdded.filter(f => f.duplicate && f.item).map(f => f.item);
+      if (dupItems.length && result.matched) {
+        await temuMarkListed(dupItems, store);
+        add(`✓ ${dupItems.length} duplicate product(s) marked as listed in "${store || 'default'}" — skipped in the next export`);
+        temuUpdateSrcInfo();
+      }
+      const other = notAdded.filter(f => !f.duplicate).length;
+      if (other) add(`• ${other} product(s) not added (draft / failed) — reasons above. Fix them on Temu ("Complete product infomation") or in the Categories tab.`);
+      return result;
+    }
     const failed = result.failed || [];
     TemuLastFailed = new Set(failed.map(f => temuNormTitle(f.name)));   // v9.15 — these products are NOT uploaded: never mark them as listed
     if (!failed.length) return result;
@@ -14535,7 +14810,7 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false } 
       if (f.duplicate && it) dupItems.push(it);
     }
     if (dupItems.length) {
-      await temuMarkListed(dupItems);
+      await temuMarkListed(dupItems, upStore || undefined);
       add(`✓ ${dupItems.length} duplicate product(s) marked in listed history — they will be skipped in the next export`);
       temuUpdateSrcInfo();
     }
@@ -14573,32 +14848,40 @@ async function temuHistKeepFile(histId, bytes, name) {   // save the xlsx for a 
     // clean up files whose history record no longer exists
     const ids = new Set((await temuHistGet()).map(h => h.id)); const ks = await ZhFiles.keys();
     for (const k of ks) if (!ids.has(k) && k !== 'sheet_state') await ZhFiles.del(k);
-    { // only the newest 50 files are kept (older records stay in History, just without the file)
+    await temuHistSerial(async () => { // only the newest 50 files are kept (older records stay in History, just without the file)
       const list = await temuHistGet(); const keep = new Set(list.slice(0, 50).map(h => h.id));
       let drop = false;
       for (const h of list) if (h.fileName && !keep.has(h.id)) { try { await ZhFiles.del(h.id); } catch (_) {} delete h.fileName; delete h.fileSize; drop = true; }
       if (drop) await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r));
-    }
+    });
   } catch (e) { console.log('[ZHunter] history file not saved', e?.message || e); }
 }
 async function temuHistGet() { return new Promise(r => chrome.storage.local.get('temuUploadHistory', x => r(Array.isArray(x?.temuUploadHistory) ? x.temuUploadHistory : []))); }
 // v9.15 — optional batch name typed on the Upload tab (used in file name + History)
 function temuBatchName() { return (document.getElementById('temuBatchNameInp')?.value || '').trim().slice(0, 60); }
 function temuBatchFile() { const b = temuBatchName().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, ''); return b ? `temu_upload_${b}.xlsx` : 'temu_upload.xlsx'; }
+// v9.15.1 — every History write waits for the one before it (a late confirmation and a new upload used to overwrite each other)
+let _temuHistChain = Promise.resolve();
+function temuHistSerial(work) { const p = _temuHistChain.then(work); _temuHistChain = p.catch(() => {}); return p; }
 async function temuHistAdd(entry) {
-  const list = await temuHistGet();
   const hid = 'h_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  list.unshift({ id: hid, t: Date.now(), batch: temuBatchName(), ...entry });
-  await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list.slice(0, 100) }, r));
+  await temuHistSerial(async () => {
+    const list = await temuHistGet();
+    list.unshift({ id: hid, t: Date.now(), batch: temuBatchName(), ...entry });
+    await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list.slice(0, 100) }, r));
+  });
   temuRenderHistory();
   return hid;
 }
 async function temuHistPatch(histId, patch) {
   if (!histId) return;
-  const list = await temuHistGet(); const rec = list.find(h => h.id === histId); if (!rec) return;
-  Object.assign(rec, patch);
-  await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r));
-  temuRenderHistory();
+  const found = await temuHistSerial(async () => {
+    const list = await temuHistGet(); const rec = list.find(h => h.id === histId); if (!rec) return false;
+    Object.assign(rec, patch);
+    await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r));
+    return true;
+  });
+  if (found) temuRenderHistory();
 }
 let TemuHistFilter = 'all';
 
@@ -14821,9 +15104,11 @@ async function temuRenderHistory() {
 
     el.querySelector('[data-act="del"]').addEventListener('click', async () => {
       if (!confirm(`Delete this upload record (${when} · ${h.store || 'store'} · ${h.n} products)?`)) return;
-      const allHist = await temuHistGet();
-      const nextHist = allHist.filter(x => (h.id ? x.id !== h.id : x.t !== h.t));
-      await new Promise(r => chrome.storage.local.set({ temuUploadHistory: nextHist }, r));
+      await temuHistSerial(async () => {
+        const allHist = await temuHistGet();
+        const nextHist = allHist.filter(x => (h.id ? x.id !== h.id : x.t !== h.t));
+        await new Promise(r => chrome.storage.local.set({ temuUploadHistory: nextHist }, r));
+      });
       try { if (h.id) await ZhFiles.del(h.id); } catch (_) {}
       temuRenderHistory();
       toast('History record deleted ✓', 'ok');
@@ -15628,6 +15913,7 @@ function temuFillForm() {
   set('tgPx', cfg.price_multiplier); set('tgPx2', cfg.price_multiplier);
   set('tgListPx', cfg.list_price_multiplier ?? 1.25);
   set('tgGap', cfg.ask_tiers || '10:50, 25:45, 60:40, 120:60, 40%'); set('tgGapFz', cfg.ask_gap_frozen ?? 35);
+  set('tgPriceStrategy', cfg.price_strategy === 'legacy' ? 'legacy' : 'gap'); temuApplyPxMode();
   set('tgMinPx', cfg.price_min ?? 80); set('tgMaxPx', cfg.price_max ?? 999);
   set('tgQtyMin', cfg.quantity_min ?? 250); set('tgQtyMax', cfg.quantity_max ?? 500);
   set('tgMaxW', cfg.max_weight_lb ?? 8);
@@ -15679,7 +15965,18 @@ function temuReadDeptTable() {
   return out;
 }
 // Settings pane fields that the export reads live (no Save needed)
+// v9.15.1 — pricing strategy: "gap" (cost + tier gap, default) or "legacy" (Price ×, Min/Max, Department, Category Price ×).
+// Only the chosen strategy's boxes are shown; the Upload-tab chip says which one is active.
+function temuPxMode() { const v = $('tgPriceStrategy')?.value; return v === 'legacy' || (!v && temuGetCfg().price_strategy === 'legacy') ? 'legacy' : 'gap'; }
+function temuApplyPxMode() {
+  const mode = temuPxMode();
+  document.querySelectorAll('#temuModal [data-px-mode]').forEach(el => { el.style.display = el.dataset.pxMode === mode ? '' : 'none'; });
+  const lbl = $('temuSrcPxLbl'), val = $('temuSrcPxVal');
+  if (lbl) lbl.textContent = mode === 'legacy' ? 'Price ×' : 'Pricing:';
+  if (val) val.textContent = mode === 'legacy' ? ($('tgPx2')?.value || $('tgPx')?.value || '5') : 'Cost + gap';
+}
 function temuApplyLiveCopyPrice(cfg) {
+  { const ps = $('tgPriceStrategy')?.value; if (ps) cfg.price_strategy = ps === 'legacy' ? 'legacy' : 'gap'; }
   const dc = $('tgDescOn'); if (dc) cfg.fill_description = !!dc.checked;
   const aw = $('tgAvoidWords'); if (aw) cfg.desc_avoid_words = aw.value.split(',').map(x => x.trim()).filter(Boolean);
   if ($('tgDeptTable')?.querySelector('.tg-dept-row[data-dept]')) cfg.dept_pricing = temuReadDeptTable();
@@ -15688,6 +15985,7 @@ function temuApplyLiveCopyPrice(cfg) {
 // "N products ready" line under the source selector
 async function temuUpdateSrcInfo() {
   temuSyncSrcSeg();
+  temuScheduleReady();   // v9.15.1 — keep the Ready checklist current
   const el = $('temuSrcInfo'); if (!el) return;
   try {
     const source = $('temuSource')?.value || 'bulk';
@@ -15703,7 +16001,7 @@ async function temuUpdateSrcInfo() {
     const store = temuActiveStoreName() || 'default';
     const skipOn = $('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false; // v9.7.4: export ki tarah live checkbox
     const listed = rows.filter(r => temuListedMap()[store + '|' + temuSourceIdentity(r.url || '')]).length;
-    el.textContent = `${n} products ready` + (listed ? ` · ${listed} already listed (${skipOn ? 'skip' : 'skip OFF — they will be sent again!'})` : '') + ` · store: ${temuActiveStoreName() || '—'}`;
+    el.textContent = `${n} products in the list` + (listed ? ` · ${listed} already listed (${skipOn ? 'skip' : 'skip OFF — they will be sent again!'})` : '') + ` · store: ${temuActiveStoreName() || '—'}`;
   } catch (_) { el.textContent = '—'; }
 }
 function temuSwitchTab(name) {
@@ -15744,6 +16042,96 @@ function temuUpdateReviewCount(rows) {
     bulkBtn.textContent = `AI Title Rewrite (${included})`;
   }
   temuUpdateImgEditCount(rows);
+  temuScheduleReady();
+}
+
+// ═══ v9.15.1 — Ready checklist (Upload tab) ═══
+// A dry run of the same export rules on the ticked products: shows what goes up and what needs you, before anything is sent.
+// Red = would stop the upload (already listed / no image / no or suspicious price) → the button stays off with the reason.
+// Amber = left out but the rest goes on (no category / too heavy / not a usable link). Click a chip → that product in the list.
+let _temuReadyT = null, _temuReadySeq = 0;
+function temuScheduleReady() { clearTimeout(_temuReadyT); _temuReadyT = setTimeout(() => { temuUpdateReady().catch(e => console.warn('[ZHunter] ready check', e)); }, 350); }
+async function temuUpdateReady() {
+  const box = $('temuReadyBox'), btn = $('temuAutoBtn');
+  if (!box || !btn) return;
+  const seq = ++_temuReadySeq;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const store = temuActiveStoreName();
+  const source = $('temuSource')?.value || 'bulk';
+  let total = 0, ok = 0, groups = [], mult = [];
+  if (source === 'sheet' && TemuLast?.asIs) { total = ok = TemuLast.n || 0; }
+  else {
+    const rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+    if (seq !== _temuReadySeq) return;
+    total = rows.length;
+    const cfg = temuApplyLiveCopyPrice(temuGetCfg()); cfg.price_strategy = temuPxMode();
+    const G = {
+      listed: { cls: 'bad', label: 'already listed', ids: [] },
+      noimg: { cls: 'bad', label: 'no image', ids: [] },
+      noprice: { cls: 'bad', label: 'no / suspicious price', ids: [] },
+      nocat: { cls: 'warn', label: 'no category — left out', ids: [] },
+      heavy: { cls: 'warn', label: 'too heavy — left out', ids: [] },
+      other: { cls: 'warn', label: 'not usable — left out', ids: [] }
+    };
+    for (const r0 of rows) {
+      const r = JSON.parse(JSON.stringify(r0));
+      // edited images (data / blob / Flow) are uploaded to the image host during export — count them as images here
+      if (Array.isArray(r.images)) r.images = r.images.map(u => typeof u === 'string' && /^(data:image\/|blob:|https:\/\/flow-content\.google\/)/i.test(u) ? 'https://edited.image.pending/x.jpg' : u);
+      let res; try { res = temuEnrich([r], cfg); } catch (_) { continue; }
+      const it = res.items[0], why = res.skipped[0] || '', t = String(r0.title || r0.url || '').slice(0, 70);
+      if (!it) { G[/^already listed/i.test(why) ? 'listed' : /^too heavy/i.test(why) ? 'heavy' : 'other'].ids.push({ id: r0.id, t: why || t }); continue; }
+      if (it.warn.includes('NO_IMAGES')) G.noimg.ids.push({ id: r0.id, t });
+      else if (it.warn.includes('NO_PRICE') || it.warn.includes('PRICE_SUSPICIOUS')) G.noprice.ids.push({ id: r0.id, t });
+      else if (it.warn.includes('NO_CATEGORY_PROFILE')) G.nocat.ids.push({ id: r0.id, t });
+      else {
+        ok++;
+        const c = parseFloat(String(it.sourcingPrice ?? '').replace(/[$,]/g, ''));
+        if (c > 0 && it.base > 0) mult.push(it.base / c);
+      }
+    }
+    groups = Object.values(G).filter(g => g.ids.length);
+  }
+  if (seq !== _temuReadySeq) return;
+  let stop = '';
+  if (!store) stop = 'Add or choose a store first (Settings → store)';
+  else if (!total) stop = 'No products — hunt first or choose another source';
+  else if (groups.some(g => g.cls === 'bad')) stop = 'Untick or fix the red products first';
+  else if (!ok) stop = 'No product is ready to upload';
+  const chip = g => `<button type="button" class="temu-ready-item ${g.cls}" data-ready-ids="${esc(g.ids.map(x => x.id).join(','))}" title="${esc(g.ids.slice(0, 12).map(x => '• ' + x.t).join('\n'))}">${g.cls === 'bad' ? '✗' : '⚠'} ${g.ids.length} ${esc(g.label)}</button>`;
+  box.innerHTML = `<div class="temu-ready-row">`
+    + `<span class="temu-ready-item ${store ? 'ok' : 'bad'}">${store ? '✓ Store <b>' + esc(store) + '</b>' : '✗ No store'}</span>`
+    + `<span class="temu-ready-item ${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${ok} of ${total} ready</span>`
+    + groups.map(chip).join('') + `</div>`
+    + (stop ? `<div class="temu-ready-stop">⛔ ${esc(stop)}</div>` : '');
+  if (!TemuUploadBusy) { btn.disabled = !!stop; btn.title = stop; }
+  const ps = $('temuPxStats');
+  if (ps) {
+    if (mult.length) { const avg = mult.reduce((a, b) => a + b, 0) / mult.length; ps.textContent = `Price vs source: avg ${avg.toFixed(1)}× · lowest ${Math.min(...mult).toFixed(1)}× (${mult.length} products)`; ps.hidden = false; }
+    else ps.hidden = true;
+  }
+}
+// chip click → open the product list and jump to the first product of that group
+async function temuReadyJump(ids) {
+  const id = (ids || [])[0]; if (!id) return;
+  const list = $('temuReviewList');
+  if (list?.classList.contains('hidden')) $('temuReviewToggleBtn')?.click();
+  for (let i = 0; i < 20 && !document.querySelector(`.temu-rv-card[data-id="${CSS.escape(id)}"]`); i++) await new Promise(r => setTimeout(r, 150));
+  temuJumpToCard(id);
+}
+
+// ═══ v9.15.1 — Upload steps (File → Store → Processing → Result) shown above the text report ═══
+const TEMU_STEP_DEFS = [['file', 'File'], ['store', 'Store'], ['proc', 'Processing'], ['result', 'Result']];
+function temuStepsReset() {
+  const el = $('temuSteps'); if (!el) return;
+  el.classList.remove('hidden');
+  el.innerHTML = TEMU_STEP_DEFS.map(([k, l], i) => `<div class="temu-step" data-step="${k}" data-state="wait"><span class="temu-step-ic">${i + 1}</span><span class="temu-step-lbl">${l}</span><span class="temu-step-txt"></span></div>`).join('');
+}
+function temuStep(k, state, txt = '') {
+  const s = document.querySelector(`#temuSteps .temu-step[data-step="${k}"]`); if (!s) return;
+  s.dataset.state = state;
+  const n = TEMU_STEP_DEFS.findIndex(d => d[0] === k) + 1;
+  s.querySelector('.temu-step-ic').textContent = state === 'ok' ? '✓' : state === 'err' ? '✗' : state === 'warn' ? '!' : String(n);
+  s.querySelector('.temu-step-txt').textContent = txt;
 }
 
 function _thumbUrl(r) {
@@ -16313,6 +16701,7 @@ function temuRefreshReviewPrices() {
   const cfg = temuGetCfg();
   const px = parseFloat($('tgPx')?.value || $('tgPx2')?.value || cfg.price_multiplier);
   if (isFinite(px) && px > 0) cfg.price_multiplier = px;
+  cfg.price_strategy = temuPxMode();   // v9.15.1 — preview follows the strategy chosen in Settings (even before it is saved)
   document.querySelectorAll('.temu-rv-card').forEach(card => {
     if (card.dataset.customPrice) return;
     const rawPrice = card.dataset.rawPrice;
@@ -17205,7 +17594,7 @@ async function temuStartBulkImageEdit(opts = {}) {
 
   if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });
   { const ae = zhLibGet(ZhLibActive); if (engine === 'gemini' && ae?.setup && prompt.trim() === ae.text.trim()) queue.forEach(q => { q.setup = zhSetupFor(ae.id); }); }   // Gemini: library prompt as it is; alternate text per product
-  if (!(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : engine === 'gemini' ? 'Gemini' : 'Auto (ChatGPT → Flow → Gemini)'))) return;   // the setup window now opens for every engine (Flow, ChatGPT, Gemini)
+  if (!(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : engine === 'gemini' ? 'Gemini' : 'Auto (Gemini → Flow)'))) return;   // the setup window now opens for every engine (Flow, ChatGPT, Gemini)
 
   TemuImgStepper = {
     queue,
@@ -17575,7 +17964,7 @@ async function temuStepProcessCurrent() {
   if (nameEl) nameEl.textContent = current.product.title || 'Product';
   if (current.status !== 'done') current.status = 'busy';
   try { temuStepResultsRender(); } catch (_) {}
-  temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (Nano Banana 2)' : TemuImgStepper.engine === 'auto' ? 'Auto' : TemuImgStepper.engine}...`);
+  temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (newest Nano Banana)' : TemuImgStepper.engine === 'auto' ? 'Auto' : TemuImgStepper.engine}...`);
 
   // Paste & Next is only for the manual engines
   $('temuStepPasteNextBtn')?.classList.remove('hidden'); // v9.10.1 — manual fallback for Flow too
@@ -17591,7 +17980,7 @@ async function temuStepSendCurrent() {
   let engine = TemuImgStepper.engine;
   if (engine === 'auto') {
     current.tried = current.tried || [];
-    engine = ZH_AUTO_ORDER.find(e => !current.tried.includes(e) && !(e === 'chatgpt' && TemuImgStepper.gptDown)) || 'flow';
+    engine = ZH_AUTO_ORDER.find(e => !current.tried.includes(e) && !zhEngineDown(TemuImgStepper, e)) || 'flow';
     if (!current.tried.includes(engine)) current.tried.push(engine);
     else current.tried = [engine];   // "Send Again" after everything failed → start over
   }
@@ -17636,53 +18025,26 @@ async function temuStepSendCurrent() {
     const nxt = queue[currentIndex + 1];
     if (nxt?.imgUrl) flowPrefetchImage(nxt.imgUrl);
   } else if (engine === 'gemini') {
-    let base64Data = current.imgUrl;
-    if (current.imgUrl && !current.imgUrl.startsWith('data:')) {
-      try {
-        const resp = await fetch(current.imgUrl);
-        const blob = await resp.blob();
-        base64Data = await new Promise(res => {
-          const rd = new FileReader();
-          rd.onload = () => res(rd.result);
-          rd.readAsDataURL(blob);
-        });
-      } catch (_) {}
-    }
-    // v9.15 — rules once per Gemini chat; later images = image only (full prompt again every N images)
-    const S = TemuImgStepper;
-    let gtext = current.prompt || prompt;
-    if (current.setup) {
-      const g = S.gemPrime || (S.gemPrime = { key: null, since: 0 });
-      const need = g.key !== current.setup.key || g.since >= current.setup.every;
-      if (need) { g.key = current.setup.key; g.since = 0; }
-      g.since++;
-      gtext = need ? current.setup.text : (current.setup.short || ZH_SETUP_SHORT);
-    }
+    // v9.15.1 — the same Gemini runner as the Gemini engine (gemRunOnTab via gptSendAndWait): new chat every few images,
+    // account switch on a limit, CAPTCHA stop, retry on "I encountered an error", background-tab wake-up, safe image download
     temuStepCancelActiveJob();
-    const token = {}; S.gptToken = token; current.done = false; current.sentAt = Date.now();
+    const S = TemuImgStepper, token = {};
+    S.gptToken = token; current.done = false; current.sentAt = Date.now();
     temuStepSetStatus('⏳ Sending to Gemini…');
     (async () => {
       try {
-        const tab = await manualPickTab('gemini', true);
-        if (!tab) throw new Error('could not open Gemini');
-        await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-        const r = await manualSend(tab.id, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [base64Data], prompt: gtext, send: true }, 'gemini_automation.js');
-        if (!r?.ok) throw new Error(r?.error || 'image not attached');
-        temuStepSetStatus(r.sent ? '⏳ Gemini is creating the image…' : '👉 Press Send in Gemini — the image is taken automatically');
-        const end = Date.now() + 9 * 60000; let url = null;
-        while (Date.now() < end) {
-          if (S.gptToken !== token || !S.running || current.done) return;
-          const g = await manualSend(tab.id, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 20000 }, 'gemini_automation.js');
-          if (g?.ok && g.dataUrl) { url = g.dataUrl; break; }
-          await sleepMs(1500);
-        }
-        if (!url) throw new Error('Gemini image did not appear in time');
+        let b64 = await flowPrefetchImage(current.imgUrl);
+        if (!b64 && current.imgUrl?.startsWith('data:')) b64 = current.imgUrl;
+        if (!b64) throw new Error('Image could not be downloaded');
+        const url = await gptSendAndWait(S, 0, b64, ((current.prompt || prompt) + '').trim(), (n) => { if (S.gptToken === token) temuStepSetStatus('⏳ Gemini: ' + n); }, current.setup);
         if (S.gptToken !== token || current.done || !S.running) return;
         current.done = true;
         await temuStepApplyManualImage(url, 'Auto');
       } catch (e) {
-        if (S.gptToken !== token || !S.running) return;
+        if (e.aborted || S.gptToken !== token || !S.running) return;
         S.gptToken = null;
+        if (e.limit && !e.captcha) S.gemDown = true;   // all accounts at their limit → the next images go straight to Flow
+        if (temuStepFallback('Gemini: ' + (e.message || 'failed'))) return;
         temuStepSetStatus('⚠️ Gemini: ' + (e.message || 'failed') + ' — press "Send Again", "Skip" or paste the image yourself', 'error');
         temuStepManualAttn(true);
       }
@@ -17773,30 +18135,12 @@ async function temuStepHandlePasteNext() {
     } catch (_) {}
   }
 
-  if (base64FromClipboard && (stepEng() !== 'gemini' || current.stages)) {
+  // v9.15.1 — one path for every engine: the edit journal, counters, pack label and pack→background stages are all handled
+  // (the old Gemini-only branch skipped them, so a pasted image could show up again as "not edited")
+  if (base64FromClipboard) {
     if (btn) btn.disabled = false;
     await temuStepApplyManualImage(base64FromClipboard, 'Paste');
     return;
-  }
-  if (base64FromClipboard) {
-    await replaceProductImage(current.product.id, current.imgIndex, base64FromClipboard, null);
-    toast(`✓ Image #${current.imgIndex + 1} updated!`, 'ok');
-
-    // Async upload to public host for Temu template
-    (async () => {
-      const pub = await uploadImageToPublicHost(base64FromClipboard);
-      if (pub && pub.startsWith('http')) {
-        await replaceProductImage(current.product.id, current.imgIndex, pub, base64FromClipboard);
-      }
-    })();
-
-    TemuImgStepper.currentIndex++;
-    if (btn) btn.disabled = false;
-    if (TemuImgStepper.currentIndex < queue.length) {
-      await temuStepProcessCurrent();
-    } else {
-      temuStepFinish();
-    }
   } else {
     if (btn) btn.disabled = false;
     toast('No image in the clipboard! Right-click the generated image > Copy Image, then click Paste & Next.', 'warn');
@@ -17809,24 +18153,24 @@ async function temuStepFinish() {
   TemuImgStepper.running = false;
   const timeTxt = zhStepTimerStop();
   // v9.15 — chat archiving is OFF (chats are left as they are)
-  if (TemuImgStepper.engine !== 'gemini') {
-    const sk = stats?.skipped || 0;
-    temuStepSetStatus(`✅ Done! ${stats?.done || 0}/${queue.length} images replaced${sk ? ` · ${sk} skipped` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
-    const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · Done ✅`;
-    await new Promise(r => setTimeout(r, 2500));
+  // v9.15.1 — the same honest summary for every engine (Gemini used to close the window at once and always say
+  // "All selected images processed successfully!" — failed images and "Retry failed" were never shown)
+  const S2 = TemuImgStepper;
+  const bad = (queue || []).filter(it => it.status === 'failed' || it.status === 'skipped').length;
+  const done = stats?.done || 0;
+  if (S2.handoff) {   // Gemini limit → the rest continues in Flow; that run shows its own summary
+    try { temuStepResultsRender(); } catch (_) {}
+    return;
   }
-  if (!TemuImgStepper.running && TemuImgStepper.engine === 'gemini') $('temuImgStepperModal')?.classList.add('hidden');
+  temuStepSetStatus(`${bad ? '⚠️' : '✅'} Done — ${done}/${queue.length} images replaced${bad ? ` · ${bad} failed (press "🔁 Retry failed")` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, bad ? 'error' : 'ok');
+  { const t = $('temuStepTitle'); if (t) t.textContent = bad ? `AI Image Studio · ${bad} failed` : 'AI Image Studio · Done ✅'; }
   try { temuStepResultsRender(); } catch (_) {}
   await temuRenderReview();
   // everything done → go on to the product list by itself; with failed images the window stays open (Retry failed / Redo)
-  { const S2 = TemuImgStepper; const bad = (S2.queue || []).filter(it => it.status === 'failed' || it.status === 'skipped').length;
-    if (!bad && S2.engine !== 'gemini') { setTimeout(() => { if (TemuImgStepper === S2 && !S2.running) { $('temuImgStepperModal')?.classList.add('hidden'); temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); } }, 3500); } }
-  if (TemuImgStepper.engine !== 'gemini') {
-    const skipped = stats?.skipped || 0;
-    toast(`🎉 Image editing complete: ${stats?.done || 0} replaced${skipped ? ` · ${skipped} skipped` : ''} (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, 'ok');
-  } else {
-    toast('🎉 All selected images processed successfully!', 'ok');
-  }
+  if (!bad) setTimeout(() => { if (TemuImgStepper === S2 && !S2.running) { $('temuImgStepperModal')?.classList.add('hidden'); temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); } }, 3500);
+  toast(bad
+    ? `Image editing finished: ${done} replaced · ${bad} failed — open the list and press "Retry failed"`
+    : `🎉 Image editing complete: ${done} replaced (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, bad ? 'warn' : 'ok');
 }
 
 // Gemini image open modal
@@ -18378,7 +18722,7 @@ function initTemuExport() {
       try { temuUpdateSrcInfo(); temuSyncSrcSeg(); temuRenderReview(); } catch (_) {}
       toast('Loaded sheet removed — pick a source or import a new sheet', 'ok');
     }
-    if (e.target.closest('#temuHistClear')) (async () => { if (!confirm('Clear Temu upload history?')) return; await new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r)); temuRenderHistory(); })();
+    if (e.target.closest('#temuHistClear')) (async () => { if (!confirm('Clear Temu upload history?')) return; await temuHistSerial(() => new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r))); temuRenderHistory(); })();
     if (e.target.closest('#tcSaveBtn')) temuSaveProfileFromForm();
     if (e.target.closest('#tgUnmarkLast')) (async () => {
       const lm = await new Promise(r => chrome.storage.local.get('temuLastMarked', x => r(x?.temuLastMarked || null)));
@@ -18512,12 +18856,14 @@ function initTemuExport() {
       const num = v => { const x = parseFloat(v); return isFinite(x) && x > 0 ? x : null; };
       const px = num($('tgPx2')?.value ?? $('tgPx')?.value);
       const w = num($('tgW')?.value), l = num($('tgL')?.value), wd = num($('tgWd')?.value), ht = num($('tgH')?.value);
-      if (px === null) { temuSaveMsg('Enter a number in Price ×', 'bad'); temuSwitchTab('settings'); $('tgPx2')?.focus(); return; }
+      const pxMode = temuPxMode();
+      if (px === null && pxMode === 'legacy') { temuSaveMsg('Enter a number in Price ×', 'bad'); temuSwitchTab('settings'); $('tgPx2')?.focus(); return; }
       if ([w, l, wd, ht].some(x => x === null)) { temuSaveMsg('Enter a number in all four default package boxes', 'bad'); return; }
       const cfg = temuGetCfg();
-      cfg.price_multiplier = px;
+      cfg.price_strategy = pxMode;
+      if (px !== null) cfg.price_multiplier = px;
       { const lp = num($('tgListPx')?.value); if (lp) cfg.list_price_multiplier = lp; }
-      { const g = ($('tgGap')?.value || '').trim(), gf = num($('tgGapFz')?.value); if (g && temuParseTiers(g).steps.length) cfg.ask_tiers = g; if (gf !== null) cfg.ask_gap_frozen = gf; cfg.price_strategy = cfg.price_strategy || 'gap'; }
+      { const g = ($('tgGap')?.value || '').trim(), gf = num($('tgGapFz')?.value); if (g && temuParseTiers(g).steps.length) cfg.ask_tiers = g; if (gf !== null) cfg.ask_gap_frozen = gf; }
       { const minP = num($('tgMinPx')?.value); if (minP) cfg.price_min = minP; }
       { const maxP = num($('tgMaxPx')?.value); if (maxP) cfg.price_max = maxP; }
       { const a = parseInt($('tgQtyMin')?.value, 10), b = parseInt($('tgQtyMax')?.value, 10);
@@ -19937,8 +20283,7 @@ function temuSyncSrcSeg() {
     acts.innerHTML = hasSheet ? '<button type="button" id="temuSheetAnother" class="btn btn-xs">📂 Choose another sheet</button><button type="button" id="temuSheetClear" class="btn btn-ghost btn-xs">✕ Remove loaded sheet</button>' : '';
     acts.style.display = hasSheet ? '' : 'none';
   }
-  const pv = $('temuSrcPxVal');
-  if (pv) pv.textContent = ($('tgPx2')?.value || $('tgPx')?.value || '5');
+  temuApplyPxMode();   // v9.15.1 — chip shows the active pricing strategy
 
   // U2: Show product count badges on source segment buttons
   (async () => {
@@ -20050,7 +20395,7 @@ function temuSyncSrcSeg() {
     const origListener = autoBtn.onclick;
     // Wrap via observer: watch disabled state to toggle spinner
     const obs = new MutationObserver(() => {
-      const busy = autoBtn.disabled;
+      const busy = autoBtn.disabled && TemuUploadBusy;   // v9.15.1 — disabled by the Ready checklist ≠ processing
       autoBtnSpinner?.classList.toggle('hidden', !busy);
       if (autoBtnTxt) autoBtnTxt.textContent = busy ? 'Processing...' : 'Export + Upload to Temu';
     });
@@ -20108,6 +20453,8 @@ function temuSyncSrcSeg() {
   }
 
   document.addEventListener('change', (e) => { if (e.target?.id === 'tgPx2') temuSyncSrcSeg(); });
+  document.addEventListener('change', (e) => { if (e.target?.id === 'tgPriceStrategy') { temuApplyPxMode(); try { temuRefreshReviewPrices(); } catch (_) {} temuScheduleReady(); } });
+  $('temuReadyBox')?.addEventListener('click', e => { const b = e.target.closest('[data-ready-ids]'); if (b) temuReadyJump(b.dataset.readyIds.split(',').filter(Boolean)); });
   temuSyncSrcSeg();
 })();
 

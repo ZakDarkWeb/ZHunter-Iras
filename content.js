@@ -617,6 +617,9 @@ function walkJsonForMedia(rootJson, found) {
 }
 
 async function harvestInlineJson() {
+  // v9.15.1 — the pushState hooks above run in the extension's own world and never see the page's SPA navigation
+  // (Walmart / Temu change product without a reload), so the URL is compared on every call instead.
+  checkFlushHarvestCache();
   // Return cached result from this page load if available
   if (_harvestCache) return _harvestCache;
 
@@ -2814,9 +2817,10 @@ function temuWait(fn, timeout = 8000, step = 200) {
 function temuHistorySection() {
   try {
     // general section ki table: title "Upload history" (categories wali "Spreadsheet upload status" hoti hai)
-    const heading = [...document.querySelectorAll('div,span,h1,h2,h3')].find(e => /^\s*upload history\s*$/i.test((e.textContent || '').trim()));
-    if (!heading) return null;
-    return heading.closest('[class*="wrap-"]') || heading.closest('[class]')?.parentElement || heading.parentElement;
+    // v9.15.1 — the page can hold more than one "Upload history" block (categories + general template); use the one with real uploads
+    const heads = [...document.querySelectorAll('div,span,h1,h2,h3')].filter(e => /^\s*upload history\s*$/i.test((e.textContent || '').trim()));
+    const secs = heads.map(h => h.closest('[class*="wrap-"]') || h.closest('[class]')?.parentElement || h.parentElement).filter(Boolean);
+    return secs.find(s => /\b\d{15}\b/.test(s.innerText || s.textContent || '')) || secs.find(s => s.offsetParent) || secs[0] || null;
   } catch (_) { return null; }
 }
 // Sab se upar wali (naya-tareen) upload row ki "signature" — uska Upload ID (13-20 digit number)
@@ -2839,32 +2843,64 @@ function temuTopHistorySignature() {
   } catch (_) { return 'err'; }
 }
 
+// v9.15.1 — store name from the Temu header (#mms-layout-user-setting → mall_name). Names must match exactly
+// (only letter case and extra spaces are ignored): "HQ TWO" and "HQ - TWO" are different stores.
+const temuStoreNorm = s => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+function temuMallNameNow() {
+  const el = document.querySelector('#mms-layout-user-setting [class*="mall_name"]') || document.querySelector('[class*="mall_name"]');
+  return (el?.textContent || '').trim();
+}
+async function temuReadMall(timeout = 15000) { return (await temuWait(() => temuMallNameNow() || null, timeout, 300)) || ''; }
 
-// v9.15 — Temu store switcher (DOM seen on seller.temu.com): header store name → popover with "Switch" → modal "Switch stores" with cards (.itemStoreCard > .shopName)
-function temuCurrentStoreName() { return (document.querySelector('[class*="mall_name"]')?.textContent || '').trim(); }
-async function temuSwitchStoreTo(target) {
-  const norm = x => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  if (norm(temuCurrentStoreName()) === norm(target)) return { ok: true, already: true };
-  const trigger = document.querySelector('[class*="mall_name"]');
-  if (!trigger) return { ok: false, error: 'Store name not found on the Temu page' };
-  const holder = trigger.closest('section') || trigger.parentElement || trigger;
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const findSwitch = () => [...document.querySelectorAll('[class*="optionBtn"]')].find(b => /^\s*switch\s*$/i.test(b.textContent || '') && temuVisible(b));
-  const fire = (el, types) => types.forEach(t => { try { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); } catch (_) {} });
-  let sw = findSwitch();
-  if (!sw) { for (const el of [trigger, holder]) fire(el, ['pointerover', 'mouseover', 'mouseenter', 'mousemove']); sw = await temuWait(findSwitch, 1500); }
-  if (!sw) { for (const el of [trigger, holder]) { try { el.click(); } catch (_) {} } sw = await temuWait(findSwitch, 2500); }
-  if (!sw) return { ok: false, error: 'Temu store menu did not open (Switch button not found)' };
-  sw.click();
-  const cards = await temuWait(() => { const c = [...document.querySelectorAll('[class*="itemStoreCard"]')]; return c.length ? c : null; }, 5000);
-  if (!cards) return { ok: false, error: 'Temu "Switch stores" list did not open' };
-  const nameOf = c => norm((c.querySelector('[class*="shopName"]')?.childNodes[0]?.textContent) || c.querySelector('[class*="shopName"]')?.textContent || '');
-  const card = cards.find(c => nameOf(c) === norm(target));
-  if (!card) return { ok: false, error: `Store "${target}" is not in this Temu account's store list (${cards.map(nameOf).join(', ')})` };
-  if (/current/i.test(card.className)) return { ok: true, already: true };
-  await sleep(300);
-  card.click();
-  return { ok: true, clicked: true };
+// v9.15.1 — switch the open Temu store: hover the header store name → "Switch" → "Switch stores" window → the card with exactly this name.
+// Temu reloads the page by itself after the click, so the answer is sent first and the card is clicked a moment later.
+async function temuPageSwitchStore({ name } = {}) {
+  const want = temuStoreNorm(name);
+  if (!want) return { ok: false, error: 'No store name given' };
+  const cur = await temuReadMall();
+  if (!cur) return { ok: false, error: 'Store name not found in the Temu header — wait for the page to load' };
+  if (temuStoreNorm(cur) === want) return { ok: true, already: true, current: cur };
+  const fire = (el, type) => {
+    try {
+      const r = el.getBoundingClientRect();
+      const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new Ctor(type, { bubbles: type !== 'mouseenter' && type !== 'pointerenter', cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerType: 'mouse' }));
+    } catch (_) {}
+  };
+  const findSwitch = () => [...document.querySelectorAll('[class*="optionBtn"], [role="button"]')].find(b => /^\s*switch\s*$/i.test(b.textContent || '') && temuVisible(b)) || null;
+  const modalOf = () => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m => /switch stores/i.test(m.textContent || '') && m.querySelector('[class*="itemStoreCard"], [class*="shopCard"]')) || null;
+  const closeModal = m => { try { (m?.querySelector('[class*="modal_icon_close"], [class*="modalCloseButton"]'))?.click(); } catch (_) {} };
+  let modal = modalOf();
+  if (!modal) {
+    const host = document.querySelector('#mms-layout-user-setting');
+    if (!host) return { ok: false, error: 'Store menu not found in the Temu header' };
+    const target = host.querySelector('[class*="mall_name"]') || host;
+    let btn = null;
+    for (let t = 0; t < 3 && !btn; t++) {
+      ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove'].forEach(tp => { fire(target, tp); fire(host, tp); });
+      btn = await temuWait(findSwitch, 2500, 150);
+    }
+    if (!btn) return { ok: false, error: 'The Temu store menu did not open (no "Switch" button) — switch the store in Temu yourself' };
+    await temuHumanClick(btn);
+    modal = await temuWait(modalOf, 8000, 200);
+    if (!modal) return { ok: false, error: 'The "Switch stores" window did not open — switch the store in Temu yourself' };
+  }
+  const cardName = c => {
+    const n = c.querySelector('[class*="shopName"]'); if (!n) return '';
+    const own = [...n.childNodes].filter(x => x.nodeType === 3).map(x => x.nodeValue).join(' ').trim();   // the "Current" tag is a child element — not part of the name
+    return own || (n.textContent || '').replace(/\s*Current\s*$/i, '').trim();
+  };
+  const cards = [...modal.querySelectorAll('[class*="itemStoreCard"], [class*="shopCard"]')];
+  const stores = cards.map(cardName).filter(Boolean);
+  const hits = cards.filter(c => temuStoreNorm(cardName(c)) === want);
+  if (hits.length !== 1) {
+    closeModal(modal);
+    return { ok: false, stores, error: hits.length ? `Two Temu stores are named "${name}" — switch in Temu yourself` : `Store "${name}" is not in this Temu account (stores: ${stores.join(', ')})` };
+  }
+  if (/currentShop/i.test(hits[0].className)) { closeModal(modal); return { ok: true, already: true, current: cardName(hits[0]) }; }
+  const card = hits[0];
+  setTimeout(() => { temuHumanClick(card).catch(() => {}); }, 400);
+  return { ok: true, switching: true, from: cur, to: cardName(card), stores };
 }
 
 async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, hiddenMode }) {
@@ -2872,14 +2908,14 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
   const ok = (m) => report.push('✓ ' + m);
   const fail = (m) => { report.push('✗ ' + m); return { success: false, report }; };
 
-  // 0) Safety: make sure the right store is open in Seller Center
+  // 0) Safety: make sure the right store is open in Seller Center (waits while the header is still rendering)
   if (expectStore) {
-    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (!mall) return fail('Store name unavailable ? upload blocked. Wait for Seller Center to load.');
-    if (mall.toLowerCase() !== String(expectStore).toLowerCase()) {
+    const mall = await temuReadMall();
+    if (!mall) return fail('Store name unavailable — upload blocked. Wait for Seller Center to load.');
+    if (temuStoreNorm(mall) !== temuStoreNorm(expectStore)) {
       return fail(`Wrong store is open: Temu shows "${mall}", but the file was made for "${expectStore}". Switch the store and try again.`);
     }
-    ok(`Store verified: ${mall || expectStore}`);
+    ok(`Store verified: ${mall}`);
   }
 
   // 1) Switch to "Add products via general template" tab
@@ -3203,22 +3239,8 @@ function temuFormItemsByLabel(scope, label) {
   });
 }
 // v9.5.2 & v9.12.12 — generic: har product row mein sirf woh REQUIRED (*) fields bharo jo khali hain.
-const TEMU_DRAFT_FALLBACKS = { 
-  'material': 'Other', 
-  'applicable age group': '14 Years+', 
-  'age group': '14 Years+',
-  'power supply mode': 'None',
-  'pattern': 'Solid Color',
-  'theme': 'Other',
-  'target audience': 'Adults',
-  'care instructions': 'Hand Wash Only',
-  'occasion': 'Casual',
-  'season': 'All-Season',
-  'surface finishing type': 'Polishing',
-  'finish type': 'Polishing',
-  'blade material': 'Stainless Steel',
-  'handle material': 'Stainless Steel'
-};
+// v9.15.1 — no guessed fallback values any more ("Other", "14 Years+", "Polishing"…): a field is filled only from the
+// title, the category or your own rules/defaults; everything else stays empty and is listed for you.
 function temuRowFields(row) {
   const out = [];
   const seenControls = new Set();
@@ -3230,7 +3252,7 @@ function temuRowFields(row) {
     if (!lb) continue;
     const label = lb.textContent.replace(/\*/g, '').trim();
     if (!label || /^variant\s*\d/i.test(label)) continue;
-    const required = !!fi.querySelector('[class*="Form_itemRequired"]') || lb.textContent.includes('*') || fi.textContent.includes('*') || location.href.includes('product-action');
+    const required = !!fi.querySelector('[class*="Form_itemRequired"]') || lb.textContent.includes('*');
     const sel = fi.querySelector('[data-testid="beast-core-select"], [class*="ST_outerWrapper"], [role="combobox"]');
     const inp = sel ? null : fi.querySelector('input:not([type="hidden"]), textarea');
     const ctrl = sel || inp;
@@ -3248,29 +3270,50 @@ function temuRowFields(row) {
     seenControls.add(sel);
     const parent = sel.closest('[class*="item"], [class*="Item"], td') || row;
     const lb = parent.querySelector('[class*="Form_itemLabelContent"], label, [class*="itemLabel"]');
-    const label = (lb ? lb.textContent : '').replace(/\*/g, '').trim() || 'Surface Finishing Type';
+    const label = (lb ? lb.textContent : '').replace(/\*/g, '').trim();
+    if (!label) continue;   // v9.15.1 — a dropdown without a readable label is never guessed
+    const required = !!parent.querySelector('[class*="Form_itemRequired"]') || (lb?.textContent || '').includes('*');
     const current = temuSelectCurrent(sel);
     const empty = !current || /^select$/i.test(current);
-    out.push({ fi: parent, label, required: true, sel, inp: null, current, empty });
+    out.push({ fi: parent, label, required, sel, inp: null, current, empty });
   }
 
   return out;
 }
 // v9.15 - smart draft values from the product title / category (same rules as the sidepanel's smart attributes)
+// v9.15.1 — same age / material rules as the side panel's export (temuAgeClean / temuAgeContext / temuMaterialClean):
+// an age needs an age / child word; warranty, supply and aged-food numbers are ignored; "Cotton Candy", "Iron Man"… are not materials.
+function temuDraftAgeClean(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\b\d{1,2}\s*-?\s*(?:years?|yrs?|months?|mos?)\s*(?:limited\s+|manufacturer\s+)?(?:warranty|guarantee|anniversary|supply|subscription|shelf[- ]life|protection|plan)\b/g, ' ')
+    .replace(/\b(?:warranty|guarantee)\s*(?:of\s*)?\d{1,2}\s*-?\s*(?:years?|yrs?|months?)\b/g, ' ')
+    .replace(/\b\d{1,2}\s*-?\s*(?:years?|yrs?)\s*(?:old\s+|aged\s+)?(?:whisk(?:e)?y|scotch|bourbon|rum|wine|cheddar|cheese|parmesan|balsamic)\b/g, ' ')
+    .replace(/\baged\s*(?:for\s*)?\d{1,2}\s*-?\s*(?:years?|yrs?|months?)\b/g, ' ');
+}
+function temuDraftAgeContext(t) {
+  return /\b(ages?|kids?|child|children|toddlers?|baby|babies|infants?|newborns?|boys?|girls?|teens?|youth|preschool|toys?)\b/.test(t)
+    || /\b(?:years?|yrs?)\s*old\b/.test(t) || /\b\d{1,2}\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?|y)\b/.test(t);
+}
+function temuDraftMaterialClean(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\bcotton\s*candy\b|\biron\s*man\b|\bglass(?:es)?\s*(?:cleaner|cleaning|wipes?|case)\b|\bglass\s*slipper\b|\bplastic[- ]free\b|\b(?:shaving|cleansing|bath|hand)\s*foam\b|\bfoaming\b|\bwood[- ](?:fired|smoked|grain(?:\s*look)?|look)\b|\bmetal(?:lic)?\s*(?:look|finish|colou?r)\b|\bsteel\s*(?:blue|grey|gray)\b|\brubber\s*duck(?:y|ie)?\b|\bpaper\s*(?:thin|white)\b|\bleather\s*(?:look|cleaner|conditioner)\b|\bfaux\s*leather\b/g, ' ');
+}
 function temuDraftSmart(lbl, title, cat) {
-  const t = String(title || '').toLowerCase(), toys = /^toys & games/i.test(cat || '');
+  const t = /age group/.test(lbl) ? temuDraftAgeClean(title) : lbl === 'material' ? temuDraftMaterialClean(title) : String(title || '').toLowerCase();
+  const toys = /^toys & games/i.test(cat || '');
   if (/age group/.test(lbl)) {
     const Y = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18], M = [1, 3, 4, 5, 6, 10, 12, 18];
+    if (!temuDraftAgeContext(t)) return toys ? { dept: '3 Years+' } : {};
     let m = t.match(/(\d{1,2})\s*(?:-\s*\d{1,2}\s*)?months?\b/);
     if (m) { const v = parseInt(m[1], 10), o = [...M].reverse().find(x => x <= v); return { explicit: o ? `${o} Months+` : '0-5M' }; }
-    m = t.match(/(\d{1,2})\s*-\s*\d{1,2}\s*(?:years?|yrs?)/) || t.match(/(?:ages?|for)\s*(\d{1,2})\s*(?:\+|and up|& up|plus|years?|yrs?|-)/) || t.match(/(\d{1,2})\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?)?\b/) || t.match(/(\d{1,2})\s*(?:years?|yrs?)(?:\s*(?:old|\+|and up|& up))?/) || t.match(/\b(\d{1,2})\s*\+(?!\d)/);
+    m = t.match(/(\d{1,2})\s*-\s*\d{1,2}\s*(?:years?|yrs?)/) || t.match(/(?:ages?|for)\s*(\d{1,2})\s*(?:\+|and up|& up|plus|years?|yrs?|-)/) || t.match(/(\d{1,2})\s*(?:\+|and up|& up|plus)\s*(?:years?|yrs?)\b/) || t.match(/(\d{1,2})\s*(?:years?|yrs?)(?:\s*(?:old|\+|and up|& up))?/) || (/\bages?\b/.test(t) ? t.match(/\b(\d{1,2})\s*\+(?!\d)/) : null);
     if (m) { const v = parseInt(m[1], 10); if (v >= 18) return { explicit: '18 Years+' }; if (v <= 1) return { explicit: '12 Months+' }; const o = [...Y].reverse().find(x => x <= v); if (o) return { explicit: `${o} Years+` }; }
     if (/\b(newborn|infant)\b/.test(t)) return { explicit: '0 Year+' };
     if (/\btoddler/.test(t)) return { explicit: '18 Months+' };
     return toys ? { dept: '3 Years+' } : {};
   }
   if (lbl === 'material') {
-    const map = [[/\b(wood|wooden)\b/, 'Wood'], [/\bstainless steel\b/, 'Stainless Steel'], [/\b(metal|aluminum|iron)\b/, 'Metal'], [/\b(plastic|abs)\b/, 'Plastic'], [/\bsilicone\b/, 'Silicone'], [/\bcotton\b/, 'Cotton'], [/\bpolyester\b/, 'Polyester'], [/\bglass\b/, 'Glass'], [/\bceramic\b/, 'Ceramic'], [/\brubber\b/, 'Rubber'], [/\b(paper|cardboard)\b/, 'Paper'], [/\bfoam\b/, 'Foam']];
+    const map = [[/\b(wood|wooden)\b/, 'Wood'], [/\bstainless steel\b/, 'Stainless Steel'], [/\b(metal|aluminum|iron)\b/, 'Metal'], [/\b(plastic|abs)\b/, 'Plastic'], [/\bsilicone\b/, 'Silicone'], [/\bcotton\b/, 'Cotton'], [/\bpolyester\b/, 'Polyester'], [/\bglass\b/, 'Glass'], [/\bceramic\b/, 'Ceramic'], [/\brubber\b/, 'Rubber'], [/\b(paper|cardboard)\b/, 'Paper'], [/\bfoam\b/, 'Foam'], [/\bleather\b/, 'Leather'], [/\b(plush|fabric)\b/, 'Fabric']];
     const hit = map.find(([re]) => re.test(t)); return hit ? { explicit: hit[1] } : {};
   }
   if (lbl === 'power supply') return /\b(battery|batteries|electric|rechargeable|usb|plug|led|remote control)\b/.test(t) ? {} : { explicit: 'Use Without Electricity' };
@@ -3294,10 +3337,10 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   const warn = m => report.push('• ' + m);
   const fail = m => { report.push('✗ ' + m); return { success: false, report }; };
   if (expectStore) {
-    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    if (!mall) return fail('Store name unavailable ? draft changes blocked. Wait for Seller Center to load.');
-    if (mall.toLowerCase() !== String(expectStore).toLowerCase())
-      return fail(`Wrong store is open: Temu shows "${mall}", the extension has "${expectStore}" active.`);
+    const mall = await temuReadMall();
+    if (!mall) return fail('Store name unavailable — draft changes blocked. Wait for Seller Center to load.');
+    if (temuStoreNorm(mall) !== temuStoreNorm(expectStore))
+      return fail(`Wrong store is open: Temu shows "${mall}", the extension has "${expectStore}" active. Switch the store in Temu (drafts are never switched automatically), then press Fix drafts again.`);
   }
   // Support both products-excel-multiple-edit (TB_father) and product-action.html (beast-core table rows)
   const rows = await temuWait(() => {
@@ -3340,9 +3383,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
       if (sm.explicit) cands.push(sm.explicit);
       if (sm.dept) cands.push(sm.dept);
       { const dv = pick(defaults, f.label); if (dv != null) cands.push(dv); if (want == null) want = dv ?? sm.explicit ?? sm.dept ?? null; }
-      if (lbl === 'material' && /golf|tee\b|tees\b/.test(tl)) cands.push('Rubber');
-      if (TEMU_DRAFT_FALLBACKS[lbl]) cands.push(TEMU_DRAFT_FALLBACKS[lbl]);
-      if (!cands.length) { notes.push(f.label + ': missing sourced/user-approved value'); stillEmpty++; continue; }
+      if (!cands.length) { notes.push(f.label + ': NEEDS YOU (no value from title / category / your rules)'); stillEmpty++; continue; }
       zhS(`fixing draft — ${f.label}`);
       if (f.sel) {
         let res = 'no_option';
@@ -3351,7 +3392,8 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
         else {
           // nothing matched: for battery / power style fields pick a "no battery / none" option from the REAL list
           let done = false;
-          if (/battery|power/.test(lbl)) {
+          // (only when the title has no battery / electric words — same rule as "Use Without Electricity")
+          if (/battery|power/.test(lbl) && !/\b(battery|batteries|electric|rechargeable|usb|plug|led|remote control)\b/i.test(name)) {
             const r2 = await temuPickByRegex(f.sel, /^(no battery|without battery|battery not included|not included|no|none|not applicable|n\/a|not required|non-battery)/i);
             if (r2.text) { notes.push(`${f.label}=${r2.text}`); changed++; done = true; } else if (r2.names.length) notes.push(`${f.label}: options are [${r2.names.slice(0, 8).join(' | ')}]`);
           }
@@ -3405,15 +3447,19 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
 // td1 = reason (e.g. "Contribution SKU duplicated with another product (Goods ID: 6109…)"). Close: [class*=modalCloseButton].
 async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const report = [];
-  const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-  if (expectStore && mall && mall.toLowerCase() !== String(expectStore).toLowerCase())
+  const mall = expectStore ? await temuReadMall(8000) : temuMallNameNow();
+  if (expectStore && mall && temuStoreNorm(mall) !== temuStoreNorm(expectStore))
     return { success: false, wrongStore: true, mall, report: [`✗ This tab belongs to store "${mall}", the extension has "${expectStore}" active`] };
   const sec = temuHistorySection();
   if (!sec) return { success: false, report: ['✗ Upload history section not found'] };
   const rowsOf = () => [...sec.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
-  const btnOf = row => [...row.querySelectorAll('[role="button"], button, a')].find(b =>
-    /view\s*(failed|processing)\s*details|view\s*processing\s*results?|complete\s*product\s*inf|download\s*processing/i.test((b.textContent || '').trim())
-  );
+  // v9.15.1 — Temu (Oct 2026) shows "View processing results" as a plain text-button (div.textButton, no role) — it was never found,
+  // and "Complete product infomation" was clicked instead. Only the results / failed-details buttons are used now.
+  const btnOf = row => {
+    const cands = [...row.querySelectorAll('[role="button"], button, a, [class*="textButton"]')];
+    const txt = b => (b.textContent || '').replace(/\s+/g, ' ').trim();
+    return cands.find(b => /^view\s*processing\s*results?$/i.test(txt(b))) || cands.find(b => /view\s*(failed|processing)\s*details/i.test(txt(b))) || null;
+  };
   const pickRow = () => {
     const rows = rowsOf();
     if (uploadId) { const r = rows.find(r => (r.innerText || '').includes(String(uploadId))); if (r) return r; }
@@ -3436,15 +3482,58 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
     }
     if (!row) row = pickRow();
   }
-  if (!row) return { success: true, failed: [], report: ['• This upload was not found in Upload history' + (uploadId ? ` (ID ${uploadId})` : '')] };
+  if (!row) return { success: false, failed: [], report: ['✗ This upload was not found in Upload history' + (uploadId ? ` (ID ${uploadId})` : '')] };
   const btn = btnOf(row);
-  if (!btn) return { success: true, failed: [], report: ['• This upload has no "View failed details" button (no failed products, or still processing)'] };
+  if (!btn) return { success: false, failed: [], report: ['✗ This upload has no "View processing results" button (still processing?)'] };
   btn.click();
   const modal = await temuWait(() => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(m =>
-    /failed to upload|processing results?|require additional attribute|product.*information/i.test(m.innerText || '')
-  ), 8000);
-  if (!modal) return { success: false, report: ['✗ The "failed to upload" popup did not open'] };
-  await temuWait(() => modal.querySelector('tr[data-testid="beast-core-table-body-tr"]'), 5000);
+    /failed to upload|processing results?/i.test(m.innerText || '') && m.querySelector('tr[data-testid="beast-core-table-body-tr"], [data-testid="beast-core-table"]')
+  ), 10000);
+  if (!modal) return { success: false, report: ['✗ The "Processing results" popup did not open'] };
+  await temuWait(() => modal.querySelector('tr[data-testid="beast-core-table-body-tr"]'), 6000);
+  const closeModal = () => { try { (modal.querySelector('[class*="modalCloseButton"], [class*="closeIcon"]') || null)?.click(); } catch (_) {} };
+
+  // v9.15.1 — new "Processing results" popup (Oct 2026): columns Line · Goods ID/SKU ID · Status · Failure reason · Processing notes,
+  // 30 rows per page. No product names — "Line" is the spreadsheet row (row 5 = first product of the file). Every page is read.
+  const heads = [...modal.querySelectorAll('th')].map(th => (th.textContent || '').trim().toLowerCase());
+  if (heads.some(h => /^line$/.test(h)) && heads.some(h => /^status$/.test(h))) {
+    const pag = () => modal.querySelector('ul[data-testid="beast-core-pagination"]');
+    const nextBtn = () => pag()?.querySelector('[data-testid="beast-core-pagination-next"]');
+    const nextOn = () => { const n = nextBtn(); return !!n && !/disabled/i.test(n.className) && n.getAttribute('aria-disabled') !== 'true'; };
+    const activePage = () => (pag()?.querySelector('[class*="pagerItemActive"]')?.textContent || '').trim();
+    const total = +(((pag()?.textContent || modal.innerText || '').match(/Total\s+(\d+)\s+items?/i) || [])[1] || 0);
+    const byLine = new Map();
+    const readPage = () => {
+      for (const tr of modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')) {
+        const tds = tr.querySelectorAll('td');
+        const line = parseInt((tds[0]?.textContent || '').trim(), 10);
+        if (!Number.isFinite(line)) continue;
+        const ids = [...(tds[1]?.querySelectorAll('span') || [])].map(s => (s.textContent || '').trim()).filter(x => /^\d{6,}$/.test(x));
+        const status = (tds[2]?.textContent || '').replace(/\s+/g, ' ').trim();
+        const reason = (tds[3]?.textContent || '').replace(/\s+/g, ' ').trim().replace(/^-$/, '');
+        const dup = reason.match(/Goods ID:\s*(\d{10,})/i);
+        byLine.set(line, { line, goodsId: ids[0] || '', skuId: ids[1] || '', status, reason, added: /^added$/i.test(status), duplicate: /duplicat/i.test(reason), dupGoodsId: dup ? dup[1] : '' });
+      }
+    };
+    readPage();
+    for (let guard = 0; guard < 60 && nextOn(); guard++) {
+      const pageBefore = activePage(), firstBefore = modal.querySelector('tr[data-testid="beast-core-table-body-tr"] td')?.textContent;
+      const n = nextBtn();
+      try { n.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); n.click(); } catch (_) {}
+      const moved = await temuWait(() => activePage() !== pageBefore && modal.querySelector('tr[data-testid="beast-core-table-body-tr"] td')?.textContent !== firstBefore, 8000, 200);
+      if (!moved) { report.push('• Could not open the next page of Processing results'); break; }
+      await temuSleep(300);
+      readPage();
+    }
+    const rows = [...byLine.values()].sort((a, b) => a.line - b.line);
+    const failed = rows.filter(r => !r.added).map(r => ({ ...r, name: `Line ${r.line}` }));
+    const complete = total > 0 && rows.length === total;
+    closeModal();
+    report.push(`✓ Processing results read: ${rows.length}${total ? ' of ' + total : ''} rows · ${rows.length - failed.length} added · ${failed.length} not added${complete ? '' : ' (NOT complete)'}`);
+    return { success: true, mode: 'results', rows, failed, total: total || rows.length, complete, report };
+  }
+
+  // older "N product(s) failed to upload" popup (names + reasons)
   const failed = [];
   for (const tr of modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')) {
     const tds = tr.querySelectorAll('td');
@@ -3505,15 +3594,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: true, ready: true });
       return true;
     }
-    if (message?.action === 'TEMU_GET_STORE') {
-      sendResponse({ success: true, name: temuCurrentStoreName() });
-      return true;
-    }
-    if (message?.action === 'TEMU_SWITCH_STORE') {
-      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ ok: false, error: 'Not a Temu seller page' }); return true; }
-      temuSwitchStoreTo(String(message.target || '')).then(sendResponse).catch(e => sendResponse({ ok: false, error: e?.message || 'switch failed' }));
-      return true;
-    }
     if (message?.action === 'TEMU_UPLOAD_FILE') {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
       try { zhFrame('working', 'ZHunter · uploading to Temu…'); } catch (_) {}
@@ -3524,6 +3604,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
       try { zhFrame('working', 'ZHunter · checking upload results…'); } catch (_) {}
       temuPageReadFailed(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · check failed ✗' : 'ZHunter · results read ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · check failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
+      return true;
+    }
+    if (message?.action === 'TEMU_GET_STORE') {   // v9.15.1 — the side panel follows the store that is open in Temu
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, name: '' }); return true; }
+      temuReadMall(Number(message.wait) || 8000).then(name => sendResponse({ success: !!name, name })).catch(() => sendResponse({ success: false, name: '' }));
+      return true;
+    }
+    if (message?.action === 'TEMU_SWITCH_STORE') {   // v9.15.1 — used only by the upload (never by Fix drafts)
+      if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ ok: false, error: 'This is not a Temu seller page' }); return true; }
+      temuPageSwitchStore(message).then(sendResponse).catch(err => sendResponse({ ok: false, error: err?.message || 'switch failed' }));
       return true;
     }
     if (message?.action === 'TEMU_SCAN_ATTRS') {
@@ -3979,20 +4069,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   // ── Download helper ──────────────────────────────────────────
-  function downloadViaBackground(url, filename) {
-    chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url }, res => {
-      if (chrome.runtime.lastError || !res?.base64) {
-        // Fallback: open in new tab (CDN blocks direct anchor downloads)
-        window.open(url, '_blank');
-        return;
-      }
-      // res.base64 is already a full data URL (data:image/jpeg;base64,...)
-      // Do NOT wrap it again — that creates an invalid double-prefixed URL
-      const dataUrl = res.base64.startsWith('data:') ? res.base64 : `data:image/jpeg;base64,${res.base64}`;
-      const a = document.createElement('a');
-      a.href = dataUrl; a.download = filename;
-      document.body.appendChild(a); a.click();
-      setTimeout(() => a.remove(), 500);
+  // v9.15.1 — resolves true/false so the card can show the REAL result; only a single-image download may open the picture
+  // in a new tab as a fallback (a multi-download failure used to open one new tab per image).
+  function downloadViaBackground(url, filename, allowOpenTab = false) {
+    return new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url }, res => {
+          if (chrome.runtime.lastError || !res?.base64) {
+            if (allowOpenTab) window.open(url, '_blank');   // CDN blocks direct anchor downloads — let the user save it by hand
+            resolve(false);
+            return;
+          }
+          // res.base64 is already a full data URL (data:image/jpeg;base64,...) — do NOT wrap it again
+          const dataUrl = res.base64.startsWith('data:') ? res.base64 : `data:image/jpeg;base64,${res.base64}`;
+          const mime = (dataUrl.match(/^data:image\/([a-z0-9+]+)/i) || [])[1] || 'jpeg';
+          const ext = mime.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+          const a = document.createElement('a');
+          a.href = dataUrl; a.download = String(filename || 'image').replace(/\.(jpe?g|png|webp|gif)$/i, '') + '.' + ext;   // extension follows the real file type
+          document.body.appendChild(a); a.click();
+          setTimeout(() => a.remove(), 500);
+          resolve(true);
+        });
+      } catch (_) { resolve(false); }
     });
   }
 
@@ -4391,6 +4489,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .status-bar { padding: 4px 10px 8px; font-size: 10px; color: #3b6a8a; text-align: center; min-height: 20px; transition: color 0.3s; }
       .status-bar.ok  { color: #34d399; text-shadow: 0 0 8px rgba(52,211,153,0.4); }
       .status-bar.err { color: #f87171; }
+
+      /* v9.15.1 — calm card: a plain cyan border instead of the spinning rainbow ring; the minimized button no longer spins.
+         (These endless animations ran in every open product tab — heavy with 30–50 tabs during a hunt.) */
+      .panel-wrap { box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+      .panel-wrap::before { animation: none; background: linear-gradient(135deg, #00E5FF, #0EA5E9); }
+      .mini-ring { animation: none; background: linear-gradient(135deg, #00E5FF, #0EA5E9); }
+      .mini-glow { animation: none; display: none; }
     `;
     shadow.appendChild(style);
 
@@ -4933,7 +5038,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const u = images[currentIdx];
         const ext = (u.match(/\.(jpe?g|png|webp|gif)/i)?.[1] || 'jpg').toLowerCase();
         const pSlug = (document.title || 'product').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 25);
-        downloadViaBackground(u, `${pSlug}-hd${currentIdx + 1}.${ext}`);
+        downloadViaBackground(u, `${pSlug}-hd${currentIdx + 1}.${ext}`, true);
       });
 
       lb.querySelector('#zh-lb-source').addEventListener('click', (e) => {
@@ -5087,8 +5192,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     dlBtn.addEventListener('click', async () => {
       if (!selected.size) return;
       dlBtn.disabled = true;
-      const toDownload = [...selected].sort();
-      let done = 0;
+      const toDownload = [...selected].sort((a, b) => a - b);
+      let done = 0, failed = 0;
 
       status.className = 'status-bar';
       status.textContent = `Downloading 0 / ${toDownload.length}...`;
@@ -5099,16 +5204,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const url = images[idx];
         const ext = url.match(/\.(jpe?g|png|webp|gif)/i)?.[1] || 'jpg';
         const filename = `${productSlug}-img${idx + 1}.${ext}`;
-        try {
-          downloadViaBackground(url, filename);
-          done++;
-          status.textContent = `Downloading ${done} / ${toDownload.length}...`;
-          await new Promise(r => setTimeout(r, 400)); // stagger downloads
-        } catch (_) {}
+        // v9.15.1 \u2014 count real results (before: "downloaded" was shown at once, even when the download failed)
+        if (await downloadViaBackground(url, filename)) done++; else failed++;
+        status.textContent = `Downloading ${done + failed} / ${toDownload.length}...`;
+        await new Promise(r => setTimeout(r, 400)); // stagger downloads
       }
 
-      status.className = 'status-bar ok';
-      status.textContent = `\u2713 ${done} image${done !== 1 ? 's' : ''} downloaded!`;
+      status.className = failed ? 'status-bar err' : 'status-bar ok';
+      status.textContent = failed ? `${done} downloaded \u00b7 ${failed} failed` : `\u2713 ${done} image${done !== 1 ? 's' : ''} downloaded!`;
       dlBtn.disabled = false;
       setTimeout(() => { status.textContent = ''; status.className = 'status-bar'; }, 4000);
     });
@@ -5225,7 +5328,7 @@ function zhFrameColorFor(name) {
 let _zhFrameOn = true;
 let _zhFrameTimer = null;
 let _zhFrameCustomColor = '#FF1E56';
-let _zhFrameCustomWidth = 5.5;
+let _zhFrameCustomWidth = 3;   // v9.15.1 — thinner default (was 5.5)
 let _zhFrameCustomBrightness = 100;
 let _zhFrameCustomCorners = 'square';
 let _zhFrameMoving = false;
@@ -5265,7 +5368,7 @@ function zhApplyFrameColors(f, hexColor) {
   f.classList.toggle('zh-rainbow', isRainbow);
   f.classList.toggle('zh-moving', isMoving);
 
-  const w = parseFloat(_zhFrameCustomWidth) || 5.5;
+  const w = parseFloat(_zhFrameCustomWidth) || 3;
   const br = (parseFloat(_zhFrameCustomBrightness) || 100) / 100;
   const speed = Math.max(0.8, Math.min(10, parseFloat(_zhFrameSpeed) || 3.5));
 
@@ -5347,7 +5450,11 @@ function zhApplyFrameColors(f, hexColor) {
   const alpha1 = Math.min(0.95, Math.max(0.08, 0.65 * br)).toFixed(3);
   const alpha2 = Math.min(0.85, Math.max(0.05, 0.45 * br)).toFixed(3);
 
-  if (isRainbow || (isMoving && styleMode === 'wave')) {
+  if (!isMoving) {
+    // v9.15.1 — calm frame: no drop-shadow filter on a full-screen layer (expensive on every open shopping tab), only a light inner glow
+    f.style.filter = 'none';
+    f.style.boxShadow = isRainbow ? 'none' : `inset 0 0 ${Math.round(insetSpread * 0.5)}px rgba(${r},${g},${b},${(alpha1 * 0.5).toFixed(3)})`;
+  } else if (isRainbow || styleMode === 'wave') {
     f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(0,242,254,${(0.55 * br).toFixed(2)}), 0 0 ${outerSpread}px rgba(255,0,85,${(0.55 * br).toFixed(2)})`;
     f.style.filter = `drop-shadow(0 0 ${Math.round(10 * br)}px rgba(0,242,254,0.65)) drop-shadow(0 0 ${Math.round(18 * br)}px rgba(255,0,85,0.45)) brightness(${Math.min(1.6, 0.8 + 0.3 * br).toFixed(2)})`;
   } else {
@@ -5390,19 +5497,17 @@ function zhFrame(state, label, color) {
   animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
 }
 #zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot{animation-play-state:paused !important}
-#zh-frame:not(.zh-moving) #zh-frame-beam{
-  animation:zhBorderPulse 2.5s ease-in-out infinite alternate;
-}
+/* v9.15.1 — calm by default: no pulse / glow animation unless "Moving / Animated Border" is on (CPU on many open tabs) */
 .zh-corner{position:absolute;width:24px;height:24px;border:solid var(--zh-bcol2,#FFB800);pointer-events:none !important;transition:all .25s ease;z-index:2}
 #zh-frame-c-tl{top:0;left:0;border-width:var(--zh-bwidth,5.5px) 0 0 var(--zh-bwidth,5.5px);border-top-left-radius:var(--zh-bradius,0px)}
 #zh-frame-c-tr{top:0;right:0;border-width:var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0 0;border-top-right-radius:var(--zh-bradius,0px)}
 #zh-frame-c-bl{bottom:0;left:0;border-width:0 0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px);border-bottom-left-radius:var(--zh-bradius,0px)}
 #zh-frame-c-br{bottom:0;right:0;border-width:0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0;border-bottom-right-radius:var(--zh-bradius,0px)}
 @keyframes zhBorderPulse{0%{opacity:0.82}100%{opacity:1.0}}
-#zh-frame.zh-working{border-color:#00F2FE !important;animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate}
-#zh-frame.zh-working .zh-corner{border-color:#00F2FE;filter:drop-shadow(0 0 12px #00F2FE)}
-#zh-frame.zh-done{border-color:#10B981 !important;box-shadow:inset 0 0 20px rgba(16,185,129,.7),0 0 24px rgba(52,211,153,.6);animation:none}
-#zh-frame.zh-done .zh-corner{border-color:#10B981;filter:drop-shadow(0 0 10px #10B981)}
+#zh-frame.zh-moving.zh-working{animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate}
+#zh-frame.zh-working .zh-corner{border-color:#22D3EE}
+#zh-frame.zh-done .zh-corner{border-color:#10B981}
+#zh-frame.zh-error .zh-corner{border-color:#F87171}
 @keyframes zhFrameWorkingPulse{
   from{filter:drop-shadow(0 0 8px #00F2FE);box-shadow:inset 0 0 16px rgba(0,242,254,.5),0 0 16px rgba(56,189,248,.5)}
   to{filter:drop-shadow(0 0 16px #00F2FE) brightness(1.3);box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
@@ -5419,19 +5524,25 @@ function zhFrame(state, label, color) {
   z-index:3;
   pointer-events:none !important;
 }
-#zh-frame.zh-working #zh-frame-l,#zh-frame.zh-done #zh-frame-l{display:inline-flex}
-#zh-frame.zh-working #zh-frame-l{border-color:rgba(0,242,254,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(0,242,254,.35)}
-#zh-frame.zh-done #zh-frame-l{border-color:rgba(16,185,129,.6);box-shadow:0 4px 20px rgba(0,0,0,.75),0 0 14px rgba(16,185,129,.35)}
-#zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800;box-shadow:0 0 8px #FFB800}
-#zh-frame.zh-working #zh-frame-dot{background:#00F2FE;box-shadow:0 0 10px #00F2FE;animation:zhDot .8s ease-in-out infinite}
-#zh-frame.zh-done #zh-frame-dot{background:#10B981;box-shadow:0 0 8px #10B981}
+#zh-frame.zh-working #zh-frame-l,#zh-frame.zh-done #zh-frame-l,#zh-frame.zh-error #zh-frame-l{display:inline-flex}
+#zh-frame.zh-working #zh-frame-l{border-color:rgba(34,211,238,.6)}
+#zh-frame.zh-done #zh-frame-l{border-color:rgba(16,185,129,.6)}
+#zh-frame.zh-error #zh-frame-l{border-color:rgba(248,113,113,.75)}
+#zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800}
+#zh-frame.zh-working #zh-frame-dot{background:#22D3EE}
+#zh-frame.zh-moving.zh-working #zh-frame-dot{animation:zhDot .8s ease-in-out infinite}
+#zh-frame.zh-done #zh-frame-dot{background:#10B981}
+#zh-frame.zh-error #zh-frame-dot{background:#F87171}
 @keyframes zhDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.85)}}`;
       (document.head || document.documentElement).appendChild(st);
       (document.body || document.documentElement).appendChild(f);
     }
     f.classList.toggle('zh-working', state === 'working');
-    f.classList.toggle('zh-done', state === 'done' || state === 'error');
-    zhApplyFrameColors(f, _zhFrameCustomColor || col);
+    f.classList.toggle('zh-done', state === 'done');
+    f.classList.toggle('zh-error', state === 'error');   // v9.15.1 — an error is red, never the "done" green
+    // v9.15.1 — status colours win while ZHunter works on the page (working cyan / done green / error red); idle = your colour
+    const statusCol = state === 'working' ? '#22D3EE' : state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : null;
+    zhApplyFrameColors(f, statusCol || _zhFrameCustomColor || col);
     const t = f.querySelector('#zh-frame-t'); if (t) t.textContent = label || 'ZHunter';
     f.title = label || 'ZHunter';
     clearTimeout(_zhFrameTimer);
@@ -5511,7 +5622,7 @@ function zhFrameIdle() {
           }
         }
         if (ch.zhFrameColor) _zhFrameCustomColor = ch.zhFrameColor.newValue || '#FF1E56';
-        if (ch.zhFrameWidth != null) _zhFrameCustomWidth = ch.zhFrameWidth.newValue || 5.5;
+        if (ch.zhFrameWidth != null) _zhFrameCustomWidth = ch.zhFrameWidth.newValue || 3;
         if (ch.zhFrameBrightness != null) _zhFrameCustomBrightness = ch.zhFrameBrightness.newValue || 100;
         if (ch.zhFrameCorners) _zhFrameCustomCorners = ch.zhFrameCorners.newValue || 'square';
         if (ch.zhFrameMoving != null) _zhFrameMoving = !!ch.zhFrameMoving.newValue;

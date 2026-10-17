@@ -1,5 +1,68 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.15.1 AI images: Gemini + Flow (2026-10-17, same manifest version)
+- Flow model: always the NEWEST "Nano Banana" in Flow's menu (now 2.1; later versions automatically), never a "Lite" one (before, "Nano Banana 2.1 Lite" counted as correct and "2" could be picked over "2.1"). If the menu cannot be read, the job goes on with the selected model and shows a warning instead of failing. The status line names the model used.
+- Flow: the multi-MB image of each job is removed from extension storage as soon as the Flow tab has taken it.
+- Gemini finish: the same honest summary as the other engines — "N replaced · N failed (press Retry failed)", the window stays open when something failed (before: it closed at once and always said "All selected images processed successfully!").
+- Auto engine = Gemini → Flow (ChatGPT stays as its own engine, not in Auto). Auto's Gemini step now uses the full Gemini runner (new chat every few images, account switch on a limit, CAPTCHA stop, retry on "I encountered an error", wake-up of a background tab, safe image download).
+- Gemini limit: first the next signed-in Google account (as before); when every account is at its limit, the images that are not done yet continue in Flow by themselves ("Gemini limit — N continue in Flow"). A Google CAPTCHA still stops the run (solve it yourself).
+- "ZHunter AI" window: Gemini / ChatGPT / Flow tabs now work in their own Chrome window, so your own window never loses its tab during a run. Keep that window visible (side by side or on a 2nd screen) — Chrome slows down tabs of a minimized / fully covered window. A window's last tab is never moved out.
+- "Paste & Next": one path for every engine (edit journal, counters, pack label and stages handled; the old Gemini-only branch skipped them).
+- UI labels: "Nano Banana (newest)", Auto option "Auto (Gemini → Flow)".
+- Tested in the stubbed panel: model choice from a menu (2 / 2.1 / 2.1 Lite / Veo / Imagen → 2.1; Lite rejected), Gemini limit → 3 of 4 images handed to Flow, Gemini summary with a failure, AI window moves / new tabs / last-tab guard. NOT tested live on Gemini or Flow — first run with 3–4 images.
+
+## 9.15.1 fixes round 3 (2026-10-17, same manifest version) — audit C2–C10 + Temu "Processing results"
+- Temu upload results (C3 + new bug): Temu now shows "View processing results" (a text button) and a "Processing results" window with Line · Goods ID/SKU ID · Status · Failure reason and NO product names. The extension never found that button (it pressed "Complete product infomation") and matched failures by name, so failed details were never read. Now: the right button is pressed, EVERY page of the window is read (next page until the end), and each "Line" is matched to the product of the uploaded file (line 5 = first product). Only "Added" products are marked accepted; duplicates ("SKU duplicated … Goods ID") are marked listed in the store the file was uploaded to (C4); drafts / failed are not marked and their reason is shown. If not every line could be read, nothing is marked (as before). Also: when the page has two "Upload history" blocks, the one with real uploads is used.
+- Ages / materials (C2): an age is read only with an age / child word ("Ages 3+", "Kids", "5 years old", "8+ years"); warranty, supply, anniversary and aged-food numbers are ignored ("2 Year Warranty", "12 Year Old Scotch", "Cheddar Aged 2 Years"). "Cotton Candy", "Iron Man", "Glass Cleaner", "Plastic-free", "Shaving Foam" … no longer give a material. Same rules in the export and in Fix drafts.
+- Upload History writes wait for each other (C5): a late confirmation and a new upload no longer overwrite each other's record.
+- In-page image card (C6): shows the real result ("N downloaded · N failed") and never opens one new tab per failed image (a single-image download may still open the picture); downloaded files get the right extension.
+- ChatGPT (C7): clears only its own message box (never the whole page). Gemini / ChatGPT (C8): the on-page status box no longer disappears in the middle of a run.
+- Background (C9): image downloads use settings kept in memory instead of reading all stored data for every image.
+- Page scraping (C10): after Walmart / Temu change the product without reloading, old image / video data is no longer reused.
+- Tested: syntax of all changed files; the reader on your saved Temu pages (right button, right history block, 30 rows on page 1, a simulated page 2 → 50 / 50, duplicate + failed rows); Line → product matching and marking (complete / incomplete); 16 age and 8 material sample titles. Not live-tested on Temu, ChatGPT or Gemini.
+
+## 9.15.1 UI round, part C (2026-10-17, same manifest version) — Jobs, language, light mode
+- Jobs patti in the bottom status line: a running hunt ("🔎 Hunting 12/30"), Temu upload ("⬆ Temu processing 45%", also while ZHunter keeps watching a slow upload) and image edit ("🖼 Gemini 3/10") are shown together; click one to open its window. With no job the line shows the Library count as before. "Synced" → "Updated" (there is no cloud sync).
+- Language: buttons / tabs / labels stay short English; help lines are now Roman Urdu (all Settings rows, Temu Settings hints, pricing / weight tips, empty screens). Two Roman Urdu buttons became English ("Latest from Flow", "Image from device"). Broken characters fixed ("No hunts yet", AI model list).
+- Light mode: Library's selected filter chip ("All") was white on white — now cyan with white text; Hunt "N images" badge count readable; Image batch setup inputs, selects and task chips follow the light theme (were always dark); its header/help text darker. Mode chooser, Edit Studio, AI image stepper, Content Studio and Temu Export were measured and are already fine in light mode.
+- Tested in the stubbed panel: automatic contrast scan of the main tabs and windows in light mode, Jobs patti with a fake hunt + image run, syntax check.
+
+## 9.15.1 UI round, part B (2026-10-17, same manifest version) — Temu Export window
+- Ready checklist above "Export + Upload": store, "N of M ready", and chips for what needs you — red = would stop the upload (already listed / no image / no or suspicious price), amber = left out while the rest goes on (no category / too heavy / not usable). It is a dry run of the same export rules on the ticked products. Click a chip → the product list opens at that product.
+- "Export + Upload" stays off while there is no store, no product or a red item; the reason is shown under the checklist (and the button no longer says "Processing…" when it is only waiting for you).
+- Under the pricing chip: "Price vs source: avg N× · lowest N×" for the ready products.
+- Upload steps above the report: File → Store → Processing (%) → Result, each green / amber / red with a short note (also for late confirmation and failed-details checks). The full text report is now under "Details". Source line says "N products in the list" (not "ready").
+- Tested in the stubbed panel at 360 / 420 px, dark and light: checklist counts, button guard, chip jump, untick → ready again, steps.
+
+## 9.15.1 UI round, part A (2026-10-17, same manifest version) — calmer pages
+- Page frame on shopping / Temu pages: thin (3 px default) and still — no pulse, glow animation or full-screen drop-shadow unless "Moving / Animated Border" is on. While ZHunter works on the page it is cyan, green when done and RED on an error (before, an error also glowed green; your custom colour hid the status colours).
+- In-page image card: the spinning rainbow border and the two spinning rings of the small button are replaced by a plain cyan border (these ran in every open product tab).
+- Tab group: product tabs are no longer grouped while you just browse; only the hunted tabs are grouped when a hunt starts (setting renamed "Group hunted tabs into a ZHunter tab group").
+- Tested on a sample product page: no endless animation left on the frame or the card; working = cyan, error = red.
+
+## 9.15.1 fixes round 2 (2026-10-17, same manifest version) — audit B1–B8
+- Export no longer drops these links as "invalid product url": Amazon /gp/product/…, Sam's Club …/prod12345678, AliExpress /item/….html, Target …/A-12345678. (Amazon /dp/ and Walmart ids are unchanged.)
+- Hunt: Library products that are partial / failed (no images or no real title) are hunted again; only complete ones are skipped as "already in your Library".
+- Weight: your own "N Pack - " titles (Pack buttons) now ship N × the weight (price already used source × N); the 8 lb limit is checked on the pack weight. Source titles like "Pack of 6" are not changed.
+- Pricing strategy selector (Temu Settings → Pricing): "Cost + gap (tiers)" (default, same as before) or "Multiplier (Price ×, Min / Max, Department)". Only the chosen strategy's boxes are shown; the Upload-tab chip shows the active one ("Pricing: Cost + gap" / "Price × 5"); review prices follow it at once.
+- Hunt rows that cannot be saved to the Library are also kept in storage and saved automatically when the panel opens again; after 8 failures the retry slows down (15 s) instead of looping every 2 s, and stops when the hunt is over.
+- Background keepalive: every task has its own keepalive (side panel, hunt, upload). Closing the panel no longer stops a running upload's keepalive; uploads are kept alive up to 30 min.
+- Auto-capture queue: uses the same locked, de-duplicated path as everything else, limit 2000 (was cut to 500, older queued links were lost). A full queue keeps the newest link.
+- Interrupted upload: the message now says which upload (file, store, time, minutes ago); older than 30 min → clear "I checked it, continue" question.
+- Tested in the stubbed panel: product ids for all link forms, pack weight (×6, too-heavy skip), both pricing strategies + selector/chip, partial re-hunt split, unsaved-row keep/restore. Not live-tested: background keepalive / auto-capture (service worker).
+
+## 9.15.1 fixes (2026-10-17, same manifest version) — audit A1–A8 (see FULL_AUDIT_2026-10-17.md)
+- Temu store follow works again: the Temu tab now answers "which store is open" (header store name, waits up to 15 s while the page loads). The missing handler was the reason the extension never followed the Temu store.
+- Upload auto store switch: if Temu shows another store, the extension switches ONCE (hover store name → Switch → the card with EXACTLY the same name; only letter case / extra spaces ignored, so "HQ TWO" ≠ "HQ - TWO"), waits for Temu's reload, opens the upload page again and checks the name again. Not found / menu did not open / still wrong → upload stops, nothing is sent. Fix drafts never switches stores (it stops with a message).
+- Upload / Fix drafts / failed details: the store name is waited for (no more instant "Store name unavailable").
+- Errors on Temu: products are marked as listed only when Temu's COMPLETE failed list was read; otherwise nothing is marked and "Mark as listed" is shown.
+- Fix drafts no longer marks any upload record / products as listed (Submit ≠ accepted). Check Temu, then use "Mark as listed".
+- Fix drafts: no guessed values any more ("Other", "14 Years+", "Hand Wash Only", "Stainless Steel", golf → Rubber, unlabeled dropdown → "Polishing"). Only title / category / your own rules & defaults; the rest is listed as "NEEDS YOU". Fields count as required only when Temu marks them required. "No battery" options are picked only when the title has no battery/electric words.
+- Library above 300: you are asked first (once per hunt); starred products are never deleted; Cancel keeps everything.
+- A partial product that later hunts complete now gets its missing title / images / bullets / description (your own edits are never replaced).
+- Google Sheet sourcing record is written only for products Temu confirmed (not at upload start, never for a failed upload).
+- Tested: syntax of content/background/sidepanel; store switch logic on the saved Temu "Switch stores" page (exact-name pick, current store, unknown store); Library cap + partial upgrade + confirmed-marking cases with a stubbed panel. NOT tested live on Temu (hover menu, reload after switch) — try with 2–3 products first.
+
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
 - Categories: new fallback matcher that needs several words of the title (never one word) to agree with a category. A product with no category no longer blocks Export/Upload — it is left out and the error is shown; the rest goes on. Export no longer opens Temu to learn categories by itself.
 - Learn categories: when Temu gives no suggestion, the extension picks the best match from your own categories (Categories tab) by itself and saves it; only products with no match wait for your paste.

@@ -6028,6 +6028,51 @@ body.light-mode .zs-cnt { color: var(--ok); }
 .temu-rv-ratio.ok{color:#6ee7a8;border-color:rgba(110,231,168,.4);background:rgba(110,231,168,.08)}
 .temu-rv-ratio.low{color:#ff8a8a;border-color:rgba(255,138,138,.5);background:rgba(255,80,80,.12)}
 
-/* v9.15 — loaded-sheet actions under the Products source */
-.temu-src-sheetacts{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
-.temu-src-sheetacts .btn{border-radius:4px}
+/* v9.15.1 - Temu Upload tab: Ready checklist, price-vs-source line, upload steps (theme tokens = dark + light) */
+.temu-ready{display:flex;flex-direction:column;gap:6px;margin:2px 0 8px}
+.temu-ready:empty{display:none}
+.temu-ready-row{display:flex;flex-wrap:wrap;gap:5px}
+.temu-ready-item{display:inline-flex;align-items:center;gap:4px;font:600 11px/1.3 var(--font);padding:4px 8px;border-radius:4px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.temu-ready-item b{color:var(--ink);font-weight:700}
+.temu-ready-item.ok{color:var(--ok);border-color:var(--ok-line);background:var(--ok-soft)}
+.temu-ready-item.warn{color:var(--warn);border-color:var(--warn-line);background:var(--warn-soft)}
+.temu-ready-item.bad{color:var(--bad);border-color:var(--bad-line);background:var(--bad-soft)}
+button.temu-ready-item{cursor:pointer;transition:filter var(--dur) var(--ease)}
+button.temu-ready-item:hover{filter:brightness(1.15)}
+button.temu-ready-item:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.temu-ready-stop{font:600 11.5px/1.4 var(--font);color:var(--bad)}
+.temu-btn-main-upload:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;filter:grayscale(.4)}
+.temu-px-stats{margin-top:6px;font:600 11px/1.3 var(--font);color:var(--ink-2)}
+.temu-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 8px}
+.temu-steps.hidden{display:none}
+.temu-step{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:7px 8px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface-2);min-width:0}
+.temu-step-ic{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font:700 11px/1 var(--font);background:var(--surface-3);color:var(--ink-2)}
+.temu-step-lbl{font:700 11px/1.2 var(--font);color:var(--ink)}
+.temu-step-txt{font:500 10.5px/1.3 var(--font);color:var(--ink-2);overflow-wrap:anywhere}
+.temu-step[data-state="run"]{border-color:var(--accent-line);background:var(--accent-soft)}
+.temu-step[data-state="run"] .temu-step-ic{background:var(--accent);color:var(--accent-fg)}
+.temu-step[data-state="ok"]{border-color:var(--ok-line);background:var(--ok-soft)}
+.temu-step[data-state="ok"] .temu-step-ic{background:var(--ok);color:#fff}
+.temu-step[data-state="warn"]{border-color:var(--warn-line);background:var(--warn-soft)}
+.temu-step[data-state="warn"] .temu-step-ic{background:var(--warn);color:#fff}
+.temu-step[data-state="err"]{border-color:var(--bad-line);background:var(--bad-soft)}
+.temu-step[data-state="err"] .temu-step-ic{background:var(--bad);color:#fff}
+@media (max-width:400px){.temu-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* v9.15.1 - Jobs patti (status line): running hunt / upload / image edit, click opens the window */
+.status-line #statusLineText{display:inline-flex;gap:6px;align-items:center;min-width:0;overflow:hidden}
+.status-line.zh-job .dot{background:var(--accent);box-shadow:none}
+.zh-job-chip{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:4px;border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);font:600 10.5px/1 var(--font);cursor:pointer;white-space:nowrap}
+.zh-job-chip:hover{filter:brightness(1.15)}
+.zh-job-chip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* v9.15.1 - light mode: Image batch setup inputs/selects were always dark (color-scheme: dark) */
+body.light-mode .flow-batch-modal select, body.light-mode .flow-batch-modal input[type="number"], body.light-mode .flow-batch-modal input[type="search"]{color-scheme:light;color:var(--ink);background:var(--input);border-color:var(--line-2)}
+body.light-mode .flow-batch-modal option{color:var(--ink);background:var(--input)}
+body.light-mode .flow-batch-modal .batch-chip{background:var(--surface-3);color:var(--ink);border-color:var(--line-2)}
+body.light-mode .flow-batch-modal .batch-chip.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+body.light-mode .flow-batch-modal .batch-header p, body.light-mode .flow-batch-modal .batch-help{color:var(--ink-2)}
+/* v9.15.1 - light mode: the selected Library filter chip ("All") was white text on a white chip (a later light rule reset its background) */
+body.light-mode .filter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* v9.15.1 - light mode: Hunt "N images" count was dark blue on the cyan badge */
+body.light-mode .hunt-sub-btn.active .hunt-sub-count{color:#fff}

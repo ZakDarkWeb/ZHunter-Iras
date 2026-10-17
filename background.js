@@ -94,30 +94,34 @@ function withWriteLock(fn) {
 // ── Service Worker Keepalive ─────────────────────────────────
 // MV3 service workers are terminated after ~30 s of inactivity.
 // Call startKeepAlive() before long bulk operations, stopKeepAlive() after.
+// v9.15.1 — every task has its OWN keepalive (owner + time limit). Before, one shared timer was used: the side panel
+// closing (port disconnect) also stopped a running upload's keepalive, and the 15-min cap cut long upload watches.
 let _keepAliveInterval = null;
-let _keepAliveTimeout = null;
-function startKeepAlive() {
-  if (_keepAliveInterval) { clearInterval(_keepAliveInterval); _keepAliveInterval = null; }
-  if (_keepAliveTimeout) { clearTimeout(_keepAliveTimeout); _keepAliveTimeout = null; }
-  _keepAliveInterval = setInterval(() => {
-    chrome.runtime.getPlatformInfo(() => {}); // no-op — just prevents SW termination
-  }, 20000);
-  _keepAliveTimeout = setTimeout(() => {
-    stopKeepAlive();
-  }, 15 * 60 * 1000); // 15 mins max
+const _keepAliveOwners = new Map();   // owner → expires at (ms)
+function _keepAliveTick() {
+  const now = Date.now();
+  for (const [k, until] of _keepAliveOwners) if (until <= now) _keepAliveOwners.delete(k);
+  if (!_keepAliveOwners.size) { clearInterval(_keepAliveInterval); _keepAliveInterval = null; return; }
+  chrome.runtime.getPlatformInfo(() => {}); // no-op — just prevents SW termination
 }
-function stopKeepAlive() {
-  if (_keepAliveInterval) { clearInterval(_keepAliveInterval); _keepAliveInterval = null; }
-  if (_keepAliveTimeout) { clearTimeout(_keepAliveTimeout); _keepAliveTimeout = null; }
+function startKeepAlive(owner = 'default', maxMs = 15 * 60 * 1000) {
+  _keepAliveOwners.set(owner, Date.now() + maxMs);
+  if (!_keepAliveInterval) _keepAliveInterval = setInterval(_keepAliveTick, 20000);
+}
+function stopKeepAlive(owner = 'default') {
+  _keepAliveOwners.delete(owner);
+  if (!_keepAliveOwners.size && _keepAliveInterval) { clearInterval(_keepAliveInterval); _keepAliveInterval = null; }
 }
 
 // ── Persistent Port Keepalive ─────────────────────────────────
+let _keepAlivePortSeq = 0;
 try {
   chrome.runtime.onConnect.addListener(port => {
     if (port.name === 'zhunter-keepalive') {
-      startKeepAlive();
+      const owner = 'port:' + (++_keepAlivePortSeq);
+      startKeepAlive(owner);
       port.onDisconnect.addListener(() => {
-        stopKeepAlive();
+        stopKeepAlive(owner);
       });
     }
   });
@@ -319,6 +323,15 @@ async function getData() {
     throw new Error('Stored data unavailable: ' + e.message);
   }
 }
+
+// v9.15.1 — image downloads only need the settings: keep them in memory instead of reading (and migrating) all stored data
+// for every single image; dropped whenever the stored data changes.
+let _zhSettingsCache = null;
+async function zhSettingsCached() {
+  if (!_zhSettingsCache) _zhSettingsCache = (await getData())?.settings || {};
+  return _zhSettingsCache;
+}
+try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch[STORAGE_KEY]) _zhSettingsCache = null; }); } catch (_) {}
 
 async function saveData(data) {
   try {
@@ -1297,7 +1310,12 @@ async function temuBgAutoUpload(input) {
   if (ZhUploadTask) return { success: false, report: ['Upload already running; wait for its result'] };
   ZhUploadTask = (async () => {
     const previous = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
-    if (previous?.state === 'running') return { success: false, report: ['Previous upload needs verification. Check its Temu tab before retrying.'], recoveryRequired: true };
+    // A "running" job here means the worker stopped in the middle of it (this worker is not running one). v9.15.1 — say WHICH upload it was.
+    if (previous?.state === 'running') {
+      const ageMin = Math.max(0, Math.round((Date.now() - (previous.t || 0)) / 60000));
+      return { success: false, report: ['Previous upload needs verification. Check its Temu tab before retrying.'], recoveryRequired: true,
+        previous: { store: previous.store || '', filename: previous.filename || '', t: previous.t || 0, ageMin, stale: ageMin >= 30 } };
+    }
     const job = { id: input.sourcing?.id || crypto.randomUUID(), state: 'running', t: Date.now(), store: input.expectStore, filename: input.filename, sourcing: input.sourcing };
     await chrome.storage.local.set({ zhTemuUploadJob: job });
     try { const result = await temuBgAutoUploadJob(input); await chrome.storage.local.set({ zhTemuUploadJob: { ...(await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob, ...job, state: result.confirmed ? 'processed' : 'needs-review', result } }); return result; }
@@ -1305,60 +1323,68 @@ async function temuBgAutoUpload(input) {
   })();
   try { return await ZhUploadTask; } finally { ZhUploadTask = null; }
 }
-async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sourcing }) {
+// v9.15.1 — store names must match exactly (only letter case / extra spaces ignored): "HQ TWO" ≠ "HQ - TWO"
+const zhStoreNorm = s => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const TEMU_UPLOAD_URL = 'https://seller.temu.com/upload-goods-multiple.html';
+async function bgWaitTemuReady(tabId, tries = 50) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise(r => setTimeout(r, i === 0 ? 1200 : 500));
+    const r = await tabsSend(tabId, { action: 'PING' });
+    if (r && r.ready) return true;
+  }
+  return false;
+}
+// resolves true once the tab has reloaded (loading → complete) — Temu reloads by itself after a store card is clicked
+function bgWaitTabReload(tabId, ms = 30000) {
+  return new Promise(res => {
+    let sawLoading = false, done = false, timer = null;
+    const end = v => { if (done) return; done = true; try { chrome.tabs.onUpdated.removeListener(fn); } catch (_) {} clearTimeout(timer); res(v); };
+    const fn = (id, info) => { if (id !== tabId) return; if (info.status === 'loading') sawLoading = true; if (info.status === 'complete' && sawLoading) end(true); };
+    chrome.tabs.onUpdated.addListener(fn);
+    timer = setTimeout(() => end(sawLoading), ms);
+  });
+}
+// v9.15.1 — the right store must be open before a file is sent. A wrong store is switched ONCE (header menu → Switch → exact store card),
+// then the upload page is opened again and the name is checked again. Anything unclear = upload stops, nothing is sent.
+async function bgEnsureTemuStore(tabId, expectStore, report) {
+  const cur = await tabsSend(tabId, { action: 'TEMU_GET_STORE', wait: 15000 });
+  if (!cur?.name) { report.push('✗ Store name not shown on the Temu page — upload blocked, nothing was sent' + (cur?.__err ? ` (${cur.__err})` : '')); return false; }
+  if (zhStoreNorm(cur.name) === zhStoreNorm(expectStore)) { report.push(`✓ Store verified: ${cur.name}`); return true; }
+  report.push(`• Temu is on "${cur.name}" — switching to "${expectStore}"…`);
+  const reload = bgWaitTabReload(tabId);
+  const sw = await tabsSend(tabId, { action: 'TEMU_SWITCH_STORE', name: expectStore });
+  if (!sw?.ok) { report.push('✗ Store switch failed: ' + (sw?.error || sw?.__err || 'no answer from the Temu tab') + ' — nothing was uploaded'); return false; }
+  if (sw.switching) {
+    if (!(await reload)) { report.push('✗ Temu did not reload after the store was chosen — check the Temu tab; nothing was uploaded'); return false; }
+    try { await chrome.tabs.update(tabId, { url: TEMU_UPLOAD_URL }); } catch (_) {}
+    if (!(await bgWaitTemuReady(tabId))) { report.push('✗ Upload page did not load after the store switch — nothing was uploaded'); return false; }
+  }
+  const after = await tabsSend(tabId, { action: 'TEMU_GET_STORE', wait: 15000 });
+  if (zhStoreNorm(after?.name) !== zhStoreNorm(expectStore)) { report.push(`✗ After switching, Temu still shows "${after?.name || '?'}" — nothing was uploaded`); return false; }
+  report.push(`✓ Store switched to ${after.name}`);
+  return true;
+}
+async function temuBgAutoUploadJob({ b64, filename, expectStore, background }) {
   const report = [];
   const bg = background !== false;
-  let sourcingQueued = false;
-  startKeepAlive();
-  if (sourcing) { try { await zhSourcingQueue(sourcing); sourcingQueued = true; } catch (e) { report.push('Sourcing record: ' + e.message); } }
+  // v9.15.1 — the Google Sheet sourcing record is no longer written here: the side panel sends it only for the products Temu confirmed
+  startKeepAlive('upload', 30 * 60 * 1000);
   try {
     let prevTab = null;
     try { prevTab = (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0] || null; } catch (_) {}
     // v9.1.2: tab hamesha saamne khulta hai — Temu ki "Processing data %" page ke andar chalti hai aur
     // background tab mein throttle ho kar bohat slow ho jati hai. bg=true ka matlab: kaam khatam hote hi
     // focus khud aap ke pichle tab par wapas.
-    const tab = await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
+    const tab = await chrome.tabs.create({ url: TEMU_UPLOAD_URL, active: true });
     const savedJob = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
     if (savedJob) await chrome.storage.local.set({zhTemuUploadJob:{...savedJob,tabId:tab.id}});
     _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null;
     report.push(bg ? '✓ Temu tab opened (focus will return after processing)' : '✓ Temu tab khola');
 
     // wait for content script
-    let ready = false;
-    for (let i = 0; i < 50 && !ready; i++) {
-      await new Promise(r => setTimeout(r, i === 0 ? 1200 : 500));
-      const r = await tabsSend(tab.id, { action: 'PING' });
-      ready = !!(r && r.ready);
-    }
-    if (!ready) { report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
+    if (!(await bgWaitTemuReady(tab.id))) { report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
     report.push('✓ Temu page ready');
-
-    // v9.15 — the store open in Temu must be the extension's store: switch it automatically (header menu → Switch → store card)
-    if (expectStore) {
-      const sleep = ms => new Promise(r => setTimeout(r, ms));
-      const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-      const curName = async () => { const r = await tabsSend(tab.id, { action: 'TEMU_GET_STORE' }); return r && r.name ? r.name : ''; };
-      const before = await curName();
-      if (before && !same(before, expectStore)) {
-        report.push(`• Temu is on "${before}" — switching to "${expectStore}"…`);
-        const sw = await tabsSend(tab.id, { action: 'TEMU_SWITCH_STORE', target: expectStore });
-        if (sw && sw.ok === false) { report.push('✗ ' + sw.error); return finish({ success: false, report }); }
-        let okSw = false;
-        for (let i = 0; i < 45 && !okSw; i++) { await sleep(1000); okSw = same(await curName(), expectStore); }
-        if (!okSw) { report.push(`✗ Could not switch Temu to "${expectStore}" (it still shows "${await curName() || '?'}"). Switch it by hand and try again.`); return finish({ success: false, report }); }
-        report.push(`✓ Switched Temu store to "${expectStore}"`);
-        // the page may have reloaded or moved to another page: open the upload page again and wait for it
-        try { await chrome.tabs.update(tab.id, { url: 'https://seller.temu.com/upload-goods-multiple.html' }); } catch (_) {}
-        ready = false;
-        for (let i = 0; i < 50 && !ready; i++) {
-          await sleep(i === 0 ? 2000 : 500);
-          const r = await tabsSend(tab.id, { action: 'PING' });
-          ready = !!(r && r.ready) && same(await curName(), expectStore);
-        }
-        if (!ready) { report.push('✗ Temu upload page did not load after the store switch'); return finish({ success: false, report }); }
-        report.push('✓ Temu page ready (new store)');
-      }
-    }
+    if (expectStore && !(await bgEnsureTemuStore(tab.id, expectStore, report))) return finish({ success: false, report });
 
     const result = await tabsSend(tab.id, {
       action: 'TEMU_UPLOAD_FILE', b64, filename: filename || 'temu_upload.xlsx', expectStore,
@@ -1380,12 +1406,8 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background, sou
       }
     } catch (_) {}
     _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
-    if (sourcingQueued) {
-      try { out.sourcing = await zhSourcingRetry(false, sourcing.id, true); /* v9.15 silent: sheet tab not opened */ out.report.push(out.sourcing.success ? 'Sourcing records saved to Google Sheet' : (out.sourcing.error || 'Sourcing sync pending')); }
-      catch (e) { out.report.push('Sourcing sync pending: ' + e.message); }
-    }
     try { await chrome.storage.local.set({ temuLastUploadReport: { t: Date.now(), ...out } }); } catch (_) {}
-    stopKeepAlive();
+    stopKeepAlive('upload');
     return out;
   }
 }
@@ -1423,7 +1445,7 @@ async function handleMessage(msg, sender, queueLocked = false) {
       return { ...data, settings: getPublicSettings(data.settings) };
     }
     case 'GET_LINK_IMAGES':    return { success: true, images: await getImagesFromIndexedDB(msg.id) };
-    case 'START_KEEPALIVE':    startKeepAlive(); return { success: true };
+    case 'START_KEEPALIVE':    startKeepAlive('panel'); return { success: true };
     case 'SOURCING_CONNECT': return await zhSourcingConnect(msg.config);
     case 'SOURCING_DISCONNECT': await zhSourcingSerial(() => chrome.storage.local.remove('zhSourcingConnection')); return { success: true };
     case 'SOURCING_STATUS': return await zhSourcingStatus();
@@ -1516,14 +1538,14 @@ async function handleMessage(msg, sender, queueLocked = false) {
         return { success: false, error: e?.message };
       }
     }
-    case 'STOP_KEEPALIVE':     stopKeepAlive();  return { success: true };
+    case 'STOP_KEEPALIVE':     stopKeepAlive('panel');  return { success: true };
     case 'FETCH_BASE64': {
-      const storedSettings = (await getData())?.settings || {};
+      const storedSettings = await zhSettingsCached();
       const effectiveSettings = msg.settings ? { ...storedSettings, ...msg.settings } : storedSettings;
       return await fetchImageAsBase64(msg.url, effectiveSettings);
     }
     case 'FETCH_BASE64_BATCH': {
-      const settings = (await getData())?.settings || {};
+      const settings = await zhSettingsCached();
       const urls = Array.isArray(msg.urls) ? msg.urls.slice(0, 15) : [];
       const results = await mapPool(urls, FETCH_CONCURRENCY, u => fetchImageAsBase64(u, settings));
       return { success: true, results: results || [] };
@@ -1735,7 +1757,7 @@ async function handleMessage(msg, sender, queueLocked = false) {
         error: ''
       };
       q.push(newItem);
-      await chrome.storage.local.set({ [BULK_QUEUE_KEY]: q.slice(0, 2000) });
+      await chrome.storage.local.set({ [BULK_QUEUE_KEY]: q.slice(-2000) });   // v9.15.1 — keep the NEW item when the queue is full (was dropped silently)
       broadcastMessage({ action: 'BULK_QUEUE_UPDATED', item: newItem });
       return { success: true, item: newItem };
     }
@@ -1952,10 +1974,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const stored = await chrome.storage.local.get(['zakLinkCollectorData', BULK_QUEUE_KEY]);
   const settings = stored['zakLinkCollectorData']?.settings || {};
 
-  // v9.5.0: naya product tab → 'ZHunter' group (default on; sirf ungrouped tabs)
-  if (settings.bulkTabGroup !== false && (tab.groupId == null || tab.groupId === -1) && !/^https?:\/\/seller\.temu\.com/i.test(url)) {
-    bgGroupTabs([tabId]).catch(() => {});
-  }
+  // v9.15.1 — tabs are NOT grouped while you just browse any more; the side panel groups the hunted tabs when a hunt starts
+  // (GROUP_PRODUCT_TABS, setting "Keep product tabs in a ZHunter tab group").
 
   // Exclude seller portals from auto-capture (they are not product pages to hunt)
   if (/seller\.(temu|walmart|amazon|ebay|alibaba|etsy)\.|sellercentral\.|vendorcentral\./i.test(url)) return;
@@ -1964,25 +1984,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (settings.bulkQueueAutoCapture !== true) return; // v8: off unless the user turns it on
   if (!ZhGate.isProductUrl(url)) return;              // v9.14 — never auto-queue home / store / mall / search pages
 
-  const queue = stored[BULK_QUEUE_KEY] || [];
-  const normUrl = url.split('#')[0].trim();
-  if (queue.some(i => i.url === normUrl)) return; // already queued
-
-  const newItem = {
-    id:        `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    url:       normUrl,
-    title:     tab.title || normUrl,
-    platform:  bgDetectPlatform(normUrl),
-    addedAt:   Date.now(),
-    checked:   true
-  };
-  queue.push(newItem);
-  // Keep queue from growing unbounded
-  const trimmed = queue.slice(-500);
-  await chrome.storage.local.set({ [BULK_QUEUE_KEY]: trimmed });
-
-  // Notify open popup / sidepanel to refresh their queue list
-  chrome.runtime.sendMessage({ action: 'BULK_QUEUE_UPDATED', item: newItem }).catch(() => {});
+  // v9.15.1 — same safe path as every other queue write: write lock, normalized URL (no tracking/variant duplicates),
+  // 2000-item limit (before: unlocked write, raw URL and the whole queue cut to 500 → older queued links were lost).
+  // addBulkQueueItems skips duplicates and notifies the side panel itself.
+  try { await withWriteLock(() => addBulkQueueItems([{ url, title: tab.title || url }])); } catch (_) {}
 });
 
 // ============================================================

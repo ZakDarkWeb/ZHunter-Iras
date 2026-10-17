@@ -147,6 +147,7 @@ try { chrome.storage.local.get('zhFx', r => { const v = r && r.zhFx; if (v === '
   const progText = $('bulkProgText');
   if (progText) new MutationObserver(() => {
     const t = $('statusLineText'); if (!t) return;
+    if (document.querySelector('.status-line.zh-job')) return;   // v9.15.1 — the Jobs patti owns the line while a job runs
     const modalOpen = !$('bulkProgressModal')?.classList.contains('hidden');
     if (modalOpen && progText.textContent.trim()) t.textContent = `Hunting ${progText.textContent.trim()}`;
     else syncStatus();
@@ -154,6 +155,7 @@ try { chrome.storage.local.get('zhFx', r => { const v = r && r.zhFx; if (v === '
 
   // ── Status line ─────────────────────────────────────────────
   async function syncStatus() {
+    if (document.querySelector('.status-line.zh-job')) return;   // v9.15.1 — a running job is shown instead
     try {
       const bytes = await chrome.storage.local.getBytesInUse(null);
       const mb = bytes / 1048576;

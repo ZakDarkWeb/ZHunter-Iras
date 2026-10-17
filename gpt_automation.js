@@ -41,9 +41,11 @@
     const icon = type === 'ok' ? '✓' : type === 'warn' ? '⚠️' : '⚡';
     hud.innerHTML = `<span>${icon}</span> <span>${text}</span>`;
     hud.style.borderColor = type === 'ok' ? '#10a37f' : type === 'warn' ? '#f59e0b' : '#4d4d4f';
-    setTimeout(() => {
+    // v9.15.1 — one timer: a new message cancels the old one (the HUD used to vanish 6 s after the FIRST message, mid-run)
+    clearTimeout(hud._zhHide);
+    hud._zhHide = setTimeout(() => {
       if (hud && hud.parentNode) hud.parentNode.removeChild(hud);
-    }, 6000);
+    }, type === 'info' ? 15000 : 6000);
   }
 
   // Helper: wait for element
@@ -202,8 +204,19 @@
     const getVal = () => (ed.value !== undefined ? ed.value : ed.innerText) || '';
     const squash = (v) => String(v).replace(/\s+/g, '');
     const want = squash(text);
+    // v9.15.1 — clear ONLY the message box (document "selectAll" could select the whole page when the box had no focus)
+    const clearBox = () => {
+      try {
+        ed.focus({ preventScroll: true });
+        if (ed.value !== undefined) { ed.value = ''; ed.dispatchEvent(new Event('input', { bubbles: true })); return; }
+        if (!(ed.innerText || '').trim()) return;
+        const r = document.createRange(); r.selectNodeContents(ed);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        document.execCommand('delete', false, null);
+      } catch (_) {}
+    };
     // 1) clear
-    try { document.execCommand('selectAll'); document.execCommand('delete'); } catch (_) {}
+    clearBox();
     // 2) paste event (ProseMirror handles plain-text paste incl. line breaks)
     try {
       const dt = new DataTransfer(); dt.setData('text/plain', text);
@@ -211,8 +224,8 @@
     } catch (_) {}
     if (await waitUntil(() => squash(getVal()).length >= want.length * 0.98, 2500)) return ed;
     // 3) fallback: insertText
-    ed.focus();
-    try { document.execCommand('selectAll'); document.execCommand('delete'); document.execCommand('insertText', false, text); } catch (_) {}
+    clearBox();
+    try { document.execCommand('insertText', false, text); } catch (_) {}
     if (await waitUntil(() => squash(getVal()).length >= want.length * 0.98, 4000)) return ed;
     throw new Error('Text did not enter the ChatGPT message box');
   }

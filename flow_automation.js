@@ -362,9 +362,18 @@
     return clickUntil(btn, () => find()?.getAttribute('aria-checked') === 'true', `${groupLabel} ${text}`, 2500);
   }
 
-  // Nano Banana 2 Lite is a different model; never accept it as Nano Banana 2.
-  const correctModel = (sum) => /\bnano banana 2\b/i.test(sum) && !/\bnano banana 2\s*lite\b/i.test(sum);
-  const settingsOk = (sum) => correctModel(sum) && /crop_square|\b1\s*:\s*1\b/.test(sum) && /\bx1\b/.test(sum);
+  // v9.15.1 — always the NEWEST "Nano Banana" model in Flow's menu (2 → 2.1 → …), never a "Lite" one.
+  // If the menu cannot be read, the job goes on with the model that is selected (a warning, not a failure).
+  const nbInfo = (s) => {
+    const t = String(s || '');
+    const m = /\bnano\s*banana(?:\s*(\d+(?:\.\d+)?))?/i.exec(t);
+    if (!m) return null;
+    return { ver: m[1] ? parseFloat(m[1]) : 1, lite: /\bnano\s*banana[\s\d.]*\b(lite|mini)\b/i.test(t), name: (t.match(/nano\s*banana[\s\d.]*(?:\s*(?:lite|mini))?/i) || [''])[0].replace(/\s+/g, ' ').trim() };
+  };
+  let bestNB = null;   // { ver, name } — newest non-Lite model seen in the menu (this page load)
+  const correctModel = (sum) => { const i = nbInfo(sum); return !!i && !i.lite && (!bestNB || i.ver >= bestNB.ver); };
+  const ratioOk = (sum) => /crop_square|\b1\s*:\s*1\b/.test(sum) && /\bx1\b/.test(sum);
+  const settingsOk = (sum) => correctModel(sum) && ratioOk(sum) && !!bestNB;
   const settingsPanel = () => document.querySelector('flow-prompt-box-settings');
 
   async function closeSettings() {
@@ -390,26 +399,39 @@
       await pickToggle('Mode', 'Image');
       await pickToggle('Aspect ratio', '1:1');
       await pickToggle('Output count', 'x1');
-      if (!correctModel(settingsSummary(Q.promptRoot()))) {
+      if (!bestNB || !correctModel(settingsSummary(Q.promptRoot()))) {
         const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Select model family"]');
         if (modelBtn) {
-          const menuItem = () => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
-            .find(el => correctModel(el.textContent || ''));
-          await clickUntil(modelBtn, () => !!menuItem(), 'model menu', 2500);
-          const item = menuItem();
-          if (item) await trustedClick(item, 'Nano Banana 2');
-          else warn('Nano Banana 2 option not found in model menu');
+          const items = () => Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="menuitemradio"], .cdk-overlay-container [role="option"]'))
+            .map(el => ({ el, info: nbInfo(el.textContent || '') })).filter(x => x.info && !x.info.lite);
+          await clickUntil(modelBtn, () => items().length > 0, 'model menu', 2500);
+          const list = items().sort((a, b) => b.info.ver - a.info.ver);
+          if (list.length) {
+            bestNB = { ver: list[0].info.ver, name: list[0].info.name };
+            log('Newest model in the menu:', bestNB.name);
+            if (!correctModel(settingsSummary(Q.promptRoot()))) await trustedClick(list[0].el, bestNB.name);
+            else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+          } else {
+            bestNB = bestNB || { ver: 0, name: '' };   // menu without Nano Banana items — keep what is selected
+            warn('No Nano Banana option found in the model menu');
+          }
           await sleep(400);
-        }
+        } else if (!bestNB) bestNB = { ver: 0, name: '' };   // no model button in this Flow build
       }
       await closeSettings();
       await sleep(300);
     }
     const after = settingsSummary(Q.promptRoot());
-    if (!settingsOk(after)) {
-      throw new JobError(`Flow settings were not applied (${after.replace('crop_square', '1:1')}) — select "Nano Banana 2 · 1:1 · x1" yourself and press "Send Again"`);
+    if (!ratioOk(after)) {
+      throw new JobError(`Flow settings were not applied (${after.replace('crop_square', '1:1')}) — select "1:1 · x1" yourself and press "Send Again"`);
+    }
+    if (!correctModel(after)) {
+      // v9.15.1 — wrong / unknown model is a warning, not a failure: the job goes on with what is selected
+      updateFlowHUD(`ZHunter: could not select the newest Nano Banana — using "${after.replace('crop_square', '1:1').slice(0, 60)}"`, 'warn');
     }
   }
+  // the model name shown in the settings button (for the status line)
+  const currentModelName = () => nbInfo(settingsSummary(Q.promptRoot()))?.name || '';
 
   async function clearPromptBox() {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -646,7 +668,7 @@
     }
 
     const beforeIds = [...before], refIdList = [...refIds];
-    reportStatus(job, 'generating', `🎨 Generating · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`, false,
+    reportStatus(job, 'generating', `🎨 Generating${currentModelName() ? ' (' + currentModelName() + ')' : ''} · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`, false,
       { beforeIds, refIds: refIdList });
     try {
       const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
@@ -704,7 +726,8 @@
     job.shortTitle = (job.productTitle || 'Product').slice(0, 30);
     log('Job start', job.jobId, job.productTitle, 'img#', job.imageIndex);
     try {
-      await chrome.storage.local.set({ pendingFlowAction: { ...job, status: 'running', startedAt: Date.now() } });
+      // v9.15.1 — the image is in memory now: drop the multi-MB copy from storage (it was written for every image)
+      await chrome.storage.local.set({ pendingFlowAction: { ...job, imgBase64: '', status: 'running', startedAt: Date.now() } });
 
       reportStatus(job, 'prepare', `ZHunter: prompt box tayyar · ${job.shortTitle}`);
       // Agent panel open = no normal prompt box, so turn Agent off first.
