@@ -13479,6 +13479,23 @@ function temuCatDoubtful(title, prof) {
   return !words.some(w => t.includes(w.replace(/s$/, '')));
 }
 // first matching category profile for a title → [name, profile]
+// v9.15 — fallback matcher: needs SEVERAL words of the title to agree with a category (name / keywords / path), never a single word
+function temuCatMultiWord(title, cfg) {
+  const tt = temuCatTokens(title).filter(w => w.length > 2 && !TEMU_CAT_STOP.has(w));
+  if (tt.length < 2) return null;
+  const have = new Set(); tt.forEach(w => temuCatForms(w).forEach(x => have.add(x)));
+  const hit = w => [...temuCatForms(w)].some(x => have.has(x));
+  let best = null, second = 0;
+  for (const [name, p] of Object.entries(cfg.category_profiles || {})) {
+    const core = [...new Set(temuCatTokens([p.name, p.category_keyword, ...(p.match || [])].join(' ')).filter(w => w.length > 2 && !TEMU_CAT_STOP.has(w)))];
+    const path = [...new Set(temuCatTokens(p.full_path || '').filter(w => w.length > 3 && !TEMU_CAT_STOP.has(w) && !core.includes(w)))];
+    const c = core.filter(hit).length, x = path.filter(hit).length;
+    if (!c || c + x < 2) continue;   // at least one category word + a second agreeing word
+    const sc = c * 3 + x + (core.length && c === core.length ? 2 : 0);
+    if (!best || sc > best.score) { second = best ? best.score : 0; best = { name, prof: p, score: sc }; } else if (sc > second) second = sc;
+  }
+  return best && best.score > second ? best : null;
+}
 function temuProfileFor(title, cfg) {
   const tl = String(title || '').toLowerCase();
   { const sc = temuScoreProfiles(title, cfg); if (sc.length) return [sc[0].name, sc[0].prof]; }   // v9.15 smart scoring first; the old first-match loop below is the fallback
@@ -13500,6 +13517,7 @@ function temuProfileFor(title, cfg) {
                   || entries[0];
     if (pick && !(pick[1].exclude || []).some(m => m && tl.includes(String(m).toLowerCase()))) return [pick[0], pick[1]];
   }
+  { const mw = temuCatMultiWord(title, cfg); if (mw) return [mw.name, mw.prof]; }
   return ['', {}];
 }
 // v9.12.0 — which multiplier / min / max applies: category → department → store default
@@ -14051,14 +14069,6 @@ async function temuRunExport(opts = {}) {
     }
 
     let enr = temuEnrich(rows, cfg);
-    // v9.15 — products without a category: learn them from Temu automatically (first suggestion), then carry on with the export
-    if (enr.items.some(it => it.warn.includes('NO_CATEGORY_PROFILE')) && !TlcState?.running) {
-      const nNo = enr.items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE')).length;
-      say(`${nNo} product(s) have no category — learning categories from Temu automatically…`);
-      try { await temuLearnCategories(); } catch (e) { say('Category learning stopped: ' + (e?.message || e)); }
-      cfg = temuGetCfg();
-      enr = temuEnrich(rows, cfg);
-    }
     const { items, skipped } = enr;
     // v9.15 — products already listed on THIS store: warn and stop the upload (nothing is sent)
     if (opts.forUpload) {
@@ -14076,9 +14086,14 @@ async function temuRunExport(opts = {}) {
         '\n\nTo list them again, turn off the "Skip already listed" checkbox.');
       return;
     }
-    const blockers = items.filter(it => it.warn.some(w => ['NO_IMAGES', 'NO_PRICE', 'NO_CATEGORY_PROFILE', 'PRICE_SUSPICIOUS'].includes(w)));
-    if (blockers.some(it => it.warn.includes('NO_CATEGORY_PROFILE'))) toast('Some products have no category — press "Learn categories"', 'warn');
-    if (blockers.length) throw new Error('Export blocked: ' + blockers.map(it => it.title.slice(0, 45) + ': ' + it.warn.filter(w => ['NO_IMAGES','NO_PRICE','NO_CATEGORY_PROFILE','PRICE_SUSPICIOUS'].includes(w)).join(', ')).join(' | '));
+    // v9.15 — a missing category never stops the whole export: that product is left out and the error is shown, the rest goes on
+    { const noCat = items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE'));
+      if (noCat.length) { noCat.forEach(it => { items.splice(items.indexOf(it), 1); skipped.push('no category: ' + it.title.slice(0, 50)); });
+        say(`⚠ ${noCat.length} product(s) have no category and were left out (the rest goes on):\n` + noCat.map(it => '• ' + it.title.slice(0, 70)).join('\n') + '\nPress "Learn categories" (or add the category) and export those again.');
+        toast(`${noCat.length} product(s) left out: no category`, 'warn');
+        if (!items.length) return; } }
+    const blockers = items.filter(it => it.warn.some(w => ['NO_IMAGES', 'NO_PRICE', 'PRICE_SUSPICIOUS'].includes(w)));
+    if (blockers.length) throw new Error('Export blocked: ' + blockers.map(it => it.title.slice(0, 45) + ': ' + it.warn.filter(w => ['NO_IMAGES','NO_PRICE','PRICE_SUSPICIOUS'].includes(w)).join(', ')).join(' | '));
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
@@ -20412,7 +20427,7 @@ async function temuLearnCategories() {
       const ctl = { stop: false };
       if (TlcState.pendingPaste) res = { pasted: TlcState.pendingPaste };
       // v9.15 — Temu gave nothing: the extension looks in YOUR own categories itself and takes the best match
-      if (!res) { try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; } catch (_) {} }
+      if (!res) { try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; else { const mw = temuCatMultiWord(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM); if (mw?.prof?.full_path) res = { pasted: mw.prof.full_path, own: mw.prof.name }; } } catch (_) {} }
       if (!res) {
       // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
       tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
