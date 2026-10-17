@@ -20411,6 +20411,8 @@ async function temuLearnCategories() {
       }
       const ctl = { stop: false };
       if (TlcState.pendingPaste) res = { pasted: TlcState.pendingPaste };
+      // v9.15 — Temu gave nothing: the extension looks in YOUR own categories itself and takes the best match
+      if (!res) { try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; } catch (_) {} }
       if (!res) {
       // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
       tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
@@ -20426,7 +20428,7 @@ async function temuLearnCategories() {
       }
       ctl.stop = true;
       if (TlcState.stop) break;
-      if (res.pasted) { const pk = { path: res.pasted, match: '' }; cfg = temuGetCfg(); tlcApplyPick(cfg, it, pk); await temuSaveCfg(cfg); saved++; tlcLedgerPut(it.title, pk.path); tlcSay('✓ Category saved from your paste'); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} continue; }
+      if (res.pasted) { const pk = { path: res.pasted, match: '' }; cfg = temuGetCfg(); tlcApplyPick(cfg, it, pk); await temuSaveCfg(cfg); saved++; tlcLedgerPut(it.title, pk.path); tlcSay(res.own ? `✓ Temu gave nothing — picked from your categories: ${res.own}` : '✓ Category saved from your paste'); if (res.own) await sleep(1500); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} continue; }
       if (res.skip) continue;
       if (res.error === 'no_input') { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); break; }
       prev = res.options || [];
