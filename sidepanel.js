@@ -10050,6 +10050,7 @@ function filterAndRenderMasterRows() {
     const batch = (MasterUIState.batches || []).find(b => b.id === MasterUIState.filterBatchId);
     rows = masterRowsForBatch(rows, batch || { id: MasterUIState.filterBatchId }, MasterUIState.batches);
   }
+  zhRenderBatchFilterBar(rows.length);
 
   // Sort rows
   rows = [...rows];
@@ -10480,9 +10481,70 @@ async function reHuntMasterRow(rowId) {
   toast('✓ Updated with latest data', 'ok');
 }
 
+// ═══ v9.15.1 — Recent hunts: visible filter bar + "⋯" menu (Filter · Remove from history · Delete hunt + its products) ═══
+function zhRenderBatchFilterBar(shown) {
+  const bar = $('masterBatchFilterBar'); if (!bar) return;
+  const id = MasterUIState.filterBatchId;
+  if (!id) { bar.hidden = true; bar.innerHTML = ''; return; }
+  const b = (MasterUIState.batches || []).find(x => x.id === id);
+  const d = b?.date ? new Date(b.date) : null;
+  const when = d ? `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'hunt';
+  const total = (MasterUIState.allRows || []).length;
+  bar.hidden = false;
+  bar.innerHTML = `<span class="lib-filter-txt">Showing hunt <b>${esc(when)}</b>${b?.label ? ' · ' + esc(b.label) : ''} — ${shown} of ${total} products</span><button type="button" class="lib-filter-clear">✕ Show all</button>`;
+  bar.querySelector('.lib-filter-clear').onclick = () => { MasterUIState.filterBatchId = null; filterAndRenderMasterRows(); renderMasterBatches(MasterUIState.batches || []); };
+}
+function zhSortBatches(list) { return list.sort((a, c) => (Date.parse(c.date) || 0) - (Date.parse(a.date) || 0)); }
+async function zhHuntRemove(b) {
+  const before = await getMasterBatches();
+  await setMasterBatches(before.filter(x => x.id !== b.id));
+  if (MasterUIState.filterBatchId === b.id) MasterUIState.filterBatchId = null;
+  await updateMasterStats();
+  toastUndo('Hunt removed from history (products kept)', async () => {
+    const cur = await getMasterBatches();
+    if (!cur.some(x => x.id === b.id)) await setMasterBatches(zhSortBatches([...cur, b]));
+    await updateMasterStats();
+  });
+}
+async function zhHuntDeleteWithProducts(b) {
+  const lib = await getMasterRows(), batches = await getMasterBatches();
+  const rows = masterRowsForBatch(lib, b, batches);
+  showConfirm('Delete hunt + products', `Delete this hunt and its ${rows.length} product${rows.length === 1 ? '' : 's'} from the Library? You can undo it for a few seconds.`, `Delete ${rows.length}`, async () => {
+    const ids = new Set(rows.map(r => r.id));
+    const cur = await getMasterRows();
+    await setMasterRows(cur.filter(r => !ids.has(r.id)), cur);
+    await setMasterBatches((await getMasterBatches()).filter(x => x.id !== b.id));
+    if (MasterUIState.filterBatchId === b.id) MasterUIState.filterBatchId = null;
+    await updateMasterStats();
+    toastUndo(`Deleted hunt + ${ids.size} product${ids.size === 1 ? '' : 's'}`, async () => {
+      const now = await getMasterRows();
+      const back = rows.filter(r => !now.some(x => x.id === r.id));
+      if (back.length) await setMasterRows([...now, ...back], now);
+      const cb = await getMasterBatches();
+      if (!cb.some(x => x.id === b.id)) await setMasterBatches(zhSortBatches([...cb, b]));
+      await updateMasterStats();
+    });
+  });
+}
+async function zhHuntClearHistory() {
+  const before = await getMasterBatches();
+  if (!before.length) { toast('History is already empty', 'info'); return; }
+  showConfirm('Clear hunt history', `Remove ${before.length === 1 ? 'the 1 hunt' : 'all ' + before.length + ' hunts'} from Recent Hunts? Products stay in the Library.`, 'Clear history', async () => {
+    await setMasterBatches([]);
+    MasterUIState.filterBatchId = null;
+    await updateMasterStats();
+    toastUndo('Hunt history cleared', async () => { const cur = await getMasterBatches(); const keep = before.filter(b => !cur.some(x => x.id === b.id)); await setMasterBatches(zhSortBatches([...cur, ...keep])); await updateMasterStats(); });
+  });
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('#rhClearBtn')) { zhHuntClearHistory(); return; }
+  if (!e.target.closest('.rh-menu, .rh-more-btn')) document.querySelectorAll('.rh-menu:not([hidden])').forEach(m => { m.hidden = true; });
+});
+
 function renderMasterBatches(batches) {
   const list = $('masterBatchList');
   if (!list) return;
+  if ($('rhClearBtn')) $('rhClearBtn').hidden = !batches?.length;
   if (!batches || batches.length === 0) {
     list.innerHTML = '<div class="rh-empty"><p>No hunts yet — Hunt some tabs first!</p></div>';
     return;
@@ -10541,10 +10603,28 @@ function renderMasterBatches(batches) {
           ${b.label ? `<span class="rh-batch-lbl">${esc(b.label)}</span>` : ''}
         </div>
       </div>
-      <button class="rh-view-btn" type="button" title="Filter these products in Library">
+      <button class="rh-view-btn${MasterUIState.filterBatchId === b.id ? ' on' : ''}" type="button" title="${MasterUIState.filterBatchId === b.id ? 'Showing only this hunt — click to show all' : 'Show only these products in the Library'}">
         <svg viewBox="0 0 24 24"><polyline points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3"/></svg>
-        <span>Filter</span>
-      </button>`;
+        <span>${MasterUIState.filterBatchId === b.id ? 'Filtered ✓' : 'Filter'}</span>
+      </button>
+      <button class="rh-more-btn" type="button" title="More: remove / delete this hunt" aria-label="More actions">⋯</button>
+      <div class="rh-menu" hidden>
+        <button type="button" data-rh="remove">Remove from history<small>products stay in the Library</small></button>
+        <button type="button" data-rh="delete" class="danger">Delete hunt + its products<small>asks first · Undo for a few seconds</small></button>
+      </div>`;
+
+    card.querySelector('.rh-more-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const m = card.querySelector('.rh-menu');
+      const open = m.hidden;
+      document.querySelectorAll('.rh-menu:not([hidden])').forEach(x => { x.hidden = true; });
+      m.hidden = !open;
+    });
+    card.querySelector('.rh-menu')?.addEventListener('click', e => {
+      const a = e.target.closest('button[data-rh]'); if (!a) return;
+      card.querySelector('.rh-menu').hidden = true;
+      if (a.dataset.rh === 'remove') zhHuntRemove(b); else zhHuntDeleteWithProducts(b);
+    });
 
     card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
       // Switch to Library tab
@@ -10562,6 +10642,8 @@ function renderMasterBatches(batches) {
       document.querySelectorAll('#masterPlatBar .plat-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.plat === 'all'));
       document.querySelectorAll('#masterFilterChips .filter-chip:not(#compactModeToggle)').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === 'all'));
       filterAndRenderMasterRows();
+      renderMasterBatches(MasterUIState.batches || batches);   // v9.15.1 — "Filtered ✓" on the active hunt
+      $('masterBatchFilterBar')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       toast(clear ? 'All Library products' : `Batch filter: ${matched.length} products`, 'info');
     });
 
@@ -14477,6 +14559,30 @@ async function temuLateConfirm({ uploadId, items, store, histId }) {
 }
 // Temu has finished. All good → accepted. Errors / Action required → read failures, skip duplicates (listed),
 // fix drafts automatically, and only then mark the rest. Products that failed are never marked.
+// v9.15.1 (B8) — after a clean upload the batch name is cleared (it used to stay for the next batch);
+// the old name stays one click away as a "Last: …" chip under the box
+function temuBatchNameDone() {
+  const inp = $('temuBatchNameInp'); if (!inp) return;
+  const last = inp.value.trim();
+  if (!last) return;
+  inp.value = '';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  try { chrome.storage.local.set({ zhTemuBatchName: '', zhTemuBatchLast: last }); } catch (_) {}
+  temuShowLastBatch(last);
+}
+function temuShowLastBatch(last) {
+  const inp = $('temuBatchNameInp'); if (!inp) return;
+  let chip = $('temuLastBatchChip');
+  if (!chip) {
+    chip = document.createElement('button'); chip.type = 'button'; chip.id = 'temuLastBatchChip'; chip.className = 'temu-last-batch';
+    chip.title = 'Use the last batch name again';
+    chip.addEventListener('click', () => { inp.value = chip.dataset.name || ''; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); });
+    (inp.parentElement || inp).after(chip);
+  }
+  chip.dataset.name = last || '';
+  chip.textContent = `↺ Last: ${last}`;
+  chip.hidden = !last;
+}
 async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId }) {
   const rep = $('temuReport');
   const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
@@ -14490,6 +14596,7 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
     temuStep('result', 'ok', `${added ?? items.length} added · 0 errors`);
     { const sm = await temuSourcingRecord(items, store); if (sm) add(sm); }
     temuUpdateSrcInfo(); toast('Temu confirmed — products marked', 'ok');
+    temuBatchNameDone();
     return;
   }
   add(`• Temu finished: ${added ?? '?'} added, ${errs} error(s)${info?.status ? ' · ' + info.status : ''}`);
@@ -16042,6 +16149,7 @@ function temuUpdateReviewCount(rows) {
     bulkBtn.textContent = `AI Title Rewrite (${included})`;
   }
   temuUpdateImgEditCount(rows);
+  temuUpdateActionBar(rows);
   temuScheduleReady();
 }
 
@@ -16170,18 +16278,29 @@ async function temuRenderReview() {
   { // v9.12.5 — sticky mini toolbar (list now scrolls inside its own box)
     const tools = document.createElement('div');
     tools.className = 'temu-rv-tools';
-    tools.innerHTML = `<span class="temu-rv-tools-n">${rows.length} products</span>
-      <div class="temu-rv-tools-right">
-        <button type="button" class="temu-rv-chip" data-t="upd" title="Show only products whose titles were rewritten by AI">
-          <svg viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
-          AI Updated
-        </button>
+    // v9.15.1 — search + filter chips (B9): find a product fast in a long list
+    tools.innerHTML = `<div class="temu-rv-tools-top">
+        <input type="search" class="inp temu-rv-search" placeholder="Search…" value="${esc(TemuRvFilter.q)}" title="Type to show only matching products (title, link)">
+        <span class="temu-rv-tools-n">${rows.length} products</span>
         <button type="button" class="temu-rv-icon-btn" data-t="close" title="Collapse all expanded product cards">
           <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
-          Collapse All
+          Collapse
         </button>
+      </div>
+      <div class="temu-rv-fchips">
+        ${[['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['upd', '✨ AI updated']].map(([k, l]) =>
+          `<button type="button" class="temu-rv-fchip${TemuRvFilter.f === k ? ' on' : ''}" data-f="${k}">${l}</button>`).join('')}
       </div>`;
+    tools.querySelector('.temu-rv-search').addEventListener('input', e => { TemuRvFilter.q = e.target.value; temuApplyRvFilter(); });
     tools.addEventListener('click', e => {
+      const fc = e.target.closest('button[data-f]');
+      if (fc) {
+        TemuRvFilter.f = fc.dataset.f;
+        tools.querySelectorAll('.temu-rv-fchip').forEach(x => x.classList.toggle('on', x === fc));
+        list.classList.remove('only-upd');
+        temuApplyRvFilter();
+        return;
+      }
       const b = e.target.closest('button[data-t]');
       if (!b) return;
       if (b.dataset.t === 'close') {
@@ -16217,7 +16336,7 @@ async function temuRenderReview() {
     const excluded = TemuReviewExcluded.has(r.id);
 
     const card = document.createElement('div');
-    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '') + (TemuImgEditSelected.has(r.id) ? ' img-edit-on' : '');
+    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '');
     card.dataset.idx = idx;
     card.dataset.id = r.id || '';
     card.dataset.rawPrice = (r.copyCat !== undefined && r.temuBase) ? '' : (r.price || '');
@@ -16251,20 +16370,24 @@ async function temuRenderReview() {
       ? `<div class="temu-rv-gallery-wrap"><div class="temu-rv-gallery">${imgHtml}</div></div>`
       : `<div class="temu-rv-no-img">No images</div>`;
 
+    // v9.15.1 — 2-line row: the full title gets its own space (it used to shrink to "M." next to two checkboxes and two price chips);
+    // ONE tick = this product is used (upload, AI titles and image editing all work on the ticked products)
+    card.dataset.flags = [!catProf?.category_keyword || catWeak ? 'cat' : '', allImgs.length ? '' : 'noimg'].filter(Boolean).join(' ');
+    card.dataset.search = (String(title) + ' ' + String(r.url || '')).toLowerCase();
     card.innerHTML = `
       <div class="temu-rv-collapsed-row">
-        <label class="temu-rv-chk-wrap" title="Include in upload">
+        <label class="temu-rv-chk-wrap" title="Use this product (upload, AI titles, image editing)">
           <input type="checkbox" class="temu-rv-chk" ${excluded ? '' : 'checked'} />
         </label>
-        <label class="temu-rv-edit-wrap" title="Select for AI image edit (separate from upload)">
-          <input type="checkbox" class="temu-rv-edit-chk" ${editSel ? 'checked' : ''} />
-          <span>✨</span>
-        </label>
         ${thumb ? `<img class="temu-rv-thumb" src="${esc(thumb)}" alt="" loading="lazy" />` : `<span class="temu-rv-thumb temu-rv-no-thumb">📦</span>`}
-        <span class="temu-rv-title-snippet">${esc(title)}</span>
-        ${catWeak ? '<span class="temu-rv-catwarn" title="Category looks doubtful — open the card and check">⚠</span>' : ''}
-        <span class="temu-rv-ratio" title="Source price → how many times the Temu price is of it"></span>
-        <span class="temu-rv-price-badge">${calcBase !== null ? '$' + displayPrice : '—'}</span>
+        <div class="temu-rv-main">
+          <span class="temu-rv-title-snippet" title="${esc(title)}">${esc(title)}</span>
+          <div class="temu-rv-meta">
+            <span class="temu-rv-pricechip"><span class="temu-rv-price-badge">${calcBase !== null ? '$' + displayPrice : '—'}</span><span class="temu-rv-ratio" title="Temu price ÷ source price"></span></span>
+            <span class="temu-rv-catmini${!catProf?.category_keyword || catWeak ? ' weak' : ''}" title="${esc(catProf?.full_path || 'No category')}">${catWeak ? '<span class="temu-rv-catwarn">⚠</span> ' : ''}${esc(catProf?.category_keyword || 'No category')}</span>
+            <span class="temu-rv-imgn${allImgs.length ? '' : ' weak'}">${allImgs.length} img</span>
+          </div>
+        </div>
         <button class="temu-rv-del-btn" title="Delete product" type="button">🗑</button>
         <svg class="i temu-rv-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
       </div>
@@ -16273,7 +16396,7 @@ async function temuRenderReview() {
           <div class="temu-rv-field-group">
             <label class="temu-lbl">Title</label>
             <div class="temu-rv-title-row">
-              <input type="text" class="inp temu-rv-title-inp" value="${esc(title)}" placeholder="Product title..." />
+              <textarea class="inp temu-rv-title-inp" rows="3" placeholder="Product title...">${esc(title)}</textarea>
               <span class="temu-ai-char-badge ${lenCls}">${len}/500</span>
               <button class="btn btn-ghost btn-xs temu-rv-ai-btn" title="AI Rewrite this title">⚡ AI</button>
             </div>
@@ -16381,10 +16504,8 @@ async function temuRenderReview() {
     card.querySelectorAll('.temu-rv-pk').forEach(b => b.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (b.dataset.pk === 'studio') {
-        TemuImgEditSelected.add(r.id);
-        if (editChk) editChk.checked = true;
-        card.classList.add('img-edit-on');
-        temuUpdateImgEditCount(rows);
+        if (TemuReviewExcluded.has(r.id)) { TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null; }
+        temuUpdateReviewCount(rows);
         await zhStudioOpen(r.id);
         return;
       }
@@ -16397,9 +16518,10 @@ async function temuRenderReview() {
       const snip = card.querySelector('.temu-rv-title-snippet'); if (snip) snip.textContent = t;
       const bd = card.querySelector('.temu-ai-char-badge'); if (bd) { bd.textContent = `${t.length}/500`; bd.className = 'temu-ai-char-badge ' + (t.length <= 240 ? 'ok' : t.length <= 500 ? 'warn' : 'over'); }
       card.querySelectorAll('.temu-rv-pk[data-pk]').forEach(x => x.classList.toggle('on', x.dataset.pk === String(n)));
-      if (n > 1) { TemuImgEditSelected.add(r.id); if (editChk) editChk.checked = true; card.classList.add('img-edit-on'); }
-      else { TemuImgEditSelected.delete(r.id); if (editChk) editChk.checked = false; card.classList.remove('img-edit-on'); }
-      temuUpdateImgEditCount(rows);
+      if (n > 1 && TemuReviewExcluded.has(r.id)) {   // v9.15.1 — a pack product is always ticked (one selection for everything)
+        TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null;
+      }
+      temuUpdateReviewCount(rows);
       try { await temuSaveTitles([{ id: r.id, url: r.url, title: t }]); } catch (err) { toast(err.message, 'warn'); }
       toast(n > 1 ? `📦 ${n} Pack set — product marked for image edit` : 'Pack removed', 'ok');
     }));
@@ -16408,13 +16530,11 @@ async function temuRenderReview() {
         const set = new Set();
         card.querySelectorAll('.temu-rv-img-chk').forEach(x => { if (x.checked) set.add(parseInt(x.dataset.iidx, 10)); });
         TemuImgPick.set(r.id, set);
-        // Ticking an image implies you want this product edited
-        if (set.size && !TemuImgEditSelected.has(r.id)) {
-          TemuImgEditSelected.add(r.id);
-          if (editChk) editChk.checked = true;
-          card.classList.add('img-edit-on');
+        // Ticking an image implies you want this product used (v9.15.1 — one selection)
+        if (set.size && TemuReviewExcluded.has(r.id)) {
+          TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null;
         }
-        temuUpdateImgEditCount(rows);
+        temuUpdateReviewCount(rows);
       });
     });
 
@@ -16460,7 +16580,10 @@ async function temuRenderReview() {
     // Title input live char count
     const titleInp = card.querySelector('.temu-rv-title-inp');
     const badge = card.querySelector('.temu-ai-char-badge');
+    // v9.15.1 — the title box is a textarea now (whole title visible); Enter never adds a line break
+    titleInp?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); titleInp.blur(); } });
     titleInp?.addEventListener('input', e => {
+      if (/[\r\n]/.test(e.target.value)) e.target.value = e.target.value.replace(/[\r\n]+/g, ' ');
       const v = e.target.value; r.title = v;
       const l = v.length;
       badge.textContent = `${l}/500`;
@@ -16680,7 +16803,57 @@ async function temuRenderReview() {
 
     list.appendChild(card);
   });
+  { // v9.15.1 — sticky action bar (A2): the three jobs work on the ticked products
+    const bar = document.createElement('div');
+    bar.className = 'temu-rv-actionbar';
+    bar.innerHTML = `<span class="temu-rv-ab-n"></span>
+      <button type="button" class="temu-rv-ab-btn" data-ab="img" title="Edit the images of the ticked products with AI">✨ Images</button>
+      <button type="button" class="temu-rv-ab-btn" data-ab="ttl" title="Rewrite the titles of the ticked products with AI">⚡ Titles</button>
+      <button type="button" class="temu-rv-ab-btn primary" data-ab="up" title="Upload the ticked products to Temu">⬆ Upload</button>`;
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('button[data-ab]'); if (!b) return;
+      const target = { img: 'temuAiBulkImgBtn', ttl: 'temuAiBulkRewriteBtn', up: 'temuAutoBtn' }[b.dataset.ab];
+      const el = $(target);
+      if (!el) return;
+      if (el.disabled) { toast(el.title || 'Not ready yet', 'warning'); return; }
+      el.click();
+    });
+    list.appendChild(bar);
+  }
+  temuApplyRvFilter();
+  temuUpdateActionBar(rows);
   list.scrollTop = _rvScroll;
+}
+
+// v9.15.1 — review list search + filter chips (B9)
+const TemuRvFilter = { q: '', f: 'all' };
+function temuApplyRvFilter() {
+  const list = $('temuReviewList'); if (!list) return;
+  const q = TemuRvFilter.q.trim().toLowerCase(), f = TemuRvFilter.f;
+  let shown = 0, total = 0;
+  list.querySelectorAll('.temu-rv-card').forEach(c => {
+    total++;
+    const flags = (c.dataset.flags || '').split(' ');
+    let ok = !q || (c.dataset.search || '').includes(q);
+    if (ok && f === 'cat') ok = flags.includes('cat');
+    else if (ok && f === 'noimg') ok = flags.includes('noimg');
+    else if (ok && f === 'off') ok = c.classList.contains('excluded');
+    else if (ok && f === 'upd') ok = c.matches('.rv-updated, .rv-same');
+    c.classList.toggle('rv-filtered-out', !ok);
+    if (ok) shown++;
+  });
+  const n = list.querySelector('.temu-rv-tools-n');
+  if (n) n.textContent = (q || f !== 'all') ? `${shown} of ${total}` : `${total} products`;
+  let empty = list.querySelector('.temu-rv-filter-empty');
+  if (!shown && total) {
+    if (!empty) { empty = document.createElement('div'); empty.className = 'temu-review-empty temu-rv-filter-empty'; empty.textContent = 'No product matches this filter.'; list.querySelector('.temu-rv-tools')?.after(empty); }
+  } else empty?.remove();
+}
+function temuUpdateActionBar(rows) {
+  const bar = document.querySelector('#temuReviewList .temu-rv-actionbar'); if (!bar) return;
+  const n = rows.filter(r => !TemuReviewExcluded.has(r.id)).length;
+  bar.querySelector('.temu-rv-ab-n').innerHTML = `<b>${n}</b> selected`;
+  bar.classList.toggle('none', !n);
 }
 
 // v9.15 — "$source → N.N×" chip on every product row (red = below the 2× floor, 3× for Frozen)
@@ -16692,7 +16865,8 @@ function temuUpdateRatio(card) {
   if (!(cost > 0) || !(sell > 0)) { chip.textContent = ''; chip.style.display = 'none'; return; }
   const x = sell / cost, floor = card.dataset.frozen ? 3 : 2;
   chip.style.display = '';
-  chip.textContent = `$${cost.toFixed(2)} → ${x.toFixed(1)}×`;
+  chip.textContent = `${x.toFixed(1)}×`;   // v9.15.1 — one chip "$64.50 · 4.6×" (the source price is in the tooltip)
+  chip.parentElement?.classList.toggle('low', x + 0.005 < floor);
   chip.classList.toggle('low', x + 0.005 < floor);
   chip.classList.toggle('ok', x + 0.005 >= floor);
   chip.title = `Source $${cost.toFixed(2)} → Temu $${sell.toFixed(2)} = ${x.toFixed(2)}× (minimum ${floor}×${floor === 3 ? ', Frozen' : ''})`;
@@ -17419,7 +17593,10 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
     modal.style.zIndex = '100020';
     modal.innerHTML = `<div class="modal-box flow-batch-box">
       <div class="batch-header"><h3>Image batch setup</h3>
-      <p>${esc(engineName)} · 1:1 · x1</p></div>
+      <p>${esc(/^Flow/.test(engineName) ? 'Flow · newest Nano Banana · 1:1 · x1'
+        : /^Gemini/.test(engineName) ? 'Gemini · fresh chat every few images · account switch on a limit'
+        : /^Auto/.test(engineName) ? 'Auto · Gemini first → Flow (newest Nano Banana) if Gemini hits its limit'
+        : engineName + ' · one image per request')}</p></div>
       <div class="batch-tools">
         <input class="batch-search" type="search" placeholder="Search products…" aria-label="Search products">
         <div class="batch-selection"><button type="button" class="btn btn-ghost batch-select-all">Select visible</button><button type="button" class="btn btn-ghost batch-select-none">Clear selection</button><span class="batch-selected-count"></span></div>
@@ -17542,9 +17719,10 @@ function temuImgTargetIndices(r) {
 }
 
 function temuUpdateImgEditCount(rows) {
-  const ids = new Set(rows.map(r => r.id));
-  // Forget selections for products that are no longer in the list
-  for (const id of [...TemuImgEditSelected]) if (!ids.has(id)) TemuImgEditSelected.delete(id);
+  // v9.15.1 — ONE selection: the products ticked in the list are the ones whose images are edited
+  // (the separate ✨ tick per row is gone; "AI" ticks on single images still choose WHICH images)
+  TemuImgEditSelected.clear();
+  rows.forEach(r => { if (r.id && !TemuReviewExcluded.has(r.id)) TemuImgEditSelected.add(r.id); });
   const sel = rows.filter(r => TemuImgEditSelected.has(r.id));
   const imgs = sel.reduce((n, r) => n + temuImgTargetIndices(r).length, 0);
   const cnt = $('temuImgEditCount');
@@ -17566,7 +17744,7 @@ async function temuStartBulkImageEdit(opts = {}) {
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
   if (!selRows.length) {
-    toast('Select products with the ✨ checkbox first (or "Select all")', 'warn');
+    toast('Tick products in the list first', 'warn');
     return;
   }
 
@@ -19701,7 +19879,19 @@ async function flowLatestGenerated(excludeIds = new Set()) {
 // ── mode chooser ────────────────────────────────────────────────
 function zhChooseEditMode() {
   const rowsSel = TemuImgEditSelected.size;
-  if (!rowsSel) { toast('Select products with the ✨ checkbox first (or "Select all")', 'warn'); return; }
+  if (!rowsSel) { toast('Tick products in the list first', 'warn'); return; }
+  // v9.15.1 (D1) — texts follow the chosen engine (they always said "Flow"); the speed only matters when Flow does the work
+  const e = $('temuAiImgEngineSel')?.value || 'gemini';
+  const nm = { gemini: 'Gemini', chatgpt: 'ChatGPT', flow: 'Flow', auto: 'Gemini' }[e] || 'Flow';
+  const mt = $('zhModeManualTxt'), at = $('zhModeAutoTxt');
+  if (mt) mt.textContent = `You edit in ${nm} — copy, prompt, title and pack all in one place`;
+  if (at) at.textContent = e === 'auto' ? 'The extension creates each image by itself — Gemini first, Flow when Gemini hits its limit'
+    : e === 'flow' ? 'The extension creates each image in Flow by itself (use the speed below)'
+    : `The extension creates each image in ${nm} by itself`;
+  const showSpeed = e === 'flow' || e === 'auto';
+  if ($('zhModeSpeedLbl')) { $('zhModeSpeedLbl').hidden = !showSpeed; $('zhModeSpeedLbl').textContent = e === 'auto' ? 'Flow speed (used only if it switches to Flow)' : 'Auto speed (random pause between images)'; }
+  if ($('temuAiImgSpeedSel')) $('temuAiImgSpeedSel').hidden = !showSpeed;
+  const sub = document.querySelector('#zhModeModal .zs-head .zs-sub'); if (sub) sub.textContent = `For the ${rowsSel} ticked product${rowsSel === 1 ? '' : 's'}`;
   $('zhModeModal')?.classList.remove('hidden');
 }
 (function initZhMode() {
@@ -19710,7 +19900,7 @@ function zhChooseEditMode() {
   $('zhModeManualBtn')?.addEventListener('click', () => {
     close();
     // v9.15 — Manual studio starts with the engine chosen in "Engine" (ChatGPT / Flow / Gemini); you can still change it inside the studio
-    try { const e = $('temuAiImgEngineSel')?.value; const m = ZH_ENG[e] ? e : (e === 'auto' ? 'chatgpt' : ''); if (m) { zhManualEng = m; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); } } catch (_) {}
+    try { const e = $('temuAiImgEngineSel')?.value; const m = ZH_ENG[e] ? e : (e === 'auto' ? 'gemini' : ''); if (m) { zhManualEng = m; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); } } catch (_) {}
     zhStudioOpen();
   });
   $('zhModeAutoBtn')?.addEventListener('click', () => { close(); temuStartBulkImageEdit(); });
@@ -19720,7 +19910,7 @@ function zhChooseEditMode() {
 async function zhStudioOpen(startProductId = null) {
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
-  if (!selRows.length) { toast('Select products with the ✨ checkbox first', 'warn'); return; }
+  if (!selRows.length) { toast('Tick products in the list first', 'warn'); return; }
   const basePrompt = ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
   const items = selRows.map((r, i) => {
     const all = _allImgUrls(r);
@@ -20216,7 +20406,7 @@ async function temuMakePack() {
   if (!n) { toast('Choose 2 / 3 / 4… in "Pack" first', 'warn'); return; }
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
-  if (!selRows.length) { toast('Select products with the ✨ checkbox first', 'warn'); return; }
+  if (!selRows.length) { toast('Tick products in the list first', 'warn'); return; }
   const btn = $('temuMakePackBtn');
   if (btn) btn.disabled = true;
   let ok = 0;
@@ -20264,6 +20454,7 @@ async function temuMakePack() {
 // v9.11.0 — Temu Export polish: source segments, compact setup, collapsible
 // Title Optimizer / Image Studio, settings auto-save
 // ═════════════════════════════════════════════════════════════════
+let TemuSrcUserPicked = false, TemuSrcAutoLib = false;   // v9.15.1 (B1)
 function temuSyncSrcSeg() {
   const sel = $('temuSource');
   const seg = $('temuSrcSeg');
@@ -20298,6 +20489,23 @@ function temuSyncSrcSeg() {
       if (!badge) { badge = document.createElement('span'); badge.className = 'src-cnt'; b.appendChild(badge); }
       badge.textContent = cnt > 0 ? String(cnt) : '';
     });
+    // v9.15.1 (B1) — "Last hunt" is empty but the Library has products and you haven't picked a source yourself → use the Library
+    if (v === 'bulk' && !bulkCnt && libCnt > 0 && !TemuSrcUserPicked && sel.querySelector('option[value="master"]')) {
+      TemuSrcAutoLib = true;
+      sel.value = 'master';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    if (v === 'master' && bulkCnt > 0 && TemuSrcAutoLib && !TemuSrcUserPicked) {   // a new hunt arrived → back to it
+      TemuSrcAutoLib = false;
+      sel.value = 'bulk';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    if (note && key === 'master' && TemuSrcAutoLib && !TemuSrcUserPicked) {
+      note.textContent = 'Library selected (last hunt is empty)';
+      note.classList.add('show');
+    }
   })();
 
   // U10: Live price preview next to multiplier input
@@ -20317,6 +20525,7 @@ function temuSyncSrcSeg() {
     const sel = $('temuSource');
     if (!sel) return;
     const want = b.dataset.src;
+    TemuSrcUserPicked = true;
     if (want === 'sheet') {
       // v9.15 — "Import sheet" ALWAYS opens the file window (an already loaded sheet no longer blocks a new one)
       $('temuSheetFile')?.click();
@@ -20379,7 +20588,7 @@ function temuSyncSrcSeg() {
       batchCnt.classList.toggle('temu-batch-name-count-warn', len > 50);
     };
     // v9.15 — the batch name is remembered (it used to be lost whenever the panel was closed / reloaded)
-    try { chrome.storage.local.get('zhTemuBatchName', r => { if (!batchInp.value && typeof r?.zhTemuBatchName === 'string') { batchInp.value = r.zhTemuBatchName; updateBatchCount(); } }); } catch (_) {}
+    try { chrome.storage.local.get(['zhTemuBatchName', 'zhTemuBatchLast'], r => { if (!batchInp.value && typeof r?.zhTemuBatchName === 'string') { batchInp.value = r.zhTemuBatchName; updateBatchCount(); } if (r?.zhTemuBatchLast) temuShowLastBatch(r.zhTemuBatchLast); }); } catch (_) {}
     let _bnT = null;
     const saveBatchName = () => { clearTimeout(_bnT); _bnT = setTimeout(() => { try { chrome.storage.local.set({ zhTemuBatchName: batchInp.value.trim().slice(0, 60) }); } catch (_) {} }, 300); };
     batchInp.addEventListener('input', () => { updateBatchCount(); saveBatchName(); });
@@ -20414,11 +20623,29 @@ function temuSyncSrcSeg() {
       dot.className = 'tsc-status-dot';
       compact.prepend(dot);
     }
-    dot.className = 'tsc-status-dot ' + (isConnected ? 'tsc-dot-ok' : 'tsc-dot-off');
-    dot.title = isConnected ? `Connected: ${storeName}` : 'Not connected — add store first';
+    if (!isConnected) { dot.className = 'tsc-status-dot tsc-dot-off'; dot.title = 'No store — add a store first'; return; }
+    // v9.15.1 (B2) — the dot says what Temu shows: green = this store is open in a Temu tab, grey = no Temu tab open,
+    // amber = Temu shows another store (it is switched at upload). Red only when no store is set.
+    dot.className = 'tsc-status-dot tsc-dot-idle'; dot.title = `Store: ${storeName} · no Temu tab open (checked again at upload)`;
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: '*://seller.temu.com/*' });
+        if (!tabs.length) return;
+        const tab = tabs.find(t => t.active) || tabs[0];
+        const r = await new Promise(res => { try { chrome.tabs.sendMessage(tab.id, { action: 'TEMU_GET_STORE' }, x => { void chrome.runtime.lastError; res(x); }); } catch (_) { res(null); } });
+        const name = String(r?.name || '').trim();
+        if (!name) return;
+        const same = name.replace(/\s+/g, ' ').toLowerCase() === storeName.replace(/\s+/g, ' ').toLowerCase();
+        dot.className = 'tsc-status-dot ' + (same ? 'tsc-dot-ok' : 'tsc-dot-diff');
+        dot.title = same ? `✓ Temu tab shows this store: ${name}` : `Temu tab shows "${name}" — it will be switched to "${storeName}" at upload`;
+      } catch (_) {}
+    })();
   };
   // Call once + after any setup change
   setTimeout(updateSetupDot, 500);
+  // v9.15.1 — the dot was set once at 0.5 s (before the store name loaded → red "not connected"); follow the name now
+  if ($('tscStore')) { let _dT = null; new MutationObserver(() => { clearTimeout(_dT); _dT = setTimeout(updateSetupDot, 150); }).observe($('tscStore'), { childList: true, characterData: true, subtree: true }); }
+  try { chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete' && /seller\.temu\.com/.test(tab?.url || '')) setTimeout(updateSetupDot, 1500); }); } catch (_) {}
   document.addEventListener('click', (e) => {
     if (e.target.closest('#temuTestConnBtn,#temuStoreAddBtn,#tscChangeBtn')) {
       setTimeout(updateSetupDot, 800);

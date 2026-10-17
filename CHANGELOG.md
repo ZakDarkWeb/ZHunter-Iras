@@ -1,5 +1,19 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.15.1 UI/UX round 1 (2026-10-17, same manifest version) — see UI_UX_UPGRADE_PLAN_2026-10-17.md
+- Library → Recent Hunts: every hunt card has a "⋯" menu — **Remove from history** (products stay in the Library) and **Delete hunt + its products** (asks first, Undo for a few seconds). "Clear history" button above the list (asks first, Undo). Before there was no way to delete a hunt.
+- Library: when a hunt filter is on, a bar above the list says "Showing hunt Oct 16 · … — 2 of 32 products  ✕ Show all"; the active hunt's button says "Filtered ✓" (before the filter was invisible and the list looked half empty).
+- Temu review list: new 2-line row — the whole title (2 lines) is readable, below it ONE price chip "$64.50 | 4.6×" (red under the floor), category name (⚠ when doubtful) and image count. Bigger delete button.
+- ONE selection: the second "✨" tick per row is gone. The ticked products are used for upload, AI titles AND image editing ("Select All / Clear" for images are hidden; choosing a pack, Studio or an image tick also ticks the product).
+- Sticky action bar under the list: "N selected · ✨ Images · ⚡ Titles · ⬆ Upload" (presses the same buttons as before; a disabled one shows its reason).
+- Search box + filter chips over the list: All · ⚠ Category · No image · Unticked · ✨ AI updated ("2 of 32" count).
+- Title field is a 3-line box (whole title visible; Enter does not add a line break).
+- Source: when "Last hunt" is empty and the Library has products (and you have not picked a source yourself), the Library is chosen with a note "Library selected (last hunt is empty)"; a new hunt switches back.
+- Store dot: green = a Temu tab shows this store, grey = no Temu tab open, amber = Temu shows another store (switched at upload), red only when no store is set. It used to be red even when the store was set (it was checked once before the name had loaded).
+- Batch name is cleared after a clean, Temu-confirmed upload; "↺ Last: name" chip puts it back with one click.
+- Image mode chooser: texts follow the engine (Gemini / Flow / Auto = Gemini → Flow); the speed choice shows only for Flow / Auto. Manual studio with engine Auto starts in Gemini (was ChatGPT). Image batch setup header per engine ("Gemini · fresh chat every few images …", "Flow · newest Nano Banana · 1:1 · x1").
+- Tested in the stubbed panel at 380 px, dark + light: hunt menu remove / delete + Undo / clear history, filter bar, rows, search, chips, action bar count, mode chooser texts, last batch chip. NOT tested live on Temu (store dot colours, batch name after a real upload).
+
 ## 9.15.1 AI images: Gemini + Flow (2026-10-17, same manifest version)
 - Flow model: always the NEWEST "Nano Banana" in Flow's menu (now 2.1; later versions automatically), never a "Lite" one (before, "Nano Banana 2.1 Lite" counted as correct and "2" could be picked over "2.1"). If the menu cannot be read, the job goes on with the selected model and shows a warning instead of failing. The status line names the model used.
 - Flow: the multi-MB image of each job is removed from extension storage as soon as the Flow tab has taken it.

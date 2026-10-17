@@ -325,6 +325,7 @@
             <button id="masterDeselectAllBtn" class="btn btn-ghost btn-xs" type="button">None</button>
           </div>
         </div>
+        <div id="masterBatchFilterBar" class="lib-filter-bar" hidden></div>
         <div id="masterRowsList" class="tbl">
           <div class="empty lib-empty-onboard">
             <div class="lib-empty-steps">
@@ -364,7 +365,7 @@
             <button id="masterBulkCancelBtn" class="btn btn-ghost btn-xs" type="button">✕</button>
           </div>
         </div>
-        <div class="rh-header"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Recent Hunts</span></div>
+        <div class="rh-header"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Recent Hunts</span><button id="rhClearBtn" class="rh-clear-btn" type="button" title="Remove every hunt from this history (products stay in the Library)">Clear history</button></div>
         <div id="masterBatchList" class="rh-list"><div class="rh-empty"><p>Abhi koi hunt nahi — pehle kuch tabs hunt karein.</p></div></div>
         <div class="card-actions">
           <div class="dd" style="flex:1">
@@ -1082,8 +1083,9 @@
               <div class="temu-coll-body" data-coll-body="img">
               <div class="temu-img-pick-row">
                 <span id="temuImgEditCount" class="temu-img-pick-count">0 products · 0 images</span>
-                <button id="temuImgSelAllBtn" class="temu-img-pick-btn" type="button" title="Select all products for image editing"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="20 6 9 17 4 12"/></svg> Select All</button>
-                <button id="temuImgSelNoneBtn" class="temu-img-pick-btn" type="button" title="Clear image editing selection"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Clear</button>
+                <span class="temu-img-pick-hint" title="Ek hi selection: list mein jo products tick hain unhi ki images edit hongi">= the ticked products in the list</span>
+                <button id="temuImgSelAllBtn" class="temu-img-pick-btn" type="button" hidden title="Select all products for image editing"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="20 6 9 17 4 12"/></svg> Select All</button>
+                <button id="temuImgSelNoneBtn" class="temu-img-pick-btn" type="button" hidden title="Clear image editing selection"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Clear</button>
               </div>
               <div class="temu-img-bar-controls">
                 <div class="temu-img-sel-wrap">
@@ -1091,7 +1093,7 @@
                   <select id="temuAiImgEngineSel" class="temu-img-sel">
                     <option value="gemini" selected>✦ Gemini (recommended)</option>
                     <option value="chatgpt">🤖 ChatGPT (auto)</option>
-                    <option value="flow">⚡ Flow (Nano 2)</option>
+                    <option value="flow">⚡ Flow (newest Nano Banana)</option>
                     <option value="auto">🔁 Auto (Gemini → Flow)</option>
                   </select>
                 </div>
@@ -1958,14 +1960,14 @@
       </div>
       <button id="zhModeManualBtn" type="button" class="zs-mode on">
         <span class="zs-mode-ic">✋</span>
-        <span><b>Manual studio</b><small>You edit in Flow — copy, prompt, title and pack all in one place</small></span>
+        <span><b>Manual studio</b><small id="zhModeManualTxt">You edit in Flow — copy, prompt, title and pack all in one place</small></span>
         <span class="zs-badge">Fast</span>
       </button>
       <button id="zhModeAutoBtn" type="button" class="zs-mode">
         <span class="zs-mode-ic">🤖</span>
-        <span><b>Auto</b><small>The extension creates each image in Flow by itself (use the speed below)</small></span>
+        <span><b>Auto</b><small id="zhModeAutoTxt">The extension creates each image in Flow by itself (use the speed below)</small></span>
       </button>
-      <div class="zs-sub" style="margin:8px 2px 4px">Auto speed (random pause between images)</div>
+      <div id="zhModeSpeedLbl" class="zs-sub" style="margin:8px 2px 4px">Auto speed (random pause between images)</div>
       <select id="temuAiImgSpeedSel" class="temu-img-sel" style="width:100%" title="Auto mode only. Faster = higher risk of the account being flagged">
         <option value="safe">🛡 Safe (8–20s)</option>
         <option value="normal" selected>⚡ Normal (4–10s)</option>

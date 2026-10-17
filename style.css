@@ -6076,3 +6076,78 @@ body.light-mode .flow-batch-modal .batch-header p, body.light-mode .flow-batch-m
 body.light-mode .filter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 /* v9.15.1 - light mode: Hunt "N images" count was dark blue on the cyan badge */
 body.light-mode .hunt-sub-btn.active .hunt-sub-count{color:#fff}
+
+/* ═══ v9.15.1 — UI/UX Round 1 ═══ */
+/* A1 — 2-line product row: thumb | title (2 lines) + one meta line | delete | chevron */
+.temu-rv-collapsed-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:7px 8px 7px 10px}
+.temu-rv-thumb,.temu-rv-no-thumb{width:40px;height:40px}
+.temu-rv-main{min-width:0;display:flex;flex-direction:column;gap:3px}
+.temu-rv-main .temu-rv-title-snippet{flex:none;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font:600 11.5px/1.3 var(--font);color:var(--ink);overflow-wrap:anywhere}
+.temu-rv-meta{display:flex;align-items:center;gap:4px 6px;flex-wrap:wrap;min-width:0}
+/* B4 — ONE price chip: $sell · N× (red when under the floor) */
+.temu-rv-pricechip{display:inline-flex;align-items:center;height:18px;border-radius:4px;border:1px solid var(--accent-line);background:var(--accent-soft);overflow:hidden;flex-shrink:0}
+.temu-rv-pricechip .temu-rv-price-badge{border:0;background:none;border-radius:0;padding:0 6px;font:700 10.5px/18px var(--font);color:var(--accent)}
+.temu-rv-pricechip .temu-rv-ratio{border:0;border-left:1px solid var(--accent-line);border-radius:0;background:none;padding:0 6px;font:700 10px/18px var(--font);color:var(--ink-2)}
+.temu-rv-pricechip.low{border-color:rgba(255,120,120,.55);background:rgba(255,80,80,.10)}
+.temu-rv-pricechip.low .temu-rv-price-badge,.temu-rv-pricechip.low .temu-rv-ratio{color:#ff8a8a;border-color:rgba(255,120,120,.45)}
+.temu-rv-catmini{order:3;flex:0 1 auto;min-width:0;max-width:100%;font:500 10px/1.2 var(--font);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.temu-rv-catmini.weak{color:var(--warn)}
+.temu-rv-imgn{flex-shrink:0;font:500 10px/1.2 var(--font);color:var(--ink-3);white-space:nowrap}
+.temu-rv-imgn.weak{color:var(--bad)}
+.temu-rv-del-btn{width:26px;height:28px;display:grid;place-items:center;padding:0}
+.temu-rv-collapsed-row{gap:6px}
+/* B6 — title box shows the whole title */
+textarea.temu-rv-title-inp{min-height:58px;resize:vertical;font:500 12px/1.4 var(--font);white-space:normal;overflow-wrap:anywhere}
+.temu-rv-title-row:has(textarea){align-items:center;flex-wrap:wrap;gap:6px}
+.temu-rv-title-row textarea.temu-rv-title-inp{flex:1 1 100%;width:100%}
+/* B9 — search + filter chips */
+.temu-rv-tools{flex-direction:column;align-items:stretch;gap:6px}
+.temu-rv-tools-top{display:flex;align-items:center;gap:6px;min-width:0}
+.temu-rv-search{flex:1;min-width:0;height:28px;font-size:11.5px;padding:0 8px}
+.temu-rv-tools-top .temu-rv-tools-n{flex:none;white-space:nowrap}
+.temu-rv-fchips{display:flex;gap:4px;flex-wrap:wrap}
+.temu-rv-fchip{height:22px;padding:0 8px;border-radius:4px;border:1px solid var(--line-2);background:var(--surface-3);color:var(--ink-2);font:600 10.5px/1 var(--font);cursor:pointer;white-space:nowrap}
+.temu-rv-fchip:hover{border-color:var(--accent-line);color:var(--ink)}
+.temu-rv-fchip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.temu-rv-card.rv-filtered-out{display:none}
+/* A2 — sticky action bar under the list */
+.temu-rv-actionbar{position:sticky;bottom:-8px;z-index:3;display:flex;align-items:center;gap:5px;margin:8px -10px -8px;padding:8px 10px;background:color-mix(in srgb,var(--surface-2) 94%,transparent);backdrop-filter:blur(6px);border-top:1px solid var(--line-2)}
+.temu-rv-ab-n{flex:1;min-width:0;font:500 11px var(--font);color:var(--ink-2);white-space:nowrap}
+.temu-rv-ab-n b{color:var(--ink);font-weight:800}
+.temu-rv-ab-btn{height:28px;padding:0 9px;border-radius:4px;border:1px solid var(--line-2);background:var(--surface-3);color:var(--ink);font:600 11px/1 var(--font);cursor:pointer;white-space:nowrap}
+.temu-rv-ab-btn:hover{border-color:var(--accent-line)}
+.temu-rv-ab-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.temu-rv-actionbar.none .temu-rv-ab-btn{opacity:.45}
+.temu-img-pick-hint{font:500 10.5px var(--font);color:var(--ink-3)}
+@media (max-width:380px){.temu-rv-ab-btn{padding:0 7px;font-size:10.5px}}
+/* G2 — Library hunt filter bar */
+.lib-filter-bar{display:flex;align-items:center;gap:8px;margin:0 10px 6px;padding:6px 8px 6px 10px;border-radius:6px;border:1px solid var(--accent-line);background:var(--accent-soft);font:500 11px/1.35 var(--font);color:var(--ink)}
+.lib-filter-bar[hidden]{display:none}
+.lib-filter-bar .lib-filter-txt{flex:1;min-width:0;overflow-wrap:anywhere}
+.lib-filter-clear{flex-shrink:0;height:24px;padding:0 8px;border-radius:4px;border:1px solid var(--accent-line);background:var(--surface);color:var(--accent-ink,var(--accent));font:600 10.5px/1 var(--font);cursor:pointer;white-space:nowrap}
+.lib-filter-clear:hover{background:var(--accent);color:var(--accent-fg)}
+/* G1 — hunt ⋯ menu + Clear history */
+.rh-header{justify-content:flex-start}
+.rh-clear-btn{margin-left:auto;height:22px;padding:0 8px;border-radius:4px;border:1px solid var(--line-2);background:transparent;color:var(--ink-3);font:600 10px/1 var(--font);cursor:pointer;text-transform:none;letter-spacing:0}
+.rh-clear-btn:hover{color:var(--bad);border-color:var(--bad)}
+.rh-clear-btn[hidden]{display:none}
+.rh-view-btn.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.rh-more-btn{flex-shrink:0;width:28px;height:30px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);font:700 15px/1 var(--font);cursor:pointer}
+.rh-more-btn:hover{border-color:var(--accent-line);color:var(--ink)}
+.rh-menu{position:absolute;right:8px;top:calc(100% - 4px);z-index:20;min-width:210px;display:flex;flex-direction:column;padding:4px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface);box-shadow:0 10px 24px rgba(0,0,0,.4)}
+.rh-menu[hidden]{display:none}
+.rh-menu button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:7px 9px;border:0;border-radius:4px;background:none;color:var(--ink);font:600 11.5px/1.2 var(--font);text-align:left;cursor:pointer}
+.rh-menu button small{font:500 10px/1.2 var(--font);color:var(--ink-3)}
+.rh-menu button:hover{background:var(--hover)}
+.rh-menu button.danger{color:var(--bad)}
+.rh-menu button.danger:hover{background:var(--bad-soft)}
+.rh-card{overflow:visible}
+body.light-mode .rh-menu{box-shadow:0 10px 24px rgba(15,23,42,.18)}
+body.light-mode .temu-rv-pricechip.low .temu-rv-price-badge,body.light-mode .temu-rv-pricechip.low .temu-rv-ratio{color:#c62828}
+/* B2 — store dot meaning: green = Temu tab shows this store, grey = no Temu tab, amber = another store, red = no store set */
+.tsc-dot-idle{background:#7a869a;box-shadow:none}
+.tsc-dot-diff{background:#f59e0b;box-shadow:0 0 5px rgba(245,158,11,.45)}
+/* B8 — last batch name chip */
+.temu-last-batch{display:inline-flex;align-items:center;gap:4px;margin-top:4px;height:20px;padding:0 7px;border-radius:4px;border:1px dashed var(--line-2);background:transparent;color:var(--ink-3);font:500 10.5px/1 var(--font);cursor:pointer}
+.temu-last-batch:hover{color:var(--ink);border-color:var(--accent-line)}
+.temu-last-batch[hidden]{display:none}
