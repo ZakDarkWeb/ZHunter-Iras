@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: no longer hangs when Temu picks a category by itself and shows no suggestion list — the extension presses 'Reselect' (twice at most) to open the list, and if there is still none it shows Temu's own pick with a note so you can Skip.
 - AI image Engine list: Gemini is now first and the default for a fresh start (your last choice is still remembered). Flow is last — it runs one image at a time and stalls when its tab is in the background.
 - Gemini: 'image found but could not be read' fixed — if the direct read of the generated image fails, it is now read with login cookies, then through the extension's background fetch, before the canvas fallback.
 - AI images (ChatGPT / Gemini): new 'Auto' tab count (default) — up to 10 images use 1 tab, 11–25 use 2 tabs, more than 25 use 3 tabs. Picking a number by hand still overrides it.

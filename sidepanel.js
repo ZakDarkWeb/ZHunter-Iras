@@ -20166,7 +20166,14 @@ function tlcPageSnap() {
   if (rs && rs.parentElement) selected = (rs.parentElement.textContent || '').replace(/reselect|returnable/gi, '').replace(/\s+/g, ' ').trim();
   return { hasInput: !!input, value: input ? input.value : '', opts, selected };
 }
-async function tlcWatch(tab, prev, ctl, globalStop) {
+// v9.15 — runs INSIDE the Temu page: Temu already picked a category by itself ("Reselect" is shown) → press it so the suggestion list opens again
+function tlcPageReselect() {
+  const rs = [...document.querySelectorAll('*')].find(e => !e.children.length && /^reselect$/i.test((e.textContent || '').trim()));
+  if (!rs) return false;
+  try { rs.click(); } catch (_) { return false; }
+  return true;
+}
+async function tlcWatch(tab, prev, ctl, globalStop, title) {
   const snap = async () => {
     let t = tab;
     try { const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] }); if (tabs.length && !tabs.some(x => x.id === t.id)) t = tabs[0]; } catch (_) {}
@@ -20174,15 +20181,23 @@ async function tlcWatch(tab, prev, ctl, globalStop) {
   };
   const prevKey = JSON.stringify(prev || []);
   const first = await snap();
-  const baseOpts = JSON.stringify(first?.opts || []), baseSel = first?.selected || '';
-  let missing = 0, last = '', since = 0;
+  const baseOpts = JSON.stringify(first?.opts || []), baseSel = first?.selected || '', baseVal = first?.value || '';
+  let missing = 0, last = '', since = 0, tries = 0, idleSince = Date.now(), lastTry = 0;
   const t0 = Date.now();
   while (!ctl.stop && !globalStop() && Date.now() - t0 < 10 * 60 * 1000) {
     const r = await snap();
     if (!r || !r.hasInput) { if (++missing >= 6) return { error: 'no_input' }; await sleep(800); continue; }
     missing = 0;
     const optsKey = JSON.stringify(r.opts);
-    const fresh = (r.opts.length && optsKey !== prevKey && optsKey !== baseOpts) || (r.value && r.selected && r.selected !== baseSel);
+    const fresh = (r.opts.length && optsKey !== prevKey && optsKey !== baseOpts) || (r.value && r.selected && (r.selected !== baseSel || r.value !== baseVal));
+    // v9.15 — the title is in the box and Temu picked a category by itself, but no suggestion list is showing: that used to wait forever.
+    // Press "Reselect" (max 2 times) to open the list; if there is still no list, show Temu's own pick so the window never hangs.
+    if (!fresh && r.selected && !r.opts.length && title && String(r.value || '').trim() === String(title).trim()) {
+      if (Date.now() - idleSince > 4000 && Date.now() - lastTry > 5000) {
+        if (tries < 2) { tries++; lastTry = Date.now(); try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageReselect }); } catch (_) {} }
+        else if (Date.now() - lastTry > 4000) return { options: [r.selected], onlySelected: true };
+      }
+    } else if (!r.selected) { idleSince = Date.now(); }
     if (fresh) {
       const key = optsKey + '|' + r.selected;
       if (key === last) { if (Date.now() - since > 900) return { options: r.opts.length ? r.opts : [r.selected] }; }
@@ -20212,7 +20227,7 @@ function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category
     { const first = box.querySelector('input'); if (first) { first.checked = true; first.dispatchEvent(new Event('change')); } }   // Temu's top suggestion is pre-selected
     $('tlcSkip').onclick = () => resolve({ skip: true });
     save.onclick = () => resolve({ path: options[chosen], match: '' });   // v9.15 — no word rules: the whole title is the lesson
-    tlcSay(options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
+    tlcSay(it._onlySel ? 'Temu picked this category by itself and showed no list. If it is wrong, press Skip and set the category in the product row.' : options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
   });
 }
 async function temuLearnCategories() {
@@ -20265,13 +20280,14 @@ async function temuLearnCategories() {
       await copyTitle();
       $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
       const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
-      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop), skipP]);
+      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP]);
       }
       ctl.stop = true;
       if (TlcState.stop) break;
       if (res.skip) continue;
       if (res.error === 'no_input') { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); break; }
       prev = res.options || [];
+      it._onlySel = !!res.onlySelected;
       let autoTimer = null;
       if (res.auto && prev.length) autoTimer = setTimeout(() => { try { tlcSay('✓ First suggestion accepted automatically'); $('tlcSave').click(); } catch (_) {} }, 2200);
       const pick = await tlcAsk(it, k, todo.length, prev);
