@@ -13491,6 +13491,7 @@ function temuCatMultiWord(title, cfg) {
     const path = [...new Set(temuCatTokens(p.full_path || '').filter(w => w.length > 3 && !TEMU_CAT_STOP.has(w) && !core.includes(w)))];
     const c = core.filter(hit).length, x = path.filter(hit).length;
     if (!c || c + x < 2) continue;   // at least one category word + a second agreeing word
+    if (c < 2 && !(core.length && c === core.length && x >= 1)) continue;   // a wrong category is worse than none: two category words, or the whole short name + a path word
     const sc = c * 3 + x + (core.length && c === core.length ? 2 : 0);
     if (!best || sc > best.score) { second = best ? best.score : 0; best = { name, prof: p, score: sc }; } else if (sc > second) second = sc;
   }
