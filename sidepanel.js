@@ -14016,6 +14016,27 @@ async function temuRunExport(opts = {}) {
           say(`Cloud image upload: ${doneCount}/${pendingUploads.length} done…`);
         }));
       }
+      { // v9.15 — an edited image (data/blob) that failed to upload is NEVER swapped for the original quietly: try again (up to 3 more rounds, slower each time)
+        for (let round = 1; round <= 3; round++) {
+          const again = pendingUploads.filter(x => x.failed && !/^https:\/\/flow-content\.google\//i.test(x.img));
+          if (!again.length) break;
+          say(`Retrying ${again.length} edited image upload${again.length > 1 ? 's' : ''} (round ${round}/3)…`);
+          await new Promise(r => setTimeout(r, 3000 * round));
+          for (const x of again) {
+            try {
+              const pub = await uploadImageToPublicHost(x.img);
+              if (!pub || !/^https?:\/\//i.test(pub)) throw new Error('not uploaded');
+              x.row.images[x.index] = pub; x.failed = null;
+            } catch (e) { x.failed = e.message || 'upload failed'; }
+          }
+        }
+        const stuck = pendingUploads.filter(x => x.failed && !/^https:\/\/flow-content\.google\//i.test(x.img));
+        if (stuck.length) {   // still not uploaded: stop here, nothing wrong goes to Temu, nothing is lost
+          say(`✗ ${stuck.length} edited image${stuck.length > 1 ? 's' : ''} could not be uploaded (the free image host is busy or offline). Export stopped so the ORIGINAL pictures are not sent by mistake. Your edits are saved — wait a few minutes and press Export again.`);
+          toast('Edited images could not be uploaded — export stopped, try again in a few minutes', 'err');
+          return;
+        }
+      }
       { // images that could not be re-hosted (e.g. an old Flow link that has expired): main image → the original, others → dropped
         const bad = pendingUploads.filter(x => x.failed); const names = [];
         for (const x of bad) {
@@ -20242,7 +20263,7 @@ async function temuLearnCategories() {
   // products with no category AND products whose category looks doubtful (the ⚠ ones) are checked against Temu's own suggestions
   items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
   if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
-  TlcState = { running: true, stop: false };
+  TlcState = { running: true, stop: false, late: [] };
   const modal = $('temuLearnModal'); modal.classList.remove('hidden');
   $('tlcClose').onclick = () => { TlcState.stop = true; modal.classList.add('hidden'); };
   let tab = null, prev = [], saved = 0, k = 0;
@@ -20280,7 +20301,10 @@ async function temuLearnCategories() {
       await copyTitle();
       $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
       const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
-      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP]);
+      // v9.15 — if Temu gives no category within ~40 s, this product is skipped and the next one starts (listed at the end)
+      const lateP = new Promise(r => setTimeout(() => { ctl.stop = true; r({ skip: true, late: true }); }, 40000));
+      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP, lateP]);
+      if (res?.late) { (TlcState.late = TlcState.late || []).push(it.title); tlcSay('⏭ No category from Temu in time — skipped, going on with the next product.'); await sleep(1200); }
       }
       ctl.stop = true;
       if (TlcState.stop) break;
@@ -20313,11 +20337,12 @@ async function temuLearnCategories() {
       try { await temuRenderReview(); } catch (_) {}   // ⚠ marks and category names update immediately
     }
     if (!TlcState.stop && saved) tlcSay(`✓ Done — ${saved} categor${saved > 1 ? 'ies' : 'y'} saved. Press Export again.`);
+    if (TlcState?.late?.length) { const n = TlcState.late.length; toast(`${n} product${n > 1 ? 's' : ''} got no category from Temu in time and ${n > 1 ? 'were' : 'was'} skipped. Press "Learn categories" again later for ${n > 1 ? 'them' : 'it'}.`, 'warn'); tlcSay(`⚠ ${n} skipped (no category from Temu): ${TlcState.late.slice(0, 3).map(t => t.slice(0, 40)).join(' · ')}${n > 3 ? ' …' : ''}`, true); }
   } catch (e) {
     tlcSay('Error: ' + (e?.message || e), true);
   } finally {
     TlcState.running = false;
-    if (!TlcState.stop) setTimeout(() => $('temuLearnModal')?.classList.add('hidden'), saved ? 1800 : 6000);
+    if (!TlcState.stop) setTimeout(() => $('temuLearnModal')?.classList.add('hidden'), TlcState.late?.length ? 15000 : saved ? 1800 : 6000);
     if (saved) toast(`✓ ${saved} categor${saved > 1 ? 'ies' : 'y'} learned from Temu`, 'ok');
   }
 }

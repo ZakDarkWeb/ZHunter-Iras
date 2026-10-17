@@ -1,6 +1,8 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: if Temu gives no category within ~40 s the product is skipped and the next one starts; skipped ones are listed at the end.
+- Export: an edited image that fails to upload is retried (3 more rounds); if it still fails the export STOPS with a clear message instead of sending the ORIGINAL picture by mistake.
 - Learn categories: no longer hangs when Temu picks a category by itself and shows no suggestion list — the extension presses 'Reselect' (twice at most) to open the list, and if there is still none it shows Temu's own pick with a note so you can Skip.
 - AI image Engine list: Gemini is now first and the default for a fresh start (your last choice is still remembered). Flow is last — it runs one image at a time and stalls when its tab is in the background.
 - Gemini: 'image found but could not be read' fixed — if the direct read of the generated image fails, it is now read with login cookies, then through the extension's background fetch, before the canvas fallback.
