@@ -20406,7 +20406,7 @@ async function temuLearnCategories() {
           } catch (_) {}
         }
         if (!res) TlcState.autoFail = (TlcState.autoFail || 0) + 1;
-        if ((TlcState.autoFail || 0) >= 3) TlcState.manualOnly = true;   // auto keeps failing → manual for the rest
+        if ((TlcState.autoFail || 0) >= 1) TlcState.manualOnly = true;   // auto keeps failing → manual for the rest
         if (!res) tlcSay('Auto did not give suggestions → manual mode');
       }
       const ctl = { stop: false };
@@ -20419,7 +20419,7 @@ async function temuLearnCategories() {
       $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
       const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
       // v9.15 — if Temu gives no category within ~40 s, this product is skipped and the next one starts (listed at the end)
-      const lateP = new Promise(r => { const arm = ms => setTimeout(() => { if (Date.now() - (TlcState.pasteAt || 0) < 90000) return arm(30000); ctl.stop = true; r({ skip: true, late: true }); }, ms); arm(40000); });
+      const lateP = new Promise(r => { const arm = ms => setTimeout(() => { if (Date.now() - (TlcState.pasteAt || 0) < 90000) return arm(30000); ctl.stop = true; r({ skip: true, late: true }); }, ms); arm(120000); });
       const pasteP = new Promise(r => { TlcState.onPaste = path => { ctl.stop = true; r({ pasted: path }); }; });
       res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP, lateP, pasteP]);
       if (res?.late) { (TlcState.late = TlcState.late || []).push(it.title); tlcSay('⏭ No category from Temu in time — skipped, going on with the next product.'); await sleep(1200); }
