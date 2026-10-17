@@ -17200,6 +17200,7 @@ async function temuStartBulkImageEdit(opts = {}) {
     startedAt: Date.now(),
     stats: { done: 0, skipped: 0 }
   };
+  zhImgQueueSave(TemuImgStepper);   // v9.15 — so the rest can be continued after a reload / shutdown
   zhStepTimerStart();
 
   temuStepOpenModal();
@@ -17207,6 +17208,71 @@ async function temuStartBulkImageEdit(opts = {}) {
   if (engine === 'chatgpt' || engine === 'gemini') { await gptPoolStart(); return; }   // v9.15 — 2 ChatGPT tabs at the same time
   await temuStepProcessCurrent();
 }
+
+// ══ v9.15 — AI image editing: continue where it stopped (reload / PC switched off) ═════════════
+// Finished images are already kept (edit journal). This remembers the plan (which images, engine, prompts); on opening
+// the panel the images that are still NOT edited are offered as "Continue (N left)".
+const ZH_IMGQ_KEY = 'zhImgQueueState';
+async function zhImgQueueSave(S) {
+  try {
+    const items = (S.queue || []).map(q => ({ pid: q.product?.id || '', url: q.product?.url || '', idx: q.imgIndex, orig: q.origUrl || q.imgUrl || '', prompt: q.prompt || '', setup: q.setup || null, batchMode: q.batchMode || '', packQty: q.packQty || 0, packLabel: q.packLabel, stages: q.stages || null }));
+    await chrome.storage.local.set({ [ZH_IMGQ_KEY]: { engine: S.engine, prompt: S.prompt || '', items, savedAt: Date.now() } });
+  } catch (e) { console.log('[ZHunter] image queue save', e?.message || e); }
+}
+async function zhImgQueueRemaining() {
+  try {
+    const st = (await chrome.storage.local.get([ZH_IMGQ_KEY]))?.[ZH_IMGQ_KEY];
+    if (!st?.items?.length) return null;
+    const rows = await temuGetQueuedRows();
+    const J = await zhEditsLoad();
+    const left = [];
+    for (const it of st.items) {
+      const r = rows.find(x => (it.pid && x.id === it.pid) || (it.url && x.url === it.url));
+      if (!r) continue;
+      const allImgs = _allImgUrls(r);
+      if (it.idx < 0 || it.idx >= allImgs.length) continue;
+      const j = J[`${r.url || r.id}#${it.idx}`];
+      if (j && j.newUrl && j.newUrl !== j.orig) continue;   // already edited
+      left.push({ it, r, imgUrl: allImgs[it.idx] });
+    }
+    return left.length ? { st, left } : null;
+  } catch (_) { return null; }
+}
+async function zhImgQueueContinue() {
+  const rem = await zhImgQueueRemaining();
+  if (!rem) { toast('Nothing left to continue', 'info'); zhImgQueueBar(); return; }
+  if (TemuImgStepper?.running) { toast('Image editing is already running', 'warn'); return; }
+  const { st, left } = rem;
+  const queue = left.map(({ it, r, imgUrl }) => ({ product: r, imgUrl, origUrl: it.orig || imgUrl, imgIndex: it.idx, jobId: null, status: 'wait', prompt: it.prompt || undefined, setup: it.setup || undefined, batchMode: it.batchMode || undefined, packQty: it.packQty || undefined, packLabel: it.packLabel, stages: it.stages || undefined, stageIndex: 0 }));
+  queue.forEach(q => { Object.keys(q).forEach(k => { if (q[k] === undefined) delete q[k]; }); });
+  const engine = st.engine || 'gemini';
+  TemuImgStepper = { queue, currentIndex: 0, engine, prompt: st.prompt || '', activeJobId: null, running: true, startedAt: Date.now(), stats: { done: 0, skipped: 0 } };
+  zhStepTimerStart();
+  temuStepOpenModal();
+  for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
+  zhImgQueueBar();
+  if (engine === 'chatgpt' || engine === 'gemini') { await gptPoolStart(); return; }
+  await temuStepProcessCurrent();
+}
+async function zhImgQueueBar() {
+  try {
+    let bar = $('zhImgQueueBar');
+    const host = $('temuReviewList')?.parentElement;
+    if (!host) return;
+    const rem = (TemuImgStepper?.running) ? null : await zhImgQueueRemaining();
+    if (!rem) { bar?.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div'); bar.id = 'zhImgQueueBar';
+      bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;padding:8px 10px;border:1px solid var(--accent,#2dd4ff);border-radius:4px;font-size:12px';
+      bar.innerHTML = '<span class="zh-iq-txt" style="flex:1;min-width:160px"></span><button type="button" class="btn btn-primary btn-xs" id="zhIqGo" style="border-radius:4px">Continue</button><button type="button" class="btn btn-ghost btn-xs" id="zhIqNo" style="border-radius:4px">Discard</button>';
+      host.insertBefore(bar, $('temuReviewList'));
+      bar.querySelector('#zhIqGo').onclick = () => zhImgQueueContinue();
+      bar.querySelector('#zhIqNo').onclick = async () => { try { await chrome.storage.local.remove([ZH_IMGQ_KEY]); } catch (_) {} bar.remove(); };
+    }
+    bar.querySelector('.zh-iq-txt').textContent = `↻ Image editing was not finished — ${rem.left.length} image${rem.left.length > 1 ? 's' : ''} left (${rem.st.engine}). Finished images are kept.`;
+  } catch (_) {}
+}
+setTimeout(() => { zhImgQueueBar(); }, 3500);
 
 // v9.15.0 — timer: live clock while the image studio runs, summary (total + average per image) at the end
 let _zhStepTimerId = null;
@@ -20251,6 +20317,32 @@ function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category
     tlcSay(it._onlySel ? 'Temu picked this category by itself and showed no list. If it is wrong, press Skip and set the category in the product row.' : options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
   });
 }
+// v9.15 — apply one picked Temu category to the config (profile + examples + override)
+function tlcApplyPick(cfg, it, pick) {
+  const leaf = pick.path.split(' / ').pop().trim();
+  cfg.category_profiles = cfg.category_profiles || {};
+  let key = leaf.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'category';
+  let n = 2; while (cfg.category_profiles[key]) key = key.replace(/_\d+$/, '') + '_' + n++;
+  const words = String(pick.match || '').split(/[,;]+/).map(w => w.replace(/[^a-z0-9' \-]+/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase()).filter(w => w.split(' ').length >= 2);
+  const same = Object.entries(cfg.category_profiles).find(([, p]) => (p.full_path || '') === pick.path);
+  if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
+  else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
+  const _k = same ? same[0] : key; const _st = zhStripSourceNames(it.title || '');
+  [it.title, _st, temuCleanTitle(it.title, cfg), temuCleanTitle(_st, cfg)].forEach(t => temuLearnExample(cfg, t, _k));
+  try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = _k; } } catch (_) {}
+  return _k;
+}
+// v9.15 — ledger of every category you have already picked (title → Temu path). Saved at once, so nothing has to be learned twice.
+const TLC_LEDGER_KEY = 'zhLearnLedger';
+const tlcLedgerKey = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+async function tlcLedgerGet() { try { return (await chrome.storage.local.get([TLC_LEDGER_KEY]))?.[TLC_LEDGER_KEY] || {}; } catch (_) { return {}; } }
+async function tlcLedgerPut(title, path) {
+  try {
+    const L = await tlcLedgerGet(); L[tlcLedgerKey(title)] = { path, at: Date.now() };
+    const ks = Object.keys(L); if (ks.length > 4000) ks.sort((a, b) => L[a].at - L[b].at).slice(0, ks.length - 4000).forEach(k => delete L[k]);
+    await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L });
+  } catch (_) {}
+}
 async function temuLearnCategories() {
   if (TlcState?.running) { $('temuLearnModal')?.classList.remove('hidden'); return; }
   const cfg0 = temuGetCfg();
@@ -20262,6 +20354,10 @@ async function temuLearnCategories() {
   const doubtfulIt = (it, cfgX) => { try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
   // products with no category AND products whose category looks doubtful (the ⚠ ones) are checked against Temu's own suggestions
   items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
+  // v9.15 — categories you already picked earlier (even before a reload / in another store) are re-applied silently, never asked again
+  { const L = await tlcLedgerGet(); let replayed = 0; const cfgR = temuGetCfg();
+    for (let i = todo.length - 1; i >= 0; i--) { const hit = L[tlcLedgerKey(todo[i].title)]; if (hit?.path) { tlcApplyPick(cfgR, todo[i], { path: hit.path, match: '' }); todo.splice(i, 1); replayed++; } }
+    if (replayed) { await temuSaveCfg(cfgR); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} toast(`${replayed} categor${replayed > 1 ? 'ies' : 'y'} re-applied from what you picked before`, 'ok'); } }
   if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
   TlcState = { running: true, stop: false, late: [] };
   const modal = $('temuLearnModal'); modal.classList.remove('hidden');
@@ -20318,21 +20414,10 @@ async function temuLearnCategories() {
       clearTimeout(autoTimer);
       if (TlcState.stop) break;
       if (pick.skip) continue;
-      const leaf = pick.path.split(' / ').pop().trim();
-      cfg = temuGetCfg(); cfg.category_profiles = cfg.category_profiles || {};
-      let key = leaf.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'category';
-      let n = 2; while (cfg.category_profiles[key]) key = key.replace(/_\d+$/, '') + '_' + n++;
-      // v9.15 — match words: only phrases of 2+ words (a single word would pull every product into this category); commas split phrases
-      const words = String(pick.match || '').split(/[,;]+/).map(w => w.replace(/[^a-z0-9' \-]+/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase()).filter(w => w.split(' ').length >= 2);
-      // the same Temu category may already exist (same path) → just add the new match words to it
-      const same = Object.entries(cfg.category_profiles).find(([, p]) => (p.full_path || '') === pick.path);
-      if (same) { same[1].match = [...new Set([...(same[1].match || []), ...words])]; }
-      else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
-      { const _k = same ? same[0] : key; const _st = zhStripSourceNames(it.title || '');   // v9.15 — the whole title is the lesson (stored in every form it can appear in)
-        [it.title, _st, temuCleanTitle(it.title, cfg), temuCleanTitle(_st, cfg)].forEach(t => temuLearnExample(cfg, t, _k)); }
-      // this product gets the category you just chose, right now
-      try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = same ? same[0] : key; } } catch (_) {}
+      cfg = temuGetCfg();
+      tlcApplyPick(cfg, it, pick);
       await temuSaveCfg(cfg); saved++;
+      tlcLedgerPut(it.title, pick.path);   // v9.15 — remembered on its own too (survives store switches / reloads)
       try { temuRenderProfiles(); } catch (_) {}
       try { await temuRenderReview(); } catch (_) {}   // ⚠ marks and category names update immediately
     }
