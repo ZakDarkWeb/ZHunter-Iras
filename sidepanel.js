@@ -20294,6 +20294,24 @@ async function tlcWatch(tab, prev, ctl, globalStop, title) {
   }
   return { skip: true };
 }
+// v9.15 — you can paste a category path yourself (e.g. copied from another Temu login when this one stops suggesting)
+function tlcCleanPath(raw) {
+  let t = String(raw || '').replace(/\b(returnable|reselect)\b/gi, ' ').replace(/\s*[>›»|]\s*/g, ' / ').replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ').trim().replace(/^[\s/]+|[\s/]+$/g, '');
+  return t.split(' / ').length >= 2 ? t : '';
+}
+function tlcWirePaste() {
+  const inp = $('tlcPaste'), btn = $('tlcPasteBtn'); if (!inp || !btn) return;
+  inp.value = '';
+  const go = () => {
+    const path = tlcCleanPath(inp.value);
+    if (!path) { toast('Paste the whole category path, e.g. "Grocery & Gourmet Food / Frozen Foods / …"', 'warn'); return; }
+    if (TlcState?.onPaste) { TlcState.onPaste(path); inp.value = ''; }
+  };
+  btn.onclick = go;
+  inp.onkeydown = e => { if (e.key === 'Enter') go(); };
+  inp.oninput = () => { if (TlcState) TlcState.pasteAt = Date.now(); };   // typing/pasting here pauses the 40 s skip timer
+  inp.onpaste = () => { if (TlcState) TlcState.pasteAt = Date.now(); setTimeout(go, 150); };
+}
 function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category you pick
   return new Promise(resolve => {
     $('tlcCount').textContent = `${k} / ${n}`;
@@ -20313,6 +20331,7 @@ function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category
     });
     { const first = box.querySelector('input'); if (first) { first.checked = true; first.dispatchEvent(new Event('change')); } }   // Temu's top suggestion is pre-selected
     $('tlcSkip').onclick = () => resolve({ skip: true });
+    if (TlcState) TlcState.onPaste = path => resolve({ path, match: '' });
     save.onclick = () => resolve({ path: options[chosen], match: '' });   // v9.15 — no word rules: the whole title is the lesson
     tlcSay(it._onlySel ? 'Temu picked this category by itself and showed no list. If it is wrong, press Skip and set the category in the product row.' : options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
   });
@@ -20360,7 +20379,7 @@ async function temuLearnCategories() {
     if (replayed) { await temuSaveCfg(cfgR); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} toast(`${replayed} categor${replayed > 1 ? 'ies' : 'y'} re-applied from what you picked before`, 'ok'); } }
   if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
   TlcState = { running: true, stop: false, late: [] };
-  const modal = $('temuLearnModal'); modal.classList.remove('hidden');
+  const modal = $('temuLearnModal'); modal.classList.remove('hidden'); tlcWirePaste();
   $('tlcClose').onclick = () => { TlcState.stop = true; modal.classList.add('hidden'); };
   let tab = null, prev = [], saved = 0, k = 0;
   try {
@@ -20374,10 +20393,11 @@ async function temuLearnCategories() {
       $('tlcCount').textContent = `${k} / ${todo.length}`; $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
       // v9.15 — AUTO first: the extension types the title like a person; if that does not work, MANUAL: you paste it (Ctrl+V)
       let res = null;
+      TlcState.pendingPaste = null; TlcState.onPaste = path => { TlcState.pendingPaste = path; tlcSay('Got your category — saving it after this step…'); };
       if (!TlcState.manualOnly) {
         // v9.15 — order: 1) paste the complete title → 2) type the complete title → 3) manual. The first suggestion is accepted automatically.
         for (const mode of ['paste', 'type']) {
-          if (res || TlcState.stop) break;
+          if (res || TlcState.stop || TlcState.pendingPaste) break;
           tlcSay(mode === 'paste' ? '🤖 Auto 1/2: pasting the complete title in Temu…' : '🤖 Auto 2/2: typing the complete title like a person…');
           try {
             const r = await tlcRead(tab, it.title, prev, mode);
@@ -20390,6 +20410,7 @@ async function temuLearnCategories() {
         if (!res) tlcSay('Auto did not give suggestions → manual mode');
       }
       const ctl = { stop: false };
+      if (TlcState.pendingPaste) res = { pasted: TlcState.pendingPaste };
       if (!res) {
       // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
       tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
@@ -20398,12 +20419,14 @@ async function temuLearnCategories() {
       $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
       const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
       // v9.15 — if Temu gives no category within ~40 s, this product is skipped and the next one starts (listed at the end)
-      const lateP = new Promise(r => setTimeout(() => { ctl.stop = true; r({ skip: true, late: true }); }, 40000));
-      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP, lateP]);
+      const lateP = new Promise(r => { const arm = ms => setTimeout(() => { if (Date.now() - (TlcState.pasteAt || 0) < 90000) return arm(30000); ctl.stop = true; r({ skip: true, late: true }); }, ms); arm(40000); });
+      const pasteP = new Promise(r => { TlcState.onPaste = path => { ctl.stop = true; r({ pasted: path }); }; });
+      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP, lateP, pasteP]);
       if (res?.late) { (TlcState.late = TlcState.late || []).push(it.title); tlcSay('⏭ No category from Temu in time — skipped, going on with the next product.'); await sleep(1200); }
       }
       ctl.stop = true;
       if (TlcState.stop) break;
+      if (res.pasted) { const pk = { path: res.pasted, match: '' }; cfg = temuGetCfg(); tlcApplyPick(cfg, it, pk); await temuSaveCfg(cfg); saved++; tlcLedgerPut(it.title, pk.path); tlcSay('✓ Category saved from your paste'); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} continue; }
       if (res.skip) continue;
       if (res.error === 'no_input') { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); break; }
       prev = res.options || [];

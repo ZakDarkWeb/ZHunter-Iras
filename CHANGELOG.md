@@ -1,6 +1,7 @@
 # ZHunter Iras — CHANGELOG
 
 ## 9.15.0 (2026-10-07) — Hunt rework: product-only links, verification hold, reliable images
+- Learn categories: new "paste the Temu category here" box + Use button — when Temu stops suggesting, copy the category from another Temu login and paste it; it is saved and remembered like a normal pick.
 - Learn categories: every category you pick is also written to its own ledger (title → Temu path) at once; after a reload, a store switch or a new run those products are re-applied silently and never asked again.
 - AI image editing: the plan of a run (images, engine, prompts) is saved when it starts. After a reload / shutdown a bar 'Continue (N left)' appears above the product list; images already edited are kept and only the unfinished ones run again. 'Discard' clears it.
 - Learn categories: if Temu gives no category within ~40 s the product is skipped and the next one starts; skipped ones are listed at the end.
