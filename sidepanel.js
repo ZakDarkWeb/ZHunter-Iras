@@ -3898,7 +3898,8 @@ function gptPoolUiInner(light) {
   const total = S.queue.length, done = S.pool.finished;
   const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round(done / Math.max(1, total) * 100) + '%';
   const bd = $('temuStepBadge'); if (bd) bd.textContent = `${done} / ${total}`;
-  const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ChatGPT · ${done}/${total}`;
+  // the same runner serves ChatGPT and Gemini — name the engine that is really working (it always said "ChatGPT")
+  const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ${zhIsGem(S) ? 'Gemini' : 'ChatGPT'} · ${done}/${total}`;
   const cur = S.pool.cur;
   if (cur) {
     const im = $('temuStepImg'); if (im && im.getAttribute('src') !== cur.imgUrl) im.src = cur.imgUrl;
@@ -3937,7 +3938,7 @@ async function gptRunItem(S, idx, item) {
       if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; if (lastErr.captcha) S.captchaDown = true; else if (zhIsGem(S)) S.gemDown = true; }
       S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) {}
       S.pool.failed.push(`${label()}: ${lastErr?.message || 'failed'}`);
-      toast(`ChatGPT: ${label()} failed — ${lastErr?.message || 'error'}`, 'warn');
+      toast(`${zhIsGem(S) ? 'Gemini' : 'ChatGPT'}: ${label()} failed —${lastErr?.message || 'error'}`, 'warn');
       return false;
     }
     const tSave = Date.now();
@@ -4565,7 +4566,7 @@ async function temuStepRedo(item) {
   if (item.status === 'busy') { toast('This image is working right now', 'info'); return; }
   if (S.running && S.pool) {   // 2-tab run still going: a free tab takes it next
     temuStepRedoPrepare(item); (S.pool.redo = S.pool.redo || []).push(item);
-    temuStepResultsRender(); toast('🔁 Queued — it runs on the next free ChatGPT tab', 'ok'); return;
+    temuStepResultsRender(); toast(`🔁 Queued — it runs on the next free ${zhIsGem(S) ? 'Gemini' : 'ChatGPT'} tab`, 'ok'); return;
   }
   if (S.running) { toast('Press ⏹ Stop first (or wait), then Redo', 'warn'); return; }
   temuStepRedoPrepare(item);

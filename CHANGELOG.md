@@ -3,6 +3,7 @@
 ## 9.15.1 UI/UX round 1 follow-up (2026-10-18)
 - The separate ✨ image-edit checkbox on every product row is back (user's choice): the upload tick and the ✨ tick are independent again, as before Round 1. "Select All / Clear" for images are back; choosing a pack, Studio or an image "AI" tick marks the product ✨ again.
 - Action bar shows "✨ Images (N)" = the ✨ selected products; new filter chip "✨ For images".
+- AI Image Studio progress title said "ChatGPT" while Gemini was working (the 2-tab runner serves both engines); it now names the real engine. Same for the failure toast and the Redo "queued" message.
 - sidepanel.js on disk had been replaced by an older copy (the 17 Oct commit 293cb90) — the Round 1 version was put back first.
 
 ## 9.15.1 UI/UX round 1 (2026-10-17, same manifest version) — see UI_UX_UPGRADE_PLAN_2026-10-17.md
