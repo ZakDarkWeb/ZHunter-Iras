@@ -16289,7 +16289,7 @@ async function temuRenderReview() {
         </button>
       </div>
       <div class="temu-rv-fchips">
-        ${[['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['upd', '✨ AI updated']].map(([k, l]) =>
+        ${[['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['edit', '✨ For images'], ['upd', 'AI titles']].map(([k, l]) =>
           `<button type="button" class="temu-rv-fchip${TemuRvFilter.f === k ? ' on' : ''}" data-f="${k}">${l}</button>`).join('')}
       </div>`;
     tools.querySelector('.temu-rv-search').addEventListener('input', e => { TemuRvFilter.q = e.target.value; temuApplyRvFilter(); });
@@ -16337,7 +16337,7 @@ async function temuRenderReview() {
     const excluded = TemuReviewExcluded.has(r.id);
 
     const card = document.createElement('div');
-    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '');
+    card.className = 'temu-rv-card' + (excluded ? ' excluded' : '') + (TemuImgEditSelected.has(r.id) ? ' img-edit-on' : '');
     card.dataset.idx = idx;
     card.dataset.id = r.id || '';
     card.dataset.rawPrice = (r.copyCat !== undefined && r.temuBase) ? '' : (r.price || '');
@@ -16377,8 +16377,12 @@ async function temuRenderReview() {
     card.dataset.search = (String(title) + ' ' + String(r.url || '')).toLowerCase();
     card.innerHTML = `
       <div class="temu-rv-collapsed-row">
-        <label class="temu-rv-chk-wrap" title="Use this product (upload, AI titles, image editing)">
+        <label class="temu-rv-chk-wrap" title="Include in upload (and AI titles)">
           <input type="checkbox" class="temu-rv-chk" ${excluded ? '' : 'checked'} />
+        </label>
+        <label class="temu-rv-edit-wrap" title="✨ Select for AI image edit (separate from upload)">
+          <input type="checkbox" class="temu-rv-edit-chk" ${editSel ? 'checked' : ''} />
+          <span>✨</span>
         </label>
         ${thumb ? `<img class="temu-rv-thumb" src="${esc(thumb)}" alt="" loading="lazy" />` : `<span class="temu-rv-thumb temu-rv-no-thumb">📦</span>`}
         <div class="temu-rv-main">
@@ -16505,8 +16509,10 @@ async function temuRenderReview() {
     card.querySelectorAll('.temu-rv-pk').forEach(b => b.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (b.dataset.pk === 'studio') {
-        if (TemuReviewExcluded.has(r.id)) { TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null; }
-        temuUpdateReviewCount(rows);
+        TemuImgEditSelected.add(r.id);
+        if (editChk) editChk.checked = true;
+        card.classList.add('img-edit-on');
+        temuUpdateImgEditCount(rows);
         await zhStudioOpen(r.id);
         return;
       }
@@ -16519,10 +16525,9 @@ async function temuRenderReview() {
       const snip = card.querySelector('.temu-rv-title-snippet'); if (snip) snip.textContent = t;
       const bd = card.querySelector('.temu-ai-char-badge'); if (bd) { bd.textContent = `${t.length}/500`; bd.className = 'temu-ai-char-badge ' + (t.length <= 240 ? 'ok' : t.length <= 500 ? 'warn' : 'over'); }
       card.querySelectorAll('.temu-rv-pk[data-pk]').forEach(x => x.classList.toggle('on', x.dataset.pk === String(n)));
-      if (n > 1 && TemuReviewExcluded.has(r.id)) {   // v9.15.1 — a pack product is always ticked (one selection for everything)
-        TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null;
-      }
-      temuUpdateReviewCount(rows);
+      if (n > 1) { TemuImgEditSelected.add(r.id); if (editChk) editChk.checked = true; card.classList.add('img-edit-on'); }
+      else { TemuImgEditSelected.delete(r.id); if (editChk) editChk.checked = false; card.classList.remove('img-edit-on'); }
+      temuUpdateImgEditCount(rows);
       try { await temuSaveTitles([{ id: r.id, url: r.url, title: t }]); } catch (err) { toast(err.message, 'warn'); }
       toast(n > 1 ? `📦 ${n} Pack set — product marked for image edit` : 'Pack removed', 'ok');
     }));
@@ -16531,11 +16536,13 @@ async function temuRenderReview() {
         const set = new Set();
         card.querySelectorAll('.temu-rv-img-chk').forEach(x => { if (x.checked) set.add(parseInt(x.dataset.iidx, 10)); });
         TemuImgPick.set(r.id, set);
-        // Ticking an image implies you want this product used (v9.15.1 — one selection)
-        if (set.size && TemuReviewExcluded.has(r.id)) {
-          TemuReviewExcluded.delete(r.id); const c = card.querySelector('.temu-rv-chk'); if (c) c.checked = true; card.classList.remove('excluded'); TemuLast = null;
+        // Ticking an image implies you want this product edited
+        if (set.size && !TemuImgEditSelected.has(r.id)) {
+          TemuImgEditSelected.add(r.id);
+          if (editChk) editChk.checked = true;
+          card.classList.add('img-edit-on');
         }
-        temuUpdateReviewCount(rows);
+        temuUpdateImgEditCount(rows);
       });
     });
 
@@ -16808,7 +16815,7 @@ async function temuRenderReview() {
     const bar = document.createElement('div');
     bar.className = 'temu-rv-actionbar';
     bar.innerHTML = `<span class="temu-rv-ab-n"></span>
-      <button type="button" class="temu-rv-ab-btn" data-ab="img" title="Edit the images of the ticked products with AI">✨ Images</button>
+      <button type="button" class="temu-rv-ab-btn" data-ab="img" title="Edit the images of the ✨ selected products with AI">✨ Images</button>
       <button type="button" class="temu-rv-ab-btn" data-ab="ttl" title="Rewrite the titles of the ticked products with AI">⚡ Titles</button>
       <button type="button" class="temu-rv-ab-btn primary" data-ab="up" title="Upload the ticked products to Temu">⬆ Upload</button>`;
     bar.addEventListener('click', e => {
@@ -16839,6 +16846,7 @@ function temuApplyRvFilter() {
     if (ok && f === 'cat') ok = flags.includes('cat');
     else if (ok && f === 'noimg') ok = flags.includes('noimg');
     else if (ok && f === 'off') ok = c.classList.contains('excluded');
+    else if (ok && f === 'edit') ok = c.classList.contains('img-edit-on');
     else if (ok && f === 'upd') ok = c.matches('.rv-updated, .rv-same');
     c.classList.toggle('rv-filtered-out', !ok);
     if (ok) shown++;
@@ -16855,6 +16863,10 @@ function temuUpdateActionBar(rows) {
   const n = rows.filter(r => !TemuReviewExcluded.has(r.id)).length;
   bar.querySelector('.temu-rv-ab-n').innerHTML = `<b>${n}</b> selected`;
   bar.classList.toggle('none', !n);
+  // ✨ Images works on the ✨ ticks (separate from the upload tick)
+  const ni = rows.filter(r => TemuImgEditSelected.has(r.id)).length;
+  const ib = bar.querySelector('[data-ab="img"]');
+  if (ib) { ib.textContent = `✨ Images (${ni})`; ib.classList.toggle('off', !ni); }
 }
 
 // v9.15 — "$source → N.N×" chip on every product row (red = below the 2× floor, 3× for Frozen)
@@ -17720,10 +17732,11 @@ function temuImgTargetIndices(r) {
 }
 
 function temuUpdateImgEditCount(rows) {
-  // v9.15.1 — ONE selection: the products ticked in the list are the ones whose images are edited
-  // (the separate ✨ tick per row is gone; "AI" ticks on single images still choose WHICH images)
-  TemuImgEditSelected.clear();
-  rows.forEach(r => { if (r.id && !TemuReviewExcluded.has(r.id)) TemuImgEditSelected.add(r.id); });
+  // ✨ image-edit selection stays separate from the upload tick (user's choice, 18 Oct 2026)
+  const ids = new Set(rows.map(r => r.id));
+  // Forget selections for products that are no longer in the list
+  for (const id of [...TemuImgEditSelected]) if (!ids.has(id)) TemuImgEditSelected.delete(id);
+  temuUpdateActionBar(rows);
   const sel = rows.filter(r => TemuImgEditSelected.has(r.id));
   const imgs = sel.reduce((n, r) => n + temuImgTargetIndices(r).length, 0);
   const cnt = $('temuImgEditCount');
@@ -17745,7 +17758,7 @@ async function temuStartBulkImageEdit(opts = {}) {
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
   if (!selRows.length) {
-    toast('Tick products in the list first', 'warn');
+    toast('Select products with the ✨ checkbox first', 'warn');
     return;
   }
 
@@ -19880,7 +19893,7 @@ async function flowLatestGenerated(excludeIds = new Set()) {
 // ── mode chooser ────────────────────────────────────────────────
 function zhChooseEditMode() {
   const rowsSel = TemuImgEditSelected.size;
-  if (!rowsSel) { toast('Tick products in the list first', 'warn'); return; }
+  if (!rowsSel) { toast('Select products with the ✨ checkbox first', 'warn'); return; }
   // v9.15.1 (D1) — texts follow the chosen engine (they always said "Flow"); the speed only matters when Flow does the work
   const e = $('temuAiImgEngineSel')?.value || 'gemini';
   const nm = { gemini: 'Gemini', chatgpt: 'ChatGPT', flow: 'Flow', auto: 'Gemini' }[e] || 'Flow';
@@ -19892,7 +19905,7 @@ function zhChooseEditMode() {
   const showSpeed = e === 'flow' || e === 'auto';
   if ($('zhModeSpeedLbl')) { $('zhModeSpeedLbl').hidden = !showSpeed; $('zhModeSpeedLbl').textContent = e === 'auto' ? 'Flow speed (used only if it switches to Flow)' : 'Auto speed (random pause between images)'; }
   if ($('temuAiImgSpeedSel')) $('temuAiImgSpeedSel').hidden = !showSpeed;
-  const sub = document.querySelector('#zhModeModal .zs-head .zs-sub'); if (sub) sub.textContent = `For the ${rowsSel} ticked product${rowsSel === 1 ? '' : 's'}`;
+  const sub = document.querySelector('#zhModeModal .zs-head .zs-sub'); if (sub) sub.textContent = `For the ${rowsSel} ✨ selected product${rowsSel === 1 ? '' : 's'}`;
   $('zhModeModal')?.classList.remove('hidden');
 }
 (function initZhMode() {
@@ -19911,7 +19924,7 @@ function zhChooseEditMode() {
 async function zhStudioOpen(startProductId = null) {
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
-  if (!selRows.length) { toast('Tick products in the list first', 'warn'); return; }
+  if (!selRows.length) { toast('Select products with the ✨ checkbox first', 'warn'); return; }
   const basePrompt = ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
   const items = selRows.map((r, i) => {
     const all = _allImgUrls(r);
@@ -20407,7 +20420,7 @@ async function temuMakePack() {
   if (!n) { toast('Choose 2 / 3 / 4… in "Pack" first', 'warn'); return; }
   const rows = await temuGetQueuedRows();
   const selRows = rows.filter(r => TemuImgEditSelected.has(r.id));
-  if (!selRows.length) { toast('Tick products in the list first', 'warn'); return; }
+  if (!selRows.length) { toast('Select products with the ✨ checkbox first', 'warn'); return; }
   const btn = $('temuMakePackBtn');
   if (btn) btn.disabled = true;
   let ok = 0;

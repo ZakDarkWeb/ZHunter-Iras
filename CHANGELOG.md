@@ -1,5 +1,10 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.15.1 UI/UX round 1 follow-up (2026-10-18)
+- The separate ✨ image-edit checkbox on every product row is back (user's choice): the upload tick and the ✨ tick are independent again, as before Round 1. "Select All / Clear" for images are back; choosing a pack, Studio or an image "AI" tick marks the product ✨ again.
+- Action bar shows "✨ Images (N)" = the ✨ selected products; new filter chip "✨ For images".
+- sidepanel.js on disk had been replaced by an older copy (the 17 Oct commit 293cb90) — the Round 1 version was put back first.
+
 ## 9.15.1 UI/UX round 1 (2026-10-17, same manifest version) — see UI_UX_UPGRADE_PLAN_2026-10-17.md
 - Library → Recent Hunts: every hunt card has a "⋯" menu — **Remove from history** (products stay in the Library) and **Delete hunt + its products** (asks first, Undo for a few seconds). "Clear history" button above the list (asks first, Undo). Before there was no way to delete a hunt.
 - Library: when a hunt filter is on, a bar above the list says "Showing hunt Oct 16 · … — 2 of 32 products  ✕ Show all"; the active hunt's button says "Filtered ✓" (before the filter was invisible and the list looked half empty).

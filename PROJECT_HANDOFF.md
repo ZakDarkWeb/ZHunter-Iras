@@ -229,7 +229,7 @@ Studio mein ek waqt **1 product** (‹ Prev / Next ›, ← → keys, progress b
 
 ## UI/UX round 1 (17 Oct 2026) — plan: `UI_UX_UPGRADE_PLAN_2026-10-17.md` (Round 2 = A3 Temu main tab, A4 workflow patti, A5 drawer, B5 category picker, B7 images)
 - Hunts: `zhHuntRemove`, `zhHuntDeleteWithProducts`, `zhHuntClearHistory` (showConfirm + toastUndo), `.rh-menu` / `#rhClearBtn`; filter bar `#masterBatchFilterBar` ← `zhRenderBatchFilterBar` (called in `filterAndRenderMasterRows`).
-- Review list: ek selection — `temuUpdateImgEditCount` ab `TemuImgEditSelected` = ticked rows (`TemuReviewExcluded` ke ilawa); row markup `.temu-rv-main` / `.temu-rv-pricechip` / `.temu-rv-catmini`; `TemuRvFilter` + `temuApplyRvFilter` (card `data-flags` 'cat' 'noimg', `data-search`); action bar `.temu-rv-actionbar` ← `temuUpdateActionBar` (from `temuUpdateReviewCount`).
+- Review list: ✨ image-edit tick (`TemuImgEditSelected`, `.temu-rv-edit-chk`) upload tick (`TemuReviewExcluded`) se ALAG hai — user ne 18 Oct ko ye wapas manga, dobara ek mat karna; row markup `.temu-rv-main` / `.temu-rv-pricechip` / `.temu-rv-catmini`; `TemuRvFilter` + `temuApplyRvFilter` (card `data-flags` 'cat' 'noimg', `data-search`); action bar `.temu-rv-actionbar` ← `temuUpdateActionBar` (from `temuUpdateReviewCount`).
 - `TemuSrcUserPicked` / `TemuSrcAutoLib` (B1, in `temuSyncSrcSeg`); store dot `tsc-dot-ok|idle|diff|off` (TEMU_GET_STORE, MutationObserver on `#tscStore`); `temuBatchNameDone` / `temuShowLastBatch` (storage `zhTemuBatchLast`) only in the clean branch of `temuFinishConfirmed`.
 
 ## AI images (17 Oct 2026) — user ab main Gemini + Flow use karta hai (ChatGPT kam)

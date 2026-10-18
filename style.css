@@ -6079,7 +6079,7 @@ body.light-mode .hunt-sub-btn.active .hunt-sub-count{color:#fff}
 
 /* ═══ v9.15.1 — UI/UX Round 1 ═══ */
 /* A1 — 2-line product row: thumb | title (2 lines) + one meta line | delete | chevron */
-.temu-rv-collapsed-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:7px 8px 7px 10px}
+.temu-rv-collapsed-row{display:grid;grid-template-columns:auto auto auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:7px 8px 7px 10px}
 .temu-rv-thumb,.temu-rv-no-thumb{width:40px;height:40px}
 .temu-rv-main{min-width:0;display:flex;flex-direction:column;gap:3px}
 .temu-rv-main .temu-rv-title-snippet{flex:none;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font:600 11.5px/1.3 var(--font);color:var(--ink);overflow-wrap:anywhere}
@@ -6118,6 +6118,8 @@ textarea.temu-rv-title-inp{min-height:58px;resize:vertical;font:500 12px/1.4 var
 .temu-rv-ab-btn:hover{border-color:var(--accent-line)}
 .temu-rv-ab-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .temu-rv-actionbar.none .temu-rv-ab-btn{opacity:.45}
+.temu-rv-ab-btn.off{opacity:.45}
+.temu-rv-collapsed-row .temu-rv-edit-wrap{flex-shrink:0}
 .temu-img-pick-hint{font:500 10.5px var(--font);color:var(--ink-3)}
 @media (max-width:380px){.temu-rv-ab-btn{padding:0 7px;font-size:10.5px}}
 /* G2 — Library hunt filter bar */
