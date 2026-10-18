@@ -13737,9 +13737,10 @@ function temuCatMultiWord(title, cfg) {
   for (const [name, p] of Object.entries(cfg.category_profiles || {})) {
     const core = [...new Set(temuCatTokens([p.name, p.category_keyword, ...(p.match || [])].join(' ')).filter(w => w.length > 2 && !TEMU_CAT_STOP.has(w)))];
     const path = [...new Set(temuCatTokens(p.full_path || '').filter(w => w.length > 3 && !TEMU_CAT_STOP.has(w) && !core.includes(w)))];
-    const c = core.filter(hit).length, x = path.filter(hit).length;
+    const GEN = new Set(['frozen','canned','dried','fresh','organic','seasoned','breaded','cooked','whole','mixes','mix','snacks','foods','food','style','original','classic','natural','premium','large','small','medium']);
+    const c = core.filter(w => hit(w) && !GEN.has(w)).length, x = path.filter(w => hit(w) && !GEN.has(w)).length;
     if (!c || c + x < 2) continue;   // at least one category word + a second agreeing word
-    if (c < 2 && !(core.length && c === core.length && x >= 1)) continue;   // a wrong category is worse than none: two category words, or the whole short name + a path word
+    if (c < 2 || c < core.filter(w => !GEN.has(w)).length * 0.6) continue;   // a wrong category is worse than none: two category words (path words alone never count)
     const sc = c * 3 + x + (core.length && c === core.length ? 2 : 0);
     if (!best || sc > best.score) { second = best ? best.score : 0; best = { name, prof: p, score: sc }; } else if (sc > second) second = sc;
   }
