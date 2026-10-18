@@ -4246,7 +4246,7 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
     if (finalUrl === src) finalUrl = (await uploadImageToPublicHost(src)) || src;
   }
   // v9.15x — final stage of a pack job: stamp the correct "N PACK" label ourselves (AI-drawn labels were often wrong)
-  if (how === 'Auto' && current.packQty > 1 && current.batchMode !== 'background' && current.batchMode !== 'improve' && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
+  if (how === 'Auto' && current.packQty > 1 && (current.batchMode === 'pack' || current.batchMode === 'pack_background') && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
     finalUrl = await zhStampPackLabel(finalUrl, current.packQty, current.packLabel !== false);
   }
   if (/^data:image\//i.test(finalUrl) && finalUrl.length > 700000) { try { finalUrl = await zsShrinkForSend(finalUrl); } catch (_) {} }   // big PNG from the AI tool → JPEG: saves and uploads much faster
@@ -17714,7 +17714,7 @@ function temuConfigureBatch(queue, backgroundPrompt, engineName = 'Flow') {
           const label = row.querySelector('.batch-lbl').checked, style = row.querySelector('.batch-style').value;
           return { index: Number(row.dataset.batch), mode, qty, label, style, stages: temuBatchStages(mode, qty, backgroundPrompt, label, style, Math.max(0, zhProductOrdinal(queue, queue[Number(row.dataset.batch)].product))) };
         });
-        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.qty, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0], setup: String(s.mode).startsWith('lib:') ? zhSetupFor(String(s.mode).slice(4)) : null }));
+        const activeQueue = settings.map(s => Object.assign(queue[s.index], { batchMode: s.mode, packQty: s.mode === 'pack' || s.mode === 'pack_background' ? s.qty : 0, packLabel: s.label, stages: s.stages, stageIndex: 0, prompt: s.stages[0], setup: String(s.mode).startsWith('lib:') ? zhSetupFor(String(s.mode).slice(4)) : null }));
         queue.splice(0, queue.length, ...activeQueue);
         modal.remove(); resolve(true);
       } catch (e) { modal.querySelector('.batch-error').textContent = e.message; }
