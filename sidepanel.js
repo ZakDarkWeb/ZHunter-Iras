@@ -4318,7 +4318,7 @@ document.addEventListener('paste', async (e) => {
   const z = $('temuStepPasteZone');
   if (!z) return;
   z.addEventListener('click', () => z.focus());
-  z.addEventListener('dragover', (e) => { e.preventDefault(); z.style.borderColor = '#00E5FF'; });
+  z.addEventListener('dragover', (e) => { e.preventDefault(); z.style.borderColor = 'var(--accent)'; });
   z.addEventListener('dragleave', () => { z.style.borderColor = ''; });
   z.addEventListener('drop', async (e) => {
     e.preventDefault(); z.style.borderColor = '';
@@ -10560,7 +10560,7 @@ function renderMasterBatches(batches) {
     if (s.includes('temu'))       return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#FA5131"/></svg>`;
     if (s.includes('aliexpress')) return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#E62E00"/></svg>`;
     if (s.includes('sams'))       return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#0067A0"/></svg>`;
-    return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(0,229,255,0.4)"/></svg>`;
+    return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(34,211,238,0.4)"/></svg>`;
   };
 
   batches.slice(0, 20).forEach((b, idx) => {
@@ -15666,7 +15666,7 @@ function temuRenderProfiles() {
       <div class="temu-cat-head">
         <div class="temu-cat-head-left">
           <button class="temu-cat-chk" type="button" title="Select for bulk action" aria-label="Select ${esc(displayName)}">
-            ${isSel ? '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="rgba(0,229,255,0.15)" stroke="var(--accent)" stroke-width="2"/><polyline points="6 12 10 16 18 8" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>' : '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="var(--ink-4)" stroke-width="1.5"/></svg>'}
+            ${isSel ? '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="rgba(34,211,238,0.15)" stroke="var(--accent)" stroke-width="2"/><polyline points="6 12 10 16 18 8" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>' : '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="var(--ink-4)" stroke-width="1.5"/></svg>'}
           </button>
           <span class="temu-cat-arrow" aria-hidden="true">
             <svg class="i" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -16207,12 +16207,22 @@ async function temuUpdateReady() {
   else if (!total) stop = 'No products — hunt first or choose another source';
   else if (groups.some(g => g.cls === 'bad')) stop = 'Untick or fix the red products first';
   else if (!ok) stop = 'No product is ready to upload';
-  const chip = g => `<button type="button" class="temu-ready-item ${g.cls}" data-ready-ids="${esc(g.ids.map(x => x.id).join(','))}" title="${esc(g.ids.slice(0, 12).map(x => '• ' + x.t).join('\n'))}">${g.cls === 'bad' ? '✗' : '⚠'} ${g.ids.length} ${esc(g.label)}</button>`;
-  box.innerHTML = `<div class="temu-ready-row">`
-    + `<span class="temu-ready-item ${store ? 'ok' : 'bad'}">${store ? '✓ Store <b>' + esc(store) + '</b>' : '✗ No store'}</span>`
-    + `<span class="temu-ready-item ${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${ok} of ${total} ready</span>`
-    + groups.map(chip).join('') + `</div>`
-    + (stop ? `<div class="temu-ready-stop">⛔ ${esc(stop)}</div>` : '');
+  // One slim readiness row: store on the left, "N of M ready" on the right; issue chips below only when there are issues.
+  // Tone (thin left border + icon colour): green ready, amber setup missing, red products block the upload. The reason is the button's tooltip.
+  const ico = {
+    store: '<path d="M3 10V6l2-3h14l2 3v4M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 13v8h14v-8"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'
+  };
+  const svg = k => `<svg viewBox="0 0 24 24" aria-hidden="true">${ico[k]}</svg>`;
+  const tone = !store || !total ? 'warn' : stop ? 'bad' : 'ok';
+  const chip = g => `<button type="button" class="temu-ready-item ${g.cls}" data-ready-ids="${esc(g.ids.map(x => x.id).join(','))}" title="${esc(g.ids.slice(0, 12).map(x => '• ' + x.t).join('\n'))}"><b>${g.ids.length}</b> ${esc(g.label)}</button>`;
+  box.innerHTML = `<div class="trs" data-tone="${tone}" title="${esc(stop)}">`
+    + `<div class="trs-checks">`
+    + `<span class="trs-chk ${store ? 'ok' : 'todo'}">${svg('store')}${store ? '<b>' + esc(store) + '</b>' : 'No store'}</span>`
+    + `<span class="trs-chk trs-chk-n ${ok && ok === total ? 'ok' : ok ? 'part' : 'todo'}">${svg('box')}<b>${ok}</b>&nbsp;of ${total} ready</span>`
+    + `</div>`
+    + (groups.length ? `<div class="trs-issues">${groups.map(chip).join('')}</div>` : '')
+    + `</div>`;
   if (!TemuUploadBusy) { btn.disabled = !!stop; btn.title = stop; }
   const ps = $('temuPxStats');
   if (ps) {

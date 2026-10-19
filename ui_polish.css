@@ -1,0 +1,282 @@
+/* ============================================================
+   ZHunter — UI polish layer (v9.16, 18 Oct 2026)
+   Loaded after style.css. Three things:
+   1. Refined palette: deeper navy surfaces, softer cyan, less glow,
+      violet only for AI actions, more readable light-mode text.
+   2. Event-only motion: hover / press / open / enter transitions that
+      are always on (they cost nothing while idle). Endless decorative
+      loops stay off unless zhFx = 'full'.
+   3. prefers-reduced-motion turns all of it off.
+   To undo everything: remove the <link> to this file in sidepanel.html.
+   ============================================================ */
+
+/* ── 1. Tokens ─────────────────────────────────────────────── */
+:root {
+  --accent: #22D3EE; --accent-hover: #67E8F9; --accent-dark: #0891B2;
+  --accent-soft: rgba(34,211,238,.10); --accent-line: rgba(34,211,238,.34);
+  --accent-ink: #67E8F9; --accent-fg: #03131A; --accent-glow: rgba(34,211,238,.26);
+
+  --bg: #060A14; --surface: #0A1120; --surface-2: #0E1729; --surface-3: #142036;
+  --hover: #1A2944; --input: #08101F;
+  --line: #1B2840; --line-2: #26375A; --line-3: #34496F;
+  --ink: #E6EDF5; --ink-2: #A3B1C6; --ink-3: #7A889F; --ink-4: #56657E; --text-dim: var(--ink-3);
+
+  --ok: #34D399; --warn: #FBBF24; --bad: #F87171; --run: #60A5FA;
+
+  --ai: #A78BFA; --ai-soft: rgba(167,139,250,.12); --ai-line: rgba(167,139,250,.38);
+  --ai-ink: #C4B5FD; --ai-fg: #FFFFFF; --ai-grad: linear-gradient(135deg, #8B5CF6, #6D28D9);
+
+  --shadow: 0 1px 2px rgba(0,0,0,.35);
+  --shadow-md: 0 4px 14px -4px rgba(0,0,0,.5);
+  --shadow-pop: 0 20px 50px -12px rgba(0,0,0,.7), 0 0 0 1px rgba(34,211,238,.06);
+  --glow: 0 4px 14px rgba(34,211,238,.20), inset 0 1px 0 rgba(255,255,255,.16);
+  --ring: 0 0 0 3px rgba(34,211,238,.22);
+
+  /* motion */
+  --t-fast: 110ms; --t: 170ms; --t-slow: 240ms;
+  --ease: cubic-bezier(.2,.8,.2,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-spring: cubic-bezier(.34,1.45,.64,1);
+}
+body.light-mode, html.light-mode {
+  --accent: #0891B2; --accent-hover: #0E7490; --accent-dark: #0369A1;
+  --accent-soft: rgba(8,145,178,.09); --accent-line: rgba(8,145,178,.32);
+  --accent-ink: #0E7490; --accent-fg: #FFFFFF; --accent-glow: rgba(8,145,178,.22);
+
+  --bg: #F3F6FA; --surface: #FFFFFF; --surface-2: #F6F8FB; --surface-3: #EDF2F7;
+  --hover: #E8F4F8; --input: #FFFFFF;
+  --line: #DCE3EC; --line-2: #C5D0DD; --line-3: #AEBBCB;
+  --ink: #0F172A; --ink-2: #3F4D60; --ink-3: #5B6B80; --ink-4: #8592A6; --text-dim: var(--ink-3);
+
+  --ai: #7C3AED; --ai-soft: rgba(124,58,237,.08); --ai-line: rgba(124,58,237,.30);
+  --ai-ink: #6D28D9; --ai-fg: #FFFFFF; --ai-grad: linear-gradient(135deg, #8B5CF6, #7C3AED);
+
+  --shadow: 0 1px 2px rgba(15,23,42,.06);
+  --shadow-md: 0 4px 14px -6px rgba(15,23,42,.18);
+  --shadow-pop: 0 20px 44px -14px rgba(15,23,42,.28), 0 0 0 1px rgba(15,23,42,.04);
+  --glow: 0 4px 12px rgba(8,145,178,.20), inset 0 1px 0 rgba(255,255,255,.2);
+  --ring: 0 0 0 3px rgba(8,145,178,.18);
+}
+
+/* Short transitions are always on (style.css had --dur: 0ms with zhFx 'off'). */
+html, html[data-fx] { --dur: var(--t); }
+
+/* ── 2. Calmer background + header ─────────────────────────── */
+body::before { opacity: .55; }
+body::after { opacity: .7; }
+.app-header { background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface) 88%, var(--bg))); }
+.brand-logo-glow { opacity: .45; }
+.hdr-btn { transition: background var(--t), color var(--t), transform var(--t-fast) var(--ease); }
+.hdr-btn:active { transform: scale(.92); }
+
+/* ── 3. Endless decorative loops: off unless zhFx = 'full' ─── */
+html:not([data-fx="full"]) :is(.empty-ico, .img-tab-empty-ico, .hea-bg, .hea-dot, .hea-pulse,
+  .rh-latest-chip, .hunt-row, .temu-btn-main-upload, .temu-activity-dot,
+  #imgDownloadBtn, #vidDownloadZipBtn, #bulkHuntStartBtn, #bulkQueueHuntBtn,
+  #masterExportMenuBtn, #temuAiBulkRewriteBtn, #tgSaveBtn) { animation: none !important; }
+html:not([data-fx="full"]) .hea-arrow { animation: none !important; stroke-dashoffset: 0; }
+html:not([data-fx="full"]) .hea-pulse { opacity: 0; }
+html:not([data-fx="full"]) .temu-btn-main-upload::after,
+html:not([data-fx="full"]) .bp-act-primary::after { animation: none !important; opacity: 0; }
+
+/* ── 4. Buttons: hover lift, press, focus ──────────────────── */
+.btn {
+  transition: background-color var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+              box-shadow var(--t) var(--ease), filter var(--t) var(--ease), transform var(--t-fast) var(--ease);
+}
+.btn:active:not([disabled]) { transform: translateY(0) scale(.97) !important; transition-duration: 60ms; }
+.btn-primary:not([disabled]) { box-shadow: 0 2px 10px -2px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.18) !important; }
+.btn-primary:not([disabled]):hover { box-shadow: 0 6px 18px -4px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.22) !important; }
+.btn-ghost:hover:not([disabled]), .btn-secondary:hover:not([disabled]) { border-color: var(--line-3); }
+.btn[disabled] { filter: saturate(.6); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.btn:focus-visible, .tab-btn:focus-visible, .temu-tab:focus-visible { outline: 0; box-shadow: var(--ring) !important; }
+
+/* AI actions use violet so they stand apart from save / upload (cyan). */
+#zhTextStudioModal .zt-ai-btn, #temuAiBulkRewriteBtn { background: var(--ai-grad) !important; color: var(--ai-fg) !important; border-color: transparent !important; box-shadow: 0 4px 14px -4px rgba(124,58,237,.5) !important; }
+#zhTextStudioModal .zt-ai-btn:hover:not([disabled]), #temuAiBulkRewriteBtn:hover:not([disabled]) { filter: brightness(1.08); }
+
+/* ── 5. Inputs, checkboxes, switches ───────────────────────── */
+.inp, .sel, select.inp, textarea.inp {
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), background-color var(--t) var(--ease);
+}
+.inp:hover:not(:focus):not([readonly]), .sel:hover:not(:focus) { border-color: var(--line-3); }
+.inp:focus, .sel:focus { border-color: var(--accent); box-shadow: var(--ring); outline: 0; }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent); }
+input[type="checkbox"], input[type="radio"] { transition: transform var(--t-fast) var(--ease); }
+input[type="checkbox"]:active, input[type="radio"]:active { transform: scale(.88); }
+.sw::after { transition: transform var(--t-slow) var(--ease-spring), background var(--t); }
+.sw-wrap input:checked + .sw { box-shadow: 0 0 0 3px var(--accent-soft); }
+.sw-wrap input:checked + .sw::after { box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.sw-wrap:active .sw::after { width: 19px; }
+.sw-wrap:active input:checked + .sw::after { transform: translateX(13px); }
+
+/* ── 6. Tabs: smooth state change ──────────────────────────── */
+.tab-nav, .temu-tabs { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.tab-btn, .temu-tab {
+  transition: color var(--t) var(--ease), background-color var(--t) var(--ease),
+              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease) !important;
+}
+.tab-btn:active, .temu-tab:active { transform: scale(.97); }
+.tab-btn.active, .temu-tab.active { box-shadow: 0 1px 8px -2px var(--accent-glow); }
+.tab-btn svg.i { transition: transform var(--t-slow) var(--ease-spring); }
+.tab-btn.active svg.i { transform: scale(1.1); }
+
+/* Panels fade in when switched (opacity only, so fixed / sticky children never jump). */
+.tab-panel.active, .temu-pane.active { animation: zpFade var(--t-slow) var(--ease-out) both; }
+
+/* ── 7. Cards and list rows ────────────────────────────────── */
+.card { box-shadow: var(--shadow); transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease); }
+.bulk-tab-row:hover, .master-row:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-md);
+}
+.bulk-tab-row:active, .master-row:active { transform: scale(.995); transition-duration: 60ms; }
+.bulk-tab-row.checked, .master-row.selected { box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md); }
+.rh-card, .temu-rv-card, .hunt-row, .qip-row, .vid-card, .set {
+  transition: border-color var(--t) var(--ease), background-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease);
+}
+.rh-card:hover, .temu-rv-card:hover, .vid-card:hover { box-shadow: var(--shadow-md); }
+.hunt-row:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.hunt-row:active, .rh-card:active { transform: scale(.99); }
+.img-card, .hunt-img-card { transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t) var(--ease), transform var(--t-fast) var(--ease); }
+.img-card:hover, .hunt-img-card:hover { transform: translateY(-1px); border-color: var(--accent-line); }
+.img-card:active, .hunt-img-card:active { transform: scale(.97); }
+.img-card .img-card-thumb, .edit-imgs-grid img { transition: transform var(--t-slow) var(--ease-out), opacity var(--t); }
+.img-card:hover .img-card-thumb { transform: scale(1.04); }
+.img-card-check { animation: zpPop var(--t-slow) var(--ease-spring) both; }
+.tag { transition: background-color var(--t), border-color var(--t), color var(--t), transform var(--t-fast) var(--ease); }
+.tag:hover { border-color: var(--accent-line); color: var(--ink); }
+.tag:active { transform: scale(.95); }
+
+/* details / summary chevrons */
+details > summary .chev, details > summary svg:last-child { transition: transform var(--t-slow) var(--ease-out); }
+details[open] > summary + * { animation: zpSlideDown var(--t-slow) var(--ease-out) both; }
+
+/* ── 8. Modals ─────────────────────────────────────────────── */
+.modal-back {
+  background: rgba(2,6,15,.6);
+  backdrop-filter: blur(4px);
+  animation: zpFade var(--t) var(--ease) both !important;
+}
+body.light-mode .modal-back { background: rgba(15,23,42,.32); }
+.modal-back.hidden { animation: none !important; }
+.modal-box {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-pop);
+  animation: zpModalIn var(--t-slow) var(--ease-out) both !important;
+}
+/* sidepanel.js hides the modal 150 ms after adding .closing */
+.modal-box.closing { animation: zpModalOut 140ms var(--ease) forwards !important; }
+.modal-back:has(> .modal-box.closing) { animation: zpFadeOut 140ms var(--ease) forwards !important; }
+.modal-head { background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 60%, var(--surface)), var(--surface)); }
+.modal-close { transition: background-color var(--t), color var(--t), transform var(--t-slow) var(--ease-spring); }
+.modal-close:hover { transform: rotate(90deg); }
+.modal-close:active { transform: rotate(90deg) scale(.9); }
+
+/* ── 9. Toasts ─────────────────────────────────────────────── */
+.toast-item {
+  background: color-mix(in srgb, #0B1324 94%, transparent) !important;
+  border: 1px solid rgba(148,163,184,.16) !important;
+  border-left: 3px solid var(--accent) !important;
+  box-shadow: 0 14px 34px -10px rgba(0,0,0,.6) !important;
+  transform: translateY(14px) scale(.96);
+  transition: opacity var(--t) var(--ease), transform var(--t-slow) var(--ease-spring) !important;
+  animation: none !important; /* enter/leave are transitions on .visible / .leaving */
+}
+body.light-mode .toast-item { background: #0F172A !important; }
+html[data-fx] .toast-item { opacity: 0; }
+html[data-fx] .toast-item.visible { opacity: 1; transform: none; }
+html[data-fx] .toast-item.leaving { opacity: 0; }
+.toast-item.leaving { opacity: 0; transform: translateX(14px) scale(.97); transition: opacity var(--t) var(--ease), transform var(--t) var(--ease) !important; }
+.toast-item.ok   { border-left-color: var(--ok) !important; }
+.toast-item.err  { border-left-color: var(--bad) !important; }
+.toast-item.warn { border-left-color: var(--warn) !important; }
+.toast-item.info { border-left-color: var(--accent) !important; }
+.toast-item::after { box-shadow: none !important; opacity: .7; }
+.toast-item.visible::before { animation: zpPop var(--t-slow) 60ms var(--ease-spring) both; }
+
+/* ── 10. Progress ──────────────────────────────────────────── */
+.bulk-prog-fill, .pq-stage-fill, .vid-progress-fill { transition: width .45s var(--ease-out) !important; box-shadow: none; }
+.vid-progress-bar, .bulk-prog-bar { background: var(--surface-3); }
+.spinner { border-color: var(--line-2); border-top-color: var(--accent); }
+
+/* ── 11. Empty states (calmer) ─────────────────────────────── */
+.empty, .bulk-empty, .img-tab-empty {
+  border-color: var(--line-2);
+  background: radial-gradient(circle at 50% 0%, var(--accent-soft), transparent 70%), var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+}
+.empty-ico, .img-tab-empty-ico { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.empty h3, .img-tab-empty-title { color: var(--ink); }
+
+/* ── 12. Header pill + small bits ──────────────────────────── */
+.temu-top-pill { transition: background-color var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease); }
+.temu-top-pill:hover { box-shadow: 0 4px 14px -4px var(--accent-glow); }
+.temu-dot-live { box-shadow: 0 0 0 2px rgba(16,185,129,.18); }
+.tab-n, .temu-tab-n, .temu-pill-count { transition: transform var(--t-slow) var(--ease-spring); }
+::-webkit-scrollbar-thumb { transition: background var(--t); }
+::-webkit-scrollbar-thumb:hover { background: var(--line-3); }
+::selection { background: var(--accent-line); color: var(--ink); }
+
+/* ── 13. Temu Export: readiness strip above the upload button ── */
+.temu-ready { width: 100%; margin: 0; }
+.trs {
+  --tc: var(--accent); --tc-soft: var(--accent-soft); --tc-line: var(--accent-line);
+  width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 7px 10px; border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2); border-left: 2px solid var(--tc);
+  /* no entrance animation: temuUpdateReady() re-renders this on every change */
+}
+.trs[data-tone="ok"]   { --tc: var(--ok);   --tc-soft: var(--ok-soft);   --tc-line: var(--ok-line); }
+.trs[data-tone="warn"] { --tc: var(--warn); --tc-soft: var(--warn-soft); --tc-line: var(--warn-line); }
+.trs[data-tone="bad"]  { --tc: var(--bad);  --tc-soft: var(--bad-soft);  --tc-line: var(--bad-line); }
+.trs svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.trs-checks { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 18px; }
+.trs-chk { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trs-chk-n { flex-shrink: 0; }
+.trs[data-tone="bad"] .trs-chk-n svg, .trs[data-tone="bad"] .trs-chk-n b { color: var(--bad); }
+.trs[data-tone="warn"] .trs-chk.todo svg { color: var(--warn); }
+.trs-chk b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.trs-chk svg { width: 13px; height: 13px; color: var(--ink-4); }
+.trs-chk.ok svg { color: var(--ok); }
+.trs-chk.part svg { color: var(--warn); }
+.trs-chk.todo { color: var(--ink-3); }
+.trs-issues { display: flex; flex-wrap: wrap; gap: 5px; }
+.trs .temu-ready-item {
+  height: 22px; padding: 0 8px; border-radius: 999px; gap: 5px;
+  font: 500 10.5px/1 var(--font); background: var(--surface); border: 1px solid var(--line-2); color: var(--ink-2);
+  transition: border-color var(--t), background-color var(--t), transform var(--t-fast) var(--ease);
+}
+.trs .temu-ready-item::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
+.trs .temu-ready-item.bad::before { background: var(--bad); }
+.trs .temu-ready-item.warn::before { background: var(--warn); }
+.trs .temu-ready-item b { color: var(--ink); font-weight: 700; }
+.trs button.temu-ready-item:hover { filter: none; border-color: var(--line-3); background: var(--surface-2); }
+.trs button.temu-ready-item:active { transform: scale(.96); }
+
+/* ── Keyframes (all finite) ────────────────────────────────── */
+@keyframes zpFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zpFadeOut { to { opacity: 0; } }
+@keyframes zpModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes zpModalOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.985); } }
+@keyframes zpSlideDown { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes zpPop { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+/* ── 3. Reduced motion: everything off ─────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html, html[data-fx] { --dur: 1ms; --t-fast: 1ms; --t: 1ms; --t-slow: 1ms; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:active:not([disabled]), .bulk-tab-row:hover, .master-row:hover, .hunt-row:hover,
+  .img-card:hover, .img-card:hover .img-card-thumb, .modal-close:hover { transform: none !important; }
+}

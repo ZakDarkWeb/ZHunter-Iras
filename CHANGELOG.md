@@ -1,5 +1,11 @@
 # ZHunter Iras — CHANGELOG
 
+## UI polish: refined colours + micro-animations (2026-10-18, same manifest version)
+- New `ui_polish.css` (loaded after style.css; remove its `<link>` in sidepanel.html to undo). Refined cyan: neon #00E5FF → softer #22D3EE everywhere in style.css, deeper navy surfaces, less glow. AI buttons (Content Studio rewrite, bulk AI titles) are violet so they stand apart from save/upload (cyan). Light mode: readable small/meta text (--ink-4), defined --line-3 / --text-dim.
+- Short event-only motion is always on now (before, zhFx 'off' set every transition to 0 ms): button hover/press, tab switch fade, row/card hover lift, image thumb zoom, switch knob spring, modal open/close, toast slide-in/out, progress bar easing. Zero idle CPU — endless decorative loops (empty-state bob, button glow/shimmer, blinking dots) are off unless zhFx = 'full'.
+- prefers-reduced-motion (Windows "Animation effects" off) turns all animation and transitions off.
+- Temu Export → Upload: the two red "✗ No store / ✗ 0 of 0 ready" chips + red "⛔ …" line above the upload button are now one slim full-width row: store name (or "No store") on the left, "N of M ready" on the right. A thin left border shows the state (green ready, amber store/products missing, red products block the upload); the reason is the row's and the upload button's tooltip. Issue chips (red dot = blocks upload, amber = left out; click = jump to product) show under the row only when there are issues.
+
 ## 9.15.1 UI/UX round 1 follow-up (2026-10-18)
 - The separate ✨ image-edit checkbox on every product row is back (user's choice): the upload tick and the ✨ tick are independent again, as before Round 1. "Select All / Clear" for images are back; choosing a pack, Studio or an image "AI" tick marks the product ✨ again.
 - Action bar shows "✨ Images (N)" = the ✨ selected products; new filter chip "✨ For images".
