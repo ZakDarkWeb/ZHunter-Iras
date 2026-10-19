@@ -1294,7 +1294,8 @@ function isAuthorizedMessage(msg, sender) {
 // content script attaches + waits for Temu to register the upload → if the hidden
 // page refuses to mount its upload box, the content script asks TEMU_NEED_VISIBLE
 // and we flash the tab forward for a moment, then restore the user's tab.
-const _temuUpload = { tabId: null, activated: false, prevTabId: null };
+// cancel = user pressed Cancel in the side panel; sent = the file was already handed to the Temu page (can't be taken back)
+const _temuUpload = { tabId: null, activated: false, prevTabId: null, cancel: false, sent: false };
 function tabsSend(tabId, message) {
   return new Promise(res => {
     try {
@@ -1318,7 +1319,7 @@ async function temuBgAutoUpload(input) {
     }
     const job = { id: input.sourcing?.id || crypto.randomUUID(), state: 'running', t: Date.now(), store: input.expectStore, filename: input.filename, sourcing: input.sourcing };
     await chrome.storage.local.set({ zhTemuUploadJob: job });
-    try { const result = await temuBgAutoUploadJob(input); await chrome.storage.local.set({ zhTemuUploadJob: { ...(await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob, ...job, state: result.confirmed ? 'processed' : 'needs-review', result } }); return result; }
+    try { const result = await temuBgAutoUploadJob(input); await chrome.storage.local.set({ zhTemuUploadJob: { ...(await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob, ...job, state: result.confirmed ? 'processed' : result.cancelled ? 'cancelled' : 'needs-review', result } }); return result; }
     catch (e) { await chrome.storage.local.set({ zhTemuUploadJob: { ...job, state: 'needs-review', error: e.message } }); throw e; }
   })();
   try { return await ZhUploadTask; } finally { ZhUploadTask = null; }
@@ -1329,6 +1330,7 @@ const TEMU_UPLOAD_URL = 'https://seller.temu.com/upload-goods-multiple.html';
 async function bgWaitTemuReady(tabId, tries = 50) {
   for (let i = 0; i < tries; i++) {
     await new Promise(r => setTimeout(r, i === 0 ? 1200 : 500));
+    if (_temuUpload.cancel) return false;
     const r = await tabsSend(tabId, { action: 'PING' });
     if (r && r.ready) return true;
   }
@@ -1367,6 +1369,16 @@ async function bgEnsureTemuStore(tabId, expectStore, report) {
 async function temuBgAutoUploadJob({ b64, filename, expectStore, background }) {
   const report = [];
   const bg = background !== false;
+  _temuUpload.cancel = false; _temuUpload.sent = false;
+  let tabIdForCancel = null;
+  // user pressed Cancel before the file was sent: stop, close the Temu tab we opened, nothing reaches Temu
+  const cancelled = async () => {
+    report.push('✕ Cancelled by you — nothing was sent to Temu');
+    if (tabIdForCancel != null) { try { await chrome.tabs.remove(tabIdForCancel); } catch (_) {} }
+    if (_temuUpload.prevTabId != null) { try { await chrome.tabs.update(_temuUpload.prevTabId, { active: true }); } catch (_) {} }
+    _temuUpload.activated = false;
+    return finish({ success: false, cancelled: true, report });
+  };
   // v9.15.1 — the Google Sheet sourcing record is no longer written here: the side panel sends it only for the products Temu confirmed
   startKeepAlive('upload', 30 * 60 * 1000);
   try {
@@ -1379,13 +1391,17 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background }) {
     const savedJob = (await chrome.storage.local.get('zhTemuUploadJob')).zhTemuUploadJob;
     if (savedJob) await chrome.storage.local.set({zhTemuUploadJob:{...savedJob,tabId:tab.id}});
     _temuUpload.tabId = tab.id; _temuUpload.activated = true; _temuUpload.prevTabId = prevTab?.id ?? null;
+    tabIdForCancel = tab.id;
     report.push(bg ? '✓ Temu tab opened (focus will return after processing)' : '✓ Temu tab khola');
 
     // wait for content script
-    if (!(await bgWaitTemuReady(tab.id))) { report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
+    if (!(await bgWaitTemuReady(tab.id))) { if (_temuUpload.cancel) return cancelled(); report.push('✗ Temu page did not load (check login)'); return finish({ success: false, report }); }
+    if (_temuUpload.cancel) return cancelled();
     report.push('✓ Temu page ready');
-    if (expectStore && !(await bgEnsureTemuStore(tab.id, expectStore, report))) return finish({ success: false, report });
+    if (expectStore && !(await bgEnsureTemuStore(tab.id, expectStore, report))) return _temuUpload.cancel ? cancelled() : finish({ success: false, report });
+    if (_temuUpload.cancel) return cancelled();
 
+    _temuUpload.sent = true;   // from here on the file is on its way to Temu
     const result = await tabsSend(tab.id, {
       action: 'TEMU_UPLOAD_FILE', b64, filename: filename || 'temu_upload.xlsx', expectStore,
       waitForUpload: true, hiddenMode: false
@@ -1405,7 +1421,7 @@ async function temuBgAutoUploadJob({ b64, filename, expectStore, background }) {
         out.report.push('✓ Focus returned to your tab');
       }
     } catch (_) {}
-    _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null;
+    _temuUpload.tabId = null; _temuUpload.activated = false; _temuUpload.prevTabId = null; _temuUpload.cancel = false; _temuUpload.sent = false;
     try { await chrome.storage.local.set({ temuLastUploadReport: { t: Date.now(), ...out } }); } catch (_) {}
     stopKeepAlive('upload');
     return out;
@@ -1459,6 +1475,11 @@ async function handleMessage(msg, sender, queueLocked = false) {
       return {success:true};
     }
     case 'TEMU_AUTO_UPLOAD':   return await temuBgAutoUpload(msg);
+    case 'TEMU_UPLOAD_CANCEL': {
+      if (!ZhUploadTask) return { success: true, running: false };
+      _temuUpload.cancel = true;
+      return { success: true, running: true, sent: _temuUpload.sent };
+    }
     case 'TEMU_NEED_VISIBLE': {
       // content script (hidden Temu tab) says the page won't mount its upload box while hidden →
       // bring the tab forward briefly; temuBgAutoUpload restores the previous tab afterwards.

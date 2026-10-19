@@ -249,5 +249,18 @@ Poori list `FULL_AUDIT_2026-10-17.md` mein. A1–A8 aur B1–B8 theek ho gaye (s
 - Library cap 300: confirm (har hunt mein ek dafa), starred kabhi delete nahi. Partial → complete upgrade khaali title/images/bullets/description bharta hai.
 - **Live test baqi:** hover menu script se khulta hai ya nahi, switch ke baad reload/upload.
 
+## UI/UX round 2 (18 Oct 2026) — same version, details in CHANGELOG
+- Styles: `ui_polish.css` (loaded after style.css; tokens, event-only motion, sections 13–21 = new components). Animations: endless loops only with zhFx 'full'.
+- Workflow patti `#temuFlow` ← `temuRenderFlow()` (called from `temuUpdateReady`), click `temuFlowGo(step)`.
+- Product drawer `#temuDrawer`: `temuDrawerOpen(card)` moves the real card into the sheet (placeholder `.temu-rv-ph` in the list), `temuDrawerSync()` at the end of `temuRenderReview`, `temuDrawerClose()`.
+- Category picker `.tcp` inside the card (applyKey / applyPath = old select/paste save logic); `temuCatWhy(title, prof)` = ⚠ reason.
+- Images: drag reorder in `.temu-rv-gallery` (zhLibPatch save, TemuImgPick remap), "✨ edited" from `zhImgEdits` URLs.
+- Content Studio (text_studio.js): bullet boxes `.zt-bullet-ta`, `#ztUnsaved` + Ctrl+S, per-field Compare (`zhTextWordDiff`) / Undo (`data-undo`).
+- Stepper results grid: `temuStepResultsRender` (tiles, `data-retry`), `S.view` before/after, `temuStepEstimate` / `temuStepEtaRender`.
+- Daily counter: `zhDailyCount(key, limitHit)`, keys `gemini#N` / `chatgpt` / `flow`, storage `zhAiDaily` + `zhAiLimitSeen`, UI `#zhAiDailyBox`, warning in `temuStartBulkImageEdit` (`S.limitWarn`).
+- Storage card: `zhStorageScan / zhStorageRender / zhStorageClean`, never touches `zhunterMasterSheet`.
+- content.js: no `infinite` animation left; frame "Moving" = one-shot sweeps, no full-screen filters.
+- Testing without Node: a tiny local server + chrome stub (stub.js) was used; asli Temu/Gemini/Flow par test baqi.
+
 ## Audit implementation - 5 October 2026
 Same manifest version 9.12.13. Audit fixes and remaining integration limits are recorded in EXTENSION_AUDIT_2026-10-04.md. Bundled Groq keys removed; saved profile credentials remain. Run tests/audit-storage.test.cjs and tests/audit-browser.test.cjs from repository root. No new ZIP.

@@ -191,6 +191,27 @@ function zhTextCounter(field, value) {
   if (field === 'title') return `${n}/${limits.title} characters` + (n > ZT_TITLE_TARGET && n <= limits.title ? ' · under 240 is best' : '');
   return `${n}/${limits[field]} characters`;
 }
+// v9.16 — word diff for the side-by-side compare (old words red/struck, new words green)
+function zhTextWordDiff(a, b) {
+  const A = String(a || '').split(/(\s+)/), B = String(b || '').split(/(\s+)/);
+  if (A.length * B.length > 400000) return [esc(a), esc(b)];   // very long text: plain view
+  const L = Array.from({ length: A.length + 1 }, () => new Uint16Array(B.length + 1));
+  for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, oa = '', ob = '';
+  while (i < A.length && j < B.length) {
+    if (A[i] === B[j]) { oa += esc(A[i]); ob += esc(B[j]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { oa += /\S/.test(A[i]) ? `<del>${esc(A[i])}</del>` : esc(A[i]); i++; }
+    else { ob += /\S/.test(B[j]) ? `<ins>${esc(B[j])}</ins>` : esc(B[j]); j++; }
+  }
+  for (; i < A.length; i++) oa += /\S/.test(A[i]) ? `<del>${esc(A[i])}</del>` : esc(A[i]);
+  for (; j < B.length; j++) ob += /\S/.test(B[j]) ? `<ins>${esc(B[j])}</ins>` : esc(B[j]);
+  return [oa, ob];
+}
+// number of changed fields across all products (not saved yet)
+function zhTextUnsavedCount() {
+  const items = ZhTextStudio.items || [];
+  return { fields: items.reduce((n, it) => n + it.touched.size, 0), products: items.filter(it => it.touched.size).length };
+}
 function zhTextFoldMeta(field, value) {
   if (field === 'bullets') {
     const list = Array.isArray(value) ? value : [];
@@ -238,6 +259,7 @@ function zhTextEnsureModal() {
     </div>
     <div class="zt-progress" id="ztProgress" role="status" aria-live="polite" data-kind="info"></div>
     <main id="ztEditor" class="zt-editor"></main>
+    <div id="ztUnsaved" class="zt-unsaved-bar" role="status" aria-live="polite" hidden><span class="zt-ub-dot" aria-hidden="true"></span><span class="zt-ub-txt"></span><kbd>Ctrl+S</kbd></div>
     <footer class="zt-footer">
       <span id="ztCount" class="zt-count"></span>
       <div class="zt-footer-btns">
@@ -262,8 +284,22 @@ function zhTextEnsureModal() {
   $('ztEditor').addEventListener('input', e => {
     const field = e.target.dataset.field, it = ZhTextStudio.items[ZhTextStudio.page];
     if (!field || !it) return;
-    it.draft[field] = field === 'bullets' ? e.target.value.split('\n').map(b => b.trim()).filter(Boolean) : e.target.value;
+    // v9.16 — bullets: one box per point (read all boxes in order; empty boxes are not saved)
+    if (field === 'bullets') {
+      if (/\n/.test(e.target.value)) e.target.value = e.target.value.replace(/\s*\n+\s*/g, ' ');
+      it.draft.bullets = [...$('ztEditor').querySelectorAll('.zt-bullet-ta')].map(t => t.value.trim()).filter(Boolean);
+      const bc = e.target.closest('.zt-bullet')?.querySelector('.zt-bullet-n');
+      if (bc) { const lim = zhTextLimits().bullets, n = e.target.value.trim().length; bc.textContent = `${n}/${lim}`; bc.dataset.state = n > lim ? 'over' : n > lim * 0.9 ? 'warn' : 'ok'; }
+    } else it.draft[field] = e.target.value;
     it.touched.add(field); it.status = 'Draft'; it.error = '';
+    $('ztEditor').querySelector(`[data-fhead="${field}"]`)?.classList.add('dirty');
+    $('ztEditor').querySelector(`[data-undo="${field}"]`)?.removeAttribute('disabled');
+    const cmpBox = $('ztEditor').querySelector(`[data-cmpbox="${field}"]`);
+    if (cmpBox) {   // keep the side-by-side view live while typing
+      const A = field === 'bullets' ? it.before.bullets.join('\n') : it.before[field], B = field === 'bullets' ? it.draft.bullets.join('\n') : it.draft[field];
+      const [da, db] = zhTextWordDiff(A, B), cols = cmpBox.querySelectorAll('.zt-cmp-txt');
+      cols[0].innerHTML = da || '<i>No source content</i>'; cols[1].innerHTML = db || '<i>Empty</i>';
+    }
     zhTextUpdateControls();
     const counter = $('ztEditor').querySelector(`[data-counter="${field}"]`);
     if (counter) { counter.textContent = zhTextCounter(field, it.draft[field]); counter.dataset.state = zhTextCounterState(field, it.draft[field]); }
@@ -278,6 +314,35 @@ function zhTextEnsureModal() {
   });
   $('ztEditor').addEventListener('toggle', e => { if (e.target.dataset.section) ZhTextStudio.sections[e.target.dataset.section] = e.target.open; }, true);
   $('ztEditor').addEventListener('click', e => {
+    // v9.16 — bullet boxes, per-field compare + undo
+    const cur = ZhTextStudio.items[ZhTextStudio.page];
+    const addB = e.target.closest('[data-bullet-add]');
+    if (addB && cur) {
+      const vals = [...$('ztEditor').querySelectorAll('.zt-bullet-ta')].map(t => t.value.trim());
+      if (vals.length >= 6) return;
+      cur.draft.bullets = vals.filter(Boolean); ZhTextStudio._bulletBoxes = vals.length + 1; ZhTextStudio.sections.bullets = true;
+      zhTextRender();
+      const tas = $('ztEditor').querySelectorAll('.zt-bullet-ta'); tas[tas.length - 1]?.focus();
+      return;
+    }
+    const delB = e.target.closest('[data-bullet-del]');
+    if (delB && cur) {
+      const vals = [...$('ztEditor').querySelectorAll('.zt-bullet-ta')].map(t => t.value.trim());
+      vals.splice(Number(delB.dataset.bulletDel), 1);
+      cur.draft.bullets = vals.filter(Boolean); ZhTextStudio._bulletBoxes = Math.max(1, vals.length);
+      cur.touched.add('bullets'); cur.status = 'Draft'; cur.error = '';
+      zhTextRender(); return;
+    }
+    const cmp = e.target.closest('[data-cmp]');
+    if (cmp) { ZhTextStudio.cmp = ZhTextStudio.cmp || {}; ZhTextStudio.cmp[cmp.dataset.cmp] = !ZhTextStudio.cmp[cmp.dataset.cmp]; zhTextRender(); return; }
+    const undo = e.target.closest('[data-undo]');
+    if (undo && cur) {
+      const f = undo.dataset.undo;
+      cur.draft[f] = zhTextClone(zhTextSnapshot(cur.row)[f]);   // back to the last saved text of this field
+      cur.touched.delete(f); cur.error = ''; cur.status = cur.touched.size ? 'Draft' : 'Ready';
+      if (f === 'bullets') ZhTextStudio._bulletBoxes = 0;
+      zhTextRender(); return;
+    }
     const titleAction = e.target.closest('[data-title-action]');
     if (titleAction) {
       if (titleAction.dataset.titleAction === 'fit') {
@@ -301,7 +366,15 @@ function zhTextEnsureModal() {
     it.status = it.touched.size ? 'Draft' : 'Ready'; it.error = '';
     zhTextRender();
   });
-  modal.addEventListener('keydown', e => { if (e.key === 'Escape') zhTextClose(); });
+  modal.addEventListener('keydown', e => {
+    if (e.key === 'Escape') zhTextClose();
+    // v9.16 — Ctrl+S: save the selected products with changes (or this product when nothing selected has changes)
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && String(e.key).toLowerCase() === 's') {
+      e.preventDefault();
+      if (!$('ztSaveAll').disabled) zhTextSave(false); else if (!$('ztSaveOne').disabled) zhTextSave(true);
+      else toast('Nothing to save', 'info');
+    }
+  });
 }
 async function zhTextOpen(productId = null) {
   if (ZhTextStudio.busy || ZhTextStudio.saving) { toast('Content Studio is busy — please wait', 'info'); return; }
@@ -361,14 +434,30 @@ function zhTextRender() {
     ${ZH_TEXT_FIELDS.map(field => {
       const label = field === 'title' ? 'Title' : field === 'bullets' ? 'Bullet points' : 'Description';
       const dis = ZhTextStudio.busy || ZhTextStudio.saving ? 'disabled' : '';
-      const head = `<div class="zt-field-head"><label for="ztEdit-${field}">${field === 'bullets' ? 'One bullet point per line' : label}</label><small class="zt-counter" data-counter="${field}" data-state="${zhTextCounterState(field, it.draft[field])}">${zhTextCounter(field, it.draft[field])}</small></div>`;
+      const dirty = it.touched.has(field), cmpOn = !!ZhTextStudio.cmp?.[field];
+      const fbtns = `<span class="zt-fbtns"><button type="button" class="zt-fbtn${cmpOn ? ' on' : ''}" data-cmp="${field}" aria-pressed="${cmpOn}" title="Original and new text side by side">Compare</button><button type="button" class="zt-fbtn" data-undo="${field}" ${dirty && !dis ? '' : 'disabled'} title="Undo the unsaved changes of this field">↶ Undo</button></span>`;
+      const head = `<div class="zt-field-head${dirty ? ' dirty' : ''}" data-fhead="${field}"><label for="ztEdit-${field}"><i class="zt-dirty-dot" title="Unsaved change"></i>${field === 'bullets' ? 'One box per bullet point' : label}</label><small class="zt-counter" data-counter="${field}" data-state="${zhTextCounterState(field, it.draft[field])}">${zhTextCounter(field, it.draft[field])}</small>${fbtns}</div>`;
       const tools = field === 'title' ? `<div class="zt-title-tools" role="group" aria-label="Title quick actions">
           <button type="button" class="zt-ta-btn zt-ta-ai" data-title-action="rewrite">${ZT_ICONS.spark}Rewrite title</button>
           <button type="button" class="zt-ta-btn" data-title-action="shorten">${ZT_ICONS.shorten}Shorten</button>
           <button type="button" class="zt-ta-btn" data-title-action="removeBrand">${ZT_ICONS.brand}Remove brand</button>
           <button type="button" class="zt-ta-btn zt-ta-fit" data-title-action="fit" ${titleOver ? '' : 'hidden'}>${ZT_ICONS.fit}Fit to ${zhTextLimits().title}</button></div>` : '';
-      const area = `<textarea class="inp inp-ta zt-field-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 3 : 4}" ${dis}>${esc(field === 'bullets' ? it.draft[field].join('\n') : it.draft[field])}</textarea>`;
-      const orig = `<details class="zt-original"><summary>Compare with original</summary><pre>${esc(field === 'bullets' ? it.before[field].join('\n') : it.before[field]) || 'No source content'}</pre></details>`;
+      let area;
+      if (field === 'bullets') {   // v9.16 — a separate box per point (max 6), each with its own counter
+        const lim = zhTextLimits().bullets;
+        const vals = it.draft.bullets.slice();
+        const boxes = Math.min(6, Math.max(vals.length, ZhTextStudio._bulletBoxes || 0, 1));
+        while (vals.length < boxes) vals.push('');
+        area = `<div class="zt-bullets">${vals.map((v, i) => `<div class="zt-bullet"><span class="zt-bullet-i">${i + 1}</span><textarea class="inp inp-ta zt-bullet-ta" ${i === 0 ? 'id="ztEdit-bullets"' : ''} data-field="bullets" data-bi="${i}" rows="2" placeholder="Bullet point ${i + 1}" aria-label="Bullet point ${i + 1}" ${dis}>${esc(v)}</textarea><small class="zt-bullet-n" data-state="${v.length > lim ? 'over' : v.length > lim * 0.9 ? 'warn' : 'ok'}">${v.length}/${lim}</small><button type="button" class="zt-bullet-del" data-bullet-del="${i}" title="Remove this point" aria-label="Remove point ${i + 1}" ${dis}>×</button></div>`).join('')}
+          <button type="button" class="zt-bullet-add" data-bullet-add ${boxes >= 6 || dis ? 'disabled' : ''}>+ Add point <small>${boxes}/6</small></button></div>`;
+      } else area = `<textarea class="inp inp-ta zt-field-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 3 : 4}" ${dis}>${esc(it.draft[field])}</textarea>`;
+      // v9.16 — side-by-side compare (original source copy vs. the text in the box now)
+      let orig = '';
+      if (cmpOn) {
+        const A = field === 'bullets' ? it.before.bullets.join('\n') : it.before[field], B = field === 'bullets' ? it.draft.bullets.join('\n') : it.draft[field];
+        const [da, db] = zhTextWordDiff(A, B);
+        orig = `<div class="zt-cmp" data-cmpbox="${field}"><div class="zt-cmp-col"><b>Original</b><div class="zt-cmp-txt">${da || '<i>No source content</i>'}</div></div><div class="zt-cmp-col new"><b>New</b><div class="zt-cmp-txt">${db || '<i>Empty</i>'}</div></div></div>`;
+      }
       if (field === 'title') return `<section class="zt-field zt-title-field">${head}${tools}${area}${orig}</section>`;
       const fold = zhTextFoldMeta(field, it.draft[field]);
       const open = ZhTextStudio.sections[field] ?? (field === 'bullets' ? it.draft[field].length > 0 : !!it.draft[field]);
@@ -377,6 +466,7 @@ function zhTextRender() {
           <div class="zt-field-content">${head}${area}${orig}</div>
         </details>`;
     }).join('')}`;
+  ZhTextStudio._bulletBoxes = 0;
   zhTextUpdateControls();
 }
 function zhTextUpdateControls() {
@@ -399,6 +489,13 @@ function zhTextUpdateControls() {
   $('ztSaveAll').disabled = busy || !touchedSel;
   $('ztSaveAll').title = !busy && !touchedSel ? 'Rewrite or edit selected products first' : '';
   if ($('ztSaveAllLbl')) $('ztSaveAllLbl').textContent = touchedSel ? `Save selected (${touchedSel})` : 'Save selected';
+  // v9.16 — "N unsaved changes" bar
+  const ub = $('ztUnsaved');
+  if (ub) {
+    const u = zhTextUnsavedCount();
+    ub.hidden = !u.fields;
+    if (u.fields) ub.querySelector('.zt-ub-txt').textContent = `${u.fields} unsaved ${u.fields === 1 ? 'change' : 'changes'}` + (u.products > 1 ? ` in ${u.products} products` : '');
+  }
 }
 function zhTextGo(delta) {
   ZhTextStudio.page = Math.max(0, Math.min(ZhTextStudio.items.length - 1, ZhTextStudio.page + delta));

@@ -1102,7 +1102,8 @@ function scrapeAmazon() {
   const r = { title: '', price: '', images: [], videos: [], variants: [] };
 
   // v9.15 — #productTitle FIRST: "#title span" can be a hidden "Adding to Cart..." label that comes earlier on the page
-  const AMZ_BAD = /^(adding to cart|add to cart|added to cart|loading|please wait|processing)/i;
+  // whole-text match only: a real title can start with these words ("Cartoon Design…", "Loading Ramp…")
+  const AMZ_BAD = /^(adding to cart|add to cart|added to cart|loading|please wait|processing)\W*$/i;
   for (const sel of ['#productTitle', '#titleSection #title span#productTitle', 'h1#title span', 'h1.a-size-large', '#title_feature_div #title']) {
     const el = document.querySelector(sel);
     const t = el ? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim() : '';
@@ -1128,7 +1129,7 @@ function scrapeAmazon() {
   }
   if (!r.title) {
     const dt = (document.title || '').replace(/^\s*amazon(\.[a-z.]+)?\s*[:\-–|]\s*/i, '').replace(/\s*[:\-–|]\s*amazon(\.[a-z.]+)?\s*$/i, '').trim();
-    if (dt && !/^(amazon|robot check|sorry|page not found|adding to cart|cart)/i.test(dt)) r.title = dt;
+    if (dt && !/^(amazon(\.[a-z.]+)?|adding to cart|cart)\W*$|^(robot check|sorry|page not found)\b/i.test(dt)) r.title = dt;
   }
   // If DOM title is empty (e.g. page still loading), try og:title — never fall back to document.title
   // because Amazon sets it to "Adding to Cart..." during cart operations.
@@ -2774,7 +2775,7 @@ async function scrapePageData() {
   data.url      = location.href;
   // Filter out transient browser states ("Adding to Cart...", "Loading...", etc.)
   // that Amazon and other sites temporarily set as the page/tab title.
-  const BAD_TITLE = /^(adding to cart|add to cart|added to cart|loading\.\.\.|please wait\.\.\.?|checkout|your amazon\.com cart|amazon\.com shopping cart|cart|processing)/i;
+  const BAD_TITLE = /^(adding to cart|add to cart|added to cart|loading\.\.\.|please wait\.\.\.?|checkout|your amazon\.com cart|amazon\.com shopping cart|cart|processing)\W*$/i;   // whole text only ("Cartoon…" is a real title)
   const docTitle = BAD_TITLE.test((document.title || '').trim()) ? '' : document.title;
   const candidateTitle = (data.title || docTitle || '').trim();
   data.title = BAD_TITLE.test(candidateTitle) ? '' : candidateTitle;
@@ -3527,7 +3528,11 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
     }
     const rows = [...byLine.values()].sort((a, b) => a.line - b.line);
     const failed = rows.filter(r => !r.added).map(r => ({ ...r, name: `Line ${r.line}` }));
-    const complete = total > 0 && rows.length === total;
+    // one page only (≤30 rows): Temu shows NO pagination and NO "Total N items" — the visible list is then the whole list
+    // (before: total stayed 0 → "NOT complete" → nothing was marked although every row had been read)
+    const allFiltersOn = [...modal.querySelectorAll('[data-testid="beast-core-checkboxGroup"] [data-testid="beast-core-checkbox"]')].every(c => c.getAttribute('data-checked') !== 'false');
+    const singlePage = !pag() && rows.length > 0 && allFiltersOn;
+    const complete = (total > 0 && rows.length === total) || (singlePage && !total);
     closeModal();
     report.push(`✓ Processing results read: ${rows.length}${total ? ' of ' + total : ''} rows · ${rows.length - failed.length} added · ${failed.length} not added${complete ? '' : ' (NOT complete)'}`);
     return { success: true, mode: 'results', rows, failed, total: total || rows.length, complete, report };
@@ -4157,7 +4162,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         width: 400%; height: 400%;
         transform: translate(-50%, -50%) rotate(0deg);
         background: conic-gradient(from 0deg, #ff0000, #ff7f00, #ffff00, #00ff00, #00ffff, #0000ff, #8b00ff, #ff0000);
-        animation: zh-panel-spin 4s linear infinite;
+        /* v9.16 — static (was a 4s endless spin) */
         z-index: 0;
       }
       .panel {
@@ -4207,7 +4212,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inset: 0;
         border-radius: 50%;
         background: conic-gradient(from 0deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff, #38bdf8, #7c3aed, #00e5ff);
-        animation: zh-spin 3s linear infinite;
+        /* v9.16 — static (was an endless spin) */
         z-index: 0;
       }
       /* Reverse-spin blurred glow layer for depth effect */
@@ -4216,7 +4221,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inset: -2px;
         border-radius: 50%;
         background: conic-gradient(from 180deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff);
-        animation: zh-spin-rev 4s linear infinite;
+        /* v9.16 — static (was an endless reverse spin) */
         filter: blur(12px);
         opacity: 0.65;
         transition: opacity 0.25s ease, filter 0.25s ease;
@@ -4338,7 +4343,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .skel-item {
         aspect-ratio: 1; border-radius: 8px;
         background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(0,229,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
-        background-size: 200% 100%; animation: zh-shimmer 1.5s ease-in-out infinite;
+        background-size: 200% 100%; animation: zh-shimmer 1.5s ease-in-out 4;   /* v9.16 — a few sweeps while loading, then still */
       }
       .skel-item:nth-child(2) { animation-delay: 0.15s; }
       .skel-item:nth-child(3) { animation-delay: 0.30s; }
@@ -4481,7 +4486,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         background-position: right center;
         box-shadow: 0 4px 20px rgba(0,229,255,0.55);
         transform: translateY(-1px);
-        animation: zh-btn-shine 1.2s linear infinite;
+        animation: zh-btn-shine 1.2s linear 1;   /* v9.16 — one shine per hover (was endless while hovered) */
       }
       .btn-dl:not(:disabled):active { transform: translateY(1px) scale(0.97); box-shadow: 0 1px 8px rgba(0,229,255,0.3); }
       .btn-dl:disabled { opacity: 0.3; cursor: not-allowed; background: rgba(255,255,255,0.1); box-shadow: none; }
@@ -5455,11 +5460,12 @@ function zhApplyFrameColors(f, hexColor) {
     f.style.filter = 'none';
     f.style.boxShadow = isRainbow ? 'none' : `inset 0 0 ${Math.round(insetSpread * 0.5)}px rgba(${r},${g},${b},${(alpha1 * 0.5).toFixed(3)})`;
   } else if (isRainbow || styleMode === 'wave') {
+    // v9.16 — no drop-shadow / brightness filter on the full-screen layer (repainted the whole page); the glow is the box-shadow alone
     f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(0,242,254,${(0.55 * br).toFixed(2)}), 0 0 ${outerSpread}px rgba(255,0,85,${(0.55 * br).toFixed(2)})`;
-    f.style.filter = `drop-shadow(0 0 ${Math.round(10 * br)}px rgba(0,242,254,0.65)) drop-shadow(0 0 ${Math.round(18 * br)}px rgba(255,0,85,0.45)) brightness(${Math.min(1.6, 0.8 + 0.3 * br).toFixed(2)})`;
+    f.style.filter = 'none';
   } else {
     f.style.boxShadow = `inset 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${insetSpread}px rgba(${r},${g},${b},${alpha1}), 0 0 ${outerSpread}px rgba(${r},${g},${b},${alpha2})`;
-    f.style.filter = `drop-shadow(0 0 ${Math.round(12 * br)}px rgba(${r},${g},${b},${alpha1})) brightness(${Math.min(1.6, 0.7 + 0.35 * br).toFixed(2)})`;
+    f.style.filter = 'none';
   }
 }
 
@@ -5493,9 +5499,14 @@ function zhFrame(state, label, color) {
   mask-composite:exclude;
   transition:padding .15s ease,border-radius .15s ease;
 }
+/* v9.16 — "Moving" border = ONE sweep when the frame appears and one when ZHunter starts / finishes on the page (was endless on every tab) */
 #zh-frame.zh-moving #zh-frame-beam{
-  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
+  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear 1;
 }
+#zh-frame.zh-moving.zh-working #zh-frame-beam{animation:zhRotateFrameW var(--zh-anim-speed,3.5s) linear 2}
+#zh-frame.zh-moving.zh-done #zh-frame-beam,#zh-frame.zh-moving.zh-error #zh-frame-beam{animation:zhRotateFrameD var(--zh-anim-speed,3.5s) linear 1}
+@keyframes zhRotateFrameW{to{--zh-angle:360deg}}
+@keyframes zhRotateFrameD{to{--zh-angle:360deg}}
 #zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot{animation-play-state:paused !important}
 /* v9.15.1 — calm by default: no pulse / glow animation unless "Moving / Animated Border" is on (CPU on many open tabs) */
 .zh-corner{position:absolute;width:24px;height:24px;border:solid var(--zh-bcol2,#FFB800);pointer-events:none !important;transition:all .25s ease;z-index:2}
@@ -5504,13 +5515,13 @@ function zhFrame(state, label, color) {
 #zh-frame-c-bl{bottom:0;left:0;border-width:0 0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px);border-bottom-left-radius:var(--zh-bradius,0px)}
 #zh-frame-c-br{bottom:0;right:0;border-width:0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0;border-bottom-right-radius:var(--zh-bradius,0px)}
 @keyframes zhBorderPulse{0%{opacity:0.82}100%{opacity:1.0}}
-#zh-frame.zh-moving.zh-working{animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate}
+#zh-frame.zh-moving.zh-working{animation:zhFrameWorkingPulse 1s ease-in-out 4 alternate}
 #zh-frame.zh-working .zh-corner{border-color:#22D3EE}
 #zh-frame.zh-done .zh-corner{border-color:#10B981}
 #zh-frame.zh-error .zh-corner{border-color:#F87171}
 @keyframes zhFrameWorkingPulse{
-  from{filter:drop-shadow(0 0 8px #00F2FE);box-shadow:inset 0 0 16px rgba(0,242,254,.5),0 0 16px rgba(56,189,248,.5)}
-  to{filter:drop-shadow(0 0 16px #00F2FE) brightness(1.3);box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
+  from{box-shadow:inset 0 0 16px rgba(0,242,254,.5),0 0 16px rgba(56,189,248,.5)}
+  to{box-shadow:inset 0 0 30px rgba(0,242,254,.9),0 0 28px rgba(56,189,248,.9)}
 }
 #zh-frame-l{
   position:absolute;right:16px;bottom:16px;display:none;align-items:center;gap:8px;
@@ -5530,7 +5541,7 @@ function zhFrame(state, label, color) {
 #zh-frame.zh-error #zh-frame-l{border-color:rgba(248,113,113,.75)}
 #zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800}
 #zh-frame.zh-working #zh-frame-dot{background:#22D3EE}
-#zh-frame.zh-moving.zh-working #zh-frame-dot{animation:zhDot .8s ease-in-out infinite}
+#zh-frame.zh-moving.zh-working #zh-frame-dot{animation:zhDot .8s ease-in-out 5}
 #zh-frame.zh-done #zh-frame-dot{background:#10B981}
 #zh-frame.zh-error #zh-frame-dot{background:#F87171}
 @keyframes zhDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.85)}}`;

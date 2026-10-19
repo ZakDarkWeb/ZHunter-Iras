@@ -510,6 +510,11 @@
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg> Data</span>
       <div class="set">
         <div class="it"><div class="l"><b>Storage used</b><span id="spStorageDesc">Calculating…</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRefreshStorageBtn">Refresh</button></div>
+        <!-- v9.16 — what uses the space + Clean up (never Library products / starred items) -->
+        <div class="zh-store" id="spStorageBox">
+          <div id="spStorageList" class="zh-store-list"><span class="zh-store-wait">Checking…</span></div>
+          <div class="zh-store-foot"><span id="spStorageFree" class="zh-store-free"></span><button class="btn btn-secondary btn-xs" type="button" id="spCleanBtn" disabled>Clean up…</button></div>
+        </div>
         <div class="it"><div class="l"><b>Backup everything</b><span>Saara data aur settings ek JSON file mein download</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
         <div class="it"><div class="l"><b>Restore backup</b><span>ZHunter backup file (.json) wapas lao. Products, queue aur history is se badal jayenge</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRestoreBtn">Restore</button><input id="spRestoreFile" type="file" accept=".json" style="display:none"></div>
         <div class="it"><div class="l"><b>Reset Library</b><span>Hunt kiye products aur history mit jayegi</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
@@ -900,6 +905,14 @@
         <!-- ═══════════ TAB: UPLOAD ═══════════ -->
         <div class="temu-pane active" data-tpane="upload">
 
+          <!-- v9.16 — workflow strip: where you are (click a step = go to that part) -->
+          <nav id="temuFlow" class="temu-flow" aria-label="Workflow">
+            <button type="button" class="tf-step" data-flow="products"><i>1</i><span class="tf-l">Products</span><b class="tf-n">–</b></button>
+            <button type="button" class="tf-step" data-flow="titles"><i>2</i><span class="tf-l">Titles</span><b class="tf-n">–</b></button>
+            <button type="button" class="tf-step" data-flow="images"><i>3</i><span class="tf-l">Images</span><b class="tf-n">–</b></button>
+            <button type="button" class="tf-step" data-flow="upload"><i>4</i><span class="tf-l">Upload</span><b class="tf-n">–</b></button>
+          </nav>
+
           <!-- 1. Store & Template 2-Step Setup Card -->
           <div class="temu-card temu-setup-card" id="temuSetupCard">
             <!-- v9.11.0 — shown instead of the 2 steps once store + template are set -->
@@ -1087,6 +1100,8 @@
                 <button id="temuImgSelAllBtn" class="temu-img-pick-btn" type="button" title="Select all products for image editing"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="20 6 9 17 4 12"/></svg> Select All</button>
                 <button id="temuImgSelNoneBtn" class="temu-img-pick-btn" type="button" title="Clear image editing selection"><svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Clear</button>
               </div>
+              <!-- v9.16 — images made today per engine / Gemini account (resets every day) -->
+              <div id="zhAiDailyBox" class="zh-daily" aria-live="polite"></div>
               <div class="temu-img-bar-controls">
                 <div class="temu-img-sel-wrap">
                   <label class="temu-img-sel-label">Engine</label>
@@ -1148,6 +1163,10 @@
             <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button">
               <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt">Export + Upload to Temu</span>
+            </button>
+            <button id="temuCancelBtn" class="btn btn-ghost temu-cancel-btn" type="button" hidden title="Stop this export / upload">
+              <svg class="i i-xs" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <span>Cancel</span>
             </button>
             <details class="temu-more-tools" id="temuMoreTools">
               <summary><span>More tools</span><small>Export file only · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
@@ -1914,6 +1933,8 @@
       </div>
       <div id="temuStepResWrap" class="tsp-res hidden">
         <div class="tsp-res-h">Results <small>tap an image: Redo · Revert · Replace</small><button type="button" id="temuStepRetryBtn" class="tsp-retry hidden" title="Run every failed / skipped image again">🔁 Retry failed</button></div>
+        <!-- v9.16 — time estimate + Before/After view for the grid -->
+        <div class="tsp-res-sub"><span id="temuStepEta" class="tsp-eta"></span><span class="tsp-ba" role="group" aria-label="Show"><button type="button" data-ba="before">Before</button><button type="button" data-ba="after" class="on">After</button></span></div>
         <div id="temuStepResults" class="tsp-res-list"></div>
         <div class="tsp-res-act">
           <button type="button" data-r="prev" title="Previous image">◀</button>
