@@ -3185,7 +3185,7 @@ async function triggerFlowEdit({ src, title, prompt, productId = null, imageInde
     .replace(/\s*\(\d+\s*\/\s*\d+\)/, '')
     .replace(/\s*[-–|].*$/, '')
     .trim();
-  const flowPrompt = zhLibResolveText((prompt || '').trim() || await getSavedAiImagePrompt(), 0);
+  const flowPrompt = zhWithQuality(zhLibResolveText((prompt || '').trim() || await getSavedAiImagePrompt(), 0));
 
   toast('Preparing image & prompt for Flow…', 'info');
 
@@ -3830,6 +3830,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     slot.since = (slot.since || 0) + 1;
     text = need ? setup.text : (setup.short || ZH_SETUP_SHORT);
   } else text = ((slot.n > 0 || slot.reused) ? 'This is a NEW image. Ignore all previous images and results; edit only the image attached to this message. ' : '') + prompt;
+  text = zhWithQuality(text);
   slot.n++;
   if (zhIsGem(S)) return gemRunOnTab(S, slot.tabId, b64, text, onNote);
   return new Promise((resolve, reject) => {
@@ -4458,8 +4459,24 @@ async function manualOpen(eng) {
   if (tab) { await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {}); }
   else await chrome.tabs.create({ url: ZH_ENG[eng].home, active: true });
 }
+// Photo-quality line added to EVERY image prompt (auto + manual, all engines) for sharper results.
+// Toggle: AI Image Studio → "Sharp photo line" (storage zhImgQualityOn, default on).
+// v2 (19 Oct): protects the printed text / colours and avoids the "AI look"; no studio / depth-of-field words, so scene backgrounds still fit
+const ZH_IMG_QUALITY = 'Photo quality: the product is in sharp focus edge to edge, with crisp outlines and fine texture detail. All printed text, logos and labels on the pack stay exactly the same, sharp and readable. True-to-life colours, clean even lighting without harsh glare, no motion blur, no AI smoothing or plastic look, no artefacts — high-resolution, professional e-commerce photo.';
+let zhImgQualityOn = true;
+try { chrome.storage.local.get(['zhImgQualityOn'], st => { if (typeof st?.zhImgQualityOn === 'boolean') zhImgQualityOn = st.zhImgQualityOn; const c = document.getElementById('zhImgQualityChk'); if (c) c.checked = zhImgQualityOn; }); } catch (_) {}
+document.addEventListener('change', e => {
+  if (e.target?.id !== 'zhImgQualityChk') return;
+  zhImgQualityOn = !!e.target.checked;
+  try { chrome.storage.local.set({ zhImgQualityOn }); } catch (_) {}
+});
+function zhWithQuality(p) {
+  const s = String(p || '').split('\n\n' + ZH_IMG_QUALITY).join('').trim();
+  return zhImgQualityOn && s ? s + '\n\n' + ZH_IMG_QUALITY : s;
+}
 // put image(s) + prompt into ChatGPT / Gemini by hand (the person presses Send)
 async function manualPasteIn(eng, imgs, prompt) {
+  prompt = zhWithQuality(prompt);
   try {
     if (eng === 'chatgpt') {
       const tab = await manualPickTab('chatgpt', true);
@@ -5661,6 +5678,45 @@ function initSettingsPanel() {
     });
   }
 
+  // ── Page frame live preview (Settings): same colours / style / speed / corners / thickness as on the pages ──
+  let _zhPv = 'hunt';
+  function zhRenderFramePreview() {
+    const box = $('zhFramePreview'); if (!box) return;
+    chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed', 'zhFrameColorMode'], x => {
+      const on = x?.zhPageFrame !== false;
+      const auto = x?.zhFrameColorMode !== 'custom';
+      const mine = x?.zhFrameColor || '#FF1E56';
+      const autoCol = { idle: '#A855F7', hunt: '#22D3EE', upload: '#2CD6B9', done: '#34D399' }[_zhPv];   // idle example = Sam's Club (violet); upload = 60% (cyan → green)
+      const col = auto ? autoCol : mine;
+      const rainbow = col === 'rainbow';
+      const moving = !!x?.zhFrameMoving, style = x?.zhFrameStyle || 'laser';
+      const RB = '#FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899, #FF0055';
+      let bg;
+      if (moving && style === 'breath') bg = rainbow ? `linear-gradient(135deg, ${RB})` : `linear-gradient(135deg, ${col}, #ffffff, ${col})`;
+      else if (moving && style === 'laser') bg = rainbow ? `conic-gradient(from var(--zhp-angle), transparent 0deg 130deg, ${RB.split(', ').slice(0, 6).join(', ')}, #fff 360deg)` : `conic-gradient(from var(--zhp-angle), transparent 0deg 150deg, ${col}22 200deg, ${col}88 280deg, ${col} 345deg, #fff 360deg)`;
+      else if (moving && style === 'dual') bg = rainbow ? `conic-gradient(from var(--zhp-angle), #fff, #00F2FE 30deg, transparent 90deg 180deg, #fff 180deg, #FF0055 210deg, transparent 270deg 360deg)` : `conic-gradient(from var(--zhp-angle), #fff, ${col} 28deg, transparent 90deg 180deg, #fff 180deg, ${col} 208deg, transparent 270deg 360deg)`;
+      else if (moving) bg = rainbow ? `conic-gradient(from var(--zhp-angle), ${RB})` : `conic-gradient(from var(--zhp-angle), ${col}, #fff, ${col}, #fff, ${col})`;
+      else bg = rainbow ? `conic-gradient(from 45deg, ${RB})` : col;
+      const w = Math.max(1.5, (parseFloat(x?.zhFrameWidth) || 3) * 0.6);
+      const rad = { round: '8px', curved: '16px' }[x?.zhFrameCorners] || '2px';
+      box.style.setProperty('--zhp-bg', bg);
+      box.style.setProperty('--zhp-w', `${w}px`);
+      box.style.setProperty('--zhp-r', rad);
+      box.style.setProperty('--zhp-speed', `${Math.max(0.8, parseFloat(x?.zhFrameSpeed) || 3.5)}s`);
+      box.style.setProperty('--zhp-glow', rainbow ? '#22D3EE' : col);
+      box.classList.toggle('zh-moving', moving && style !== 'breath');
+      box.classList.toggle('zh-breath', moving && style === 'breath');
+      box.classList.toggle('zh-off', !on);
+      const txt = { idle: "ZHunter · Sam's Club", hunt: 'ZHunter · Hunting…', upload: 'ZHunter · Uploading to Temu · 60%', done: 'ZHunter · Hunted ✓ · 13 img' }[_zhPv];
+      const t = $('zhFramePreviewTxt'); if (t) t.textContent = on ? txt : 'Page frame is OFF';
+      box.dataset.pv = _zhPv;
+      const note = $('zhFramePreviewNote');
+      if (note) note.textContent = !on ? 'Off: pages par koi border / label nahi'
+        : auto ? 'Auto: har site / har Temu store ka apna rang · kaam ke dauran cyan → hara · error laal'
+        : 'My colour: border hamesha aap ka rang · status sirf label aur dot mein';
+    });
+  }
+
   // ── Page Frame Controls ──
   {
     const sendToActiveTab = (payload) => {
@@ -5799,6 +5855,38 @@ function initSettingsPanel() {
       if (styleBtn && styleBtn.dataset.style) {
         updateFrameStyle(styleBtn.dataset.style);
       }
+      const cmBtn = e.target.closest('.zh-cmode-btn');
+      if (cmBtn && cmBtn.dataset.cmode) updateColorMode(cmBtn.dataset.cmode);
+      const pvBtn = e.target.closest('#zhFramePreviewState button[data-pv]');
+      if (pvBtn) {
+        _zhPv = pvBtn.dataset.pv;
+        document.querySelectorAll('#zhFramePreviewState button').forEach(b => b.classList.toggle('active', b === pvBtn));
+        zhRenderFramePreview();
+      }
+    });
+
+    // Auto = ZHunter picks the colour (site / Temu store, status while working) · My colour = always yours. Picking a colour = My colour.
+    function updateColorMode(mode, quiet) {
+      mode = mode === 'custom' ? 'custom' : 'auto';
+      chrome.storage.local.set({ zhFrameColorMode: mode });
+      document.querySelectorAll('.zh-cmode-btn').forEach(b => b.classList.toggle('active', b.dataset.cmode === mode));
+      $('zhFrameColorRow')?.classList.toggle('zh-cmode-auto', mode === 'auto');
+      sendToActiveTab({ colorMode: mode });
+      if (!quiet) toast(mode === 'auto' ? 'Border colour: Auto (ZHunter chooses)' : 'Border colour: your colour', 'ok');
+      zhRenderFramePreview();
+    }
+    document.addEventListener('click', e => {   // a preset / the picker = "My colour"
+      if (e.target.closest('.zh-fcol-preset')) updateColorMode('custom', true);
+    });
+    $('zhFrameColorPicker')?.addEventListener('input', () => updateColorMode('custom', true));
+    chrome.storage.local.get(['zhFrameColorMode'], x => {
+      const m = x?.zhFrameColorMode === 'custom' ? 'custom' : 'auto';
+      document.querySelectorAll('.zh-cmode-btn').forEach(b => b.classList.toggle('active', b.dataset.cmode === m));
+      $('zhFrameColorRow')?.classList.toggle('zh-cmode-auto', m === 'auto');
+      zhRenderFramePreview();
+    });
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'local' && Object.keys(ch).some(k => /^zh(Frame|PageFrame)/.test(k))) zhRenderFramePreview();
     });
   }
 
@@ -18555,7 +18643,7 @@ async function temuStepManualAction(act) {
     if (await zhCopyImage(cur.newUrl || cur.imgUrl)) toast('📋 Image copied — press Ctrl+V in the Flow prompt box', 'ok');
     else toast('Copy failed (' + (zhCopyImage.lastError || 'unknown') + ') — click once on the side panel and try again', 'warn');
   } else if (act === 'prompt') {
-    if (await zhCopyText(prompt)) toast('📝 Prompt copied', 'ok'); else toast('Prompt was not copied', 'warn');
+    if (await zhCopyText(zhWithQuality(prompt))) toast('📝 Prompt copied', 'ok'); else toast('Prompt was not copied', 'warn');
   } else if (act === 'flow' && eng !== 'flow') {
     if (!S.pool && cur === S.queue[S.currentIndex]) temuStepCancelActiveJob();
     const btn = $('temuStepPasteFlowBtn'); if (btn) btn.disabled = true;
@@ -18584,7 +18672,7 @@ async function temuStepManualAction(act) {
       await chrome.tabs.update(tab.id, { active: true });
       if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
       try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) {}
-      const res = await chrome.tabs.sendMessage(tab.id, { action: 'ZH_FLOW_MANUAL_ATTACH', images: [b64], prompt, clear: true })
+      const res = await chrome.tabs.sendMessage(tab.id, { action: 'ZH_FLOW_MANUAL_ATTACH', images: [b64], prompt: zhWithQuality(prompt), clear: true })
         .catch(e => ({ ok: false, error: e?.message }));
       if (res?.ok) {
         temuStepSetStatus('✋ Manual: image + prompt are in Flow — press Generate, then "⬇ Latest from Flow" or copy the image and press Ctrl+V here.');
@@ -19323,7 +19411,7 @@ function initTemuExport() {
     if (e.target.closest('#temuGeminiClose')) $('temuGeminiModal')?.classList.add('hidden');
     if (e.target.closest('#temuGeminiModal.modal-back') && !e.target.closest('.modal-box')) $('temuGeminiModal')?.classList.add('hidden');
     if (e.target.closest('#temuGeminiCopyPromptBtn')) {
-      const txt = $('temuGeminiPromptTxt')?.value || '';
+      const txt = zhWithQuality($('temuGeminiPromptTxt')?.value || '');
       navigator.clipboard.writeText(txt).then(() => toast('Prompt copied! ✓', 'ok')).catch(() => { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Prompt copied!', 'ok'); });
     }
     if (e.target.closest('#temuGeminiOpenBtn')) {
@@ -20817,7 +20905,7 @@ async function zsPasteInFlow(it) {
     if (btn) btn.textContent = `⏳ ${imgs.length} images to Flow…`;
     const res = await chrome.tabs.sendMessage(tab.id, {
       action: 'ZH_FLOW_MANUAL_ATTACH', images: imgs,
-      prompt: ZhStudio.withPrompt ? (($('zsPrompt')?.value) || it.prompts[it.promptMode] || '') : '', clear: true
+      prompt: ZhStudio.withPrompt ? zhWithQuality(($('zsPrompt')?.value) || it.prompts[it.promptMode] || '') : '', clear: true
     }).catch(e => ({ ok: false, error: e?.message }));
     if (res?.ok) toast(`✓ ${res.added}/${res.total} images in Flow${ZhStudio.withPrompt ? ' + prompt' : ''} — press Generate`, 'ok');
     else toast('Flow: ' + (res?.error || 'images not applied'), 'warn');
@@ -20911,7 +20999,7 @@ function zsGo(delta) {
     }
     if (t.closest('[data-pm]')) { it.promptMode = t.closest('[data-pm]').dataset.pm; zhStudioRender(); return; }
     if (t.closest('#zsAiTitle')) { await zsAiRewriteTitle(it); return; }
-    if (t.id === 'zsCopyPrompt') { if (await zhCopyText(it.prompts[it.promptMode] || '')) toast('📝 Prompt copied', 'ok'); return; }
+    if (t.id === 'zsCopyPrompt') { if (await zhCopyText(zhWithQuality(it.prompts[it.promptMode] || ''))) toast('📝 Prompt copied', 'ok'); return; }
     if (t.id === 'zsShowAll') { it.showAll = !it.showAll; zhStudioRender(); return; }
     if (t.id === 'zsPasteFlow') { await zsPasteInFlow(it); return; }
     if (t.id === 'zsOpenFlow') { const e2 = temuStepManualEngine(); if (e2 === 'flow') focusOrOpenFlowTab().catch(() => {}); else manualOpen(e2).catch(() => {}); return; }

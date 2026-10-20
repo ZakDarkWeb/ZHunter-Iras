@@ -426,9 +426,28 @@
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Fail hone wale tabs hamesha khule rehte hain</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Sirf image links; Master ZIP mein images nahi hongi. Hunt 3–4× tez</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Har download (sheet, ZIP, images) Downloads → <b>ZHunter Export</b> → aaj ki date wale folder mein jata hai (jaise ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>Shopping aur Temu Seller Center pages par aap ke rang ki patli border; ZHunter kaam kare to cyan, mukammal par hara, error par laal. Animation sirf tab jab "Moving / Animated Border" on ho.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>Shopping aur Temu Seller Center pages par patli border + label ("ZHunter · Hunting…", "ZHunter · Uploading to Temu · 45%"). Off = koi border nahi. Animation sirf "Moving / Animated Border" on ho to, aur sirf saamne wale tab mein.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <div class="it zh-frame-setting-row" id="zhFramePreviewRow">
+          <div class="l"><b>Preview</b><span id="zhFramePreviewNote">Auto: har site / har Temu store ka apna rang · kaam ke dauran cyan → hara · error laal</span></div>
+          <div class="zh-fprev-wrap">
+            <div id="zhFramePreview" class="zh-fprev"><div class="zh-fprev-beam"></div>
+              <div class="zh-fprev-page"><i></i><i></i><i></i></div>
+              <div class="zh-fprev-l"><span class="zh-fprev-dot"></span><span id="zhFramePreviewTxt">ZHunter · Hunting…</span></div>
+            </div>
+            <div class="seg zh-seg-sm" id="zhFramePreviewState">
+              <button type="button" data-pv="idle">Idle</button>
+              <button type="button" data-pv="hunt" class="active">Hunting</button>
+              <button type="button" data-pv="upload">Uploading</button>
+              <button type="button" data-pv="done">Done</button>
+            </div>
+          </div>
+        </div>
         <div class="it zh-frame-setting-row" id="zhFrameColorRow">
-          <div class="l"><b>Border Shine Color</b><span>Page frame ka apna rang</span></div>
+          <div class="l"><b>Border Shine Color</b><span>Auto = ZHunter khud rang chunta hai · My colour = hamesha aap ka rang (koi preset ya picker dabayein)</span></div>
+          <div class="seg zh-seg-sm" id="zhFrameColorModeSeg" style="margin-bottom:8px">
+            <button type="button" class="zh-cmode-btn active" data-cmode="auto">Auto</button>
+            <button type="button" class="zh-cmode-btn" data-cmode="custom">My colour</button>
+          </div>
           <div class="zh-frame-colors-ctrl">
             <button type="button" class="zh-fcol-preset" data-color="rainbow" title="🌈 Colorful / Rainbow Spectrum"></button>
             <button type="button" class="zh-fcol-preset" data-color="#FF1E56" title="Cyber Red" style="background:#FF1E56;"></button>
@@ -459,6 +478,7 @@
                 <button type="button" class="zh-style-btn active" data-style="laser">Laser</button>
                 <button type="button" class="zh-style-btn" data-style="dual">Dual</button>
                 <button type="button" class="zh-style-btn" data-style="wave">Wave</button>
+                <button type="button" class="zh-style-btn" data-style="breath" title="Border softly fades in and out — lightest on the computer">Breathe</button>
               </div>
             </div>
             <div class="zh-frame-sub-row" id="zhFrameSpeedRow">
@@ -1994,6 +2014,9 @@
         <option value="normal" selected>⚡ Normal (4–10s)</option>
         <option value="fast">🚀 Fast (1.5–4s)</option>
       </select>
+      <label class="zs-tick" style="display:flex;gap:6px;align-items:center;margin:10px 2px 0" title="Adds to every image prompt: product sharp edge to edge, label text kept exact and readable, true colours, even light, no blur, no AI smoothing">
+        <input type="checkbox" id="zhImgQualityChk" checked> Sharp photo line (sharp product · exact label text · true colours) in every prompt
+      </label>
     </div>
   </div>
 

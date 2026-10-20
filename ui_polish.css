@@ -470,6 +470,35 @@ html[data-fx] .toast-item.leaving { opacity: 0; }
   .img-card:hover, .img-card:hover .img-card-thumb, .modal-close:hover { transform: none !important; }
 }
 
+/* Settings → Page frame: live preview + Auto / My colour (19 Oct 2026) */
+@property --zhp-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes zhpRotate { to { --zhp-angle: 360deg; } }
+@keyframes zhpBreath { from { opacity: .3; } to { opacity: 1; } }
+.zh-fprev-wrap { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 6px; }
+.zh-fprev { position: relative; height: 92px; border-radius: var(--zhp-r, 2px); background: var(--surface-3); overflow: hidden; }
+.zh-fprev-beam { position: absolute; inset: 0; border-radius: inherit; padding: var(--zhp-w, 2px); background: var(--zhp-bg, #22D3EE);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--zhp-glow, #22D3EE) 35%, transparent); }
+.zh-fprev.zh-moving .zh-fprev-beam { animation: zhpRotate var(--zhp-speed, 3.5s) linear infinite; }
+.zh-fprev.zh-breath .zh-fprev-beam { animation: zhpBreath var(--zhp-speed, 3.5s) ease-in-out infinite alternate; }
+.zh-fprev.zh-off .zh-fprev-beam { display: none; }
+.zh-fprev-page { position: absolute; inset: 14px 16px; display: flex; flex-direction: column; gap: 7px; opacity: .55; }
+.zh-fprev-page i { display: block; height: 7px; border-radius: 4px; background: var(--line-2); }
+.zh-fprev-page i:nth-child(1) { width: 62%; } .zh-fprev-page i:nth-child(2) { width: 84%; } .zh-fprev-page i:nth-child(3) { width: 45%; }
+.zh-fprev-l { position: absolute; right: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px;
+  border-radius: 5px; background: rgba(8,14,26,.92); color: #fff; font: 700 9.5px/1 var(--mono); border: 1px solid rgba(255,184,0,.4); }
+.zh-fprev-dot { width: 6px; height: 6px; border-radius: 50%; background: #FFB800; }
+.zh-fprev[data-pv="hunt"] .zh-fprev-l, .zh-fprev[data-pv="upload"] .zh-fprev-l { border-color: rgba(34,211,238,.6); }
+.zh-fprev[data-pv="hunt"] .zh-fprev-dot, .zh-fprev[data-pv="upload"] .zh-fprev-dot { background: #22D3EE; }
+.zh-fprev[data-pv="done"] .zh-fprev-l { border-color: rgba(16,185,129,.6); }
+.zh-fprev[data-pv="done"] .zh-fprev-dot { background: #10B981; }
+.zh-fprev.zh-off .zh-fprev-l { border-color: var(--line-2); }
+.zh-fprev.zh-off .zh-fprev-dot { background: var(--ink-4, #64748b); }
+#zhFramePreviewState button.active, #zhFrameColorModeSeg button.active { background: var(--accent); color: var(--accent-fg); }
+#zhFrameColorRow.zh-cmode-auto .zh-frame-colors-ctrl { opacity: .45; }
+#zhFrameColorRow.zh-cmode-auto .zh-frame-colors-ctrl .zh-fcol-active { outline: none; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .zh-fprev .zh-fprev-beam { animation: none !important; } }
+
 /* Temu Export: Cancel button under "Export + Upload" while it runs (19 Oct 2026) */
 .temu-cancel-btn[hidden] { display: none !important; }
 .temu-cancel-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 8px; height: 34px;

@@ -1,5 +1,29 @@
 # ZHunter Iras — CHANGELOG
 
+## Page frame Auto colours: really one colour per store / site (2026-10-19, same manifest version)
+- All Temu stores had the same colour: the frame was drawn before Temu showed the store name, so every store got the "Temu" colour and it was never updated. Now the frame watches the store name (and a store switch) and redraws; until the name is there it is grey.
+- Each store gets its own colour from a 16-colour list and keeps it (saved in `zhStoreColors`) — the first store the first colour, the next store the next free one, so two stores never share a colour (the old hash could).
+- Site colours made clearly different: Amazon orange, Walmart deep blue, Sam's Club violet, eBay yellow … (Walmart and Sam's were both light blue). None uses the cyan / green / red status colours.
+- Tested on a local copy (real content.js, fake Temu header): Charmhouse orange → Cloverhill violet → HQ TWO pink → Charmhouse orange again. NOT tested on the real Temu page.
+
+## Page frame: status labels, progress colour, Auto / My colour, Breathe, live preview (2026-10-19, same manifest version)
+- Labels on the page while ZHunter works: "ZHunter · Hunting…" → "ZHunter · Hunted ✓ · 13 img" / "Hunt failed ✗"; on Temu "ZHunter · Uploading to Temu…" → "Uploading · Temu received the file" → "Uploading to Temu · 45%" (live from Temu's "Processing data %") → "Upload done ✓" / "Upload failed ✗". A thin progress bar fills inside the label.
+- Auto colour (new default, Settings → "Border Shine Color" → Auto): each site its own colour (Amazon amber, Walmart blue, Sam's sky…), each Temu store its own colour, cyan → green while a job runs (follows the %), green when done, red on error. "My colour": tap a preset / the picker (or the "My colour" button) → the border always keeps your colour, the status shows in the label + dot. Off = the "Page frame" switch (no border, no label). Setting `zhFrameColorMode` ('auto' | 'custom').
+- New moving style "Breathe": the border softly fades in and out (opacity only — the lightest animation).
+- Settings → Page frame: live preview box (Idle / Hunting / Uploading / Done) with your colour, style, speed, corners and thickness — no need to open a shopping page to see a change.
+- Changing any frame setting now redraws the page in its current state (before it always re-applied your colour, even while ZHunter showed a status).
+- Tested on a local copy of a Sam's page (real content.js): upload label + 54 % bar + mixed colour, Wave / Breathe running endlessly, My colour → purple, Auto back, card ring follows Moving; preview box rotates. NOT tested on real Amazon / Walmart / Temu pages.
+
+## Page frame: "Moving / Animated Border" moves again (2026-10-19, same manifest version)
+- The UI round had cut the moving border to ONE sweep (and the working pulse / dot to a few beats) to save CPU, so with "Moving / Animated Border" on it looked like it did not work. Since that switch is your own opt-in, the border now keeps moving (Laser / Dual / Wave, your speed), the working pulse and dot run while ZHunter works. It pauses in hidden tabs; off = still frame as before.
+- The floating image card follows the same switch: spinning ring + glow on the round button and a moving edge on the open card when it is on, calm when it is off.
+
+## AI images: photo line v2 (2026-10-19, same manifest version)
+- The line is now: "Photo quality: the product is in sharp focus edge to edge, with crisp outlines and fine texture detail. All printed text, logos and labels on the pack stay exactly the same, sharp and readable. True-to-life colours, clean even lighting without harsh glare, no motion blur, no AI smoothing or plastic look, no artefacts — high-resolution, professional e-commerce photo." It protects label text and colours, and drops "studio lighting / no depth-of-field" so scene backgrounds are not flattened.
+
+## AI images: sharp photo line in every prompt (2026-10-19, same manifest version)
+- Every image prompt now ends with "Photo quality: sharp focus, shot on 50mm lens, f/8 aperture, clean studio lighting, high texture detail, crisp edges, no motion blur, no depth of field blur." — auto runs (Gemini / ChatGPT / Flow), manual "Paste in …", Edit Studio "Paste in Flow" and every "Copy prompt". Added once (never twice). Tick "Sharp photo line" in the Edit Images mode chooser turns it off/on (storage `zhImgQualityOn`, default on). The prompt shown in the boxes stays as you wrote it; the line is added when it is sent / copied.
+
 ## Bulk hunt: same product open twice (2026-10-19, same manifest version)
 - The skip message said "12 tabs skipped — already in your Library" also for products that were simply open in two tabs (only one copy is hunted). Now it says which: "N already in your Library · M opened twice (same product — only one copy hunted)". The tab list marks the second copy with a "2×" badge and does not pre-select it; duplicates inside one hunt are now skipped even when the Library is empty.
 

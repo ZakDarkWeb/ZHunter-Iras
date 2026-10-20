@@ -3036,6 +3036,13 @@ async function temuPageAutoUpload({ b64, filename, expectStore, waitForUpload, h
     // v9.4.3 — live progress → background → side panel (throttled: max 1 msg / 2s, rate-limit safe)
     let lastProg = 0, lastProgKey = '';
     const progress = (phase, extra = {}) => {
+      // page frame: "ZHunter · Uploading to Temu · 45%" + border colour moving cyan → green with the progress
+      try {
+        const p = Number(extra.pct) || 0;
+        const fp = phase === 'uploading' ? 5 : phase === 'accepted' ? 12 : phase === 'processing' ? 12 + Math.round(p * 0.83) : phase === 'finishing' ? 97 : null;
+        const fl = phase === 'processing' ? `ZHunter · Uploading to Temu · ${p}%` : phase === 'finishing' ? 'ZHunter · Uploading · reading the result…' : phase === 'accepted' ? 'ZHunter · Uploading · Temu received the file' : 'ZHunter · Uploading to Temu…';
+        zhFrame('working', fl, null, fp);
+      } catch (_) {}
       const key = phase + JSON.stringify(extra);
       if (key === lastProgKey || Date.now() - lastProg < 2000) return;
       lastProg = Date.now(); lastProgKey = key;
@@ -3558,13 +3565,13 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   try {
     if (message?.action === 'SCRAPE_PAGE') {
-      try { zhFrame('working', 'ZHunter · hunting…'); } catch (_) {}
+      try { zhFrame('working', 'ZHunter · Hunting…', null, 15); } catch (_) {}
       scrapePageData().then(data => {
         const imgCount = (data?.images || []).length;
-        try { zhFrame('done', `ZHunter · ${imgCount} img ✓`); } catch (_) {}
+        try { zhFrame('done', `ZHunter · Hunted ✓ · ${imgCount} img`); } catch (_) {}
         sendResponse({ success: true, data });
       }).catch(err => {
-        try { zhFrame('error', 'ZHunter · failed ✗'); } catch (_) {}
+        try { zhFrame('error', 'ZHunter · Hunt failed ✗'); } catch (_) {}
         sendResponse({
           success: false,
           error: err?.message || 'scrape_failed',
@@ -3601,8 +3608,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.action === 'TEMU_UPLOAD_FILE') {
       if (!/seller\.temu\.com$/i.test(location.hostname)) { sendResponse({ success: false, report: ['✗ This is not a Temu seller page'] }); return true; }
-      try { zhFrame('working', 'ZHunter · uploading to Temu…'); } catch (_) {}
-      temuPageAutoUpload(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · upload failed ✗' : 'ZHunter · upload done ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · upload failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
+      try { zhFrame('working', 'ZHunter · Uploading to Temu…', null, 2); } catch (_) {}
+      temuPageAutoUpload(message).then(r => { try { zhFrame(r?.success === false ? 'error' : 'done', r?.success === false ? 'ZHunter · Upload failed ✗' : 'ZHunter · Upload done ✓'); } catch (_) {} sendResponse(r); }).catch(err => { try { zhFrame('error', 'ZHunter · upload failed ✗'); } catch (_) {} sendResponse({ success: false, report: ['✗ ' + (err?.message || 'error')] }); });
       return true;
     }
     if (message?.action === 'TEMU_READ_FAILED') {
@@ -4113,6 +4120,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     document.documentElement.appendChild(root);
 
     const shadow = root.attachShadow({ mode: 'open' });
+    // card animation follows the "Moving / Animated Border" setting (zhFrameMoving)
+    const zhCardAnim = on => root.classList.toggle('zh-anim', !!on);
+    try {
+      chrome.storage.local.get(['zhFrameMoving'], x => zhCardAnim(!!x?.zhFrameMoving));
+      chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.zhFrameMoving) zhCardAnim(!!ch.zhFrameMoving.newValue); });
+      chrome.runtime.onMessage.addListener(m => { if (m?.action === 'zhUpdateFrame' && m.moving != null) zhCardAnim(m.moving); });
+    } catch (_) {}
+    document.addEventListener('visibilitychange', () => root.classList.toggle('zh-anim-paused', document.hidden));
 
     const style = document.createElement('style');
     style.textContent = `
@@ -4501,6 +4516,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .panel-wrap::before { animation: none; background: linear-gradient(135deg, #00E5FF, #0EA5E9); }
       .mini-ring { animation: none; background: linear-gradient(135deg, #00E5FF, #0EA5E9); }
       .mini-glow { animation: none; display: none; }
+      /* "Moving / Animated Border" on (Settings) → the card animates too: spinning ring + glow on the button, spinning rainbow edge on the open card.
+         Paused while the tab is hidden, so background tabs cost nothing. */
+      :host(.zh-anim) .mini-ring { background: conic-gradient(from 0deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff, #38bdf8, #7c3aed, #00e5ff); animation: zh-spin 3s linear infinite; }
+      :host(.zh-anim) .mini-glow { display: block; animation: zh-spin-rev 4s linear infinite; }
+      :host(.zh-anim) .panel-wrap::before { background: conic-gradient(from 0deg, #00e5ff, #7c3aed, #0ea5e9, #a855f7, #00e5ff); animation: zh-panel-spin 4s linear infinite; }
+      :host(.zh-anim-paused) .mini-ring, :host(.zh-anim-paused) .mini-glow, :host(.zh-anim-paused) .panel-wrap::before { animation-play-state: paused; }
     `;
     shadow.appendChild(style);
 
@@ -5329,6 +5350,46 @@ function zhFrameColorFor(name) {
   for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return ZH_FRAME_COLORS[h % ZH_FRAME_COLORS.length];
 }
+// Each Temu store gets its OWN colour, remembered in storage (zhStoreColors {store: colour}) — the first store takes the first
+// free colour of this list, the next store the next one, so two stores never share a colour (a hash could give two the same).
+// Status colours (cyan working, green done, red error) are left out of the list.
+const ZH_STORE_PALETTE = ['#F97316', '#A855F7', '#EC4899', '#3B82F6', '#EAB308', '#14B8A6', '#F43F5E', '#84CC16', '#6366F1', '#D946EF', '#0EA5E9', '#F59E0B', '#8B5CF6', '#FB7185', '#22C55E', '#E11D48'];
+let _zhStoreColors = {};
+function zhStoreKey(s) { return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+function zhStoreColor(store) {
+  const k = zhStoreKey(store);
+  if (!k) return '#FB923C';
+  if (_zhStoreColors[k]) return _zhStoreColors[k];
+  const used = new Set(Object.values(_zhStoreColors));
+  const col = ZH_STORE_PALETTE.find(c => !used.has(c)) || zhFrameColorFor(k);
+  _zhStoreColors[k] = col;
+  // confirm against the saved list (another tab may have given a store a colour meanwhile)
+  try { chrome.storage.local.get(['zhStoreColors'], x => {
+    const m = { ...(x?.zhStoreColors || {}) };
+    if (!m[k]) { const taken = new Set(Object.values(m)); m[k] = ZH_STORE_PALETTE.find(c => !taken.has(c)) || col; chrome.storage.local.set({ zhStoreColors: m }); }
+    _zhStoreColors = { ..._zhStoreColors, ...m };
+    if (m[k] !== col) zhFrameRefresh();
+  }); } catch (_) {}
+  return col;
+}
+function zhTemuMallNow() {
+  return (document.querySelector('#mms-layout-user-setting [class*="mall_name"]')?.textContent
+    || document.querySelector('[class*="mall_name"]')?.textContent || '').replace(/\s+/g, ' ').trim();
+}
+let _zhMallWatch = null, _zhMallSeen = '';
+function zhWatchTemuMall() {
+  if (_zhMallWatch) return;
+  _zhMallSeen = zhTemuMallNow();
+  _zhMallWatch = setInterval(() => {
+    try {
+      const m = zhTemuMallNow();
+      if (m === _zhMallSeen) return;
+      _zhMallSeen = m;
+      const L = _zhFrameLast;
+      if (!L || L.state === 'idle') zhFrameIdle();   // a job label (Uploading…) is never overwritten
+    } catch (_) {}
+  }, 1500);
+}
 
 let _zhFrameOn = true;
 let _zhFrameTimer = null;
@@ -5339,6 +5400,17 @@ let _zhFrameCustomCorners = 'square';
 let _zhFrameMoving = false;
 let _zhFrameStyle = 'laser';
 let _zhFrameSpeed = 3.5;
+// 'auto' = ZHunter picks the colour (each site / each Temu store its own colour; cyan → green while it works, red on error)
+// 'custom' = always your own colour (status shows in the label + dot only)
+let _zhFrameColorMode = 'auto';
+let _zhFrameLast = null;   // last zhFrame() call, so a settings change can redraw the same state
+
+// mix two #rrggbb colours (t = 0…1)
+function zhMixHex(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const x = p(a), y = p(b), k = Math.max(0, Math.min(1, t || 0));
+  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * k).toString(16).padStart(2, '0')).join('');
+}
 
 function zhFramePageOk() {
   const h = location.hostname;
@@ -5348,19 +5420,20 @@ function zhFramePageOk() {
 
 function zhFramePlatform() {
   const h = location.hostname;
-  if (/amazon\./i.test(h)) return { name: 'Amazon', color: '#F59E0B' };
-  if (/walmart\.com$/i.test(h)) return { name: 'Walmart', color: '#60A5FA' };
-  if (/samsclub\.com$/i.test(h)) return { name: "Sam's Club", color: '#38BDF8' };
-  if (/ebay\./i.test(h)) return { name: 'eBay', color: '#A78BFA' };
+  // clearly different colours per site (Walmart and Sam's were both light blue before) — none is the cyan / green / red status colour
+  if (/amazon\./i.test(h)) return { name: 'Amazon', color: '#F97316' };          // orange
+  if (/walmart\.com$/i.test(h)) return { name: 'Walmart', color: '#2563EB' };    // deep blue
+  if (/samsclub\.com$/i.test(h)) return { name: "Sam's Club", color: '#A855F7' }; // violet
+  if (/ebay\./i.test(h)) return { name: 'eBay', color: '#EAB308' };              // yellow
   if (/temu\.com$/i.test(h)) return { name: 'Temu', color: '#FB923C' };
-  if (/target\.com$/i.test(h)) return { name: 'Target', color: '#FB7185' };
-  if (/costco\.com$/i.test(h)) return { name: 'Costco', color: '#818CF8' };
-  if (/homedepot\.com$/i.test(h)) return { name: 'Home Depot', color: '#FBBF24' };
-  if (/aliexpress\./i.test(h)) return { name: 'AliExpress', color: '#F472B6' };
+  if (/target\.com$/i.test(h)) return { name: 'Target', color: '#E11D48' };
+  if (/costco\.com$/i.test(h)) return { name: 'Costco', color: '#6366F1' };
+  if (/homedepot\.com$/i.test(h)) return { name: 'Home Depot', color: '#EA580C' };
+  if (/aliexpress\./i.test(h)) return { name: 'AliExpress', color: '#EC4899' };
   if (/bestbuy\.com$/i.test(h)) return { name: 'Best Buy', color: '#FACC15' };
-  if (/lowes\.com$/i.test(h)) return { name: "Lowe's", color: '#2DD4BF' };
-  if (/wayfair\.com$/i.test(h)) return { name: 'Wayfair', color: '#C084FC' };
-  if (/shein\.com$/i.test(h)) return { name: 'SHEIN', color: '#F43F5E' };
+  if (/lowes\.com$/i.test(h)) return { name: "Lowe's", color: '#0EA5E9' };
+  if (/wayfair\.com$/i.test(h)) return { name: 'Wayfair', color: '#D946EF' };
+  if (/shein\.com$/i.test(h)) return { name: 'SHEIN', color: '#111827' };
   return { name: 'Ready', color: '#22D3EE' };
 }
 
@@ -5407,8 +5480,12 @@ function zhApplyFrameColors(f, hexColor) {
 
   let beamBg = col;
   const styleMode = _zhFrameStyle || 'laser';
+  const isBreath = isMoving && styleMode === 'breath';
+  f.classList.toggle('zh-breath', isBreath);
 
-  if (isMoving) {
+  if (isBreath) {   // "Breathe": the whole border softly fades in and out (opacity only — the lightest animation)
+    beamBg = isRainbow ? 'linear-gradient(135deg, #FF0055, #FF7700, #FFDD00, #00FF66, #00F2FE, #7928CA, #EC4899)' : `linear-gradient(135deg, ${col}, ${col2}, ${col})`;
+  } else if (isMoving) {
     if (isRainbow) {
       if (styleMode === 'laser') {
         beamBg = 'conic-gradient(from var(--zh-angle, 0deg), transparent 0deg, transparent 130deg, #FF0055 180deg, #FFAA00 225deg, #00FF66 270deg, #00F2FE 315deg, #EC4899 350deg, #FFFFFF 360deg)';
@@ -5469,17 +5546,18 @@ function zhApplyFrameColors(f, hexColor) {
   }
 }
 
-function zhFrame(state, label, color) {
+// pct (0–100, optional) = how far the current job is: border colour goes cyan → green, a thin bar fills in the label
+function zhFrame(state, label, color, pct) {
   try {
     if (!_zhFrameOn || window.top !== window) return;
     if (!zhFramePageOk()) return;
     let f = document.getElementById('zh-frame');
     if (state === 'off') { if (f) f.remove(); return; }
-    const col = color || (state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : _zhFrameCustomColor || '#22D3EE');
+    _zhFrameLast = { state, label, color, pct };
     if (!f) {
       f = document.createElement('div');
       f.id = 'zh-frame';
-      f.innerHTML = '<div id="zh-frame-beam"></div><div id="zh-frame-c-tl" class="zh-corner"></div><div id="zh-frame-c-tr" class="zh-corner"></div><div id="zh-frame-c-bl" class="zh-corner"></div><div id="zh-frame-c-br" class="zh-corner"></div><div id="zh-frame-l"><span id="zh-frame-dot"></span><span id="zh-frame-t"></span></div>';
+      f.innerHTML = '<div id="zh-frame-beam"></div><div id="zh-frame-c-tl" class="zh-corner"></div><div id="zh-frame-c-tr" class="zh-corner"></div><div id="zh-frame-c-bl" class="zh-corner"></div><div id="zh-frame-c-br" class="zh-corner"></div><div id="zh-frame-l"><span id="zh-frame-dot"></span><span id="zh-frame-t"></span><span id="zh-frame-p"><i></i></span></div>';
       const st = document.createElement('style');
       st.id = 'zh-frame-css';
       st.textContent = `@property --zh-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
@@ -5499,15 +5577,17 @@ function zhFrame(state, label, color) {
   mask-composite:exclude;
   transition:padding .15s ease,border-radius .15s ease;
 }
-/* v9.16 — "Moving" border = ONE sweep when the frame appears and one when ZHunter starts / finishes on the page (was endless on every tab) */
+/* "Moving / Animated Border" is the user's own opt-in → it keeps moving (v9.16 had cut it to one sweep, so it looked broken).
+   CPU stays low: it only runs in the tab you look at (zh-paused while hidden), the default (off) is still a still frame. */
 #zh-frame.zh-moving #zh-frame-beam{
-  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear 1;
+  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
 }
-#zh-frame.zh-moving.zh-working #zh-frame-beam{animation:zhRotateFrameW var(--zh-anim-speed,3.5s) linear 2}
-#zh-frame.zh-moving.zh-done #zh-frame-beam,#zh-frame.zh-moving.zh-error #zh-frame-beam{animation:zhRotateFrameD var(--zh-anim-speed,3.5s) linear 1}
-@keyframes zhRotateFrameW{to{--zh-angle:360deg}}
-@keyframes zhRotateFrameD{to{--zh-angle:360deg}}
-#zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot{animation-play-state:paused !important}
+#zh-frame.zh-moving.zh-breath #zh-frame-beam{animation:zhBreath var(--zh-anim-speed,3.5s) ease-in-out infinite alternate}
+@keyframes zhBreath{from{opacity:.3}to{opacity:1}}
+#zh-frame.zh-paused #zh-frame-beam,#zh-frame.zh-paused #zh-frame-dot,#zh-frame.zh-paused{animation-play-state:paused !important}
+#zh-frame-p{display:none;width:54px;height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin-left:2px}
+#zh-frame-p i{display:block;height:100%;width:0;border-radius:2px;background:linear-gradient(90deg,#22D3EE,#34D399);transition:width .5s ease}
+#zh-frame.zh-working.zh-has-pct #zh-frame-p{display:block}
 /* v9.15.1 — calm by default: no pulse / glow animation unless "Moving / Animated Border" is on (CPU on many open tabs) */
 .zh-corner{position:absolute;width:24px;height:24px;border:solid var(--zh-bcol2,#FFB800);pointer-events:none !important;transition:all .25s ease;z-index:2}
 #zh-frame-c-tl{top:0;left:0;border-width:var(--zh-bwidth,5.5px) 0 0 var(--zh-bwidth,5.5px);border-top-left-radius:var(--zh-bradius,0px)}
@@ -5515,7 +5595,7 @@ function zhFrame(state, label, color) {
 #zh-frame-c-bl{bottom:0;left:0;border-width:0 0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px);border-bottom-left-radius:var(--zh-bradius,0px)}
 #zh-frame-c-br{bottom:0;right:0;border-width:0 var(--zh-bwidth,5.5px) var(--zh-bwidth,5.5px) 0;border-bottom-right-radius:var(--zh-bradius,0px)}
 @keyframes zhBorderPulse{0%{opacity:0.82}100%{opacity:1.0}}
-#zh-frame.zh-moving.zh-working{animation:zhFrameWorkingPulse 1s ease-in-out 4 alternate}
+#zh-frame.zh-moving.zh-working{animation:zhFrameWorkingPulse 1s ease-in-out infinite alternate}
 #zh-frame.zh-working .zh-corner{border-color:#22D3EE}
 #zh-frame.zh-done .zh-corner{border-color:#10B981}
 #zh-frame.zh-error .zh-corner{border-color:#F87171}
@@ -5541,7 +5621,7 @@ function zhFrame(state, label, color) {
 #zh-frame.zh-error #zh-frame-l{border-color:rgba(248,113,113,.75)}
 #zh-frame-dot{width:7px;height:7px;border-radius:50%;background:#FFB800}
 #zh-frame.zh-working #zh-frame-dot{background:#22D3EE}
-#zh-frame.zh-moving.zh-working #zh-frame-dot{animation:zhDot .8s ease-in-out 5}
+#zh-frame.zh-moving.zh-working #zh-frame-dot{animation:zhDot .8s ease-in-out infinite}
 #zh-frame.zh-done #zh-frame-dot{background:#10B981}
 #zh-frame.zh-error #zh-frame-dot{background:#F87171}
 @keyframes zhDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.85)}}`;
@@ -5551,9 +5631,17 @@ function zhFrame(state, label, color) {
     f.classList.toggle('zh-working', state === 'working');
     f.classList.toggle('zh-done', state === 'done');
     f.classList.toggle('zh-error', state === 'error');   // v9.15.1 — an error is red, never the "done" green
-    // v9.15.1 — status colours win while ZHunter works on the page (working cyan / done green / error red); idle = your colour
-    const statusCol = state === 'working' ? '#22D3EE' : state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : null;
-    zhApplyFrameColors(f, statusCol || _zhFrameCustomColor || col);
+    // Auto colour: status colours while ZHunter works (cyan → green with the progress, green done, red error); idle = the site's / Temu store's colour.
+    // My colour: the border always keeps your colour — the label + dot still show the status.
+    const auto = _zhFrameColorMode !== 'custom';
+    const hasPct = Number.isFinite(pct);
+    const statusCol = !auto ? null
+      : state === 'working' ? zhMixHex('#22D3EE', '#34D399', hasPct ? pct / 100 : 0)
+      : state === 'done' ? '#34D399' : state === 'error' ? '#F87171' : null;
+    const idleCol = auto ? (color || '#22D3EE') : (_zhFrameCustomColor || '#22D3EE');
+    zhApplyFrameColors(f, statusCol || idleCol);
+    f.classList.toggle('zh-has-pct', state === 'working' && hasPct);
+    const bar = f.querySelector('#zh-frame-p i'); if (bar) bar.style.width = `${hasPct ? Math.max(0, Math.min(100, pct)) : 0}%`;
     const t = f.querySelector('#zh-frame-t'); if (t) t.textContent = label || 'ZHunter';
     f.title = label || 'ZHunter';
     clearTimeout(_zhFrameTimer);
@@ -5570,12 +5658,20 @@ function zhFrameIdle() {
     return;
   }
   if (/seller\.temu\.com$/i.test(location.hostname)) {
-    const mall = (document.querySelector('[class*="mall_name"]')?.textContent || '').trim();
-    zhFrame('idle', mall ? `ZHunter · ${mall}` : 'ZHunter · Temu', zhFrameColorFor(mall || 'temu'));
+    const mall = zhTemuMallNow();
+    zhFrame('idle', mall ? `ZHunter · ${mall}` : 'ZHunter · Temu', mall ? zhStoreColor(mall) : '#94A3B8');
+    // the store name loads late on Temu: keep looking (and follow a store switch) so the store's own colour shows
+    zhWatchTemuMall();
   } else {
     const pf = zhFramePlatform();
-    zhFrame('idle', `ZHunter · ${pf.name}`, _zhFrameCustomColor || pf.color);
+    zhFrame('idle', `ZHunter · ${pf.name}`, pf.color);   // auto: site colour, custom: zhFrame uses your colour
   }
+}
+// a frame setting changed: draw the same state again with the new look (before only the colour was re-applied — and always your colour)
+function zhFrameRefresh() {
+  const L = _zhFrameLast;
+  if (L && L.state !== 'idle' && document.getElementById('zh-frame')) zhFrame(L.state, L.label, L.color, L.pct);
+  else zhFrameIdle();
 }
 
 (function zhFrameBoot() {
@@ -5602,8 +5698,10 @@ function zhFrameIdle() {
 
     try {
       if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
-        chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed'], x => {
+        chrome.storage.local.get(['zhPageFrame', 'zhFrameColor', 'zhFrameWidth', 'zhFrameBrightness', 'zhFrameCorners', 'zhFrameMoving', 'zhFrameStyle', 'zhFrameSpeed', 'zhFrameColorMode', 'zhStoreColors'], x => {
           _zhFrameOn = x?.zhPageFrame !== false;
+          if (x?.zhStoreColors && typeof x.zhStoreColors === 'object') _zhStoreColors = { ...x.zhStoreColors, ..._zhStoreColors };
+          if (x?.zhFrameColorMode) _zhFrameColorMode = x.zhFrameColorMode;
           if (x?.zhFrameColor) _zhFrameCustomColor = x.zhFrameColor;
           if (x?.zhFrameWidth != null) _zhFrameCustomWidth = x.zhFrameWidth;
           if (x?.zhFrameBrightness != null) _zhFrameCustomBrightness = x.zhFrameBrightness;
@@ -5639,13 +5737,13 @@ function zhFrameIdle() {
         if (ch.zhFrameMoving != null) _zhFrameMoving = !!ch.zhFrameMoving.newValue;
         if (ch.zhFrameStyle) _zhFrameStyle = ch.zhFrameStyle.newValue || 'laser';
         if (ch.zhFrameSpeed != null) _zhFrameSpeed = ch.zhFrameSpeed.newValue || 3.5;
-        if (ch.zhFrameColor || ch.zhFrameWidth || ch.zhFrameBrightness || ch.zhFrameCorners || ch.zhFrameMoving || ch.zhFrameStyle || ch.zhFrameSpeed) {
-          let f = document.getElementById('zh-frame');
-          if (!f && _zhFrameOn && zhFramePageOk()) {
-            zhFrameIdle();
-            f = document.getElementById('zh-frame');
-          }
-          if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
+        if (ch.zhFrameColorMode) _zhFrameColorMode = ch.zhFrameColorMode.newValue || 'auto';
+        if (ch.zhStoreColors && ch.zhStoreColors.newValue && typeof ch.zhStoreColors.newValue === 'object') {
+          _zhStoreColors = { ..._zhStoreColors, ...ch.zhStoreColors.newValue };
+          if (/seller\.temu\.com$/i.test(location.hostname) && (!_zhFrameLast || _zhFrameLast.state === 'idle')) zhFrameIdle();
+        }
+        if (ch.zhFrameColor || ch.zhFrameWidth || ch.zhFrameBrightness || ch.zhFrameCorners || ch.zhFrameMoving || ch.zhFrameStyle || ch.zhFrameSpeed || ch.zhFrameColorMode) {
+          if (_zhFrameOn && zhFramePageOk()) zhFrameRefresh();
         }
       }
     });
@@ -5669,14 +5767,10 @@ function zhFrameIdle() {
         if (msg.moving != null) _zhFrameMoving = !!msg.moving;
         if (msg.style != null) _zhFrameStyle = msg.style;
         if (msg.speed != null) _zhFrameSpeed = msg.speed;
+        if (msg.colorMode != null) _zhFrameColorMode = msg.colorMode;
 
         if (!_zhFrameOn) return;
-        let f = document.getElementById('zh-frame');
-        if (!f && zhFramePageOk()) {
-          zhFrameIdle();
-          f = document.getElementById('zh-frame');
-        }
-        if (f) zhApplyFrameColors(f, _zhFrameCustomColor);
+        if (zhFramePageOk()) zhFrameRefresh();
       }
     });
   } catch (_) {}
