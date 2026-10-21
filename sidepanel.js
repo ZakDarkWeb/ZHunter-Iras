@@ -41,7 +41,7 @@ document.addEventListener('error', e => {
   if (!img.matches('.temu-rv-img-thumb, .temu-rv-thumb, .temu-rv-head img')) return;
   const u = img.getAttribute('src') || ''; if (!/^https?:\/\//i.test(u)) return;
   img.dataset.zhRetried = '1';
-  try { chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url: u, settings: { imageFormat: 'original' } }, r => { void chrome.runtime.lastError; if (r?.success && r.base64) img.src = r.base64; }); } catch (_) {}
+  try { chrome.runtime.sendMessage({ action: 'FETCH_BASE64', url: u, settings: { imageFormat: 'original' } }, r => { void chrome.runtime.lastError; if (r?.success && r.base64) img.src = r.base64; }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }, true);
 
 // Global delegated stopPropagation for bp-open-btn (CSP-safe, no inline onclick)
@@ -109,14 +109,14 @@ function zhJobsNow() {
       const done = Math.min(total || Infinity, new Set((BulkState.results || []).map(r => r.tabId)).size);
       jobs.push({ k: 'hunt', txt: `🔎 Hunting ${done}/${total || '?'}` });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   try {
     if (TemuUploadBusy || _zhLateWatch) {
       const p = _zhUploadProg;
       const st = p?.phase === 'processing' ? `processing ${p.pct ?? 0}%` : p?.phase === 'uploading' ? 'sending the file' : p?.phase === 'finishing' ? 'reading the result' : _zhLateWatch ? 'processing (watching)' : 'preparing';
       jobs.push({ k: 'upload', txt: `⬆ Temu ${st}` });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   try {
     const S = TemuImgStepper;
     if (S?.running) {
@@ -124,7 +124,7 @@ function zhJobsNow() {
       const eng = { gemini: 'Gemini', chatgpt: 'ChatGPT', flow: 'Flow', auto: 'Auto' }[S.engine] || 'Images';
       jobs.push({ k: 'img', txt: `🖼 ${eng} ${d}/${n}` });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return jobs;
 }
 function zhRenderJobs() {
@@ -144,7 +144,7 @@ document.addEventListener('click', e => {
     if (b.dataset.job === 'hunt') $('bulkProgressModal')?.classList.remove('hidden');
     else if (b.dataset.job === 'upload') { if ($('temuModal')?.classList.contains('hidden')) openTemuModal(); temuSwitchTab('upload'); $('temuSteps')?.scrollIntoView({ block: 'nearest' }); }
     else if (b.dataset.job === 'img') temuStepOpenModal();
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 });
 
 // ── DOM Helper ───────────────────────────────────────────────
@@ -158,7 +158,7 @@ function acquireKeepAlive() {
       _keepAlivePort = chrome.runtime.connect({ name: 'zhunter-keepalive' });
       _keepAlivePort.onDisconnect.addListener(() => { _keepAlivePort = null; });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 function releaseKeepAlive() {
   try {
@@ -166,7 +166,7 @@ function releaseKeepAlive() {
       _keepAlivePort.disconnect();
       _keepAlivePort = null;
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 function msg(payload) {
@@ -212,7 +212,7 @@ function safeHref(url) {
   try {
     const u = new URL(url);
     if (u.protocol === 'http:' || u.protocol === 'https:') return esc(url);
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return '#';
 }
 
@@ -244,7 +244,7 @@ function fmtDate(iso) {
 // The library's writeFile inside the side panel produced a uuid-named download.
 // chrome.downloads keeps the filename; falls back to an anchor if needed.
 // v9.15 — tell the background which file name a blob download should keep (otherwise Chrome saves it under a random UUID)
-try { const _dl = chrome.downloads.download.bind(chrome.downloads); chrome.downloads.download = async (opts, cb) => { try { if (opts && opts.filename && /^(blob:|data:)/i.test(opts.url || '')) await chrome.runtime.sendMessage({ action: 'ZH_DL_NAME', url: opts.url, filename: opts.filename }); } catch (_) {} return cb ? _dl(opts, cb) : _dl(opts); }; } catch (_) {}
+try { const _dl = chrome.downloads.download.bind(chrome.downloads); chrome.downloads.download = async (opts, cb) => { try { if (opts && opts.filename && /^(blob:|data:)/i.test(opts.url || '')) await chrome.runtime.sendMessage({ action: 'ZH_DL_NAME', url: opts.url, filename: opts.filename }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } return cb ? _dl(opts, cb) : _dl(opts); }; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 async function zhSaveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const cleanup = () => setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -254,7 +254,7 @@ async function zhSaveBlob(blob, filename) {
       cleanup();
       return;
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   const a = document.createElement('a');
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click();
@@ -385,7 +385,7 @@ function extractYouTubeId(url) {
         if (idx >= 0 && parts[idx + 1]) return parts[idx + 1];
       }
     }
-  } catch {}
+  } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
   return null;
 }
 
@@ -470,7 +470,7 @@ function scrapePageData() {
           const entries = Object.entries(JSON.parse(dynRaw));
           entries.sort((a, b) => (b[1]?.[0] || 0) - (a[1]?.[0] || 0));
           if (entries[0]?.[0]) src = entries[0][0];
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       src = upscaleAmazonUrl(abs(src));
       if (src && !/sprite|pixel|blank|placeholder|\.svg|logo|favicon|banner|\bicon\b/i.test(src)) addUnique(data.images, src);
@@ -502,7 +502,7 @@ function scrapePageData() {
           video.forEach(v => addUnique(data.videos, v.contentUrl || v.embedUrl || v.url || v.thumbnailUrl));
           Object.values(item).forEach(v => { if (v && typeof v === 'object') Array.isArray(v) ? stack.push(...v) : stack.push(v); });
         }
-      } catch {}
+      } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
     });
 
     const h = location.hostname.toLowerCase();
@@ -536,7 +536,7 @@ function scrapePageData() {
         const norm = upscaleAmazonUrl(abs(rawUrl));
         // Canonical key: hostname + path with ALL size tokens stripped
         let key = norm;
-        try { key = new URL(norm).hostname + new URL(norm).pathname.replace(/\._[A-Z0-9_,]+_\./gi, '.').toLowerCase(); } catch (_) {}
+        try { key = new URL(norm).hostname + new URL(norm).pathname.replace(/\._[A-Z0-9_,]+_\./gi, '.').toLowerCase(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         if (amazonSeenKeys.has(key)) return;
         amazonSeenKeys.add(key);
         if (!data.images.includes(norm)) data.images.push(norm);
@@ -562,7 +562,7 @@ function scrapePageData() {
               if (url && typeof url === 'string' && url.startsWith('http')) addAmazonImg(url);
             });
             if (data.images.length > 0) return;
-          } catch (_) {}
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         }
 
         // Regex fallback scoped to "initial" block only
@@ -612,7 +612,7 @@ function scrapePageData() {
             const dfsWm = (o, d) => { if (!o || typeof o !== 'object' || d > 6) return false; if (o.imageInfo && Array.isArray(o.imageInfo.allImages)) return extractWm(o.imageInfo); for (const v of Object.values(o)) { if (v && typeof v === 'object' && dfsWm(v, d + 1)) return true; } return false; };
             dfsWm(wmNd, 0);
           }
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
 
       // Strategy 2: DOM fallback
@@ -643,7 +643,7 @@ function scrapePageData() {
             const dfsSc = (o, d) => { if (!o || typeof o !== 'object' || d > 6) return false; if (extractSc(o.assets)) return true; for (const v of Object.values(o)) { if (v && typeof v === 'object' && dfsSc(v, d + 1)) return true; } return false; };
             dfsSc(scNd, 0);
           }
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       // Strategy 2: DOM fallback
       if (data.images.length === 0) {
@@ -727,7 +727,7 @@ async function saveUIState() {
         theme: State.theme
       }
     });
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 async function refresh() {
@@ -848,7 +848,7 @@ function updateHeaderCount() {
   const el = $('totalCount');
   if (!el) return;
   // Header pill = products in the Library (master sheet), not the legacy links store.
-  getMasterRows().then(rows => { el.textContent = String(rows.length); }).catch(() => {});
+  getMasterRows().then(rows => { el.textContent = String(rows.length); }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 }
 
 function updateStatsDashboard() {
@@ -3047,16 +3047,16 @@ async function zhLibLoad() {
     const r = await chrome.storage.local.get(['zhPromptLib', 'zhPromptActive']);
     ZhLibCustom = Array.isArray(r?.zhPromptLib) ? r.zhPromptLib.filter(e => e && e.id && e.text) : [];
     ZhLibActive = zhLibGet(r?.zhPromptActive) ? r.zhPromptActive : 'scene';
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
-async function zhLibSave() { try { await chrome.storage.local.set({ zhPromptLib: ZhLibCustom.slice(-30), zhPromptActive: ZhLibActive }); } catch (_) {} }
+async function zhLibSave() { try { await chrome.storage.local.set({ zhPromptLib: ZhLibCustom.slice(-30), zhPromptActive: ZhLibActive }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
 function zhLibOptionsHtml(sel) { return zhLibAll().map(e => `<option value="${esc(e.id)}"${e.id === sel ? ' selected' : ''}>${esc(e.name)}</option>`).join(''); }
 // per-product number (1,2,3…) so "alternate" really alternates between products
 function zhProductOrdinal(queueOrItems, product) {
   const ids = []; for (const q of queueOrItems) { const id = (q.product || q).id; if (!ids.includes(id)) ids.push(id); }
   return ids.indexOf((product || {}).id);
 }
-zhLibLoad().then(() => { try { zhLibRenderSel(); } catch (_) {} });
+zhLibLoad().then(() => { try { zhLibRenderSel(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } });
 function zhLibRenderSel() {
   const s = $('temuAiImgPromptSel'); if (!s) return;
   s.innerHTML = zhLibOptionsHtml(ZhLibActive);
@@ -3069,7 +3069,7 @@ function zhLibRenderSel() {
     s.addEventListener('change', async () => {
       const e = zhLibGet(s.value); if (!e) return;
       ZhLibActive = e.id; await zhLibSave();
-      const ta = $('temuAiImgPromptInp'); if (ta && (!e.mode || e.mode === 'background')) { ta.value = e.text; chrome.storage.local.set({ zhunterAiImagePrompt: e.text }).catch(() => {}); }   // pack / improve entries only choose the task, they never overwrite the background prompt
+      const ta = $('temuAiImgPromptInp'); if (ta && (!e.mode || e.mode === 'background')) { ta.value = e.text; chrome.storage.local.set({ zhunterAiImagePrompt: e.text }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }   // pack / improve entries only choose the task, they never overwrite the background prompt
       zhLibRenderSel(); toast('✓ Prompt: ' + e.name, 'ok');
     });
     $('temuAiImgPromptSaveBtn')?.addEventListener('click', async () => {
@@ -3085,7 +3085,7 @@ function zhLibRenderSel() {
       const cur = zhLibGet(ZhLibActive); if (!cur || cur.builtin) return;
       if (!window.confirm('Delete prompt "' + cur.name + '"?')) return;
       ZhLibCustom = ZhLibCustom.filter(e => e.id !== cur.id); ZhLibActive = 'scene'; await zhLibSave();
-      const ta = $('temuAiImgPromptInp'); if (ta) { ta.value = DEFAULT_AI_COMMERCIAL_PROMPT; chrome.storage.local.set({ zhunterAiImagePrompt: ta.value }).catch(() => {}); }
+      const ta = $('temuAiImgPromptInp'); if (ta) { ta.value = DEFAULT_AI_COMMERCIAL_PROMPT; chrome.storage.local.set({ zhunterAiImagePrompt: ta.value }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }
       zhLibRenderSel();
     });
   };
@@ -3114,8 +3114,8 @@ async function focusOrOpenFlowTab() {
     await chrome.tabs.update(targetTab.id, { active: true });
     try {
       await chrome.scripting.executeScript({ target: { tabId: targetTab.id }, files: ['flow_automation.js'] });
-    } catch (_) {}
-    try { await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { await chrome.tabs.sendMessage(targetTab.id, { action: 'ZH_FLOW_EXECUTE' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return 'focused';
   }
   await zhAiNewTab('https://flow.google.com');
@@ -3134,7 +3134,7 @@ async function toFlowSafeDataUrl(dataUrl) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(bmp, 0, 0);
-    try { bmp.close(); } catch (_) {}
+    try { bmp.close(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return c.toDataURL('image/jpeg', 0.95);
   } catch (e) {
     console.warn('[ZHunter] Image convert for Flow failed:', e);
@@ -3154,7 +3154,7 @@ function flowPrefetchImage(src) {
       try {
         const resp = await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
         if (resp?.success && resp.base64) b64 = resp.base64;
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
     return b64 ? await toFlowSafeDataUrl(b64) : null;
   })();
@@ -3256,13 +3256,13 @@ function _productRowsById(productId) {
     for (const it of (ZhStudio?.items || [])) {
       if (it?.product?.id === productId && !out.includes(it.product)) out.push(it.product);
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   // v9.10.1 — the stepper's own product objects (e.g. Library rows loaded straight from storage)
   try {
     for (const q of (TemuImgStepper?.queue || [])) {
       if (q?.product?.id === productId && !out.includes(q.product)) out.push(q.product);
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return out;
 }
 
@@ -3311,7 +3311,7 @@ function zhSetEditedImage(row, idx, newUrl, mode = 'record') {
   const current = row.images[idx];
   const oldUrl = _imgEntryUrl(current);
   if (oldUrl === newUrl) return 0;
-  try { zhHistApply(row, oldUrl, newUrl, mode); } catch (_) {}
+  try { zhHistApply(row, oldUrl, newUrl, mode); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   row.images = row.images.slice();
   let shift = 0;
   if (idx === 0 && oldUrl) {
@@ -3341,7 +3341,7 @@ function zhShiftImageEditors(productId, delta) {
     for (const q of TemuImgStepper.queue || []) {
       if (q.product?.id === productId) q.imgIndex = move(q.imgIndex);
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   try {
     for (const it of ZhStudio.items || []) {
       if (it.product?.id !== productId) continue;
@@ -3355,7 +3355,7 @@ function zhShiftImageEditors(productId, delta) {
       it.pasteSel = new Set([...(it.pasteSel || [])].filter(i => delta > 0 || i !== 1).map(move));
       it.active = move(it.active);
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 // Replace ONLY if the slot still holds `expectedUrl`. Returns true if anything changed.
@@ -3419,7 +3419,7 @@ function zhLibPatch(fn) {
     let lastErr = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 600)); try { await msg({ action: 'PING' }); } catch (_) {} }
+        if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 600)); try { await msg({ action: 'PING' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
         const saved = await getMasterRows();
         if (fn(saved)) await setMasterRows(saved);
         return;
@@ -3430,7 +3430,7 @@ function zhLibPatch(fn) {
     }
     throw lastErr;
   });
-  _zhLibChain = p.catch(() => {});
+  _zhLibChain = p.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   return p;
 }
 
@@ -3564,7 +3564,7 @@ async function uploadImageToPublicHost(source) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       let b64 = cleanB64;
       if (attempt > 1) {
-        try { const smaller = await compressBase64Image(processedSource, attempt === 2 ? 1200 : 1000, 0.85); b64 = (smaller.split(',')[1] || cleanB64); } catch (_) {}
+        try { const smaller = await compressBase64Image(processedSource, attempt === 2 ? 1200 : 1000, 0.85); b64 = (smaller.split(',')[1] || cleanB64); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       const postData = 'key=6d207e02198a847aa98d0a2a901485a5&action=upload&source=' + encodeURIComponent(b64) + '&format=json';
       const controller = new AbortController();
@@ -3637,11 +3637,11 @@ let _zhAiWinId = null, _zhAiWinTold = false;
 async function zhAiWindowId(create = false, firstTabId = null) {
   const ok = async id => { try { const w = await chrome.windows.get(id); return w && w.type === 'normal' ? w.id : null; } catch (_) { return null; } };
   if (_zhAiWinId != null && await ok(_zhAiWinId) != null) return _zhAiWinId;
-  try { const st = (await chrome.storage.local.get('zhAiWindowId')).zhAiWindowId; if (st != null && await ok(st) != null) return (_zhAiWinId = st); } catch (_) {}
+  try { const st = (await chrome.storage.local.get('zhAiWindowId')).zhAiWindowId; if (st != null && await ok(st) != null) return (_zhAiWinId = st); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   if (!create) return null;
   const w = await chrome.windows.create({ ...(firstTabId != null ? { tabId: firstTabId } : { url: 'about:blank' }), focused: false, state: 'normal', width: 1000, height: 820 });
   _zhAiWinId = w.id;
-  try { await chrome.storage.local.set({ zhAiWindowId: w.id }); } catch (_) {}
+  try { await chrome.storage.local.set({ zhAiWindowId: w.id }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   if (!_zhAiWinTold) { _zhAiWinTold = true; toast('ZHunter AI window opened — keep it visible (side by side or on a 2nd screen), do not minimize it', 'info'); }
   return w.id;
 }
@@ -3673,7 +3673,7 @@ async function zhAiNewTab(url) {
 async function gptEnsureSlot(S, idx) {
   // one at a time: two workers must never pick the same ChatGPT tab
   S._slotLock = (S._slotLock || Promise.resolve()).then(() => gptEnsureSlotInner(S, idx)).catch(e => { throw e; });
-  const r = S._slotLock; S._slotLock = r.catch(() => {});
+  const r = S._slotLock; S._slotLock = r.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   return r;
 }
 async function gptEnsureSlotInner(S, idx) {
@@ -3687,7 +3687,7 @@ async function gptEnsureSlotInner(S, idx) {
   const tabs = (await chrome.tabs.query({ url: gem ? '*://gemini.google.com/*' : '*://chatgpt.com/*' })).filter(t => !used.has(t.id));
   // Gemini: all tabs of one run must use the SAME Google account (the one of the first slot / the active tab)
   let refUrl = '';
-  if (gem) { for (const x of S.gptSlots) { if (x?.tabId) { const t0 = await chrome.tabs.get(x.tabId).catch(() => null); if (t0?.url) { refUrl = t0.url; break; } } } }
+  if (gem) { for (const x of S.gptSlots) { if (x?.tabId) { const t0 = await chrome.tabs.get(x.tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null)); if (t0?.url) { refUrl = t0.url; break; } } } }
   const acct = (u) => (/^https:\/\/gemini\.google\.com\/(u\/\d+)\//i.exec(u || '') || [])[1] || '';
   let pool = tabs;
   if (gem && refUrl) { const same = tabs.filter(t => acct(t.url) === acct(refUrl)); pool = same; }
@@ -3706,7 +3706,7 @@ async function gptEnsureSlotInner(S, idx) {
 // Google's "unusual traffic / I'm not a robot" page — only the person can solve it (the extension never touches CAPTCHAs)
 const ZH_SORRY_RE = /^https:\/\/(www\.)?google\.[a-z.]+\/sorry\//i;
 async function zhCheckCaptcha(tabId) {
-  const t = await chrome.tabs.get(tabId).catch(() => null);
+  const t = await chrome.tabs.get(tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
   if (t && ZH_SORRY_RE.test(t.url || '')) throw Object.assign(new Error('Google is asking "I\'m not a robot" in the Gemini tab — solve it yourself there, wait a few minutes, then press Retry failed'), { limit: true, captcha: true });
 }
 // Gemini: keep the Google account the tab is using (gemini.google.com/u/1/app → account #2), never fall back to /app (= account #1)
@@ -3727,18 +3727,18 @@ async function gemRotateAccount(S, tabId) {
       const url = 'https://gemini.google.com/' + (n ? 'u/' + n + '/' : '') + 'app';
       await chrome.tabs.update(tabId, { url });
       await gptWaitTab(tabId, 30000);
-      const t2 = await chrome.tabs.get(tabId).catch(() => null);
+      const t2 = await chrome.tabs.get(tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
       const ok = t2 && (n ? new RegExp('^https://gemini\\.google\\.com/u/' + n + '/').test(t2.url || '') : /^https:\/\/gemini\.google\.com\/app/i.test(t2.url || ''));
       if (ok) { S._gemRotated = true; await sleepMs(1500); return n + 1; }
       S._gemLimited.add(n);   // not signed in / redirected to the sign-in page → skip this number
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return 0;
 }
 async function gptWaitTab(tabId, ms = 40000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    const t = await chrome.tabs.get(tabId).catch(() => null);
+    const t = await chrome.tabs.get(tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
     if (!t) return false;
     if (t.status === 'complete') { await sleepMs(2500); return true; }
     await sleepMs(500);
@@ -3749,7 +3749,15 @@ async function gptWaitTab(tabId, ms = 40000) {
 // Gemini: attach image + prompt in this tab, press Send, wait for the NEW generated image
 // v9.15 — Chrome freezes Gemini tabs that sit in the background: the image never finishes until the tab is opened.
 // While waiting, bring the tab forward for a few seconds (one tab at a time), then give focus back.
+// "Background mode" = Settings → "AI images: pause when the screen is locked" is OFF (Chrome runs with the background switches).
+// Then hidden tabs keep working, so tabs are NOT brought to the front one by one (that made 3 tabs work like 1).
+let zhBgMode = false;
+try {
+  chrome.storage.local.get(['zhLockPause'], x => { zhBgMode = x?.zhLockPause === false; });
+  chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.zhLockPause) zhBgMode = ch.zhLockPause.newValue === false; });
+} catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 async function gemPeekTab(S, tabId, hold = 3500) {
+  if (zhBgMode) return;   // background switches: the tab works without being in front
   if (S._peekBusy) return;
   S._peekBusy = true;
   try {
@@ -3758,8 +3766,8 @@ async function gemPeekTab(S, tabId, hold = 3500) {
     if (prev && prev.id === tabId) return;   // already in front
     await chrome.tabs.update(tabId, { active: true });
     await sleepMs(hold);
-    if (prev?.id != null) await chrome.tabs.update(prev.id, { active: true }).catch(() => {});
-  } catch (_) {} finally { S._peekBusy = false; }
+    if (prev?.id != null) await chrome.tabs.update(prev.id, { active: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } finally { S._peekBusy = false; }
 }
 async function gemRunOnTab(S, tabId, b64, text, onNote) {
   let aborted = false; const abort = () => { aborted = true; };
@@ -3783,7 +3791,7 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     while (Date.now() < end) {
       if (aborted) throw Object.assign(new Error('stopped'), { aborted: true });
       await zhCheckCaptcha(tabId);
-      if (Date.now() - t0 > 25000 && Date.now() - (S._gemPeekAt?.[tabId] || 0) > 30000) { (S._gemPeekAt = S._gemPeekAt || {})[tabId] = Date.now(); onNote?.('opening the Gemini tab for a moment so it keeps working…'); await gemPeekTab(S, tabId); }
+      if (!zhBgMode && Date.now() - t0 > 25000 && Date.now() - (S._gemPeekAt?.[tabId] || 0) > 30000) { (S._gemPeekAt = S._gemPeekAt || {})[tabId] = Date.now(); onNote?.('opening the Gemini tab for a moment so it keeps working…'); await gemPeekTab(S, tabId); }
       const g = await manualSend(tabId, { action: 'ZH_GEM_GRAB_LATEST', fresh: true, waitMs: 8000 }, 'gemini_automation.js');
       if (g?.limit) {
         // v9.15 — limit on this Google account → move this tab to the next account (/u/N+1) and send again
@@ -3793,10 +3801,12 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
         rotated = true; break;
       }
       if (g?.gemErr) { gemErr = true; break; }
+      // Gemini finished without a picture → this chat is "stuck": the runner sends the image again in a NEW chat
+      if (g?.noImage) { if (S.gptSlots) S.gptSlots.forEach(x => { if (x?.tabId === tabId) x.n = Infinity; }); throw new Error('Gemini answered without a picture — trying again in a new chat'); }
       if (g?.ok && g.dataUrl) {
         // v9.15 — big PNG results → high-quality JPEG (0.95, never shrunk below 4096px) to save memory
         if (/^data:image\/png/i.test(g.dataUrl) && g.dataUrl.length > 700000) {
-          try { const j = await compressBase64Image(g.dataUrl, 4096, 0.95); if (j && /^data:image\/jpeg/i.test(j) && j.length < g.dataUrl.length) g.dataUrl = j; } catch (_) {}
+          try { const j = await compressBase64Image(g.dataUrl, 4096, 0.95); if (j && /^data:image\/jpeg/i.test(j) && j.length < g.dataUrl.length) g.dataUrl = j; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         }
         onNote?.(`image received (${Math.round(g.dataUrl.length / 1024)} KB) — saving…`); console.log('[ZHunter] Gemini image received', Math.round(g.dataUrl.length / 1024), 'KB after', Math.round((Date.now() - t0) / 1000), 's'); return g.dataUrl; }
       await sleepMs(1500);
@@ -3809,19 +3819,20 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     throw new Error('Gemini image did not appear in time');
   } finally { S.gptAborts?.delete(abort); }
 }
-async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
+async function gptSendAndWait(S, idx, b64, prompt, onNote, setup, item) {
+  if (zhIsFlow(S)) return flowSendAndWait(S, idx, b64, prompt, onNote, item);   // Flow: 2 tabs, each in its own project
   const slot = await gptEnsureSlot(S, idx);
   await zhCheckCaptcha(slot.tabId);   // stop at once instead of reloading a page that shows the robot check
   const id = 'gi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const key = 'zhGptRes_' + id;
   if (slot.n >= (setup ? Math.max(GPT_CHAT_EVERY, setup.every) : GPT_CHAT_EVERY)) {
     onNote?.('opening a new chat…');
-    const curUrl = (await chrome.tabs.get(slot.tabId).catch(() => null))?.url || '';
-    await chrome.tabs.update(slot.tabId, { url: zhIsGem(S) ? gemHomeFor(curUrl) : 'https://chatgpt.com/', active: true });
+    const curUrl = (await chrome.tabs.get(slot.tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null)))?.url || '';
+    await chrome.tabs.update(slot.tabId, { url: zhIsGem(S) ? gemHomeFor(curUrl) : 'https://chatgpt.com/', active: !zhBgMode });
     await sleepMs(800);
     await gptWaitTab(slot.tabId);
     slot.n = 0;
-  } else await chrome.tabs.update(slot.tabId, { active: true }).catch(() => {});
+  } else if (!zhBgMode) await chrome.tabs.update(slot.tabId, { active: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });   // background mode: no tab switching
   if (zhIsGem(S) && typeof prompt === 'string') prompt = prompt.split(ZH_GPT_IMPROVE_PROMPT).join(ZH_GEM_IMPROVE_PROMPT);   // v9.15 — Gemini needs a more direct, scene-style wording
   let text;
   if (setup) {   // rules once per chat, later messages = just the image (full prompt again every `every` images)
@@ -3838,7 +3849,7 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     const fin = (fn, v) => {
       if (done) return; done = true;
       chrome.storage.onChanged.removeListener(lis); clearTimeout(to); S.gptAborts?.delete(abort);
-      chrome.storage.local.remove([key]).catch(() => {});
+      chrome.storage.local.remove([key]).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
       fn(v);
     };
     const lis = (ch, area) => {
@@ -3855,13 +3866,102 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup) {
     (async () => {
       const job = { id, imgBase64: b64, prompt: text };
       for (let t = 0; t < 3 && !done; t++) {
-        try { const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_GPT_IMG_RUN', job }); if (r?.ok) return; } catch (_) {}
-        try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['gpt_automation.js'] }); } catch (_) {}
+        try { const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_GPT_IMG_RUN', job }); if (r?.ok) return; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['gpt_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         await sleepMs(1500);
       }
       fin(reject, new Error('Could not reach the ChatGPT tab — refresh it (F5) once'));
     })();
   });
+}
+
+// ═══ 20 Oct 2026 — Flow with 2 tabs (user's choice) ═══
+// Each Flow tab is its own "slot": tab A = your open Flow tab, tab B = a second Flow window (own window, so Chrome does not
+// slow it down). Each tab works in its OWN project, one image at a time, and its result comes back under its own job id
+// (storage "zhFlowRes_<id>"), so a picture can never land on the wrong product. "Unusual activity": that tab waits 60 s,
+// starts a new project and tries the image once more — max FLOW_NP_MAX times per run, then the run stops.
+const FLOW_TABS = 2;
+const zhIsFlow = (S) => (S?.curEngine || S?.engine) === 'flow' && !!S?.pool;
+const zhEngName = (S) => { const e = S?.curEngine || S?.engine; return e === 'gemini' ? 'Gemini' : e === 'flow' ? 'Flow' : 'ChatGPT'; };
+async function flowEnsureSlot(S, idx) {
+  S.gptSlots = S.gptSlots || [];
+  const alive = async id => { try { const t = await chrome.tabs.get(id); return /^https:\/\/flow\.google\.com\//i.test(t.url || t.pendingUrl || '') ? t : null; } catch (_) { return null; } };
+  const slot = S.gptSlots[idx];
+  if (slot?.tabId && await alive(slot.tabId)) return slot;
+  const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
+  const free = (await chrome.tabs.query({ url: '*://flow.google.com/*' })).filter(t => !used.has(t.id));
+  let tab = free.find(t => t.active) || free[0] || null;
+  // background mode (Chrome with the background switches): hidden tabs keep working → all Flow tabs share ONE window
+  let homeWin = null;
+  if (!tab && zhBgMode) {
+    for (const x of S.gptSlots) { if (x?.tabId) { const t0 = await alive(x.tabId); if (t0) { homeWin = t0.windowId; break; } } }
+    if (homeWin == null) { const any = (await chrome.tabs.query({ url: '*://flow.google.com/*' }))[0]; if (any) homeWin = any.windowId; }
+  }
+  if (!tab && homeWin != null) {
+    tab = await chrome.tabs.create({ windowId: homeWin, url: 'https://flow.google.com/', active: false });
+    const end = Date.now() + 25000;
+    while (Date.now() < end) { await sleepMs(500); const x = await alive(tab.id); if (x?.status === 'complete') break; }
+    await sleepMs(2500);
+  } else if (!tab) {
+    // normal Chrome: a second Flow window beside the first one (not minimized — Chrome throttles hidden tabs)
+    const w = await chrome.windows.create({ url: 'https://flow.google.com/', focused: false, width: 1000, height: 820, left: 60 + idx * 40, top: 40 + idx * 40 });
+    tab = w.tabs?.[0] || (await chrome.tabs.query({ windowId: w.id }))[0];
+    const end = Date.now() + 25000;
+    while (Date.now() < end) { await sleepMs(500); const x = await alive(tab.id); if (x?.status === 'complete') break; }
+    await sleepMs(2500);
+  }
+  S.gptSlots[idx] = { tabId: tab.id, n: 0 };
+  return S.gptSlots[idx];
+}
+function flowSendAndWait(S, idx, b64, prompt, onNote, item) {
+  return (async () => {
+    const slot = await flowEnsureSlot(S, idx);
+    const id = newFlowJobId(), key = 'zhFlowRes_' + id;
+    const text = zhWithQuality(zhLibResolveText((prompt || '').trim() || await getSavedAiImagePrompt(), 0));
+    await chrome.storage.local.remove([key]).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+    return await new Promise((resolve, reject) => {
+      let done = false;
+      const fin = (fn, v) => {
+        if (done) return; done = true;
+        chrome.storage.onChanged.removeListener(lis); clearTimeout(to); S.gptAborts?.delete(abort);
+        chrome.storage.local.remove([key]).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+        fn(v);
+      };
+      const lis = (ch, area) => {
+        const r = area === 'local' ? ch[key]?.newValue : null;
+        if (!r) return;
+        if (r.status === 'working') { onNote?.(r.note || 'working…'); return; }
+        if (r.status === 'done' && r.newImgUrl) fin(resolve, r.newImgUrl);
+        else if (r.status === 'error') fin(reject, Object.assign(new Error(r.error || 'Flow failed'), { unusual: /unusual activity/i.test(r.error || '') }));
+      };
+      const abort = () => { chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_FLOW_CANCEL_DIRECT', jobId: id }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); fin(reject, Object.assign(new Error('stopped'), { aborted: true })); };
+      S.gptAborts = S.gptAborts || new Set(); S.gptAborts.add(abort);
+      const to = setTimeout(() => { chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_FLOW_CANCEL_DIRECT', jobId: id }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); fin(reject, new Error('Flow took too long (6 min)')); }, 6 * 60000);
+      chrome.storage.onChanged.addListener(lis);
+      (async () => {
+        const job = { jobId: id, imgBase64: b64, prompt: text, productTitle: item?.product?.title || '', productId: item?.product?.id || '', imageIndex: item?.imgIndex ?? 0, imgUrl: item?.imgUrl || '' };
+        for (let t = 0; t < 4 && !done; t++) {
+          try {
+            const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_FLOW_RUN_DIRECT', job });
+            if (r?.ok) return;
+            if (r?.busy) { onNote?.('tab still busy — waiting…'); await sleepMs(5000); continue; }
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+          try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['flow_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+          await sleepMs(2000);
+        }
+        fin(reject, new Error('Could not reach the Flow tab — refresh it (F5) once'));
+      })();
+    });
+  })();
+}
+// "unusual activity" in one Flow tab: wait, then a new project in THAT tab (counts towards FLOW_NP_MAX for the whole run)
+async function flowSlotNewProject(S, idx, onNote) {
+  if ((S.npCount || 0) >= FLOW_NP_MAX) return false;
+  S.npCount = (S.npCount || 0) + 1;
+  for (let s = FLOW_NP_WAIT_S; s > 0 && S.running; s--) { onNote?.(`Google "unusual activity" — new project in ${s}s (${S.npCount}/${FLOW_NP_MAX})`); await sleepMs(1000); }
+  const slot = S.gptSlots?.[idx];
+  if (slot?.tabId) { try { await chrome.tabs.update(slot.tabId, { url: 'https://flow.google.com/' }); await sleepMs(4000); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+  return S.running;
 }
 
 // v9.15 — after the run: archive (not delete) the ChatGPT chats this run created
@@ -3870,7 +3970,7 @@ async function gptArchiveChats(S) {
   if (!list.length || S.archiving) return;
   S.archiving = true; S.gptChats.clear();
   let tabId = (S.gptSlots || []).find(x => x?.tabId)?.tabId;
-  if (!(tabId && await chrome.tabs.get(tabId).catch(() => null))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
+  if (!(tabId && await chrome.tabs.get(tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null)))) tabId = (await chrome.tabs.query({ url: '*://chatgpt.com/*' }))[0]?.id;
   if (!tabId) return;
   // safety: a chat is archived only if EVERY message in it is one of our own prompts (never a chat you wrote in yourself)
   const expect = [...new Set([S.prompt, ZH_SETUP_SHORT, ...(S.queue || []).flatMap(it => [it.prompt, it.setup?.text, it.setup?.short, ...(it.stages || [])])].filter(Boolean).map(t => String(t).trim().slice(0, 30)))];
@@ -3883,14 +3983,14 @@ async function gptArchiveChats(S) {
       let r = null;
       for (let t = 0; t < 3 && !r?.ok; t++) {
         try { r = await chrome.tabs.sendMessage(tabId, { action: 'ZH_GPT_ARCHIVE', path: list[i], expect }); }
-        catch (_) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['gpt_automation.js'] }); } catch (_) {} await sleepMs(1500); }
+        catch (_) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['gpt_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } await sleepMs(1500); }
         if (r && !r.ok && /not the expected|not found/.test(r.error || '')) break;
       }
       if (r?.ok) ok++; else { bad++; console.log('[ZHunter] archive failed', list[i], r?.error); }
     } catch (_) { bad++; }
     await sleepMs(1500 + Math.random() * 2000);
   }
-  chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' }).catch(() => {});
+  chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   toast(`🗂 ChatGPT chats archived: ${ok}${bad ? ` · ${bad} could not be archived (archive them by hand)` : ''}`, bad ? 'warn' : 'ok');
 }
 
@@ -3902,7 +4002,7 @@ function gptPoolUiInner(light) {
   const pg = $('temuStepProg'); if (pg) pg.style.width = Math.round(done / Math.max(1, total) * 100) + '%';
   const bd = $('temuStepBadge'); if (bd) bd.textContent = `${done} / ${total}`;
   // the same runner serves ChatGPT and Gemini — name the engine that is really working (it always said "ChatGPT")
-  const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ${zhIsGem(S) ? 'Gemini' : 'ChatGPT'} · ${done}/${total}`;
+  const t = $('temuStepTitle'); if (t) t.textContent = `AI Image Studio · ${zhEngName(S)}${zhIsFlow(S) ? ` (${(S.gptSlots || []).filter(Boolean).length || FLOW_TABS} tabs)` : ''} · ${done}/${total}`;
   const cur = S.pool.cur;
   if (cur) {
     const im = $('temuStepImg'); if (im && im.getAttribute('src') !== cur.imgUrl) im.src = cur.imgUrl;
@@ -3910,17 +4010,18 @@ function gptPoolUiInner(light) {
     const sb = $('temuStepSub'); if (sb) sb.textContent = `Now: ${trunc(cur.product?.title || 'Product', 40)} · Image #${cur.imgIndex + 1}`;
   }
   const lines = S.pool.slotNote.map((n, i) => n ? `Tab ${'ABCDEF'[i]}: ${n}` : '').filter(Boolean);
-  if (!light) { try { temuStepResultsRender(); } catch (_) {} }   // the results list holds big images: rebuilding it every second made Chrome slow
+  if (!light) { try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }   // the results list holds big images: rebuilding it every second made Chrome slow
   temuStepSetStatus((S.paused ? '⏸ Paused — ' : '') + `✅ ${done}/${total} done${S.stats.skipped ? ` · ${S.stats.skipped} failed` : ''}` + (lines.length ? '\n' + lines.join('\n') : ''));
 }
 
 async function gptRunItem(S, idx, item) {
   const label = () => `image #${item.imgIndex + 1} · ${trunc(item.product.title || 'Product', 28)}`;
-  S.pool.cur = item; item.status = 'busy'; try { temuStepResultsRender(); } catch (_) {}
+  S.pool.cur = item; item.status = 'busy'; try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   let more = true;
   while (more && S.running) {
     const stageTxt = item.stages && item.stages.length > 1 ? ` (step ${item.stageIndex + 1}/${item.stages.length})` : '';
     let result = null, lastErr = null;
+    const lockAt = S.lockCount || 0;   // a screen lock during this image = not its fault (see zhLockPauseInit)
     for (let attempt = 0; attempt < 2 && S.running && !result; attempt++) {
       try {
         S.pool.slotNote[idx] = `${label()}${stageTxt} — sending…`; gptPoolUi();
@@ -3929,21 +4030,34 @@ async function gptRunItem(S, idx, item) {
         if (!b64) throw new Error('Image could not be downloaded');
         if (attempt > 0 && S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;   // retry in a fresh chat
         const tSend = Date.now();
-        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(true); }, item.setup);
+        result = await gptSendAndWait(S, idx, b64, (item.prompt || S.prompt || '').trim(), (n) => { S.pool.slotNote[idx] = `${label()}${stageTxt} — ${n}`; gptPoolUi(true); }, item.setup, item);
         item._tAi = Date.now() - tSend;
       } catch (e) {
         lastErr = e;
         if (e.aborted || e.limit) break;
+        // Flow "unusual activity": this tab waits, opens a new project and tries the same image again (limited per run)
+        if (e.unusual && zhIsFlow(S)) {
+          if (await flowSlotNewProject(S, idx, n => { S.pool.slotNote[idx] = `${label()} — ${n}`; gptPoolUi(true); })) { attempt = -1; continue; }
+          lastErr = Object.assign(new Error(`Google blocked Flow ${FLOW_NP_MAX + 1} times ("unusual activity") — run stopped. Wait a while, then press Retry failed`), { limit: true });
+          break;
+        }
       }
     }
     if (!S.running) return false;
     // v9.16 — daily counter: one generation made (or this account hit its limit)
-    if (result || (lastErr?.limit && !lastErr.captcha)) zhDailyKeyFor(zhIsGem(S) ? 'gemini' : 'chatgpt', S.gptSlots?.[idx]?.tabId).then(k => zhDailyCount(k, !result)).catch(() => {});
+    if (result || (lastErr?.limit && !lastErr.captcha)) zhDailyKeyFor(zhIsGem(S) ? 'gemini' : zhIsFlow(S) ? 'flow' : 'chatgpt', S.gptSlots?.[idx]?.tabId).then(k => zhDailyCount(k, !result)).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+    if (!result && !lastErr?.aborted && !lastErr?.limit && ((S.lockCount || 0) !== lockAt || S.lockPaused)) {
+      // failed while the screen was locked → back in the line (done again after unlocking), not counted as failed
+      (S.pool.redo = S.pool.redo || []).push(item); item.status = 'wait';
+      try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      S.pool.slotNote[idx] = `${label()} — screen was locked, will be done again`; gptPoolUi(true);
+      return false;
+    }
     if (!result) {
       if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; if (lastErr.captcha) S.captchaDown = true; else if (zhIsGem(S)) S.gemDown = true; }
-      S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) {}
+      S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       S.pool.failed.push(`${label()}: ${lastErr?.message || 'failed'}`);
-      toast(`${zhIsGem(S) ? 'Gemini' : 'ChatGPT'}: ${label()} failed —${lastErr?.message || 'error'}`, 'warn');
+      toast(`${zhEngName(S)}: ${label()} failed —${lastErr?.message || 'error'}`, 'warn');
       return false;
     }
     const tSave = Date.now();
@@ -3978,11 +4092,12 @@ async function gptPoolStart() {
   S.pool = { next: 0, finished: 0, slotNote: ['', '', '', '', '', ''], failed: [] };
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = 'none'; }
   const stEl = $('temuStepStatus'); if (stEl) stEl.style.whiteSpace = 'pre-line';
-  const n = gptTabsFor(S.queue.length);
+  const flow = S.engine === 'flow';
+  const n = flow ? Math.max(1, Math.min(FLOW_TABS, S.queue.length)) : gptTabsFor(S.queue.length);
   gptPoolUi();
   const workers = [];
-  for (let i = 0; i < n; i++) {   // reserve every tab first (tab B is opened here if only one ChatGPT tab exists)
-    try { await gptEnsureSlot(S, i); } catch (e) { console.log('[ZHunter] GPT slot error', e?.message || e); }
+  for (let i = 0; i < n; i++) {   // reserve every tab first (tab B is opened here if only one ChatGPT / Flow tab exists)
+    try { if (flow) await flowEnsureSlot(S, i); else await gptEnsureSlot(S, i); } catch (e) { console.log('[ZHunter] slot error', e?.message || e); }
   }
   for (let i = 0; i < n; i++) { workers.push(gptPoolWorker(S, i)); await sleepMs(2500 + Math.random() * 2500); }   // tab B starts a few seconds after tab A
   await Promise.all(workers);
@@ -3995,7 +4110,7 @@ async function gptPoolStart() {
     if (rest.length) { await zhHandoffToFlow(S, rest); return; }
   }
   if (S.gptDown) {
-    const who = zhIsGem(S) ? 'Gemini' : 'ChatGPT';
+    const who = zhEngName(S);
     toast(`${who}: ` + (S.pool.limitMsg || 'limit reached — try again later'), 'warn');
     temuStepSetStatus(`⚠️ ${who}: ` + (S.pool.limitMsg || 'limit reached — try again later') + '. Finished images are saved; press Retry failed later.', 'error');
     await sleepMs(1500);
@@ -4003,11 +4118,38 @@ async function gptPoolStart() {
   await temuStepFinish();
 }
 
+// 20 Oct 2026 — locked screen (Win+L): Chrome treats every window as hidden and stops drawing the Gemini / ChatGPT / Flow
+// pages, so images time out and clicks do nothing. The image run now pauses itself when the screen is locked and goes on
+// when you unlock; an image that failed during the lock is put back in the line instead of counting as failed.
+(function zhLockPauseInit() {
+  try {
+    if (!chrome.idle?.onStateChanged) return;
+    // Settings → "AI images: pause when the screen is locked" (zhLockPause, default ON). OFF when Chrome runs with the background switches.
+    let on = true;
+    chrome.storage.local.get(['zhLockPause'], x => { on = x?.zhLockPause !== false; const c = $('setLockPause'); if (c) c.checked = on; });
+    document.addEventListener('change', e => { if (e.target?.id === 'setLockPause') { on = !!e.target.checked; chrome.storage.local.set({ zhLockPause: on }); toast(on ? 'Image runs pause while the screen is locked' : 'Image runs keep going while locked (Chrome needs the background switches)', 'info'); } });
+    chrome.idle.onStateChanged.addListener(state => {
+      const S = TemuImgStepper; if (!S?.running) return;
+      if (!on && !S.lockPaused) return;
+      const pb = $('temuStepPauseBtn');
+      if (state === 'locked') {
+        S.lockCount = (S.lockCount || 0) + 1;
+        if (!S.paused && pb) { pb.click(); S.lockPaused = true; }
+        temuStepSetStatus('🔒 Screen locked — paused (Chrome does not draw AI pages while Windows is locked). It goes on when you unlock.', 'info');
+      } else if (state === 'active' && S.lockPaused) {
+        S.lockPaused = false;
+        if (S.paused && pb) pb.click();
+        toast('🔓 Unlocked — image editing goes on', 'ok');
+      }
+    });
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+})();
+
 // v9.15.1 — continue the unfinished images of a Gemini run in Flow (one at a time, same prompts / pack stages)
 async function zhHandoffToFlow(S, rest) {
   const doneBefore = S.stats?.done || 0;
   S.running = false; S.handoff = true;
-  try { await temuStepFinish(); } catch (_) {}   // closes the Gemini part quietly (no summary for a handoff)
+  try { await temuStepFinish(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }   // closes the Gemini part quietly (no summary for a handoff)
   rest.forEach(it => { it.status = 'wait'; it.jobId = null; it.done = false; it.tried = []; it.sentAt = null; it.continueStage = false; });
   TemuImgStepper = { queue: rest, currentIndex: 0, engine: 'flow', prompt: S.prompt || '', activeJobId: null, running: true, startedAt: Date.now(), stats: { done: 0, skipped: 0 }, fromGemini: doneBefore };
   zhImgQueueSave(TemuImgStepper);
@@ -4059,6 +4201,26 @@ function onFlowStatus(m) {
       if (current) current.sentAt = null;
       if (unusual && stepEng() === 'flow' && TemuImgStepper.engine !== 'auto') flowAutoNewProject();   // v9.12.6
       else if (temuStepFallback('Flow: ' + (m.text || 'error'))) { /* Auto engine moved on */ }
+      else if (current && TemuImgStepper.running) {
+        // 20 Oct 2026 — it used to wait here for you (37 min stuck on "Generation did not start"): now it tries the same image
+        // again by itself (2× after 20 s), then marks it failed and goes on — "Retry failed" brings it back later.
+        const S = TemuImgStepper;
+        current.autoRetry = (current.autoRetry || 0) + 1;
+        if (current.autoRetry <= 2) {
+          temuStepSetStatus(`⚠️ Flow: ${m.text || 'error'} — trying again in 20 s (${current.autoRetry}/2)…`, 'error');
+          const again = () => {
+            if (TemuImgStepper !== S || !S.running || S.queue[S.currentIndex] !== current || current.done || S.activeJobId) return;
+            if (S.paused) { setTimeout(again, 3000); return; }   // paused (also by a locked screen): wait for Resume
+            temuStepSendCurrent();
+          };
+          setTimeout(again, 20000);
+        } else {
+          current.status = 'failed'; S.stats.skipped++;
+          toast(`Flow: image failed 3× (${m.text || 'error'}) — skipped, press "Retry failed" later`, 'warn');
+          temuStepManualAttn(false);
+          temuStepAdvance();
+        }
+      }
       else { toast('Flow: ' + (m.text || 'error') + ' — use "Send Again", "Skip" or the Manual buttons below', 'warn'); temuStepManualAttn(true); }
     } else {
       toast('Flow: ' + (m.text || 'error'), 'warn');
@@ -4075,7 +4237,7 @@ async function _markFlowJobDone(jobId, newImgUrl) {
     if (cur && cur.jobId === jobId && !(cur.processed && cur.status === 'done')) {
       await chrome.storage.local.set({ pendingFlowAction: { ...cur, processed: true, status: 'done', newImgUrl: newImgUrl || cur.newImgUrl, finishedAt: Date.now(), by: 'panel' } });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 } // jobIds already applied (message + storage both deliver)
 async function onFlowResult(m) {
   if (!m?.jobId || FlowHandledResults.has(m.jobId)) return;
@@ -4155,7 +4317,7 @@ async function onFlowResult(m) {
     try {
       const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: m.newImgUrl });
       if (r?.success && r.base64) finalUrl = r.base64;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   if (!finalUrl) finalUrl = m.newImgUrl;
   const isPublic = /^https?:\/\//i.test(finalUrl) && !/flow-content\.google/i.test(finalUrl);
@@ -4249,14 +4411,14 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
     try {
       const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src });
       if (r?.success && r.base64) finalUrl = r.base64;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     if (finalUrl === src) finalUrl = (await uploadImageToPublicHost(src)) || src;
   }
   // v9.15x — final stage of a pack job: stamp the correct "N PACK" label ourselves (AI-drawn labels were often wrong)
   if (how === 'Auto' && current.packQty > 1 && (current.batchMode === 'pack' || current.batchMode === 'pack_background') && !(current.stages && current.stageIndex + 1 < current.stages.length) && /^data:image\//i.test(finalUrl)) {
     finalUrl = await zhStampPackLabel(finalUrl, current.packQty, current.packLabel !== false);
   }
-  if (/^data:image\//i.test(finalUrl) && finalUrl.length > 700000) { try { finalUrl = await zsShrinkForSend(finalUrl); } catch (_) {} }   // big PNG from the AI tool → JPEG: saves and uploads much faster
+  if (/^data:image\//i.test(finalUrl) && finalUrl.length > 700000) { try { finalUrl = await zsShrinkForSend(finalUrl); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }   // big PNG from the AI tool → JPEG: saves and uploads much faster
   const pid = current.product?.id, idx = current.imgIndex;
   const oldImg = _imgEntryUrl(current.product?.images?.[idx]);
   let ok = await replaceProductImage(pid, idx, finalUrl, null);
@@ -4282,8 +4444,8 @@ async function temuStepApplyManualImage(src, how = 'manual', item = null) {
     TemuImgStepper.stats.done++;
   }
   current._more = !!moreStages;
-  try { temuStepResultsRender(); } catch (_) {}
-  clearTimeout(window._zhRvT); window._zhRvT = setTimeout(() => { try { temuRenderReview(); } catch (_) {} }, 300);   // redraw the list later (it used to block every image)
+  try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  clearTimeout(window._zhRvT); window._zhRvT = setTimeout(() => { try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 300);   // redraw the list later (it used to block every image)
   toast(`✓ ${trunc(current.product?.title || 'Product', 30)} · Image #${idx + 1} replaced (${how})`, 'ok');
 
   // data: image → public link in the background (Temu needs a URL)
@@ -4410,7 +4572,7 @@ const ZH_ENG = {
   gemini: { name: 'Gemini', url: '*://gemini.google.com/*', home: 'https://gemini.google.com/app', file: 'gemini_automation.js' }
 };
 let zhManualEng = '';
-try { chrome.storage.local.get('zhManualEng').then(r => { if (r?.zhManualEng && ZH_ENG[r.zhManualEng]) { zhManualEng = r.zhManualEng; temuStepManualLabels(); } }); } catch (_) {}
+try { chrome.storage.local.get('zhManualEng').then(r => { if (r?.zhManualEng && ZH_ENG[r.zhManualEng]) { zhManualEng = r.zhManualEng; temuStepManualLabels(); } }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 function temuStepManualEngine() {
   if (zhManualEng && ZH_ENG[zhManualEng]) return zhManualEng;
   const e = TemuImgStepper?.engine;
@@ -4436,8 +4598,8 @@ function temuStepManualApply(src, how) {
   return temuStepApplyManualImage(src, how, item);
 }
 async function manualSend(tabId, message, file) {
-  try { const r = await chrome.tabs.sendMessage(tabId, message); if (r) return r; } catch (_) {}
-  try { await chrome.scripting.executeScript({ target: { tabId }, files: [file] }); } catch (_) {}
+  try { const r = await chrome.tabs.sendMessage(tabId, message); if (r) return r; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: [file] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   await sleepMs(900);
   try { return (await chrome.tabs.sendMessage(tabId, message)) || { ok: false, error: 'no answer from the tab' }; } catch (e) { return { ok: false, error: e?.message || 'tab not reachable — refresh it (F5)' }; }
 }
@@ -4456,7 +4618,7 @@ async function manualPickTab(eng, create) {
 }
 async function manualOpen(eng) {
   const tab = await manualPickTab(eng, false);
-  if (tab) { await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {}); }
+  if (tab) { await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }
   else await chrome.tabs.create({ url: ZH_ENG[eng].home, active: true });
 }
 // Photo-quality line added to EVERY image prompt (auto + manual, all engines) for sharper results.
@@ -4464,11 +4626,11 @@ async function manualOpen(eng) {
 // v2 (19 Oct): protects the printed text / colours and avoids the "AI look"; no studio / depth-of-field words, so scene backgrounds still fit
 const ZH_IMG_QUALITY = 'Photo quality: the product is in sharp focus edge to edge, with crisp outlines and fine texture detail. All printed text, logos and labels on the pack stay exactly the same, sharp and readable. True-to-life colours, clean even lighting without harsh glare, no motion blur, no AI smoothing or plastic look, no artefacts — high-resolution, professional e-commerce photo.';
 let zhImgQualityOn = true;
-try { chrome.storage.local.get(['zhImgQualityOn'], st => { if (typeof st?.zhImgQualityOn === 'boolean') zhImgQualityOn = st.zhImgQualityOn; const c = document.getElementById('zhImgQualityChk'); if (c) c.checked = zhImgQualityOn; }); } catch (_) {}
+try { chrome.storage.local.get(['zhImgQualityOn'], st => { if (typeof st?.zhImgQualityOn === 'boolean') zhImgQualityOn = st.zhImgQualityOn; const c = document.getElementById('zhImgQualityChk'); if (c) c.checked = zhImgQualityOn; }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 document.addEventListener('change', e => {
   if (e.target?.id !== 'zhImgQualityChk') return;
   zhImgQualityOn = !!e.target.checked;
-  try { chrome.storage.local.set({ zhImgQualityOn }); } catch (_) {}
+  try { chrome.storage.local.set({ zhImgQualityOn }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 });
 function zhWithQuality(p) {
   const s = String(p || '').split('\n\n' + ZH_IMG_QUALITY).join('').trim();
@@ -4481,7 +4643,7 @@ async function manualPasteIn(eng, imgs, prompt) {
     if (eng === 'chatgpt') {
       const tab = await manualPickTab('chatgpt', true);
       if (!tab) return { ok: false, error: 'could not open ChatGPT' };
-      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
       for (let i = 0; i < imgs.length; i++) {
         const r = await manualSend(tab.id, { action: 'ZH_GPT_MANUAL_ATTACH', imgBase64: imgs[i], prompt: i === imgs.length - 1 ? prompt : '' }, 'gpt_automation.js');
         if (!r?.ok) return { ok: false, error: r?.error || 'image not attached' };
@@ -4492,7 +4654,7 @@ async function manualPasteIn(eng, imgs, prompt) {
     if (eng === 'gemini') {
       const tab = await manualPickTab('gemini', true);
       if (!tab) return { ok: false, error: 'could not open Gemini' };
-      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      await chrome.tabs.update(tab.id, { active: true }); if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
       const r = await manualSend(tab.id, { action: 'ZH_GEM_MANUAL_ATTACH', imgs, prompt }, 'gemini_automation.js');
       if (!r?.ok) return { ok: false, error: r?.error || 'image not attached' };
       return { ok: true };
@@ -4528,7 +4690,7 @@ async function temuStepReplaceNow() {
   const t = temuStepTarget();
   if (!t) { toast('Tap an image in Results first', 'warn'); return; }
   let src = null;
-  try { src = await zsReadClipboardImage(); } catch (_) {}
+  try { src = await zsReadClipboardImage(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   if (!src) { toast('No image in the clipboard — taking the newest from ' + ZH_ENG[temuStepManualEngine()].name, 'info'); return temuStepGrabLatest(); }
   await temuStepManualApply(src, 'Replace');
 }
@@ -4538,11 +4700,11 @@ function temuStepStopAuto() {
   S.stopped = true;
   temuStepCancelActiveJob();
   S.running = false; S.paused = false;
-  try { zhStepTimerStop(); } catch (_) {}
+  try { zhStepTimerStop(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   for (const it of S.queue) if (it.status === 'busy') it.status = 'wait';
   temuStepSetStatus(`⏹ Stopped — ${S.stats?.done || 0}/${S.queue.length} images replaced and saved. Tap an image below to Redo, Revert or Replace by hand.`, 'info');
   temuStepResultsRender();
-  temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {});
+  temuGetQueuedRows().then(temuUpdateImgEditCount).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 }
 const TSP_ST = { wait: '⏳ waiting', busy: '⚙ working', done: '✓ done', failed: '✗ failed', skipped: '⏭ skipped', reverted: '↩ original' };
 let _tspResT = null;
@@ -4562,7 +4724,7 @@ async function zhDailyLoad() {
 // key for the engine + account working in this tab: Gemini /u/N → "gemini#N+1", ChatGPT → "chatgpt", Flow → "flow"
 async function zhDailyKeyFor(engine, tabId) {
   if (engine !== 'gemini' || !tabId) return engine;
-  const t = await chrome.tabs.get(tabId).catch(() => null);
+  const t = await chrome.tabs.get(tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
   const m = /^https:\/\/gemini\.google\.com\/u\/(\d+)\//i.exec(t?.url || '');
   return 'gemini#' + ((m ? parseInt(m[1], 10) : 0) + 1);
 }
@@ -4725,7 +4887,7 @@ async function temuStepRetryFailed() {
     S.running = false;
     const left = S.queue.filter(it => it.status === 'failed').length;
     temuStepSetStatus(left ? `⚠️ Retry finished — ${left} still failed (tap one to Redo or Replace by hand)` : '✅ Retry finished — all images done', left ? 'error' : 'ok');
-    temuStepResultsRender(); temuRenderReview().catch(() => {});
+    temuStepResultsRender(); temuRenderReview().catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
     return;
   }
   S.redoQueue = list.slice(); const first = S.redoQueue.shift();
@@ -4745,7 +4907,7 @@ async function temuStepRevert(item) {
   if (item.status === 'done' && S.stats.done > 0) S.stats.done--;
   item.newUrl = null; item.imgUrl = item.origUrl; item.status = 'reverted';
   temuStepResultsRender();
-  try { await temuRenderReview(); } catch (_) {}
+  try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   toast(`↩ ${trunc(item.product?.title || 'Product', 28)} · #${idx + 1} is the original again`, 'ok');
 }
 function temuStepBindResults() {
@@ -4777,7 +4939,7 @@ function temuStepBindResults() {
   const sel = $('temuStepManualEng');
   if (sel) {
     sel.value = temuStepManualEngine();
-    sel.onchange = () => { zhManualEng = sel.value; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); };
+    sel.onchange = () => { zhManualEng = sel.value; chrome.storage.local.set({ zhManualEng }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); temuStepManualLabels(); };
   }
   if (S) S.sel = null;
   temuStepManualLabels();
@@ -4826,7 +4988,7 @@ try {
         .catch(e => console.warn('[ZHunter] Replace from Flow (storage) error:', e));
     }
   });
-} catch (_) {}
+} catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
 chrome.runtime.onMessage.addListener((m) => {
   if (m?.action === 'ZH_FLOW_STATUS' || m?.action === 'ZH_REPLACE_IMAGE_FROM_FLOW') {
@@ -5191,7 +5353,7 @@ function initHuntPreviewModal() {
       // If user picked a custom category that's different from auto-detected,
       // patch it via UPDATE_LINK
       if (category && fastRes.link.category !== category) {
-        msg({ action: 'UPDATE_LINK', id: fastRes.link.id, updates: { category } }).catch(() => {});
+        msg({ action: 'UPDATE_LINK', id: fastRes.link.id, updates: { category } }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
       }
 
       closeHuntPreviewModal();
@@ -5200,7 +5362,7 @@ function initHuntPreviewModal() {
       toast('Product saved! 🛍️ Images loading in background…', 'ok');
 
       // Background enrichment (base64 images)
-      msg({ action: 'ENRICH_LINK', linkId: fastRes.link.id }).catch(() => {});
+      msg({ action: 'ENRICH_LINK', linkId: fastRes.link.id }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 
     } finally {
       const b = $('confirmHuntSaveBtn');
@@ -5344,7 +5506,7 @@ async function zhStorageScan() {
       if (k === 'sheet_state') sheet = { size: zhJsonBytes(v?.rows || []), n: v?.rows?.length || 0 };
       else files.push({ id: k, size: v?.size || v?.blob?.size || 0 });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   const hist = Array.isArray(all.temuUploadHistory) ? all.temuUploadHistory : [];
   const keepIds = new Set(hist.slice(0, 10).map(h => h.id));
   const oldFiles = files.filter(f => !keepIds.has(f.id));
@@ -5406,16 +5568,16 @@ async function zhStorageClean(pick) {
   }
   if (pick.has('files')) {
     const f = cat('files');
-    for (const id of f.ids) { try { await ZhFiles.del(id); } catch (_) {} }
+    for (const id of f.ids) { try { await ZhFiles.del(id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     await temuHistSerial(async () => { const list = await temuHistGet(); let ch = false; for (const h of list) if (f.ids.includes(h.id) && h.fileName) { delete h.fileName; delete h.fileSize; ch = true; } if (ch) await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r)); });
     done.push(`${f.ids.length} history files`);
   }
   if (pick.has('sheet')) {
     TemuSheetRows = null; TemuLast = null;
-    try { await ZhFiles.del('sheet_state'); } catch (_) {}
+    try { await ZhFiles.del('sheet_state'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const sel = $('temuSource'); const o = sel?.querySelector('option[value="sheet"]'); if (o) o.hidden = true;
     if (sel?.value === 'sheet') { sel.value = 'bulk'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
-    try { temuUpdateSrcInfo(); temuSyncSrcSeg(); } catch (_) {}
+    try { temuUpdateSrcInfo(); temuSyncSrcSeg(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     done.push('imported sheet');
   }
   if (pick.has('left')) { const l = cat('left'); if (l.keys.length) await chrome.storage.local.remove(l.keys); done.push(`${l.keys.length} leftovers`); }
@@ -5442,7 +5604,7 @@ function zhStorageInit() {
   });
   setTimeout(() => zhStorageRender().catch(e => console.warn('[ZHunter] storage scan', e)), 1500);   // after the whole panel script has loaded
 }
-function updateStorageDisplayGlobal() { $('spRefreshStorageBtn') && chrome.storage.local.getBytesInUse(null).then(b => { const el = $('spStorageDesc'); if (el) el.textContent = `${zhFmtBytes(b)} used`; }).catch(() => {}); }
+function updateStorageDisplayGlobal() { $('spRefreshStorageBtn') && chrome.storage.local.getBytesInUse(null).then(b => { const el = $('spStorageDesc'); if (el) el.textContent = `${zhFmtBytes(b)} used`; }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }
 
 function showConfirm(title, message, btnLabel, cb) {
   const tEl = $('confirmTitle');
@@ -5539,7 +5701,7 @@ function initSettingsGroups() {
   if (!body || body.dataset.grouped) return;
   body.dataset.grouped = '1';
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem('zh_set_groups') || '{}'); } catch {}
+  try { saved = JSON.parse(localStorage.getItem('zh_set_groups') || '{}'); } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
   const defaultOpen = new Set(['Appearance', 'Hunt', 'Visible Tabs']);
   body.querySelectorAll(':scope > .settings-lbl').forEach(lbl => {
     const set = lbl.nextElementSibling;
@@ -5559,7 +5721,7 @@ function initSettingsGroups() {
     det.addEventListener('toggle', () => {
       if (body.classList.contains('searching')) return;
       saved[name] = det.open;
-      try { localStorage.setItem('zh_set_groups', JSON.stringify(saved)); } catch {}
+      try { localStorage.setItem('zh_set_groups', JSON.stringify(saved)); } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
     });
   });
   const inp = $('setSearchInp');
@@ -5724,11 +5886,11 @@ function initSettingsPanel() {
         chrome.tabs.query({ active: true }, tabs => {
           (tabs || []).forEach(tab => {
             if (tab && tab.id) {
-              chrome.tabs.sendMessage(tab.id, { action: 'zhUpdateFrame', ...payload }).catch(() => {});
+              chrome.tabs.sendMessage(tab.id, { action: 'zhUpdateFrame', ...payload }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
             }
           });
         });
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     };
 
     const pf = $('zhPageFrameToggle');
@@ -5970,7 +6132,7 @@ const _groqKeyCooldowns = new Map();
 const _groqInvalidKeys = new Set(); // 401 keys stay disabled until the panel reloads
 function callGroqAPI(args) {
   const request = _groqRequestQueue.then(() => callGroqAPIRequest(args));
-  _groqRequestQueue = request.catch(() => {});
+  _groqRequestQueue = request.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   return request;
 }
 
@@ -6253,7 +6415,7 @@ function initGroqStudio() {
     let keys = [];
     try {
       keys = parseGroqKeys(textKeys);
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     if (!keys.length) {
       const cfg = await getGroqConfig();
       keys = cfg.allKeys || [];
@@ -6450,7 +6612,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         openHuntPreviewModal(scraped, fakeTab);
         toast('Right-click image hunt ready — review and save!', 'info');
       }
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }, 300);
 
   // Listen for background messages
@@ -6640,7 +6802,7 @@ function detectTabPlatform(url) {
         return isPlatformProductUrl(url, pat) ? info : null;
       }
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return null;
 }
 
@@ -6711,14 +6873,14 @@ function initBulkTab() {
   });
   $('bulkAutoCloseToggle')?.addEventListener('change', e => {
     BulkState.AUTO_CLOSE_TABS = !!e.target.checked;
-    msg({ action: 'UPDATE_SETTINGS', settings: { bulkAutoCloseTabs: BulkState.AUTO_CLOSE_TABS } }).catch(() => {});
+    msg({ action: 'UPDATE_SETTINGS', settings: { bulkAutoCloseTabs: BulkState.AUTO_CLOSE_TABS } }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   });
   // v9.5.0 — 'ZHunter' tab group toggle (on → abhi khule product tabs bhi group mein)
   $('bulkTabGroupToggle')?.addEventListener('change', async e => {
     BulkState.TAB_GROUP = !!e.target.checked;
-    await msg({ action: 'UPDATE_SETTINGS', settings: { bulkTabGroup: BulkState.TAB_GROUP } }).catch(() => {});
+    await msg({ action: 'UPDATE_SETTINGS', settings: { bulkTabGroup: BulkState.TAB_GROUP } }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
     if (BulkState.TAB_GROUP) {
-      const r = await msg({ action: 'GROUP_PRODUCT_TABS', all: true }).catch(() => null);
+      const r = await msg({ action: 'GROUP_PRODUCT_TABS', all: true }).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
       if (r?.success) toast(r.grouped ? `${r.grouped} product tab(s) → "ZHunter" group` : 'Product tabs already grouped', 'ok');
       else toast('Could not create tab group (' + (r?.reason || 'error') + ')', 'warn');
     }
@@ -6732,7 +6894,7 @@ function initBulkTab() {
     }
     BulkState.TAB_GROUP = d?.settings?.bulkTabGroup !== false;
     const g = $('bulkTabGroupToggle'); if (g) g.checked = BulkState.TAB_GROUP;
-  }).catch(() => {});
+  }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   $('bulkHuntStartBtn')?.addEventListener('click', () => startBulkHunt());
 
   // Master Sheet exports and actions.
@@ -7006,7 +7168,7 @@ function updateQueueSummary() {
   if (btn) btn.disabled = (checked === 0 || BulkState.isHunting);
 }
 
-function saveBulkQueue() { msg({ action: 'UPDATE_BULK_QUEUE', queue: QueueState.items }).catch(() => {}); }
+function saveBulkQueue() { msg({ action: 'UPDATE_BULK_QUEUE', queue: QueueState.items }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }
 
 function removeQueueItem(id) {
   QueueState.items = QueueState.items.filter(i => i.id !== id);
@@ -7115,7 +7277,7 @@ function onQueueAddUrl() {
         const u = new URL(url);
         ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid','msclkid','ref'].forEach(p => u.searchParams.delete(p));
         url = u.href;
-      } catch {}
+      } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
 
       const platform = detectTabPlatform(url);
       if (!platform) {
@@ -7232,9 +7394,9 @@ function onQueueAddUrl() {
     const rw = $('bulkCopyRemoveWrap'); if (rw) rw.hidden = false;
     const nt = list.filter(i => /temu\.com/.test(i.url)).length, no = list.length - nt;
     if (typeof say === 'function') say(`✓ Store Copy: ${list.length} products (${fileName}) — ${nt} Temu live page se (exact copy: edited images/title)${no ? `, ${no} source page se` : ''}. Added to the queue — go to Bulk → "Hunt all". Base price / variation / category come from the Temu sheet.`, 'ok');
-    try { renderBulkPastePreview(parsePastedLinks()); } catch (_) {}
-    try { document.querySelector('[data-tab="bulk"]')?.click(); } catch (_) {}
-    try { await addBulkPastedLinks(); } catch (_) {}
+    try { renderBulkPastePreview(parsePastedLinks()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { document.querySelector('[data-tab="bulk"]')?.click(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { await addBulkPastedLinks(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     toast(`Store Copy: ${list.length} products in the queue — now press "Hunt all" in Bulk, then Temu Export`, 'ok');
   }
   window.importStoreCopy = importStoreCopy;
@@ -7325,7 +7487,7 @@ async function ensureQueueWorkerTab() {
     try {
       const existing = await new Promise(resolve => chrome.tabs.get(queueWorkerTabId, tab => resolve(chrome.runtime.lastError ? null : tab)));
       if (existing?.id) return existing;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   const created = await chrome.tabs.create({ url: 'about:blank', active: false });
   queueWorkerTabId = created.id;
@@ -7336,7 +7498,7 @@ async function closeQueueWorkerTab() {
   const id = queueWorkerTabId;
   queueWorkerTabId = null;
   if (!id) return;
-  try { await chrome.tabs.remove(id); } catch (_) {}
+  try { await chrome.tabs.remove(id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 async function waitForQueueTabReady(tabId, timeoutMs = 60000) {
@@ -7488,8 +7650,8 @@ async function huntRetryQueueItem(item, level) {
       try {
         await scrapeQueueItem(item, vis.id, { readyTimeout: 90000, settleMs: 4500, noImmediateRetry: true });
       } finally {
-        try { await chrome.tabs.remove(vis.id); } catch (_) {}
-        if (active?.id) { try { await chrome.tabs.update(active.id, { active: true }); } catch (_) {} }
+        try { await chrome.tabs.remove(vis.id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        if (active?.id) { try { await chrome.tabs.update(active.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       }
     } else {
       let tab = null;
@@ -7501,7 +7663,7 @@ async function huntRetryQueueItem(item, level) {
           noImmediateRetry: true
         });
       } finally {
-        if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+        if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       }
     }
   } catch (e) {
@@ -7541,7 +7703,7 @@ async function huntCloseTab(t) {
     const now = await new Promise(res => chrome.tabs.get(t.tabId, x => res(chrome.runtime.lastError ? null : x)));
     if (!now) { t._closed = true; return false; }
     const inWin = await new Promise(res => chrome.tabs.query({ windowId: now.windowId }, a => res(chrome.runtime.lastError ? [] : a)));
-    if (inWin.length <= 1) { try { await chrome.tabs.create({ windowId: now.windowId, url: 'chrome://newtab/', active: true }); } catch (_) { try { await chrome.tabs.create({ windowId: now.windowId, active: true }); } catch (_2) {} } }
+    if (inWin.length <= 1) { try { await chrome.tabs.create({ windowId: now.windowId, url: 'chrome://newtab/', active: true }); } catch (_) { try { await chrome.tabs.create({ windowId: now.windowId, active: true }); } catch (_2) { typeof zhQuiet === 'function' && zhQuiet(_2); } } }
     try { await chrome.tabs.remove(t.tabId); } catch (_) { return false; }
   } finally { done(); }
   t._closed = true;
@@ -7587,14 +7749,14 @@ async function huntRetryTabItem(t, level) {
       await huntWaitTabLoaded(t.tabId, prevUrl, level >= 2 ? 90000 : 45000);
     }
     await sleep(level >= 3 ? 4500 : level === 2 ? 3000 : 1500);
-    try { await chrome.scripting.executeScript({ target: { tabId: t.tabId }, files: ['content.js'] }); } catch (_) {}
+    try { await chrome.scripting.executeScript({ target: { tabId: t.tabId }, files: ['content.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     await sleep(300);
     t._retried = true; // no extra inner auto-retry — the rounds handle that
     await scrapeOneTab(t);
   } catch (e) {
     console.warn('[ZHunter] tab recovery error', e);
   } finally {
-    if (restoreTo) { try { await chrome.tabs.update(restoreTo, { active: true }); } catch (_) {} }
+    if (restoreTo) { try { await chrome.tabs.update(restoreTo, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
   }
   return huntKeepBest(t.tabId, prev);
 }
@@ -7654,7 +7816,7 @@ async function huntFetchImagesReliable(urls) {
     try {
       const batch = await msg({ action: 'FETCH_BASE64_BATCH', urls: todo.map(i => urls[i]) });
       if (batch?.success && Array.isArray(batch.results)) res = batch.results;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const next = [];
     todo.forEach((idx, k) => {
       const x = res[k];
@@ -7742,7 +7904,7 @@ async function huntWaitForHuman(tabId, rowId) {
     try {
       const t = await chrome.tabs.update(tabId, { active: true });
       if (t?.windowId != null) await chrome.windows.update(t.windowId, { focused: true });
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const ok = await promise;               // only the Resume button (or Cancel) ends the hold
     return !!ok && !BulkState.isCancelled;
   } finally {
@@ -7808,7 +7970,7 @@ async function huntPageGuard(tabId, expectUrl, rowId, nav) {
         try {
           const [pr] = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector('#productTitle, #add-to-cart-button, #buy-now-button, #corePrice_feature_div, #ppd') });
           looksProduct = !!pr?.result;
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       if (!looksProduct && now.url && /^https?:/i.test(now.url) && !ZhGate.isProductUrl(now.url)) {
         console.warn('[ZHunter] redirected away from the product:', expectUrl, '→', now.url);
@@ -7845,7 +8007,7 @@ async function huntTakeFront(tabId) {
     if (alive && alive.active) return false;
   }
   BulkState._front = tabId;
-  try { await chrome.tabs.update(tabId, { active: true }); } catch (_) {}
+  try { await chrome.tabs.update(tabId, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return true;
 }
 function huntReleaseFront(tabId) { if (BulkState._front === tabId) BulkState._front = null; }
@@ -7911,13 +8073,13 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
             scraped.images = m.images;
           }
           if (m) { scraped = scraped || { title: '', price: '', images: [], videos: [], variants: [] }; if (!scraped.title && m.title) scraped.title = m.title; if (!scraped.price && m.price) scraped.price = m.price; }
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       if (!huntScrapeIncomplete(scraped)) break;
       if (BulkState.isCancelled || Date.now() - pollStart > pollCap) break;
       if (isBjsItem && Date.now() - pollStart > 30000 && scraped && scraped.title && scraped.price && (scraped.images || []).length >= 1) break;   // BJ's: a product with really few photos
       if (pass >= 1 && await huntDetectChallenge(workerTabId)) break;   // verification appeared — handled below
-      if (isBjsItem) { try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, func: () => { window.dispatchEvent(new Event('scroll')); } }); } catch (_) {} setBulkRowMeta(fakeId, 'Waiting for page…'); await sleep(700); continue; }
+      if (isBjsItem) { try { await chrome.scripting.executeScript({ target: { tabId: workerTabId }, func: () => { window.dispatchEvent(new Event('scroll')); } }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } setBulkRowMeta(fakeId, 'Waiting for page…'); await sleep(700); continue; }
       await sleep(300);
     }
     fewStable = !loadTimedOut && !BulkState.isCancelled && Date.now() - pollStart > pollCap - 400 && !!scraped?.title && !!scraped?.price && (scraped.images || []).length >= 1;
@@ -7932,7 +8094,7 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
         try {
           const [mr] = await chrome.scripting.executeScript({ target: { tabId: workerTabId }, world: 'MAIN', func: zhHuntMainScrape });
           if (mr?.result?.title) scraped = mr.result;
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       if (!scraped?.title) scraped = await sendQueueScrape(workerTabId);
     }
@@ -7961,7 +8123,7 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
         if (Array.isArray(mainImgs?.result) && mainImgs.result.length > 0) {
           scraped.images = Array.from(new Set([...(scraped.images || []), ...mainImgs.result]));
         }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
     if (!scraped) throw new Error(loadTimedOut ? 'page_timeout' : 'no_response');
   } catch (error) {
@@ -8059,9 +8221,9 @@ async function humanRestIfNeeded() {
     HUMAN.n = 0; HUMAN.next = Math.round(humanRand(12, 20));
     const ms = Math.round(humanRand(20000, 60000));
     HUMAN.restUntil = Date.now() + ms;
-    try { updateBulkProgressTitle('Short break', `Resting ${Math.round(ms / 1000)}s, like a person would…`); } catch (_) {}
+    try { updateBulkProgressTitle('Short break', `Resting ${Math.round(ms / 1000)}s, like a person would…`); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     while (Date.now() < HUMAN.restUntil && !BulkState.isCancelled) await sleep(400);
-    try { updateBulkProgressTitle('Hunting products', 'Continuing…'); } catch (_) {}
+    try { updateBulkProgressTitle('Hunting products', 'Continuing…'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
 }
 async function humanDwell(tabId) {
@@ -8073,7 +8235,7 @@ async function humanDwell(tabId) {
       for (let i = 0; i < n; i++) { y += (0.15 + Math.random() * 0.25) * innerHeight; window.scrollTo(0, y); await sl(500 + Math.random() * 1100); }
       if (Math.random() < 0.6) { window.scrollTo(0, 0); await sl(400 + Math.random() * 600); }
     } });
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 async function humanCountDaily(add) {
   try {
@@ -8083,7 +8245,7 @@ async function humanCountDaily(add) {
     const before = rec.count; rec.count += add;
     await chrome.storage.local.set({ zhHuntDaily: rec });
     for (const lim of [150, 300]) if (before < lim && rec.count >= lim) toast(`⚠️ ${rec.count} links hunted today — consider a longer break so the sites do not get suspicious`, 'warn');
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 async function processQueueSequential(items) {
   const workers = Math.min(queueParallelCount(), Math.max(1, items.length));
@@ -8104,7 +8266,7 @@ async function processQueueSequential(items) {
         console.warn('[ZHunter Queue] Item error:', err);
       } finally {
         huntReleaseFront(tab?.id);
-        if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+        if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       }
       processedCount++;
       humanCountDaily(1);
@@ -8196,7 +8358,7 @@ async function startQueueHunt() {
   }
   if (toHunt.length === 0) { toast('No product links selected in queue', 'warn'); return; }
   let _zhUserTab = null;
-  try { const [at] = await chrome.tabs.query({ active: true, currentWindow: true }); _zhUserTab = at?.id ?? null; } catch (_) {}
+  try { const [at] = await chrome.tabs.query({ active: true, currentWindow: true }); _zhUserTab = at?.id ?? null; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   BulkState._front = null;
   BulkState.isHunting = true; BulkState.isPaused = false; BulkState.isCancelled = false;
   { const cb = $('bulkCancelBtn'); if (cb) { cb.disabled = false; cb.textContent = 'Cancel'; } const pb = $('bulkPauseBtn'); if (pb) { pb.disabled = false; pb.textContent = 'Pause'; } }
@@ -8209,7 +8371,7 @@ async function startQueueHunt() {
   openBulkProgressModal(fakeTabs);
   $('bulkQueueHuntBtn').disabled = true;
   await savePendingHunt(fakeTabs);
-  msg({ action: 'START_KEEPALIVE' }).catch(() => {});
+  msg({ action: 'START_KEEPALIVE' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   zhRunFlushLoop();
   try {
     bpSetPhase('hunt');
@@ -8223,7 +8385,7 @@ async function startQueueHunt() {
     if (!BulkState.isCancelled && !isBulkFastMode()) { bpSetPhase('download'); await imageDownloadPhase(); }
   } catch (e) { toast('Queue hunt error: ' + (e?.message || 'unknown'), 'err'); }
   BulkState.isHunting = false;
-  if (_zhUserTab != null) { try { await chrome.tabs.update(_zhUserTab, { active: true }); } catch (_) {} }
+  if (_zhUserTab != null) { try { await chrome.tabs.update(_zhUserTab, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
   const flushDeadline = Date.now() + 10000;
   while (BulkState._flushActive && Date.now() < flushDeadline) await sleep(100);
   BulkState._flushActive = false;
@@ -8263,7 +8425,7 @@ async function loadBulkTabs() {
 
     // v9.15 — Chrome tab groups: pick ONE group to hunt, the other tabs disappear from the list
     let groups = [];
-    try { groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT }); } catch (_) {}
+    try { groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const gById = new Map(groups.map(g => [g.id, g]));
     const gCount = new Map();
     tabs.filter(t => t.url && /^https?:/.test(t.url) && detectTabPlatform(t.url)).forEach(t => gCount.set(t.groupId, (gCount.get(t.groupId) || 0) + 1));
@@ -8475,7 +8637,7 @@ async function startBulkHunt(tabsOverride) {
   // v9.5.0 — hunt start: selected tabs → 'ZHunter' tab group (fire & forget)
   if (BulkState.TAB_GROUP !== false) {
     const ids = selectedTabs.map(t => t.tabId).filter(id => Number.isFinite(id));
-    if (ids.length) msg({ action: 'GROUP_PRODUCT_TABS', tabIds: ids }).catch(() => {});
+    if (ids.length) msg({ action: 'GROUP_PRODUCT_TABS', tabIds: ids }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   }
 
   // Save hunt state for auto-resume
@@ -8483,7 +8645,7 @@ async function startBulkHunt(tabsOverride) {
 
   // Keep the MV3 service worker alive for the duration of the bulk hunt
   // (it terminates after ~30s of inactivity otherwise, aborting all FETCH_BASE64 calls)
-  msg({ action: 'START_KEEPALIVE' }).catch(() => {});
+  msg({ action: 'START_KEEPALIVE' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 
   zhRunFlushLoop();
 
@@ -8613,7 +8775,7 @@ async function huntWaitComplete(tabId, timeoutMs = 25000, onTick = null) {
   const deadline = Date.now() + timeoutMs;
   let sawLoading = false;
   while (Date.now() < deadline && !BulkState.isCancelled) {
-    if (onTick) { try { await onTick(); } catch (_) {} }
+    if (onTick) { try { await onTick(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const t = await new Promise(r => chrome.tabs.get(tabId, x => r(chrome.runtime.lastError ? null : x)));
     if (!t) return false;
     if (t.status === 'loading') sawLoading = true;
@@ -8701,12 +8863,12 @@ async function processSmartQueue(tabs) {
                     await huntWaitComplete(tab.tabId, 25000);
                     await sleep(huntSettleMs(tab.url));
                   }
-                } catch (_) {}
+                } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
                 try {
                   await chrome.scripting.executeScript({ target: { tabId: tab.tabId }, files: ['content.js'] });
                   await sleep(300);
-                } catch (_) {}
+                } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
                 if (!BulkState.isCancelled) await scrapeOneTab(tab);
               }
@@ -8876,7 +9038,7 @@ function zhHuntMainScrape() {
             const pm = pk.match(/(?:Rs\.?|PKR|USD|US\$|\$|€|£|₹|AED)?\s*\d[\d,]*(?:\.\d+)?/i);
             if (pm) result.price = pm[0];
           }
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
         // Price: Strategy 2 — DOM price selectors
         if (!result.price) {
@@ -8924,7 +9086,7 @@ function zhHuntMainScrape() {
               addImg(s);
             });
           }
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
         // Images: Priority 2 — Fallback to general product images if < 3
         if (result.images.length < 3) {
@@ -8937,7 +9099,7 @@ function zhHuntMainScrape() {
               if (w > 0 && w < 80) return;
               addImg(s);
             });
-          } catch (_) {}
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         }
 
         // Images: Priority 3 — Fallback to og:image if still < 3
@@ -8952,7 +9114,7 @@ function zhHuntMainScrape() {
             const a = (im.getAttribute('alt') || '').trim();
             if (a && !result.variants.includes(a)) result.variants.push(a);
           });
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
 
       result.images = result.images.slice(0, 15);
@@ -9017,7 +9179,7 @@ async function scrapeOneTab(tabInfo) {
           files: ['content.js']
         });
         await sleep(100);
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
 
     // ── Temu: direct executeScript scrape (bypasses SPA background-tab issue) ──
@@ -9068,7 +9230,7 @@ async function scrapeOneTab(tabInfo) {
         // ── AUTO-REFRESH on Temu/WGS executeScript timeout ────────────────
         if (false && !isCancelled && !BulkState.isCancelled && error === 'timeout') { // v9.14 — disabled: recovery rounds retry later
           setBulkRowMeta(tabInfo.tabId, 'Not responding — refreshing…');
-          try { await new Promise(r => chrome.tabs.reload((tabInfo.workTabId || tabInfo.tabId), {}, r)); } catch (_) {}
+          try { await new Promise(r => chrome.tabs.reload((tabInfo.workTabId || tabInfo.tabId), {}, r)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
           let reloadDetails = null;
           for (let i = 0; i < 30; i++) {               // 30 × 500ms = 15s max
             if (BulkState.isCancelled) break;
@@ -9123,7 +9285,7 @@ async function scrapeOneTab(tabInfo) {
             await sleep(800);
           }
           setBulkRowMeta(tabInfo.tabId, 'Scraping…');
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       // ── Normal path: isLazy wake + SCRAPE_PAGE message ──────────────────
       const isLazy = /bjs\.com|faire\.com|samsclub\.com|worldwidegolfshops\.com|worldwidegolfballs\.com|amazon\.|walmart\.com/i.test(tabInfo.url);
@@ -9138,7 +9300,7 @@ async function scrapeOneTab(tabInfo) {
             }
           });
           await sleep(300); // PERF: events fire synchronously, 300ms is plenty
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
 
       // Check cancel before sending SCRAPE_PAGE
@@ -9170,7 +9332,7 @@ async function scrapeOneTab(tabInfo) {
         setBulkRowMeta(tabInfo.tabId, 'Not responding — refreshing…');
 
         // Refresh the tab and wait for it to finish loading (up to 15 seconds)
-        try { await new Promise(r => chrome.tabs.reload((tabInfo.workTabId || tabInfo.tabId), {}, r)); } catch (_) {}
+        try { await new Promise(r => chrome.tabs.reload((tabInfo.workTabId || tabInfo.tabId), {}, r)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         let reloadDetails = null;
         await huntWaitComplete((tabInfo.workTabId || tabInfo.tabId), 25000);
         reloadDetails = await new Promise(r => chrome.tabs.get((tabInfo.workTabId || tabInfo.tabId), t => r(chrome.runtime.lastError ? null : t)));
@@ -9183,7 +9345,7 @@ async function scrapeOneTab(tabInfo) {
           try {
             await chrome.scripting.executeScript({ target: { tabId: (tabInfo.workTabId || tabInfo.tabId) }, files: ['content.js'] });
             await sleep(400);
-          } catch (_) {}
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
           // Lazy-wake events (for SPA sites that need scroll to hydrate)
           if (isLazy) {
@@ -9197,7 +9359,7 @@ async function scrapeOneTab(tabInfo) {
                 }
               });
               await sleep(500);
-            } catch (_) {}
+            } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
           }
 
           // Single retry attempt after refresh
@@ -9295,7 +9457,7 @@ async function scrapeOneTab(tabInfo) {
       const oldTab = await new Promise(res => chrome.tabs.get(oldId, t => res(chrome.runtime.lastError ? null : t)));
       setBulkRowMeta(tabInfo.tabId, 'Problem — opening the link in a new tab…');
       const created = await chrome.tabs.create({ url: tabInfo.url, active: false, windowId: oldTab?.windowId, index: oldTab ? oldTab.index + 1 : undefined });
-      if (oldTab) { try { await chrome.tabs.remove(oldId); } catch (_) {} }
+      if (oldTab) { try { await chrome.tabs.remove(oldId); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       // same bookkeeping as huntEnsureTab: the row and results follow the link to the new tab id
       const row = document.querySelector(`.bulk-prog-row[data-tab-id="${tabInfo.tabId}"]`);
       if (row) row.dataset.tabId = created.id;
@@ -9333,7 +9495,7 @@ async function scrapeOneTab(tabInfo) {
       chrome.tabs.reload((tabInfo.workTabId || tabInfo.tabId), {}, () => { void chrome.runtime.lastError; });
       await huntWaitComplete((tabInfo.workTabId || tabInfo.tabId), 25000);
       await sleep(huntSettleMs(tabInfo.url));
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return await scrapeOneTab(tabInfo);
   }
 
@@ -9420,7 +9582,7 @@ async function imageDownloadPhase() {
   }
 
   updateBulkProgressTitle('Downloading images', `${pending.length} products — saving pictures`);
-  try { updateBulkProgressBar(); } catch (_) {}
+  try { updateBulkProgressBar(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
   let cursor = 0;
   const CONCUR = 4; // 4 parallel image batches (was 2) — 2x faster image phase
@@ -9854,7 +10016,7 @@ function cancelBulkHunt() {
 
 // ── Hunt finished ────────────────────────────────────────────
 async function finishBulkHunt() {
-  msg({ action: 'STOP_KEEPALIVE' }).catch(() => {});
+  msg({ action: 'STOP_KEEPALIVE' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 
   // Compute hunt duration for summary
   const durMs  = BulkState.huntStartTime ? Date.now() - BulkState.huntStartTime : 0;
@@ -10046,7 +10208,7 @@ async function huntManualRetry(id) {
     markBulkRowRetry(huntItemId(it), r?.status !== 'ok');
     await huntDownloadImagesFor(r);
     await huntFlushNow();
-    if (lh.mode === 'queue') { saveBulkQueue(); try { loadBulkQueue(); } catch (_) {} }
+    if (lh.mode === 'queue') { saveBulkQueue(); try { loadBulkQueue(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
   } catch (e) {
     console.warn('[ZHunter] manual retry error', e);
   } finally {
@@ -10126,7 +10288,7 @@ async function appendToMasterSheet(rows) {
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 700)); try { await msg({ action: 'PING' }); } catch (_) {} }
+      if (attempt > 0) { await new Promise(r => setTimeout(r, 500 + attempt * 700)); try { await msg({ action: 'PING' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       return await appendToMasterSheetOnce(rows);
     } catch (e) {
       lastErr = e;
@@ -10214,13 +10376,13 @@ async function appendToMasterSheetOnce(rows) {
     if (removable.length && BulkState._libCapAsked !== askKey) {
       BulkState._libCapAsked = askKey;
       let yes = false;
-      try { yes = confirm(`Library has more than ${LIBRARY_MAX} products (the extension gets slow above this).\n\nDelete the ${removable.length} OLDEST product${removable.length > 1 ? 's' : ''}? Starred products are never deleted.\n\nOK = delete them · Cancel = keep everything`); } catch (_) {}
+      try { yes = confirm(`Library has more than ${LIBRARY_MAX} products (the extension gets slow above this).\n\nDelete the ${removable.length} OLDEST product${removable.length > 1 ? 's' : ''}? Starred products are never deleted.\n\nOK = delete them · Cancel = keep everything`); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (yes) {
         const drop = new Set(removable.map(x => x.id));
         merged = merged.filter(x => !drop.has(x.id));
-        try { toast(`${drop.size} oldest product${drop.size > 1 ? 's' : ''} removed from the Library`, 'warn'); } catch (_) {}
+        try { toast(`${drop.size} oldest product${drop.size > 1 ? 's' : ''} removed from the Library`, 'warn'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       } else {
-        try { toast(`Library now has ${merged.length} products — nothing was deleted. Export and clean up old products when you can.`, 'warn'); } catch (_) {}
+        try { toast(`Library now has ${merged.length} products — nothing was deleted. Export and clean up old products when you can.`, 'warn'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
     }
   }
@@ -10270,7 +10432,7 @@ setTimeout(async () => {
     try { await appendToMasterSheet(rows); } finally { BulkState.currentBatchId = prevBatch; }
     await chrome.storage.local.remove(ZH_PENDING_FLUSH_KEY);
     toast(`${rows.length} hunted product(s) from an earlier session were saved to the Library`, 'ok');
-    try { updateMasterStats(); } catch (_) {}
+    try { updateMasterStats(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   } catch (e) { console.warn('[ZHunter] earlier unsaved rows still waiting', e); }
 }, 3000);
 
@@ -10769,13 +10931,13 @@ async function reHuntMasterRow(rowId) {
       try {
         await chrome.tabs.update(newTab.id, { active: true });
         await new Promise(r => setTimeout(r, 1200));
-      } catch {}
+      } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
     }
 
     // Inject content script (idempotent)
     try {
       await chrome.scripting.executeScript({ target: { tabId: newTab.id }, files: ['content.js'] });
-    } catch {}
+    } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
     await new Promise(r => setTimeout(r, 200));
 
     // Send scrape message with timeout
@@ -10795,7 +10957,7 @@ async function reHuntMasterRow(rowId) {
     // continue to cleanup
   } finally {
     if (newTab?.id) {
-      try { await chrome.tabs.remove(newTab.id); } catch {}
+      try { await chrome.tabs.remove(newTab.id); } catch (_zq) { typeof zhQuiet === 'function' && zhQuiet(_zq); }
     }
   }
 
@@ -11666,7 +11828,7 @@ async function downloadLibraryZip() {
         try {
           const res = await msg({ action: 'FETCH_BASE64_BATCH', urls });
           if (res?.success && Array.isArray(res.results)) b64s = res.results.filter(x => x?.success && x.base64).map(x => x.base64);
-        } catch (_) {}
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       fetched += b64s.length;
       folder.file('info.txt', [
@@ -11686,7 +11848,7 @@ async function downloadLibraryZip() {
       ].join('\n'));
       if (b64s.length) {
         b64s.forEach((b64, ii) => {
-          try { folder.file(`img_${String(ii + 1).padStart(2, '0')}.${extFromBase64(b64)}`, base64ToBytes(b64)); } catch (_) {}
+          try { folder.file(`img_${String(ii + 1).padStart(2, '0')}.${extFromBase64(b64)}`, base64ToBytes(b64)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         });
       } else if (urls.length) {
         folder.file('image_urls.txt', urls.join('\n'));
@@ -12013,7 +12175,7 @@ async function downloadBatchZip() {
           const num = String(ii + 1).padStart(2, '0');
           try {
             folder.file(`image_${num}.${ext}`, base64ToBytes(b64));
-          } catch (_) {}
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         });
       } else if (r.images && r.images.length > 0) {
         // If base64 conversion failed, save raw URLs in a txt so user can re-download manually
@@ -12261,7 +12423,7 @@ const results = await chrome.scripting.executeScript({
                   const rawArr = t.slice(ab, end + 1);
                   let items = null;
                   try { items = JSON.parse(rawArr); } catch (_) {
-                    try { items = JSON.parse(rawArr.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } catch (_) {}
+                    try { items = JSON.parse(rawArr.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
                   }
                   if (Array.isArray(items) && items.length) {
                     items.forEach(it => {
@@ -12835,7 +12997,7 @@ async function imgToDataUrl(src, mime, ext = 'jpg') {
               sw = Math.min(img.naturalWidth - sx, (right - left) + pad * 2);
               sh = Math.min(img.naturalHeight - sy, (bottom - top) + pad * 2);
             }
-          } catch (_) {}
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
           targetW = targetH = Math.max(sw, sh, 800);
         }
 
@@ -12963,7 +13125,7 @@ function classifyVideo(url) {
     try {
       const m = url.match(/(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
       ytId = m ? m[1] : null;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const thumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null;
     return { url, type: 'youtube', label: 'YouTube', thumbnail, ytId };
   }
@@ -13168,7 +13330,7 @@ function generateMp4Thumbnail(url, areaId) {
   vid.src = url;
   document.body.appendChild(vid);
 
-  const cleanup = () => { try { document.body.removeChild(vid); } catch(_) {} };
+  const cleanup = () => { try { document.body.removeChild(vid); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } };
 
   vid.addEventListener('loadedmetadata', () => {
     // Seek to 10% of video duration for a meaningful frame
@@ -13189,7 +13351,7 @@ function generateMp4Thumbnail(url, areaId) {
       img.alt = 'Thumbnail';
       const freshArea = document.getElementById(areaId);
       if (freshArea) { freshArea.innerHTML = ''; freshArea.appendChild(img); }
-    } catch(_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     cleanup();
   });
 
@@ -13233,13 +13395,13 @@ async function downloadVideo(video, uid) {
       try {
         // Fetch first so we can name the file; some CDNs need cookies → try with, then without.
         let resp = null;
-        try { resp = await fetch(video.url, { credentials: 'include' }); } catch (_) {}
-        if (!resp || !resp.ok) { try { resp = await fetch(video.url, { credentials: 'omit' }); } catch (_) {} }
+        try { resp = await fetch(video.url, { credentials: 'include' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        if (!resp || !resp.ok) { try { resp = await fetch(video.url, { credentials: 'omit' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
         if (resp && resp.ok && !/text\/html/i.test(resp.headers.get('content-type') || '')) {
           const blob = await resp.blob();
           if (blob.size > 1024) { await zhSaveBlob(blob, `${base}.${ext}`); downloaded = true; }
         }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (!downloaded) {
         // Let Chrome download the URL itself (cross-origin anchors ignore the download name
         // and would just open the video in a tab).
@@ -13398,7 +13560,7 @@ async function downloadAllVideosAsZip() {
           zip.file(`${fileBase}.mp4`, tsData);
         } else {
           let resp = null;
-          try { resp = await fetch(video.url, { credentials: 'include' }); } catch (_) {}
+          try { resp = await fetch(video.url, { credentials: 'include' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
           if (!resp || !resp.ok) resp = await fetch(video.url, { credentials: 'omit' });
           if (resp.ok) {
             const extRaw = video.url.split('?')[0].split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -13650,12 +13812,14 @@ async function temuUnmarkListed(items) {
   return n;
 }
 async function temuMarkListed(items, targetStore, state = 'listed') {
+  // workflow strip: "④ Upload ✓ N uploaded" only after Temu really accepted products (not when they are just ready)
+  if (state === 'accepted' && Array.isArray(items) && items.length) TemuFlowSent = { n: (TemuFlowSent && Date.now() - TemuFlowSent.at < 30 * 60000 ? TemuFlowSent.n : 0) + items.length, at: Date.now() };
   const store = targetStore || temuActiveStoreName() || 'default';
   const m = { ...temuListedMap() };
   const date = new Date();
   const now = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
   // v9.6.2: aakhri mark yaad rakho (store + source ids) taake "Unmark last upload" reload ke baad bhi chale
-  try { chrome.storage.local.set({ temuLastMarked: { store, sids: (items || []).map(it => it.url ? temuSourceIdentity(it.url) : it.sid), n: (items || []).length, t: Date.now() } }); } catch (_) {}
+  try { chrome.storage.local.set({ temuLastMarked: { store, sids: (items || []).map(it => it.url ? temuSourceIdentity(it.url) : it.sid), n: (items || []).length, t: Date.now() } }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   items.forEach(it => {
     const sid = it.sid || temuSourceId(it.url); // v9.7.1: as-is Temu file ke items mein sid SKU se aata hai
     const identity = it.url ? temuSourceIdentity(it.url) : sid;
@@ -13695,6 +13859,8 @@ async function temuSaveStores(stores, active) {
   if (ok?.success) {
     State.data.settings.temuStores = stores;
     if (active !== undefined) State.data.settings.temuActiveStore = active;
+    // every place that switches the store: the "store: …" line and the store row above Upload follow at once
+    if (active !== undefined) setTimeout(() => { try { temuUpdateSrcInfo(); temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 50);
     return true;
   }
   console.warn('[Temu] temuSaveStores failed:', ok);
@@ -13911,7 +14077,7 @@ function temuCatFor(url, title, cfg) {
   try {
     const ov = cfg.cat_overrides && url ? cfg.cat_overrides[temuSourceIdentity(url)] : '';
     if (ov && cfg.category_profiles && cfg.category_profiles[ov]) return [ov, cfg.category_profiles[ov]];
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return temuProfileFor(title, cfg);
 }
 // v9.15 — SMART category matching: every category is scored (words in the title, how many, side by side, plus context words like "frozen"/"deli" found in the category path); the best score wins
@@ -13948,7 +14114,7 @@ function temuLearnExample(cfg, title, key) {
     if (i >= 0) cfg.cat_examples.splice(i, 1);
     cfg.cat_examples.push({ k: key, t: tokens, h: head, s: sig });
     if (cfg.cat_examples.length > 6000) cfg.cat_examples.splice(0, cfg.cat_examples.length - 6000);
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 let _zhExModelCache = { sig: '', model: null };
 function temuExModel(cfg) {
@@ -14013,7 +14179,7 @@ function temuScoreProfiles(title, cfg) {
       if (hit) { if (sc > hit.score) { hit.score = sc; hit.phrase = ph; } }
       else res.push({ name: key, prof: p, score: sc, order: 99999, phrase: ph });
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   // taught titles (examples): ALL the words of a title count together — rare words weigh more than common ones, word pairs weigh extra,
   // and a category wins only when several of the title's words agree (never one single word on its own)
   try {
@@ -14037,7 +14203,7 @@ function temuScoreProfiles(title, cfg) {
         else res.push({ name: key, prof: profs[key], score: sc, order: 99998, phrase: 'similar titles' });
       }
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   res.sort((a, b) => b.score - a.score || a.order - b.order);
   return res;
 }
@@ -14057,15 +14223,15 @@ function temuCatDoubtful(title, prof) {
   try { const cf = temuGetCfg();
     // v9.15 — the taught title may have been stored as typed OR cleaned: accept either form
     const sigs = [...new Set([title, zhStripSourceNames(title || ''), temuCleanTitle(title, cf), temuCleanTitle(zhStripSourceNames(title || ''), cf)].map(t => temuExTokens(t).tokens.slice().sort().join(' ')))];
-    if ((cf.cat_examples || []).some(e => sigs.includes(e.s) && (cf.category_profiles?.[e.k]?.full_path || "#") === (prof.full_path || ""))) return false; } catch (_) {}
+    if ((cf.cat_examples || []).some(e => sigs.includes(e.s) && (cf.category_profiles?.[e.k]?.full_path || "#") === (prof.full_path || ""))) return false; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   let list = [];
-  try { list = temuScoreProfiles(temuCleanTitle(title, temuGetCfg()), temuGetCfg()); } catch (_) {}
+  try { list = temuScoreProfiles(temuCleanTitle(title, temuGetCfg()), temuGetCfg()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   const me = list.find(x => x.prof === prof || (prof.id && x.prof.id === prof.id));
   // form words must agree: a FROZEN title in a non-frozen category (or a waffle in a *Mix* category) is questionable
   { const tk = new Set(temuCatTokens(title).map(w => w.replace(/s$/, ''))); const pk = new Set(temuCatTokens((prof.full_path || '') + ' ' + (prof.name || '')).map(w => w.replace(/s$/, '')));
     // v9.15 — if you already taught this exact category with a title that has the same form word (e.g. frozen waffles → "Waffles"), the word is no reason to doubt it
     let taught = new Set();
-    try { const cf2 = temuGetCfg(); (cf2.cat_examples || []).forEach(e => { if ((cf2.category_profiles?.[e.k]?.full_path || '#') === (prof.full_path || '')) (e.t || []).forEach(x => taught.add(x)); }); } catch (_) {}
+    try { const cf2 = temuGetCfg(); (cf2.cat_examples || []).forEach(e => { if ((cf2.category_profiles?.[e.k]?.full_path || '#') === (prof.full_path || '')) (e.t || []).forEach(x => taught.add(x)); }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     for (const w of ['frozen', 'canned', 'dried', 'deli']) if (tk.has(w) && !pk.has(w) && !taught.has(w)) return true;
     if (pk.has('mix') && !tk.has('mix') && !taught.size) return true; }
   if (me) {
@@ -14090,7 +14256,7 @@ function temuCatWhy(title, prof) {
     const me = list.find(x => x.prof === prof || (prof.id && x.prof.id === prof.id));
     const other = me && list.find(x => x.prof !== me.prof && (x.prof.id || x.name) !== (prof.id || me.name));
     if (other && other.score >= me.score - 3 && me.score < 30) return `could also be "${other.prof.category_keyword || other.name}"`;
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return 'category name shares no word with the title';
 }
 // first matching category profile for a title → [name, profile]
@@ -14232,7 +14398,7 @@ function temuEnrich(rows, cfg) {
     const title = temuCleanTitle(r.title, cfg, r);
     const url = r.url || '';
     if (!title || !url) { skipped.push((!url ? 'no url: ' : 'no title: ') + String(r.title || r.url || '?').slice(0, 40)); return; } // v9.7.2: chup-chaap drop nahi
-    let uhost = ''; try { uhost = new URL(url).hostname; } catch (_) {}
+    let uhost = ''; try { uhost = new URL(url).hostname; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     if (/temu\.com$/i.test(uhost) && !isTemuProductUrl(url)) { skipped.push('not a product (Temu page): ' + title.slice(0, 40)); return; }
     if (/^Temu\s*\|/i.test(title)) { skipped.push('not a product (Temu page): ' + title.slice(0, 40)); return; }
     if (/\/s\?k=|amazon\.[a-z.]+\/s\b|walmart\.com\/search|samsclub\.com\/s(\/|\?)/i.test(url)) { skipped.push('search page: ' + title.slice(0, 40)); return; }
@@ -14396,9 +14562,9 @@ function temuFillTemplate(wb, items, cfg) {
 
 // ── v9.15 Store export: ticked products on Temu "Manage products" → Temu bulk sheet (import it in another Chrome) ──
 async function temuCloseCopyTab(id) {
-  try { await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', func: () => { try { document.documentElement.setAttribute('data-zc-closing', '1'); window.onbeforeunload = null; window.addEventListener('beforeunload', e => { e.stopImmediatePropagation(); }, true); } catch (_) {} } }); } catch (_) {}
+  try { await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', func: () => { try { document.documentElement.setAttribute('data-zc-closing', '1'); window.onbeforeunload = null; window.addEventListener('beforeunload', e => { e.stopImmediatePropagation(); }, true); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   for (let i = 0; i < 3; i++) {
-    try { await chrome.tabs.remove(id); } catch (_) {}
+    try { await chrome.tabs.remove(id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     await new Promise(r => setTimeout(r, 900));
     const alive = await new Promise(res => chrome.tabs.get(id, x => res(chrome.runtime.lastError ? null : x)));
     if (!alive) return true;
@@ -14406,13 +14572,13 @@ async function temuCloseCopyTab(id) {
   return false;
 }
 async function temuStoreExport() {
-  const rep = $('temuReport'); const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) {} } };
+  const rep = $('temuReport'); const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const send = (tabId, m, ms) => new Promise(res => { const tm = setTimeout(() => res(null), ms || 15000); try { chrome.tabs.sendMessage(tabId, m, x => { clearTimeout(tm); res(chrome.runtime.lastError ? null : x); }); } catch (_) { clearTimeout(tm); res(null); } });
   const ready = async (tabId, tries = 24) => {
     for (let i = 0; i < tries; i++) {
       const r = await send(tabId, { action: 'ZC_PING' }, 1200); if (r?.ready) return true;
-      if (i === 6 || i === 14) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['temu_store_copy.js'] }); } catch (_) {} }
+      if (i === 6 || i === 14) { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['temu_store_copy.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
       await sleep(500);
     }
     return false;
@@ -14427,7 +14593,7 @@ async function temuStoreExport() {
     const picks = sel?.rows || [];
     if (!picks.length) { say('No product is ticked. Select products in Manage products, then press again.'); return; }
     const done = [], problems = [];
-    let zcSess = ''; try { zcSess = new URL(tab.url).searchParams.get('_x_sessn_id') || ''; } catch (_) {}
+    let zcSess = ''; try { zcSess = new URL(tab.url).searchParams.get('_x_sessn_id') || ''; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     for (let i = 0; i < picks.length; i++) {
       const p = picks[i];
       say(`Reading ${i + 1}/${picks.length}: ${(p.title || p.goodsId).slice(0, 50)}…\n(the page opens in the background and closes by itself)`);
@@ -14442,9 +14608,9 @@ async function temuStoreExport() {
         if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button was not pressed (${op?.error || 'no answer'})`);
         else if (!op.viaTab) t2 = await chrome.tabs.create({ url: new URL(op.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId });
         if (t2 && await ready(t2.id, 40)) { const r = await send(t2.id, { action: 'ZC_COPY_SCRAPE' }, 120000); data = r?.data || null; }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (t2) { const closed = await temuCloseCopyTab(t2.id); if (!closed) problems.push('Tab did not close (Temu asked "leave?") — close it manually'); }
-      try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
+      try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (data?.ok) done.push({ p, d: data }); else problems.push(`${(p.title || p.goodsId).slice(0, 40)}: ${(data?.warn || ['no data']).join(', ')}`);
       await sleep(700 + Math.random() * 900);
     }
@@ -14582,8 +14748,9 @@ async function temuSyncStoreFromTemu(opts = {}) {
     if (key === temuActiveStoreName()) return { name: key, matched: true, changed: false };
     if ((await temuSaveStores(stores, key)) !== true) return { name: key, matched: true, changed: false };
     TemuLast = null;
-    try { temuRenderStoreBar(); temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm(); updateTopTemuStorePill(); temuUpdateSrcInfo(); } catch (_) {}
-    try { temuRenderReview(); } catch (_) {}
+    try { temuRenderStoreBar(); temuUpdateTplStatus(); temuRenderProfiles(); temuFillForm(); updateTopTemuStorePill(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }   // the store row above Upload follows too
     toast(`Store switched to ${key} (the one open in Temu)`, 'ok');
     return { name: key, matched: true, changed: true };
   } catch (e) { console.warn('[ZHunter] store sync failed', e); return null; }
@@ -14597,11 +14764,11 @@ async function temuSyncStoreFromTemu(opts = {}) {
     chrome.tabs.onActivated.addListener(kick);
     chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete' && /^https:\/\/seller\.temu\.com\//i.test(tab?.url || '')) kick(); });
     window.addEventListener('focus', kick);
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 })();
 async function temuRunExport(opts = {}) {
   const rep = $('temuReport');
-  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) {} } };
+  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   // v9.7.1: imported Temu file as-is — koi conversion nahi
   if (($('temuSource')?.value || '') === 'sheet' && TemuLast?.asIs) {
     if (!opts.forUpload) { zhSaveBlob(new Blob([TemuLast.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile()); toast('Temu file download', 'ok'); }
@@ -14736,7 +14903,7 @@ async function temuRunExport(opts = {}) {
     // v9.3.1: listed-history ab sirf CONFIRMED upload ke baad mark hoti hai (export-only par nahi).
     { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Mark ${n} as listed`; } }
     zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile());
-    if (!opts.forUpload) { try { const _hid = await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); await temuHistKeepFile(_hid, out, temuBatchFile()); } catch (_) {} }
+    if (!opts.forUpload) { try { const _hid = await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); await temuHistKeepFile(_hid, out, temuBatchFile()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const lines = items.map(it => `${it.sku}  ${it.brand || '—'}  ${it.vtype || 'Color'}: ${it.color}  ${it.weight}lb(${it.wsrc || '?'})  img=${it.images.length}  $${it.base ?? '—'}${it.pxLabel ? ' ' + it.pxLabel : ''}  bullets=${(it.bullets || []).length}${it.warn.length ? '  ⚠ ' + it.warn.join(',') : ''}`);
     say(`✓ ${n} products → temu_upload.xlsx\n` + (skipped.length ? `Skipped: ${skipped.length} (${skipped.slice(0,3).join('; ')}${skipped.length>3?'…':''})\n` : '') + lines.join('\n'));
     toast(`Temu file ready — ${n} products`, 'ok');
@@ -14763,7 +14930,7 @@ function temuShowCancelBtn(on) {
       TemuUploadCancel = true;
       b.disabled = true; const s = b.querySelector('span'); if (s) s.textContent = 'Cancelling…';
       let r = null;
-      try { r = await msg({ action: 'TEMU_UPLOAD_CANCEL' }); } catch (_) {}
+      try { r = await msg({ action: 'TEMU_UPLOAD_CANCEL' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (r?.running && r.sent && _temuCancelWake) _temuCancelWake({ success: false, cancelled: true, sent: true, report: [] });
     });
   }
@@ -14779,7 +14946,7 @@ async function temuAutoUpload() {
 }
 async function temuAutoUploadJob() {
   const rep = $('temuReport');
-  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
+  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); rep.scrollTop = rep.scrollHeight; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   // Build fresh if nothing exported yet in this session
   temuStepsReset(); temuStep('file', 'run', 'building the Temu file…');
   if (!TemuLast?.asIs) { TemuLast = null; await temuRunExport({ forUpload: true }); }
@@ -14817,16 +14984,16 @@ async function temuAutoUploadJob() {
       temuStep('store', 'ok', TemuLast?.store || '');   // the page only uploads after the store was verified
       temuStep('proc', 'run', m.phase === 'processing' ? `${m.pct != null ? m.pct : 0}%` : m.phase === 'uploading' ? 'sending the file…' : m.phase === 'finishing' ? 'reading the result…' : 'Temu received the file');
     };
-    try { chrome.runtime.onMessage.addListener(onProg); } catch (_) {}
+    try { chrome.runtime.onMessage.addListener(onProg); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     let result;
-    if (TemuUploadCancel) { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} temuStep('store', 'err', 'cancelled'); say(base + '\n✕ Cancelled — nothing was sent to Temu.'); toast('Upload cancelled', 'info'); return; }
+    if (TemuUploadCancel) { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuStep('store', 'err', 'cancelled'); say(base + '\n✕ Cancelled — nothing was sent to Temu.'); toast('Upload cancelled', 'info'); return; }
     try {
       result = await Promise.race([
         msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: temuBatchFile(), expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }),
         new Promise(res => { _temuCancelWake = res; })
       ]);
     }
-    finally { _temuCancelWake = null; try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) {} }
+    finally { _temuCancelWake = null; try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     if (result?.cancelled) {
       if (rep) rep.textContent = base;
       if (result.sent) {   // the file had already reached the Temu page — Temu goes on processing it
@@ -14888,7 +15055,7 @@ async function temuAutoUploadJob() {
         source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', confirmed: !!(result?.success && result?.confirmed), uploadId: idm ? idm[1] : '',
         added: result?.added ?? (rm ? +rm[2] : null), errors: result?.errors ?? (rm ? +rm[3] : null), items: temuHistItems(uploadSnapshot.items), skippedList: (uploadSnapshot.skipped || []).slice(0, 300) });
       await temuHistKeepFile(histId, uploadSnapshot.bytes, temuBatchFile());
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const completeBatch = result?.success && result?.confirmed && result.status === 'Completed' && result.errors === 0 && result.processed === uploadSnapshot.items.length && result.added === uploadSnapshot.items.length;
     if (completeBatch) {
       if (!uploadSnapshot.marked) { await temuMarkListed(uploadSnapshot.items, uploadSnapshot.store, 'accepted'); uploadSnapshot.marked = true; }
@@ -14950,11 +15117,11 @@ async function temuLateConfirm({ uploadId, items, store, histId }) {
     const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/upload-goods-multiple.html*'] });
     let info = null, usedTab = null;
     for (const t of tabs) {
-      try { const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: temuPeekPage, args: [uploadId] }); if (r?.result?.found) { info = r.result; usedTab = t; break; } } catch (_) {}
+      try { const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: temuPeekPage, args: [uploadId] }); if (r?.result?.found) { info = r.result; usedTab = t; break; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
     if (!info) {
       miss++;
-      if (miss === 3 && !reloaded && tabs[0]) { reloaded = true; try { await chrome.tabs.reload(tabs[0].id); } catch (_) {} await new Promise(r => setTimeout(r, 7000)); }
+      if (miss === 3 && !reloaded && tabs[0]) { reloaded = true; try { await chrome.tabs.reload(tabs[0].id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } await new Promise(r => setTimeout(r, 7000)); }
       if (miss > 14) break;
       continue;
     }
@@ -14980,7 +15147,7 @@ function temuBatchNameDone() {
   if (!last) return;
   inp.value = '';
   inp.dispatchEvent(new Event('input', { bubbles: true }));
-  try { chrome.storage.local.set({ zhTemuBatchName: '', zhTemuBatchLast: last }); } catch (_) {}
+  try { chrome.storage.local.set({ zhTemuBatchName: '', zhTemuBatchLast: last }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   temuShowLastBatch(last);
 }
 function temuShowLastBatch(last) {
@@ -14998,7 +15165,7 @@ function temuShowLastBatch(last) {
 }
 async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId }) {
   const rep = $('temuReport');
-  const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
+  const add = t => { if (rep) { rep.textContent = (rep.textContent || '') + '\n' + t; try { rep.scrollTop = rep.scrollHeight; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   const errs = Number(info?.errors) || 0, added = info?.added, processed = info?.processed;
   await temuHistPatch(histId, { confirmed: true, uploadId: uploadId || undefined, added: added ?? null, errors: errs });
   TemuLastFailed = new Set();
@@ -15141,7 +15308,7 @@ async function temuEnsurePageReady(tabId, say = () => {}) {
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
     if (await ping()) return true;
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   say('Refreshing the Temu page automatically — drafts will be fixed after that…');
   await chrome.tabs.reload(tabId);
   const deadline = Date.now() + 20000;
@@ -15153,7 +15320,7 @@ async function temuEnsurePageReady(tabId, say = () => {}) {
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
       if (await ping()) return true;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   return false;
 }
@@ -15253,7 +15420,7 @@ async function temuLearnAttributes() {
       const ct = temuCleanTitle(r.title || '', cfg);
       if (ct && temuProfileFor(ct, cfg)[0] !== entry[0]) temuProductPhrases(ct).forEach(ph => { cfg.cat_learned[ph] = entry[0]; phrases++; });
     }
-    await temuSaveCfg(cfg); try { temuRenderProfiles(); } catch (_) {}
+    await temuSaveCfg(cfg); try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     say(`✓ Learned from ${rows.length} products:\n• ${fresh.size} new categories added, ${known.size} already known\n• Required attributes seen: ${[...labels].join(', ') || '—'}\n• ${phrases} product-type words remembered\nNext exports fill these attributes automatically (Keyword Attributes column).`);
     toast(`Attributes learned (${labels.size} types, ${fresh.size} new categories)`, 'ok');
   } catch (e) { say('✗ ' + (e?.message || e)); }
@@ -15265,7 +15432,7 @@ let TemuLastFailed = new Set();
 const temuNormTitle = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 async function temuReadFailed({ tabId = null, uploadId = null, silent = false, items: upItems = null, store: upStore = null } = {}) {
   const rep = $('temuReport');
-  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollTop = rep.scrollHeight; } catch (_) {} } };
+  const say = t => { if (rep) { rep.textContent = t; try { rep.scrollTop = rep.scrollHeight; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   const add = t => say((rep?.textContent || '') + '\n' + t);
   if (rep && rep.textContent.includes('⏳ Reading failed details…')) {
     rep.textContent = rep.textContent.replace('⏳ Reading failed details…', '• Checking failed details…');
@@ -15291,7 +15458,7 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false, i
       result = r; tab = t; break;
     }
     if (!result) { add(`✗ Store "${expectStore}" has no "Add products via upload" tab — open that store's Temu upload page`); return null; }
-    try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
+    try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     (result?.report || []).forEach(add);
     if (!result?.success) return result;
     // v9.15.1 — new "Processing results" popup: no names, "Line" = spreadsheet row (row 5 = first product of the uploaded file)
@@ -15371,7 +15538,7 @@ async function temuHistKeepFile(histId, bytes, name) {   // save the xlsx for a 
     await temuHistSerial(async () => { // only the newest 50 files are kept (older records stay in History, just without the file)
       const list = await temuHistGet(); const keep = new Set(list.slice(0, 50).map(h => h.id));
       let drop = false;
-      for (const h of list) if (h.fileName && !keep.has(h.id)) { try { await ZhFiles.del(h.id); } catch (_) {} delete h.fileName; delete h.fileSize; drop = true; }
+      for (const h of list) if (h.fileName && !keep.has(h.id)) { try { await ZhFiles.del(h.id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } delete h.fileName; delete h.fileSize; drop = true; }
       if (drop) await new Promise(r => chrome.storage.local.set({ temuUploadHistory: list }, r));
     });
   } catch (e) { console.log('[ZHunter] history file not saved', e?.message || e); }
@@ -15382,7 +15549,7 @@ function temuBatchName() { return (document.getElementById('temuBatchNameInp')?.
 function temuBatchFile() { const b = temuBatchName().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, ''); return b ? `temu_upload_${b}.xlsx` : 'temu_upload.xlsx'; }
 // v9.15.1 — every History write waits for the one before it (a late confirmation and a new upload used to overwrite each other)
 let _temuHistChain = Promise.resolve();
-function temuHistSerial(work) { const p = _temuHistChain.then(work); _temuHistChain = p.catch(() => {}); return p; }
+function temuHistSerial(work) { const p = _temuHistChain.then(work); _temuHistChain = p.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); return p; }
 async function temuHistAdd(entry) {
   const hid = 'h_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   await temuHistSerial(async () => {
@@ -15424,7 +15591,7 @@ async function temuRenderHistory() {
   try {
     const res = await new Promise(r => chrome.storage.local.get('temuDailyTarget', r));
     if (res?.temuDailyTarget) dailyTarget = parseInt(res.temuDailyTarget, 10) || 50;
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   const dtInp = $('temuDailyTarget'); if (dtInp && document.activeElement !== dtInp) dtInp.value = dailyTarget;
 
   const isToday = (t) => {
@@ -15629,7 +15796,7 @@ async function temuRenderHistory() {
         const nextHist = allHist.filter(x => (h.id ? x.id !== h.id : x.t !== h.t));
         await new Promise(r => chrome.storage.local.set({ temuUploadHistory: nextHist }, r));
       });
-      try { if (h.id) await ZhFiles.del(h.id); } catch (_) {}
+      try { if (h.id) await ZhFiles.del(h.id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       temuRenderHistory();
       toast('History record deleted ✓', 'ok');
     });
@@ -15699,7 +15866,7 @@ async function temuImportSheet(file) {
         await importStoreCopy(sc, file.name, (t) => { if (rep) rep.textContent = t + '\n\nNext step: Bulk tab → "Hunt all" → back to Temu Export → "Export + Upload to Temu".'; });
         return;
       }
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
     const buf = await file.arrayBuffer();
@@ -15714,7 +15881,7 @@ async function temuImportSheet(file) {
         temuUpdateSrcInfo();
         if (rep) rep.textContent = `✓ Store sheet: ${file.name} — ${zc.length} products (${nc} categories matched).\nEdit titles / images in the review cards, check the store, then press "Export + Upload to Temu".`;
         toast(`${zc.length} products imported — review them, then upload`, 'ok');
-        try { temuRenderReview(); } catch (_) {}
+        try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         return;
       }
     }
@@ -16155,7 +16322,7 @@ function temuRenderProfiles() {
         form.classList.add('editing');
       }
       temuCatMsg('');
-      try { $('temuCatForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+      try { $('temuCatForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     });
 
     item.querySelector('[data-del]').addEventListener('click', async (e) => {
@@ -16203,7 +16370,7 @@ async function temuFetchFromTemuTab() {
         form.classList.remove('hidden');
         form.classList.add('editing');
         const ft = $('tcFormTitle'); if (ft) ft.textContent = `Add from Temu: ${rawName}`;
-        try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+        try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       }
       toast(`✓ Category detected from Temu:  "${cat || rawName}"`, 'ok');
     });
@@ -16372,7 +16539,7 @@ async function temuImportTemplateCategories(files) {
       }
     } catch (_) { bad++; }
   }
-  if (added) { await temuSaveCfg(cfg); try { temuRenderProfiles(); } catch (_) {} }
+  if (added) { await temuSaveCfg(cfg); try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
   toast(`Templates: ${added} new categories added, ${had} already there${bad ? ', ' + bad + ' file(s) unreadable' : ''}`, added || had ? 'ok' : 'bad');
 }
 
@@ -16642,6 +16809,7 @@ async function temuUpdateReady() {
     else ps.hidden = true;
   }
 }
+let TemuFlowSent = null;   // { n, at } — products Temu accepted in this session (set by temuMarkListed 'accepted')
 // ═══ v9.16 — Workflow strip (Upload tab): ① Products → ② Titles → ③ Images → ④ Upload ═══
 // Counts come from the same ticked rows as the ready check. Titles = products with a saved title change (zhTextEdits),
 // Images = ✨ products with at least one edited image (zhImgEdits). Click a step = open + scroll to that part.
@@ -16663,12 +16831,16 @@ async function temuRenderFlow({ total, ok, stop, rows, seq }) {
     b.dataset.state = state;            // done | part | todo | block
     b.title = tip;
   };
-  set('products', total ? String(total) : '0', total ? 'done' : 'todo', total ? `${total} products ticked for upload` : 'No products yet — hunt first or choose another source');
+  // ✓ (done) only means "finished": products found = cyan number (ready), upload ✓ only after Temu confirmed it
+  set('products', total ? `${total} found` : '0', total ? 'ready' : 'todo', total ? `${total} products in the list (ticked for upload)` : 'No products yet — hunt first or choose another source');
   if (titled == null) set('titles', '–', 'todo', 'Imported sheet: titles are used as they are');
   else set('titles', `${titled}/${total}`, total && titled >= total ? 'done' : titled ? 'part' : 'todo', `${titled} of ${total} titles changed (AI rewrite or your edit). Optional.`);
   if (imgSel == null || !imgSel) set('images', imgSel == null ? '–' : '0', 'todo', 'No product ticked ✨ for image editing. Optional.');
   else set('images', `${imgDone}/${imgSel}`, imgDone >= imgSel ? 'done' : imgDone ? 'part' : 'todo', `${imgDone} of ${imgSel} ✨ products have edited images`);
-  set('upload', stop ? '!' : String(ok), stop ? 'block' : 'done', stop || `${ok} products ready to upload`);
+  const sent = TemuFlowSent && Date.now() - TemuFlowSent.at < 30 * 60000 ? TemuFlowSent.n : 0;
+  if (sent && !ok) set('upload', `${sent} uploaded`, 'done', `${sent} products were uploaded and accepted by Temu`);
+  else if (stop) set('upload', '!', 'block', stop);
+  else set('upload', ok ? `${ok} ready` : '0', ok ? 'ready' : 'todo', ok ? `${ok} products ready — NOT uploaded yet. Press "Export + Upload to Temu"${sent ? ` (${sent} uploaded earlier)` : ''}` : 'Nothing ready to upload');
 }
 async function temuFlowGo(step) {
   const list = $('temuReviewList');
@@ -16848,7 +17020,7 @@ async function temuRenderReview() {
     tools.className = 'temu-rv-tools';
     // v9.15.1 — search + filter chips (B9): find a product fast in a long list
     // filter chips sit behind a "Filter" toggle (collapsed by default) so they don't take space
-    const RV_FILTERS = [['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['edit', '✨ For images'], ['upd', 'AI titles']];
+    const RV_FILTERS = [['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['edit', '✨ For images'], ['imged', '🖼 Images edited'], ['notimged', '🖼 Not edited'], ['upd', 'AI titles']];
     const fLabel = f => (RV_FILTERS.find(x => x[0] === f) || RV_FILTERS[0])[1];
     tools.innerHTML = `<div class="temu-rv-tools-top">
         <input type="search" class="inp temu-rv-search" placeholder="Search…" value="${esc(TemuRvFilter.q)}" title="Type to show only matching products (title, link)">
@@ -16865,9 +17037,19 @@ async function temuRenderReview() {
       <div class="temu-rv-fchips"${TemuRvFilter.open ? '' : ' hidden'}>
         ${RV_FILTERS.map(([k, l]) =>
           `<button type="button" class="temu-rv-fchip${TemuRvFilter.f === k ? ' on' : ''}" data-f="${k}">${l}</button>`).join('')}
+      </div>
+      <div class="temu-rv-fbulk" hidden>
+        <span class="temu-rv-fbulk-n"></span>
+        <button type="button" data-fb="img-on" title="Tick ✨ (image editing) on every product shown by this filter">✨ Select for images</button>
+        <button type="button" data-fb="img-off" title="Remove the ✨ tick from every product shown">✕ Unselect</button>
+        <button type="button" data-fb="relearn" title="Forget the saved category of the products shown and ask Temu again (fixes wrong smart picks)">🔁 Learn category again</button>
+        <button type="button" data-fb="del" class="danger" title="Delete every product shown by this filter (asks first)">🗑 Delete shown</button>
       </div>`;
     tools.querySelector('.temu-rv-search').addEventListener('input', e => { TemuRvFilter.q = e.target.value; temuApplyRvFilter(); });
     tools.addEventListener('click', e => {
+      // bulk actions for the products the filter / search shows right now (the bar is visible only while a filter is on)
+      const fb = e.target.closest('button[data-fb]');
+      if (fb) { temuRvFilterBulk(fb.dataset.fb, list); return; }
       const fc = e.target.closest('button[data-f]');
       if (fc) {
         TemuRvFilter.f = fc.dataset.f;
@@ -16960,7 +17142,8 @@ async function temuRenderReview() {
 
     // v9.15.1 — 2-line row: the full title gets its own space (it used to shrink to "M." next to two checkboxes and two price chips);
     // ONE tick = this product is used (upload, AI titles and image editing all work on the ticked products)
-    card.dataset.flags = [!catProf?.category_keyword || catWeak ? 'cat' : '', allImgs.length ? '' : 'noimg'].filter(Boolean).join(' ');
+    // 'imged' = at least one picture of this product was edited with AI (edit journal) — for the "Images edited / not edited" filters
+    card.dataset.flags = [!catProf?.category_keyword || catWeak ? 'cat' : '', allImgs.length ? '' : 'noimg', allImgs.some(u => isEditedImg(r, u)) ? 'imged' : ''].filter(Boolean).join(' ');
     card.dataset.search = (String(title) + ' ' + String(r.url || '')).toLowerCase();
     card.innerHTML = `
       <div class="temu-rv-collapsed-row">
@@ -17075,7 +17258,7 @@ async function temuRenderReview() {
         const parts = parsePath(q);
         if (q && parts.length >= 2) items.push({ kind: 'path', raw: q, label: parts[parts.length - 1], sub: 'Use pasted Temu path · ' + parts.slice(0, -1).slice(-2).join(' › ') });
         if (!q) {
-          try { temuScoreProfiles(temuCleanTitle(r.title || '', cfg2), cfg2).slice(0, 5).forEach(x => items.push({ kind: 'key', key: x.name, label: x.prof.category_keyword || x.name, sub: crumbs(x.prof), tag: 'Suggested' })); } catch (_) {}
+          try { temuScoreProfiles(temuCleanTitle(r.title || '', cfg2), cfg2).slice(0, 5).forEach(x => items.push({ kind: 'key', key: x.name, label: x.prof.category_keyword || x.name, sub: crumbs(x.prof), tag: 'Suggested' })); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         } else {
           const words = ql.split(/[^a-z0-9&]+/).filter(Boolean);
           const hits = [];
@@ -17179,7 +17362,7 @@ async function temuRenderReview() {
           await setMasterRows(filtered, existing);
           if (MasterUIState?.allRows) MasterUIState.allRows = filtered;
         }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
       TemuReviewExcluded.delete(r.id);
       card.style.transition = 'all 0.2s ease';
@@ -17493,6 +17676,8 @@ function temuApplyRvFilter() {
     else if (ok && f === 'noimg') ok = flags.includes('noimg');
     else if (ok && f === 'off') ok = c.classList.contains('excluded');
     else if (ok && f === 'edit') ok = c.classList.contains('img-edit-on');
+    else if (ok && f === 'imged') ok = flags.includes('imged');
+    else if (ok && f === 'notimged') ok = !flags.includes('imged') && !flags.includes('noimg');
     else if (ok && f === 'upd') ok = c.matches('.rv-updated, .rv-same');
     c.classList.toggle('rv-filtered-out', !ok);
     if (ok) shown++;
@@ -17503,6 +17688,56 @@ function temuApplyRvFilter() {
   if (!shown && total) {
     if (!empty) { empty = document.createElement('div'); empty.className = 'temu-review-empty temu-rv-filter-empty'; empty.textContent = 'No product matches this filter.'; list.querySelector('.temu-rv-tools')?.after(empty); }
   } else empty?.remove();
+  // bulk bar: only while a filter / search is on, and only for the products it shows
+  const fb = list.querySelector('.temu-rv-fbulk');
+  if (fb) { const on = (q || f !== 'all') && shown > 0; fb.hidden = !on; const t = fb.querySelector('.temu-rv-fbulk-n'); if (t) t.textContent = `${shown} shown:`; }
+}
+// ✨ select / unselect / delete every product the current filter shows (hidden products are never touched)
+async function temuRvFilterBulk(act, list) {
+  const cards = [...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out)')];
+  if (!cards.length) return;
+  if (act === 'img-on' || act === 'img-off') {
+    let n = 0;
+    for (const c of cards) {
+      const chk = c.querySelector('.temu-rv-edit-chk');
+      if (!chk || (act === 'img-on' && (c.dataset.flags || '').split(' ').includes('noimg'))) continue;
+      const want = act === 'img-on';
+      if (chk.checked !== want) { chk.checked = want; chk.dispatchEvent(new Event('change', { bubbles: true })); n++; }
+    }
+    toast(act === 'img-on' ? `✨ ${n} product${n === 1 ? '' : 's'} selected for image editing` : `✨ removed from ${n} product${n === 1 ? '' : 's'}`, 'ok');
+    try { temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    return;
+  }
+  if (act === 'relearn') {
+    const ids = cards.map(c => c.dataset.id).filter(Boolean);
+    toast(`🔁 ${ids.length} product${ids.length === 1 ? '' : 's'}: saved category forgotten — asking Temu again…`, 'info');
+    temuLearnCategories({ ids });
+    return;
+  }
+  if (act !== 'del') return;
+  // showConfirm calls back only on "Delete" (Cancel just closes it)
+  const go = await new Promise(res => {
+    if ($('confirmModal')) { showConfirm(`Delete ${cards.length} product${cards.length === 1 ? '' : 's'} shown by this filter?`, 'They are removed from this list and from your Library. Products hidden by the filter stay.', 'Delete', () => res(true)); }
+    else res(confirm(`Delete ${cards.length} product(s) shown by this filter? They are removed from this list and from your Library.`));
+  });
+  if (!go) return;
+  const ids = new Set(cards.map(c => c.dataset.id).filter(Boolean));
+  const rowsNow = await temuGetQueuedRows();
+  const urls = new Set(rowsNow.filter(r => ids.has(r.id)).map(r => r.url).filter(Boolean));
+  const gone = x => ids.has(x.id) || (x.url && urls.has(x.url));
+  const source = $('temuSource')?.value || 'bulk';
+  if (source === 'bulk' && BulkState?.results) BulkState.results = BulkState.results.filter(x => !gone(x));
+  if (source === 'sheet' && TemuSheetRows) TemuSheetRows = TemuSheetRows.filter(x => !gone(x));
+  try {
+    const existing = await getMasterRows();
+    const filtered = existing.filter(x => !gone(x));
+    if (filtered.length !== existing.length) { await setMasterRows(filtered, existing); if (MasterUIState?.allRows) MasterUIState.allRows = filtered; }
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  ids.forEach(id => { TemuReviewExcluded.delete(id); TemuImgEditSelected.delete(id); });
+  cards.forEach(c => c.remove());
+  const remaining = await temuGetQueuedRows();
+  temuUpdateReviewCount(remaining); temuUpdateSrcInfo(); temuApplyRvFilter();
+  toast(`🗑 ${ids.size} product${ids.size === 1 ? '' : 's'} deleted`, 'ok');
 }
 function temuUpdateActionBar(rows) {
   const bar = document.querySelector('#temuReviewList .temu-rv-actionbar'); if (!bar) return;
@@ -17599,7 +17834,7 @@ function cleanTemuTitleResult(raw, currentTitle, useDefaultLength) {
         const c = Array.isArray(parsed.titles) ? parsed.titles[0] : (parsed.title || parsed.new_title || '');
         if (c) title = String(c).trim();
       }
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   // Strip website button noise that might have leaked
   title = title.replace(ECOM_JUNK_RE, '');
@@ -17687,7 +17922,7 @@ function temuLimitTitle(title, max = 500) {
 }
 (function initTemuTitleOptions() {
   const inp = $('temuAiPromptInp');
-  const save = () => chrome.storage.local.set({ zhunterTitleOptimizerInstruction: inp?.value || '' }).catch(() => {});
+  const save = () => chrome.storage.local.set({ zhunterTitleOptimizerInstruction: inp?.value || '' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   chrome.storage.local.get(['zhunterTitleOptimizerInstruction']).then(saved => {
     if (!inp || inp.value.trim()) return;
     inp.value = saved.zhunterTitleOptimizerInstruction || '';
@@ -17695,7 +17930,7 @@ function temuLimitTitle(title, max = 500) {
     for (const phrase of legacy) inp.value = inp.value.split(phrase).join('');
     inp.value = inp.value.replace(/^[\s;]+|[\s;]+$/g, '').replace(/;\s*;/g, ';');
     save();
-  }).catch(() => {});
+  }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   inp?.addEventListener('input', save);
   inp?.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); temuAiBulkRewrite(); } });
 })();
@@ -17749,10 +17984,24 @@ const ZH_PROMPTS_KEY = 'zhunterTitleCustomPrompts';
 async function temuLoadSavedPrompts() {
   const sel = $('temuTitleSavedPrompts'); if (!sel) return [];
   let list = [];
-  try { list = (await chrome.storage.local.get([ZH_PROMPTS_KEY]))[ZH_PROMPTS_KEY] || []; } catch (_) {}
+  try { list = (await chrome.storage.local.get([ZH_PROMPTS_KEY]))[ZH_PROMPTS_KEY] || []; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   sel.innerHTML = '<option value="">Saved prompts…</option>' + list.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('');
   return list;
 }
+// Title Optimizer: 3 tabs (⚡ AI rewrite · ✏️ My prompt · 💬 ChatGPT) — only one way is shown at a time; the last tab is remembered
+(function initTemuTitleTabs() {
+  const show = k => {
+    document.querySelectorAll('.tt-tabs [data-tt]').forEach(b => { const on = b.dataset.tt === k; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    document.querySelectorAll('[data-tt-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.ttPane !== k));
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.tt-tabs [data-tt]'); if (!b) return;
+    show(b.dataset.tt);
+    try { localStorage.setItem('zhTitleTab', b.dataset.tt); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  });
+  let k = 'ai'; try { k = localStorage.getItem('zhTitleTab') || 'ai'; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  show(['ai', 'mine', 'gpt'].includes(k) ? k : 'ai');
+})();
 (function initTemuCustomPrompt() {
   const ta = $('temuTitleCustomPrompt');
   temuLoadSavedPrompts();
@@ -17818,7 +18067,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
       return String(card?.querySelector('.temu-rv-title-inp')?.value || r.title || '').replace(/\s+/g, ' ').trim();
     });
     ZhGptBatch = { ids: rows.map(r => r.id), urls: rows.map(r => r.url || ''), titles, at: Date.now() };
-    try { await chrome.storage.local.set({ [BKEY]: ZhGptBatch }); } catch (_) {}
+    try { await chrome.storage.local.set({ [BKEY]: ZhGptBatch }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     ZhGptPending = null; $('temuGptApplyBtn')?.classList.add('hidden'); const pv = $('temuGptPreview'); if (pv) pv.innerHTML = '';
     info();
     return titles.map((t, i) => `${i + 1}. ${t}`).join('\n');
@@ -17827,37 +18076,62 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
     const txt = await makeBatch(); if (!txt) return;
     await copy(txt, `${ZhGptBatch.titles.length} titles copied (numbered)`);
   });
-  // ── Auto: send to ChatGPT, read the answer, fill the paste box, show the preview ──
+  // ── Auto: send to ChatGPT or Gemini, read the answer, fill the paste box, show the preview ──
+  // Engine choice (ChatGPT / Gemini) is remembered (localStorage zhTitleChatEngine). Same job / result keys, job.engine says which tab takes it.
+  const ENG = {
+    chatgpt: { name: 'ChatGPT', match: '*://chatgpt.com/*', home: 'https://chatgpt.com/', file: 'gpt_automation.js', start: 'ZH_GPT_TITLES_START' },
+    gemini:  { name: 'Gemini',  match: '*://gemini.google.com/*', home: 'https://gemini.google.com/app', file: 'gemini_automation.js', start: 'ZH_GEM_TITLES_START' }
+  };
+  let titleEng = 'chatgpt';
+  try { titleEng = localStorage.getItem('zhTitleChatEngine') === 'gemini' ? 'gemini' : 'chatgpt'; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  const showEng = () => {
+    document.querySelectorAll('.tt-eng [data-teng]').forEach(b => b.classList.toggle('active', b.dataset.teng === titleEng));
+    const n = ENG[titleEng].name;
+    if ($('temuTitleEngName')) $('temuTitleEngName').textContent = n;
+    if ($('temuGptAutoBtn') && !autoRun) $('temuGptAutoBtn').textContent = `Send to ${n}`;
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.tt-eng [data-teng]'); if (!b) return;
+    if (autoRun) { toast('Wait for the current run to finish', 'warn'); return; }
+    titleEng = b.dataset.teng === 'gemini' ? 'gemini' : 'chatgpt';
+    try { localStorage.setItem('zhTitleChatEngine', titleEng); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    showEng();
+  });
   let autoRun = null;
+  showEng();
   const autoStatus = (t) => { const el = $('temuGptAutoStatus'); if (el) el.textContent = t || ''; };
   $('temuGptAutoBtn')?.addEventListener('click', async () => {
-    if (autoRun) { toast('A ChatGPT run is already in progress', 'warn'); return; }
+    const E = ENG[titleEng];
+    if (autoRun) { toast(`A ${E.name} run is already in progress`, 'warn'); return; }
     const txt = await makeBatch(); if (!txt) return;
     const mode = $('temuGptAutoMode')?.value || 'tab';
     const id = 'gt_' + Date.now().toString(36);
-    const tabs = await chrome.tabs.query({ url: '*://chatgpt.com/*' });
-    if (mode === 'tab' && !tabs.length) { toast('Open your ChatGPT chat in a tab first (or choose "New chat")', 'warn'); autoStatus('No ChatGPT tab is open.'); return; }
+    let tabs = await chrome.tabs.query({ url: E.match });
+    // Gemini: never use a tab that the image runner is working in right now
+    if (titleEng === 'gemini' && TemuImgStepper?.running && Array.isArray(TemuImgStepper.gptSlots)) { const busy = new Set(TemuImgStepper.gptSlots.filter(Boolean).map(x => x.tabId)); tabs = tabs.filter(t => !busy.has(t.id)); }
+    if (mode === 'tab' && !tabs.length) { toast(`Open your ${E.name} chat in a tab first (or choose "New chat")`, 'warn'); autoStatus(`No free ${E.name} tab is open.`); return; }
     autoRun = id; $('temuGptAutoBtn').disabled = true;
-    autoStatus(`Sending ${ZhGptBatch.titles.length} titles to ChatGPT…`);
+    autoStatus(`Sending ${ZhGptBatch.titles.length} titles to ${E.name}…`);
     await chrome.storage.local.remove(['zhGptTitlesResult']);
-    await chrome.storage.local.set({ zhGptTitlesJob: { id, text: txt, prompt: ta.value, newChat: mode === 'new', at: Date.now(), started: false } });
+    await chrome.storage.local.set({ zhGptTitlesJob: { id, engine: titleEng, text: txt, prompt: ta.value, newChat: mode === 'new', at: Date.now(), started: false } });
     try {
       if (mode === 'tab') {
         const tab = tabs.find(t => t.active) || tabs[0];
         await chrome.tabs.update(tab.id, { active: true });
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(() => {});
-        await chrome.tabs.sendMessage(tab.id, { action: 'ZH_GPT_TITLES_START' }).catch(() => {});
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [E.file] }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+        await chrome.tabs.sendMessage(tab.id, { action: E.start }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
       } else {
-        await chrome.tabs.create({ url: 'https://chatgpt.com/', active: true });   // the new tab picks the job up by itself
+        await chrome.tabs.create({ url: E.home, active: true });   // the new tab picks the job up by itself
       }
-    } catch (e) { autoStatus('Could not reach ChatGPT: ' + (e?.message || e)); autoRun = null; $('temuGptAutoBtn').disabled = false; }
+    } catch (e) { autoStatus(`Could not reach ${E.name}: ` + (e?.message || e)); autoRun = null; $('temuGptAutoBtn').disabled = false; }
   });
   chrome.storage.onChanged.addListener((ch, area) => {
     const r = area === 'local' ? ch.zhGptTitlesResult?.newValue : null;
     if (!r || !autoRun || r.id !== autoRun) return;
-    if (r.status === 'working' || r.status === 'press_send') { autoStatus(r.status === 'press_send' ? 'Press Send in the ChatGPT tab — the answer will be read automatically.' : (r.note || 'Working…')); return; }
-    autoRun = null; $('temuGptAutoBtn').disabled = false;
-    if (r.status === 'error') { autoStatus('✗ ' + (r.error || 'Failed')); toast('ChatGPT: ' + (r.error || 'failed'), 'warn'); return; }
+    const en = ENG[titleEng].name;
+    if (r.status === 'working' || r.status === 'press_send') { autoStatus(r.status === 'press_send' ? `Press Send in the ${en} tab — the answer will be read automatically.` : (r.note || 'Working…')); return; }
+    autoRun = null; $('temuGptAutoBtn').disabled = false; showEng();
+    if (r.status === 'error') { autoStatus('✗ ' + (r.error || 'Failed')); toast(`${en}: ` + (r.error || 'failed'), 'warn'); return; }
     if (r.status === 'done') {
       autoStatus('✓ Answer received — check the preview below, then Apply.');
       $('temuGptPaste').value = r.text || '';
@@ -17866,7 +18140,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   });
   const parse = (raw) => {
     const lines = String(raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    while (lines.length && /^(ChatGPT said|You said)\s*:?$/i.test(lines[0])) lines.shift();
+    while (lines.length && /^(ChatGPT said|You said|Gemini said|Show thinking)\s*:?$/i.test(lines[0])) lines.shift();
     const out = []; let numbered = 0;
     for (const l of lines) {
       const m = l.match(/^(\d{1,4})\s*[.)\-:]\s*(.+)$/);
@@ -17954,7 +18228,7 @@ async function temuAiBulkRewrite(action = 'rewrite') {
     const customPrompt = action === 'custom' ? ($('temuTitleCustomPrompt')?.value || '').trim() : '';
     if (action === 'custom' && !customPrompt) { toast('Write your prompt first', 'warn'); return; }
     // no Groq key saved: say it ONCE and stop (before, every product failed with the same error and filled Chrome's Errors page)
-    { let gk = null; try { gk = await getGroqConfig(); } catch (_) {}
+    { let gk = null; try { gk = await getGroqConfig(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (!gk?.apiKeys?.length) {
         toast('No Groq key saved — Settings → Groq API Keys → Save a key first', 'warn');
         const rep = $('temuReport'); if (rep) rep.textContent = '✗ AI titles: no Groq API key is saved, nothing was changed.\n→ Settings → "Groq API Keys" → paste a free key (console.groq.com) → Save / Replace, then try again.';
@@ -18027,7 +18301,7 @@ async function temuAiBulkRewrite(action = 'rewrite') {
       lines.push(v.inLib ? ((v.savedLib === v.inLib ? '✓' : '✗') + `Saved in Library:  ${v.savedLib}/${v.inLib}`) : '• These products are not in the Library (updated in this list only)');
     }
     const report = $('temuReport');
-    if (report) { report.textContent = (report.textContent ? report.textContent + '\n\n' : '') + lines.join('\n'); try { report.scrollTop = report.scrollHeight; } catch (_) {} }
+    if (report) { report.textContent = (report.textContent ? report.textContent + '\n\n' : '') + lines.join('\n'); try { report.scrollTop = report.scrollHeight; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     temuShowTitleChanges(changes, failures);
     const okSave = !changes.length || v.inFile === changes.length;
     toast(okSave
@@ -18153,7 +18427,7 @@ function temuJumpToCard(id) {
 async function temuSaveTitles(changes) {
   if (typeof zhSaveTextChanges === 'function') {
     const result = await zhSaveTextChanges(changes.map(c => ({ id: c.id, url: c.url, before: c.old ? { title: c.old } : undefined, patch: { title: c.title } })));
-    try { if (MasterUIState?.allRows?.length) filterAndRenderMasterRows(); } catch (_) {}
+    try { if (MasterUIState?.allRows?.length) filterAndRenderMasterRows(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return result;
   }
   throw new Error('Content save module did not load; reload the extension');
@@ -18205,13 +18479,13 @@ function temuInitReviewToggle() {
   // v9.15 — remember the chosen image engine
   { const ts = $('temuGptTabsSel');   // how many ChatGPT tabs work together
     if (ts) {
-      chrome.storage.local.get(['zhGptTabs']).then(r => { if (r?.zhGptTabs && [...ts.options].some(o => o.value === String(r.zhGptTabs))) ts.value = String(r.zhGptTabs); }).catch(() => {});
-      ts.addEventListener('change', () => chrome.storage.local.set({ zhGptTabs: ts.value }).catch(() => {}));
+      chrome.storage.local.get(['zhGptTabs']).then(r => { if (r?.zhGptTabs && [...ts.options].some(o => o.value === String(r.zhGptTabs))) ts.value = String(r.zhGptTabs); }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+      ts.addEventListener('change', () => chrome.storage.local.set({ zhGptTabs: ts.value }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }));
     } }
   { const es = $('temuAiImgEngineSel');
     if (es) {
-      chrome.storage.local.get(['zhImgEngine']).then(r => { if (r?.zhImgEngine && [...es.options].some(o => o.value === r.zhImgEngine)) es.value = r.zhImgEngine; }).catch(() => {});
-      es.addEventListener('change', () => chrome.storage.local.set({ zhImgEngine: es.value }).catch(() => {}));
+      chrome.storage.local.get(['zhImgEngine']).then(r => { if (r?.zhImgEngine && [...es.options].some(o => o.value === r.zhImgEngine)) es.value = r.zhImgEngine; }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+      es.addEventListener('change', () => chrome.storage.local.set({ zhImgEngine: es.value }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }));
     } }
   $('temuAiImgPromptToggleBtn')?.addEventListener('click', () => {
     $('temuAiImgPromptWrap')?.classList.toggle('hidden');
@@ -18223,10 +18497,17 @@ function temuInitReviewToggle() {
   });
   $('temuAiBulkImgBtn')?.addEventListener('click', () => zhChooseEditMode());
   // v9.9.0 — pick products for image editing without touching the upload selection
+  // 20 Oct 2026 — a filter / search on the product list limits "Select All" to the products it shows ("Clear" then only clears those)
   const imgSelAll = async (on) => {
     const rows = await temuGetQueuedRows();
-    TemuImgEditSelected.clear();
-    if (on) rows.forEach(r => { if (_allImgUrls(r).length) TemuImgEditSelected.add(r.id); });
+    const filtered = !!(TemuRvFilter.f !== 'all' || TemuRvFilter.q.trim()) && !!list.querySelector('.temu-rv-card');
+    const shown = filtered ? new Set([...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out)')].map(c => c.dataset.id).filter(Boolean)) : null;
+    if (on) {
+      TemuImgEditSelected.clear();
+      rows.forEach(r => { if (_allImgUrls(r).length && (!shown || shown.has(r.id))) TemuImgEditSelected.add(r.id); });
+      if (shown) toast(`✨ ${TemuImgEditSelected.size} product${TemuImgEditSelected.size === 1 ? '' : 's'} selected — only the ones your filter shows`, 'ok');
+    } else if (shown) { shown.forEach(id => TemuImgEditSelected.delete(id)); toast('✨ cleared for the products your filter shows', 'ok'); }
+    else TemuImgEditSelected.clear();
     temuUpdateImgEditCount(rows);
     if (!list.classList.contains('hidden')) await temuRenderReview();
   };
@@ -18466,11 +18747,11 @@ async function temuStartBulkImageEdit(opts = {}) {
       TemuImgStepper.limitWarn = `⚠ ${nm}: ~${room.left} left today (usual limit ~${room.usual}), this run needs ~${need}`;
       toast(`${TemuImgStepper.limitWarn}. ${engine === 'flow' ? '' : 'At the limit it switches account / Flow.'}`, 'warn');
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
   temuStepOpenModal();
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
-  if (engine === 'chatgpt' || engine === 'gemini') { await gptPoolStart(); return; }   // v9.15 — 2 ChatGPT tabs at the same time
+  if (engine === 'chatgpt' || engine === 'gemini' || (engine === 'flow' && FLOW_TABS > 1 && TemuImgStepper.queue.length > 1)) { await gptPoolStart(); return; }   // Flow: 2 tabs at once (20 Oct 2026)   // v9.15 — 2 ChatGPT tabs at the same time
   await temuStepProcessCurrent();
 }
 
@@ -18516,7 +18797,7 @@ async function zhImgQueueContinue() {
   temuStepOpenModal();
   for (const id of ['temuStepSkipBtn', 'temuStepSendAgainBtn', 'temuStepPasteNextBtn']) { const b = $(id); if (b) b.style.display = ''; }
   zhImgQueueBar();
-  if (engine === 'chatgpt' || engine === 'gemini') { await gptPoolStart(); return; }
+  if (engine === 'chatgpt' || engine === 'gemini' || (engine === 'flow' && FLOW_TABS > 1 && TemuImgStepper.queue.length > 1)) { await gptPoolStart(); return; }   // Flow: 2 tabs at once (20 Oct 2026)
   await temuStepProcessCurrent();
 }
 async function zhImgQueueBar() {
@@ -18532,10 +18813,10 @@ async function zhImgQueueBar() {
       bar.innerHTML = '<span class="zh-iq-txt" style="flex:1;min-width:160px"></span><button type="button" class="btn btn-primary btn-xs" id="zhIqGo" style="border-radius:4px">Continue</button><button type="button" class="btn btn-ghost btn-xs" id="zhIqNo" style="border-radius:4px">Discard</button>';
       host.insertBefore(bar, $('temuReviewList'));
       bar.querySelector('#zhIqGo').onclick = () => zhImgQueueContinue();
-      bar.querySelector('#zhIqNo').onclick = async () => { try { await chrome.storage.local.remove([ZH_IMGQ_KEY]); } catch (_) {} bar.remove(); };
+      bar.querySelector('#zhIqNo').onclick = async () => { try { await chrome.storage.local.remove([ZH_IMGQ_KEY]); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } bar.remove(); };
     }
     bar.querySelector('.zh-iq-txt').textContent = `↻ Image editing was not finished — ${rem.left.length} image${rem.left.length > 1 ? 's' : ''} left (${rem.st.engine}). Finished images are kept.`;
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 setTimeout(() => { zhImgQueueBar(); }, 3500);
 
@@ -18570,7 +18851,7 @@ function temuStepCancelActiveJob() {
   if (TemuImgStepper.activeJobId) FlowJobs.delete(TemuImgStepper.activeJobId);
   TemuImgStepper.activeJobId = null;
   TemuImgStepper.gptToken = null;   // v9.15 — ChatGPT image attempt
-  try { for (const f of [...(TemuImgStepper.gptAborts || [])]) f(); } catch (_) {}
+  try { for (const f of [...(TemuImgStepper.gptAborts || [])]) f(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   TemuImgStepper.npToken = null;   // v9.12.6 — stops a running "new project" countdown
   temuStepManualAttn(false);
 }
@@ -18636,7 +18917,7 @@ async function temuStepManualAction(act) {
   if (!cur) { toast('Tap an image in Results first', 'warn'); return; }
   const prompt = cur.prompt || S.prompt || '';
   const eng = temuStepManualEngine();
-  if (act === 'open') { manualOpen(eng).catch(() => {}); return; }
+  if (act === 'open') { manualOpen(eng).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); return; }
   if (act === 'replace') { await temuStepReplaceNow(); return; }
   if (act === 'img') {
     toast('📋 Copying image…', 'info');
@@ -18670,8 +18951,8 @@ async function temuStepManualAction(act) {
         return;
       }
       await chrome.tabs.update(tab.id, { active: true });
-      if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-      try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) {}
+      if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+      try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       const res = await chrome.tabs.sendMessage(tab.id, { action: 'ZH_FLOW_MANUAL_ATTACH', images: [b64], prompt: zhWithQuality(prompt), clear: true })
         .catch(e => ({ ok: false, error: e?.message }));
       if (res?.ok) {
@@ -18749,7 +19030,7 @@ function temuStepOpenModal() {
       }
     }; }
     if (db) db.onclick = async () => {
-      if (!TemuImgStepper.running) { modal.classList.add('hidden'); try { await temuRenderReview(); } catch (_) {} temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); return; }   // run is over: just close the window
+      if (!TemuImgStepper.running) { modal.classList.add('hidden'); try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuGetQueuedRows().then(temuUpdateImgEditCount).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); return; }   // run is over: just close the window
       TemuImgStepper.paused = false; TemuImgStepper.heldAdvance = false;
       temuStepCancelActiveJob();
       await temuStepFinish();
@@ -18822,7 +19103,7 @@ async function temuStepProcessCurrent() {
   if (imgEl) imgEl.src = current.imgUrl;
   if (nameEl) nameEl.textContent = current.product.title || 'Product';
   if (current.status !== 'done') current.status = 'busy';
-  try { temuStepResultsRender(); } catch (_) {}
+  try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   temuStepSetStatus(`Opening in ${TemuImgStepper.engine === 'flow' ? 'Google Flow (newest Nano Banana)' : TemuImgStepper.engine === 'auto' ? 'Auto' : TemuImgStepper.engine}...`);
 
   // Paste & Next is only for the manual engines
@@ -18861,7 +19142,7 @@ async function temuStepSendCurrent() {
     try {
       const snap = await flowScanImages();
       if (Array.isArray(snap)) current.snap = new Set(snap.map(g => g.id));
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     current.sentAt = Date.now();
     const sent = await triggerFlowEdit({
       src: current.imgUrl,
@@ -18961,7 +19242,7 @@ async function temuStepHandlePasteNext() {
         break;
       }
     }
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
   // Fallback: read clipboard via Flow tab
   if (!base64FromClipboard) {
@@ -18991,7 +19272,7 @@ async function temuStepHandlePasteNext() {
         });
         base64FromClipboard = results?.[0]?.result || null;
       }
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
 
   // v9.15.1 — one path for every engine: the edit journal, counters, pack label and pack→background stages are all handled
@@ -19018,15 +19299,15 @@ async function temuStepFinish() {
   const bad = (queue || []).filter(it => it.status === 'failed' || it.status === 'skipped').length;
   const done = stats?.done || 0;
   if (S2.handoff) {   // Gemini limit → the rest continues in Flow; that run shows its own summary
-    try { temuStepResultsRender(); } catch (_) {}
+    try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return;
   }
   temuStepSetStatus(`${bad ? '⚠️' : '✅'} Done — ${done}/${queue.length} images replaced${bad ? ` · ${bad} failed (press "🔁 Retry failed")` : ''}${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, bad ? 'error' : 'ok');
   { const t = $('temuStepTitle'); if (t) t.textContent = bad ? `AI Image Studio · ${bad} failed` : 'AI Image Studio · Done ✅'; }
-  try { temuStepResultsRender(); } catch (_) {}
+  try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   await temuRenderReview();
   // everything done → go on to the product list by itself; with failed images the window stays open (Retry failed / Redo)
-  if (!bad) setTimeout(() => { if (TemuImgStepper === S2 && !S2.running) { $('temuImgStepperModal')?.classList.add('hidden'); temuGetQueuedRows().then(temuUpdateImgEditCount).catch(() => {}); } }, 3500);
+  if (!bad) setTimeout(() => { if (TemuImgStepper === S2 && !S2.running) { $('temuImgStepperModal')?.classList.add('hidden'); temuGetQueuedRows().then(temuUpdateImgEditCount).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); } }, 3500);
   toast(bad
     ? `Image editing finished: ${done} replaced · ${bad} failed — open the list and press "Retry failed"`
     : `🎉 Image editing complete: ${done} replaced (${queue.length} total)${timeTxt ? ' · ' + timeTxt.replace('⏱ ', '') : ''}`, bad ? 'warn' : 'ok');
@@ -19163,6 +19444,8 @@ async function temuAutoSyncActiveStoreFromTab(promptIfNew = false) {
       temuRenderProfiles();
       temuFillForm();
       updateTopTemuStorePill();
+      // 20 Oct 2026 — "store: …" line and the store row above Upload used to keep the OLD store name after this switch
+      try { temuUpdateSrcInfo(); temuScheduleReady(); temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       toast(`⚡ Auto-switched to active store: ${existingKey}`, 'ok');
     }
     return;
@@ -19191,9 +19474,9 @@ async function openTemuModal() {
   const m = $('temuModal'); if (!m) return;
   m.style.zIndex = '1000';
   if ($('temuDrawer') && !$('temuDrawer').hidden) temuDrawerClose(true);   // v9.16 — never reopen on a stale product sheet
-  zhDailyRender().catch(() => {});   // v9.16 — today's AI image counter
+  zhDailyRender().catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });   // v9.16 — today's AI image counter
   await temuMigrateLegacyIfNeeded();
-  try { await temuAutoSyncActiveStoreFromTab(true); } catch (_) {}
+  try { await temuAutoSyncActiveStoreFromTab(true); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   temuRenderStoreBar();
   temuUpdateTplStatus();
   temuRenderProfiles();
@@ -19203,9 +19486,9 @@ async function openTemuModal() {
   temuRenderHistory();
   temuInitReviewToggle();
   // Update review count on open
-  temuGetQueuedRows().then(rows => temuUpdateReviewCount(rows)).catch(() => {});
+  temuGetQueuedRows().then(rows => temuUpdateReviewCount(rows)).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   // v9.7.2: purana Activity log wapas
-  try { const rep = $('temuReport'); if (rep && !(rep.textContent || '').trim()) chrome.storage.local.get('temuReportText', x => { if (x?.temuReportText && rep && !(rep.textContent || '').trim()) rep.textContent = x.temuReportText; }); } catch (_) {}
+  try { const rep = $('temuReport'); if (rep && !(rep.textContent || '').trim()) chrome.storage.local.get('temuReportText', x => { if (x?.temuReportText && rep && !(rep.textContent || '').trim()) rep.textContent = x.temuReportText; }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   { const wp = $('temuActivityWrap'); if (wp) wp.open = false; }
   m.classList.remove('hidden');
 }
@@ -19230,8 +19513,8 @@ function temuInitActivitySummary() {
   };
   // v9.7.2: Activity text ko save rakho (reload / panel band hone par bhi rahe)
   let saveT = null;
-  const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { chrome.storage.local.set({ temuReportText: (rep.textContent || '').slice(-60000) }); } catch (_) {} }, 400); };
-  try { new MutationObserver(() => { sync(); persist(); }).observe(rep, { childList: true, characterData: true, subtree: true }); } catch (_) {}
+  const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { chrome.storage.local.set({ temuReportText: (rep.textContent || '').slice(-60000) }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 400); };
+  try { new MutationObserver(() => { sync(); persist(); }).observe(rep, { childList: true, characterData: true, subtree: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   sync();
 }
 
@@ -19254,7 +19537,7 @@ async function updateTopTemuStorePill() {
   try {
     const rows = await getMasterRows();
     readyCount = rows.length;
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
   pill.innerHTML = `
     <span class="temu-dot-live"></span>
@@ -19273,7 +19556,7 @@ function initTemuExport() {
     chrome.tabs?.onActivated?.addListener(() => {
       temuAutoSyncActiveStoreFromTab(false);
     });
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   document.addEventListener('change', e => {
     if (e.target && e.target.id === 'tgSkipListed') temuUpdateSrcInfo();
     if (e.target && e.target.id === 'temuSource') { 
@@ -19283,7 +19566,7 @@ function initTemuExport() {
         temuUpdateReviewCount(rows);
         const rl = $('temuReviewList');
         if (rl && !rl.classList.contains('hidden')) temuRenderReviewList(rows);
-      }).catch(() => {});
+      }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
     }
     if (e.target && e.target.id === 'temuSheetFile') { const f = e.target.files?.[0]; if (f) temuImportSheet(f); e.target.value = ''; }
     if (e.target && e.target.id === 'temuCatTplMulti') { const fl = [...(e.target.files || [])]; if (fl.length) temuImportTemplateCategories(fl); e.target.value = ''; }
@@ -19317,7 +19600,7 @@ function initTemuExport() {
   // Delegated clicks — survive any re-render and any modal stacking
   document.addEventListener('click', e => {
     const tb = e.target.closest('#temuModal .temu-tab'); if (tb) { temuSwitchTab(tb.dataset.ttab); return; }
-    if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) {} }
+    if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
     if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill') || e.target.closest('#settingsTemuOpenBtn')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
 
@@ -19388,7 +19671,7 @@ function initTemuExport() {
         const isHidden = form.classList.toggle('hidden');
         if (!isHidden) {
           $('tcName')?.focus();
-          try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+          try { form.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         }
       }
     }
@@ -19448,15 +19731,15 @@ function initTemuExport() {
           if (existingTabs && existingTabs.length > 0) {
             const tab = existingTabs[0];
             chrome.tabs.update(tab.id, { active: true });
-            chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }).catch(() => {});
-            chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(() => {});
+            chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+            chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GEMINI_IMAGE' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
           } else {
             chrome.tabs.create({ url: 'https://gemini.google.com/app', active: true }, (tab) => {
               if (tab?.id) {
                 const onTabLoaded = (tabId, info) => {
                   if (tabId === tab.id && info.status === 'complete') {
                     chrome.tabs.onUpdated.removeListener(onTabLoaded);
-                    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }).catch(() => {});
+                    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gemini_automation.js'] }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
                   }
                 };
                 chrome.tabs.onUpdated.addListener(onTabLoaded);
@@ -19502,15 +19785,15 @@ function initTemuExport() {
           if (existingTabs && existingTabs.length > 0) {
             const tab = existingTabs[0];
             chrome.tabs.update(tab.id, { active: true });
-            chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(() => {});
-            chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GPT_IMAGE' }).catch(() => {});
+            chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+            chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_GPT_IMAGE' }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
           } else {
             chrome.tabs.create({ url: 'https://chatgpt.com/', active: true }, (tab) => {
               if (tab?.id) {
                 const onTabLoaded = (tabId, info) => {
                   if (tabId === tab.id && info.status === 'complete') {
                     chrome.tabs.onUpdated.removeListener(onTabLoaded);
-                    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(() => {});
+                    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['gpt_automation.js'] }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
                   }
                 };
                 chrome.tabs.onUpdated.addListener(onTabLoaded);
@@ -19562,7 +19845,7 @@ function initTemuExport() {
         if (queued?.success) await msg({ action: 'SOURCING_RETRY' });
         else toast(queued?.error || 'Sourcing record missing', 'warn');
       } catch (e) { toast('Sourcing sync pending: ' + e.message, 'warn'); }
-      try { await temuHistAdd({ kind: 'manual', store: temuActiveStoreName() || '—', n: TemuLast.items.length, items: temuHistItems(TemuLast.items) }); } catch (_) {}
+      try { await temuHistAdd({ kind: 'manual', store: temuActiveStoreName() || '—', n: TemuLast.items.length, items: temuHistItems(TemuLast.items) }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true;
       const rep = $('temuReport'); if (rep) rep.textContent += `\n✓ ${TemuLast.items.length} products listed mark kiye`;
       temuUpdateSrcInfo();
@@ -19580,7 +19863,7 @@ function initTemuExport() {
       const o = sel?.querySelector('option[value="sheet"]'); if (o) o.hidden = true;
       if (sel) { sel.value = 'bulk'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
       { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
-      try { temuUpdateSrcInfo(); temuSyncSrcSeg(); temuRenderReview(); } catch (_) {}
+      try { temuUpdateSrcInfo(); temuSyncSrcSeg(); temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       toast('Loaded sheet removed — pick a source or import a new sheet', 'ok');
     }
     if (e.target.closest('#temuHistClear')) (async () => { if (!confirm('Clear Temu upload history?')) return; await temuHistSerial(() => new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r))); temuRenderHistory(); })();
@@ -19593,7 +19876,7 @@ function initTemuExport() {
       const m = { ...temuListedMap() }; let n = 0;
       lm.sids.forEach(sid => { const k = lm.store + '|' + sid; if (m[k]) { delete m[k]; n++; } });
       const ok2 = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: m } });
-      if (ok2?.success) { State.data.settings.temuListed = m; try { chrome.storage.local.remove('temuLastMarked'); } catch (_) {} temuSaveMsg(`${n} products unmark (store ${lm.store})`, 'ok'); temuUpdateSrcInfo(); }
+      if (ok2?.success) { State.data.settings.temuListed = m; try { chrome.storage.local.remove('temuLastMarked'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuSaveMsg(`${n} products unmark (store ${lm.store})`, 'ok'); temuUpdateSrcInfo(); }
       else temuSaveMsg('Unmark fail', 'warn');
     })();
     if (e.target.closest('#tgClearListed')) (async () => {
@@ -19760,7 +20043,7 @@ function initTemuExport() {
     e.target.value = '';
   });
 }
-try { document.addEventListener('DOMContentLoaded', initTemuExport); if (document.readyState !== 'loading') initTemuExport(); } catch (_) {}
+try { document.addEventListener('DOMContentLoaded', initTemuExport); if (document.readyState !== 'loading') initTemuExport(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 
 // ═════════════════════════════════════════════════════════════════
 // v9.11.0 — EDIT STUDIO (manual)
@@ -20153,7 +20436,7 @@ const PACK_LAYOUTS = {
 const ZH_KEEP_PACK_LABEL = 'IMPORTANT: if the image already has a bold "N PACK" label (red number + black "PACK" letters) in its top-right corner, keep that label exactly as it is — same text, colours, size and position. Never remove, move, redraw, cover or change it.';
 // user choice (Edit Studio tick "PACK label"): write "N PACK" on pack images or not
 let zhPackLabelOn = true;
-try { chrome.storage.local.get(['zhPackLabelOn'], st => { if (typeof st?.zhPackLabelOn === 'boolean') zhPackLabelOn = st.zhPackLabelOn; }); } catch (_) {}
+try { chrome.storage.local.get(['zhPackLabelOn'], st => { if (typeof st?.zhPackLabelOn === 'boolean') zhPackLabelOn = st.zhPackLabelOn; }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 function zhWithKeepLabel(p, on = zhPackLabelOn) { p = String(p || '').split('\n\n' + ZH_KEEP_PACK_LABEL).join('').trim(); return on ? (p + '\n\n' + ZH_KEEP_PACK_LABEL).trim() : p; }
 
 // v9.15 — NEW pack prompt (keeps the original background). The "N PACK" label is either added by the extension
@@ -20439,7 +20722,7 @@ If the original image already has a quantity or pack badge, remove it and restor
 }
 // pack prompt style: 'new' (original background) or 'old' (strict, clean white studio background)
 let zhPackStyle = 'new';
-try { chrome.storage.local.get(['zhPackStyle'], st => { if (st?.zhPackStyle === 'old' || st?.zhPackStyle === 'new') zhPackStyle = st.zhPackStyle; }); } catch (_) {}
+try { chrome.storage.local.get(['zhPackStyle'], st => { if (st?.zhPackStyle === 'old' || st?.zhPackStyle === 'new') zhPackStyle = st.zhPackStyle; }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 function packStrictPrompt(n, label = zhPackLabelOn) {
   n = Number(n) || 2;
   const w = PACK_WORDS[n] || String(n);
@@ -20497,7 +20780,7 @@ async function zhImageToPngBlob(src) {
         ? await msg({ action: 'FETCH_FLOW_IMAGE', url: src })
         : await msg({ action: 'FETCH_BASE64', url: src, settings: { imageFormat: 'original' } });
       if (r?.success && r.base64) dataUrl = r.base64;
-    } catch (_) {}
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   }
   let blob = null;
   if (!/^data:/i.test(dataUrl)) {
@@ -20506,7 +20789,7 @@ async function zhImageToPngBlob(src) {
       try {
         const r = await fetch(src, { ...opt, signal: AbortSignal.timeout(30000) });
         if (r.ok) { const b = await r.blob(); if (/^image\//i.test(b.type) && b.size) { blob = b; break; } }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
     if (!blob) throw new Error('image could not be downloaded (check internet / the link may have expired)');
   } else blob = await (await fetch(dataUrl)).blob();
@@ -20515,7 +20798,7 @@ async function zhImageToPngBlob(src) {
   const c = document.createElement('canvas');
   c.width = bmp.width; c.height = bmp.height;
   c.getContext('2d').drawImage(bmp, 0, 0);
-  try { bmp.close(); } catch (_) {}
+  try { bmp.close(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('png convert fail')), 'image/png'));
 }
 async function zhCopyImage(src) {
@@ -20528,7 +20811,7 @@ async function zhCopyImage(src) {
   let blob = null;
   try {
     blob = await zhImageToPngBlob(src);
-    try { window.focus(); } catch (_) {}
+    try { window.focus(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     return true;
   } catch (e) { lastErr = e; console.warn('[ZHunter] Copy image (2) failed:', e); }
@@ -20583,7 +20866,7 @@ function zhChooseEditMode() {
   $('zhModeManualBtn')?.addEventListener('click', () => {
     close();
     // v9.15 — Manual studio starts with the engine chosen in "Engine" (ChatGPT / Flow / Gemini); you can still change it inside the studio
-    try { const e = $('temuAiImgEngineSel')?.value; const m = ZH_ENG[e] ? e : (e === 'auto' ? 'gemini' : ''); if (m) { zhManualEng = m; chrome.storage.local.set({ zhManualEng }).catch(() => {}); temuStepManualLabels(); } } catch (_) {}
+    try { const e = $('temuAiImgEngineSel')?.value; const m = ZH_ENG[e] ? e : (e === 'auto' ? 'gemini' : ''); if (m) { zhManualEng = m; chrome.storage.local.set({ zhManualEng }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); temuStepManualLabels(); } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     zhStudioOpen();
   });
   $('zhModeAutoBtn')?.addEventListener('click', () => { close(); temuStartBulkImageEdit(); });
@@ -20609,8 +20892,8 @@ async function zhStudioOpen(startProductId = null) {
   });
   const startPage = startProductId ? Math.max(0, items.findIndex(x => x.product.id === startProductId)) : 0;   // v9.12.6
   ZhStudio = { ...ZhStudio, items, page: startPage, open: true, basePrompt, usedFlowIds: new Set() };
-  try { const st = await chrome.storage.local.get(['zhStudioWithPrompt']); if (typeof st?.zhStudioWithPrompt === 'boolean') ZhStudio.withPrompt = st.zhStudioWithPrompt; } catch (_) {}
-  try { const st2 = await chrome.storage.local.get(['zhStudioAutoNext']); ZhStudio.autoNext = st2?.zhStudioAutoNext !== false; } catch (_) {}
+  try { const st = await chrome.storage.local.get(['zhStudioWithPrompt']); if (typeof st?.zhStudioWithPrompt === 'boolean') ZhStudio.withPrompt = st.zhStudioWithPrompt; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { const st2 = await chrome.storage.local.get(['zhStudioAutoNext']); ZhStudio.autoNext = st2?.zhStudioAutoNext !== false; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   $('zhStudioModal')?.classList.remove('hidden');
   zhStudioRender(startPage);
 }
@@ -20619,7 +20902,7 @@ function zhStudioClose() {
   ZhStudio.open = false;
   $('zhStudioModal')?.classList.add('hidden');
   temuSaveTitles(ZhStudio.items.map(it => ({ id: it.product.id, url: it.product.url, title: it.product.title }))).catch(e => toast(e.message, 'warn'));
-  temuRenderReview().catch(() => {});
+  temuRenderReview().catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
 }
 
 const zsCur = () => ZhStudio.items[ZhStudio.page];
@@ -20639,7 +20922,7 @@ function zhStudioRender(dir = 0) {
   if (!it || !body) return;
   const { done, total } = zsStats();
   const n = ZhStudio.items.length;
-  try { for (const k of [it, ZhStudio.items[ZhStudio.page + 1]]) if (k) _allImgUrls(k.product).slice(0, 8).forEach(u => flowPrefetchImage(u)); } catch (_) {}   // warm up so Paste is instant
+  try { for (const k of [it, ZhStudio.items[ZhStudio.page + 1]]) if (k) _allImgUrls(k.product).slice(0, 8).forEach(u => flowPrefetchImage(u)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }   // warm up so Paste is instant
   $('zhStudioSub').textContent = `Product ${ZhStudio.page + 1} / ${n} · ${done}/${total} images replaced`;
   $('zhStudioBar').style.width = `${total ? Math.round(done / total * 100) : 0}%`;
   $('zhStudioPrevBtn').disabled = ZhStudio.page === 0;
@@ -20785,7 +21068,7 @@ async function zsReadClipboardImage() {
           const type = item.types.find(x => x.startsWith('image/'));
           if (type) { const b = await item.getType(type); return await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(b); }); }
         }
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       return null;
     } });
     return r?.result || null;
@@ -20803,11 +21086,11 @@ async function zsApply(it, i, src, how = 'Paste') {
   try {
     let finalUrl = src;
     if (/^https:\/\/flow-content\.google\//i.test(src)) {
-      try { const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src }); if (r?.success && r.base64) finalUrl = r.base64; } catch (_) {}
+      try { const r = await msg({ action: 'FETCH_FLOW_IMAGE', url: src }); if (r?.success && r.base64) finalUrl = r.base64; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     }
     if (how !== 'Label' && it.packLabel && it.promptMode === 'pack' && it.pack > 1 && /^data:image\//i.test(finalUrl)) finalUrl = await zhStampPackLabel(finalUrl, it.pack, true);   // "N PACK" label, top-right
     // v9.15 — a pasted picture can be several MB: shrink it first (1500px, high-quality JPEG) so saving to the Library is fast
-    if (/^data:image\//i.test(finalUrl) && finalUrl.length > 450000) { try { const c = await compressBase64Image(finalUrl, 1500, 0.9); if (c && c.length < finalUrl.length) finalUrl = c; } catch (_) {} }
+    if (/^data:image\//i.test(finalUrl) && finalUrl.length > 450000) { try { const c = await compressBase64Image(finalUrl, 1500, 0.9); if (c && c.length < finalUrl.length) finalUrl = c; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const pid = it.product.id;
     // v9.15 — show the new image AT ONCE; saving to the Library (slow, big data) continues in the background, one at a time
     if (Array.isArray(it.product.images)) {
@@ -20847,7 +21130,7 @@ async function zsApply(it, i, src, how = 'Paste') {
 async function zsUndo(it, i) {
   const s = it.slots[i];
   if (!s?.newUrl || !s.orig) return;
-  try { await _zsPersistChain; } catch (_) {}   // let pending saves finish first
+  try { await _zsPersistChain; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }   // let pending saves finish first
   await replaceProductImage(it.product.id, i, s.orig, null);
   if (Array.isArray(it.product.images)) {
     const e = it.product.images[i];
@@ -20867,7 +21150,7 @@ async function zsShrinkForSend(d) {
     const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0, c.width, c.height);
-    try { bmp.close(); } catch (_) {}
+    try { bmp.close(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const o = c.toDataURL('image/jpeg', 0.92);
     return o.length < d.length ? o : d;
   } catch (_) { return d; }
@@ -20900,8 +21183,8 @@ async function zsPasteInFlow(it) {
       return;
     }
     await chrome.tabs.update(tab.id, { active: true });
-    if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) {}
+    if (tab.windowId) chrome.windows.update(tab.windowId, { focused: true }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['flow_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     if (btn) btn.textContent = `⏳ ${imgs.length} images to Flow…`;
     const res = await chrome.tabs.sendMessage(tab.id, {
       action: 'ZH_FLOW_MANUAL_ATTACH', images: imgs,
@@ -20927,7 +21210,7 @@ function zsGo(delta) {
 }
 
 (function initZhStudio() {
-  $('zhStudioBody')?.addEventListener('change', (e) => { if (e.target?.id === 'zsEng') { zhManualEng = e.target.value; chrome.storage.local.set({ zhManualEng }).catch(() => {}); zhStudioRender(); } });
+  $('zhStudioBody')?.addEventListener('change', (e) => { if (e.target?.id === 'zsEng') { zhManualEng = e.target.value; chrome.storage.local.set({ zhManualEng }).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); zhStudioRender(); } });
   $('zhStudioCloseBtn')?.addEventListener('click', zhStudioClose);
   $('zhStudioPrevBtn')?.addEventListener('click', () => zsGo(-1));
   $('zhStudioNextBtn')?.addEventListener('click', () => zsGo(1));
@@ -21002,7 +21285,7 @@ function zsGo(delta) {
     if (t.id === 'zsCopyPrompt') { if (await zhCopyText(zhWithQuality(it.prompts[it.promptMode] || ''))) toast('📝 Prompt copied', 'ok'); return; }
     if (t.id === 'zsShowAll') { it.showAll = !it.showAll; zhStudioRender(); return; }
     if (t.id === 'zsPasteFlow') { await zsPasteInFlow(it); return; }
-    if (t.id === 'zsOpenFlow') { const e2 = temuStepManualEngine(); if (e2 === 'flow') focusOrOpenFlowTab().catch(() => {}); else manualOpen(e2).catch(() => {}); return; }
+    if (t.id === 'zsOpenFlow') { const e2 = temuStepManualEngine(); if (e2 === 'flow') focusOrOpenFlowTab().catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); else manualOpen(e2).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); return; }
     const card = t.closest('.zs-img');
     if (!card || t.closest('.zs-tick')) return;
     const i = +card.dataset.i;
@@ -21271,9 +21554,9 @@ function temuSyncSrcSeg() {
       batchCnt.classList.toggle('temu-batch-name-count-warn', len > 50);
     };
     // v9.15 — the batch name is remembered (it used to be lost whenever the panel was closed / reloaded)
-    try { chrome.storage.local.get(['zhTemuBatchName', 'zhTemuBatchLast'], r => { if (!batchInp.value && typeof r?.zhTemuBatchName === 'string') { batchInp.value = r.zhTemuBatchName; updateBatchCount(); } if (r?.zhTemuBatchLast) temuShowLastBatch(r.zhTemuBatchLast); }); } catch (_) {}
+    try { chrome.storage.local.get(['zhTemuBatchName', 'zhTemuBatchLast'], r => { if (!batchInp.value && typeof r?.zhTemuBatchName === 'string') { batchInp.value = r.zhTemuBatchName; updateBatchCount(); } if (r?.zhTemuBatchLast) temuShowLastBatch(r.zhTemuBatchLast); }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     let _bnT = null;
-    const saveBatchName = () => { clearTimeout(_bnT); _bnT = setTimeout(() => { try { chrome.storage.local.set({ zhTemuBatchName: batchInp.value.trim().slice(0, 60) }); } catch (_) {} }, 300); };
+    const saveBatchName = () => { clearTimeout(_bnT); _bnT = setTimeout(() => { try { chrome.storage.local.set({ zhTemuBatchName: batchInp.value.trim().slice(0, 60) }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 300); };
     batchInp.addEventListener('input', () => { updateBatchCount(); saveBatchName(); });
     batchInp.addEventListener('change', saveBatchName); batchInp.addEventListener('blur', saveBatchName);
     updateBatchCount();
@@ -21321,14 +21604,14 @@ function temuSyncSrcSeg() {
         const same = name.replace(/\s+/g, ' ').toLowerCase() === storeName.replace(/\s+/g, ' ').toLowerCase();
         dot.className = 'tsc-status-dot ' + (same ? 'tsc-dot-ok' : 'tsc-dot-diff');
         dot.title = same ? `✓ Temu tab shows this store: ${name}` : `Temu tab shows "${name}" — it will be switched to "${storeName}" at upload`;
-      } catch (_) {}
+      } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     })();
   };
   // Call once + after any setup change
   setTimeout(updateSetupDot, 500);
   // v9.15.1 — the dot was set once at 0.5 s (before the store name loaded → red "not connected"); follow the name now
   if ($('tscStore')) { let _dT = null; new MutationObserver(() => { clearTimeout(_dT); _dT = setTimeout(updateSetupDot, 150); }).observe($('tscStore'), { childList: true, characterData: true, subtree: true }); }
-  try { chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete' && /seller\.temu\.com/.test(tab?.url || '')) setTimeout(updateSetupDot, 1500); }); } catch (_) {}
+  try { chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete' && /seller\.temu\.com/.test(tab?.url || '')) setTimeout(updateSetupDot, 1500); }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   document.addEventListener('click', (e) => {
     if (e.target.closest('#temuTestConnBtn,#temuStoreAddBtn,#tscChangeBtn')) {
       setTimeout(updateSetupDot, 800);
@@ -21363,7 +21646,7 @@ function temuSyncSrcSeg() {
   }
 
   document.addEventListener('change', (e) => { if (e.target?.id === 'tgPx2') temuSyncSrcSeg(); });
-  document.addEventListener('change', (e) => { if (e.target?.id === 'tgPriceStrategy') { temuApplyPxMode(); try { temuRefreshReviewPrices(); } catch (_) {} temuScheduleReady(); } });
+  document.addEventListener('change', (e) => { if (e.target?.id === 'tgPriceStrategy') { temuApplyPxMode(); try { temuRefreshReviewPrices(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuScheduleReady(); } });
   $('temuReadyBox')?.addEventListener('click', e => { const b = e.target.closest('[data-ready-ids]'); if (b) temuReadyJump(b.dataset.readyIds.split(',').filter(Boolean)); });
   $('temuFlow')?.addEventListener('click', e => { const b = e.target.closest('[data-flow]'); if (b) temuFlowGo(b.dataset.flow); });
   temuSyncSrcSeg();
@@ -21454,13 +21737,13 @@ function tlcPageBrowse() {   // runs INSIDE the other Temu page: slow, uneven sc
 async function tlcReload(tab) {
   try {
     await tlcGo(tab, 'https://seller.temu.com/');                                   // another page (seller home)
-    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageBrowse }); } catch (_) {}
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageBrowse }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     await tlcRand(3, 7);
     await tlcGo(tab, 'https://seller.temu.com/goods-category.html?from_source=1');   // back to "Add new product"
     await sleep(1500);
     return tab;
   } catch (_) {
-    try { await chrome.tabs.reload(tab.id); await sleep(5000); } catch (__) {}
+    try { await chrome.tabs.reload(tab.id); await sleep(5000); } catch (__) { typeof zhQuiet === 'function' && zhQuiet(__); }
     return tab;
   }
 }
@@ -21474,10 +21757,10 @@ function tlcPageRead(title, prev, mode) {   // mode 'paste' = whole title at onc
     const fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
     const read = () => [...document.querySelectorAll('[class*="auto_match_cate_wrapper"] [class*="label_text"]')].map(e => (e.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
     // if Temu already auto-selected a category (shows "Reselect"), open the chooser again first
-    { const rs = [...document.querySelectorAll('*')].find(e => !e.children.length && /^reselect$/i.test((e.textContent || '').trim())); if (rs) { try { rs.click(); } catch (_) {} await sleep(900); } }
+    { const rs = [...document.querySelectorAll('*')].find(e => !e.children.length && /^reselect$/i.test((e.textContent || '').trim())); if (rs) { try { rs.click(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } await sleep(900); } }
     // v9.15 — type like a person (letter by letter, uneven speed)
     input.focus(); await sleep(400 + Math.random() * 500);
-    try { input.select(); document.execCommand('delete'); } catch (_) {}
+    try { input.select(); document.execCommand('delete'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     if (input.value) { setter.call(input, ''); fire(input, 'input'); }
     await sleep(700 + Math.random() * 500);
     const baseline = JSON.stringify(read());                      // anything already on screen is old
@@ -21486,7 +21769,7 @@ function tlcPageRead(title, prev, mode) {   // mode 'paste' = whole title at onc
     if (mode === 'paste') {
       // v9.15 — step 1: the COMPLETE title goes in at once (like Ctrl+V)
       let ok = false;
-      try { input.select(); ok = document.execCommand('insertText', false, text); } catch (_) {}
+      try { input.select(); ok = document.execCommand('insertText', false, text); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       if (!ok || input.value !== text) { setter.call(input, text); fire(input, 'input'); }
     } else {
       // step 2: the COMPLETE title typed like a person, letter by letter (no early stop)
@@ -21494,7 +21777,7 @@ function tlcPageRead(title, prev, mode) {   // mode 'paste' = whole title at onc
         const ch = text[c];
         keyEv('keydown', ch);
         let ok = false;
-        try { ok = document.execCommand('insertText', false, ch); } catch (_) {}
+        try { ok = document.execCommand('insertText', false, ch); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         if (!ok) { setter.call(input, input.value + ch); fire(input, 'input'); }
         keyEv('keyup', ch);
         await sleep(30 + Math.random() * 70 + (Math.random() < 0.06 ? 150 + Math.random() * 300 : 0));
@@ -21538,7 +21821,7 @@ function tlcPageReselect() {
 async function tlcWatch(tab, prev, ctl, globalStop, title) {
   const snap = async () => {
     let t = tab;
-    try { const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] }); if (tabs.length && !tabs.some(x => x.id === t.id)) t = tabs[0]; } catch (_) {}
+    try { const tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] }); if (tabs.length && !tabs.some(x => x.id === t.id)) t = tabs[0]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     try { const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: tlcPageSnap }); return r?.result || null; } catch (_) { return null; }
   };
   const prevKey = JSON.stringify(prev || []);
@@ -21556,7 +21839,7 @@ async function tlcWatch(tab, prev, ctl, globalStop, title) {
     // Press "Reselect" (max 2 times) to open the list; if there is still no list, show Temu's own pick so the window never hangs.
     if (!fresh && r.selected && !r.opts.length && title && String(r.value || '').trim() === String(title).trim()) {
       if (Date.now() - idleSince > 4000 && Date.now() - lastTry > 5000) {
-        if (tries < 2) { tries++; lastTry = Date.now(); try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageReselect }); } catch (_) {} }
+        if (tries < 2) { tries++; lastTry = Date.now(); try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageReselect }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
         else if (Date.now() - lastTry > 4000) return { options: [r.selected], onlySelected: true };
       }
     } else if (!r.selected) { idleSince = Date.now(); }
@@ -21623,7 +21906,7 @@ function tlcApplyPick(cfg, it, pick) {
   else cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: pick.path, match: words, keyword_attributes: '' };
   const _k = same ? same[0] : key; const _st = zhStripSourceNames(it.title || '');
   [it.title, _st, temuCleanTitle(it.title, cfg), temuCleanTitle(_st, cfg)].forEach(t => temuLearnExample(cfg, t, _k));
-  try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = _k; } } catch (_) {}
+  try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = _k; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return _k;
 }
 // v9.15 — ledger of every category you have already picked (title → Temu path). Saved at once, so nothing has to be learned twice.
@@ -21635,9 +21918,126 @@ async function tlcLedgerPut(title, path) {
     const L = await tlcLedgerGet(); L[tlcLedgerKey(title)] = { path, at: Date.now() };
     const ks = Object.keys(L); if (ks.length > 4000) ks.sort((a, b) => L[a].at - L[b].at).slice(0, ks.length - 4000).forEach(k => delete L[k]);
     await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L });
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
-async function temuLearnCategories() {
+// ── 20 Oct 2026 — smart category: a product gets the category of an already learned product when their titles share
+// enough "smart words" (the product words — brand, sizes, counts and filler like Halloween / bulk / wrapped are left out):
+// at least 2 shared words, or for a short title (≤ 3 smart words) 1 strong word (a word that is also in the category name).
+const TLC_GENERIC = new Set('halloween christmas easter valentine valentines holiday holidays thanksgiving party parties gift gifts bulk individually wrapped wrap bag bags box boxes treat treats favor favors fun snack snacks mix mixed variety bundle value pouch pouches jar tub container resealable sharing share kid kids adult adults men women girl boy perfect great ideal office home school bowl candy-bowl stocking stuffer stuffers goodie goody basket baskets filler fillers pinata trick bowl'.split(' '));
+function tlcSmartWords(title, brand) {
+  const b = new Set(tlcToks(brand).map(tlcStem));
+  const t = String(title || '').replace(/^\s*\d+\s*pack\s*[-–]\s*/i, '');
+  return [...new Set(tlcToks(t).map(tlcStem).filter(w => w.length >= 3 && !TLC_STOP.has(w) && !TLC_GENERIC.has(w) && !b.has(w)))];
+}
+function tlcLearnedOf(title, path) {
+  const leaf = new Set(tlcToks(String(path || '').split(' / ').pop()).map(tlcStem).filter(w => !TLC_STOP.has(w)));   // the last part only ("Lollipops"), so two sister categories never look alike
+  return { words: new Set(tlcSmartWords(title, '')), leaf, path, title };
+}
+// best learned product for this title, or null (also null when two different categories fit equally well)
+// v2 (20 Oct): a word that shows up in 2+ DIFFERENT categories (e.g. "candy", "chocolate": Candy & Chocolate Gifts / Coated
+// Fruits / Assortments all have them) tells nothing about the category → it never counts. A category-name word only counts when
+// the title holds at least half of that name's own words ("Fruit Strips" ≠ "Coated Fruits", "Dum Dums Lollipops" = "Lollipops").
+function tlcSmartFind(it, learned) {
+  const ws = tlcSmartWords(it.title, it.brand);
+  if (!ws.length || !learned.length) return null;
+  // in how many different categories does each word appear (title words + category-name words)?
+  const df = new Map();
+  for (const L of learned) for (const w of new Set([...L.words, ...L.leaf])) { let s = df.get(w); if (!s) df.set(w, s = new Set()); s.add(L.path); }
+  const telling = w => (df.get(w)?.size || 0) <= 1;
+  const ws2 = ws.filter(telling);
+  if (!ws2.length) return null;
+  let best = null, bestScore = 0, tie = false;
+  for (const L of learned) {
+    const shared = ws2.filter(w => L.words.has(w));
+    const leafOwn = [...L.leaf].filter(telling);
+    const leafHit = leafOwn.filter(w => ws2.includes(w));
+    const leafOk = leafOwn.length > 0 && leafHit.length >= Math.ceil(leafOwn.length * 0.6);   // "Coated Fruits" needs BOTH words, "Lollipops" its one word
+    if (shared.length < 2 && !leafOk) continue;
+    const score = shared.length + (leafOk ? leafHit.length * 1.5 : 0);
+    if (score > bestScore + 0.01) { best = L; bestScore = score; tie = false; }
+    else if (Math.abs(score - bestScore) <= 0.01 && best && best.path !== L.path) tie = true;
+  }
+  return best && !tie ? { path: best.path, from: best.title, score: bestScore } : null;
+}
+// A smart pick is only a GUESS: it is set for this one product (category override) — it is NOT learned (no examples, no
+// ledger, not a seed for more guesses), so a wrong guess never spreads. "↶ Undo smart picks" takes the last run's guesses back.
+let TlcSmartLast = [];
+function tlcApplySmart(cfg, it, path) {
+  const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) => (p.full_path || '') === path);
+  if (!hit || !it.url) { tlcApplyPick(cfg, it, { path, match: '' }); return; }   // unknown path: fall back to a normal pick
+  const id = temuSourceIdentity(it.url);
+  cfg.cat_overrides = cfg.cat_overrides || {};
+  TlcSmartLast.push({ id, prev: cfg.cat_overrides[id] ?? null, title: it.title });
+  cfg.cat_overrides[id] = hit[0];
+}
+async function tlcUndoSmart() {
+  if (!TlcSmartLast.length) { toast('No smart picks to undo', 'info'); return; }
+  const cfg = temuGetCfg(); cfg.cat_overrides = cfg.cat_overrides || {};
+  for (const s of TlcSmartLast) { if (s.prev == null) delete cfg.cat_overrides[s.id]; else cfg.cat_overrides[s.id] = s.prev; }
+  const n = TlcSmartLast.length; TlcSmartLast = [];
+  await temuSaveCfg(cfg);
+  try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  $('temuSmartUndoBtn')?.remove();
+  toast(`↶ ${n} smart pick${n === 1 ? '' : 's'} taken back — press "Learn categories" to ask Temu for them`, 'ok');
+}
+function tlcShowSmartUndo() {
+  const rep = $('temuReport'); if (!rep || !TlcSmartLast.length) return;
+  let b = $('temuSmartUndoBtn');
+  if (!b) { b = document.createElement('button'); b.id = 'temuSmartUndoBtn'; b.type = 'button'; b.className = 'btn btn-secondary btn-xs'; b.style.margin = '6px 0'; b.onclick = tlcUndoSmart; rep.parentElement?.insertBefore(b, rep); }
+  b.textContent = `↶ Undo ${TlcSmartLast.length} smart pick${TlcSmartLast.length === 1 ? '' : 's'}`;
+}
+// 2 "Add new product" tabs (opened in the background) — each learns its own titles at the same time
+const TLC_TABS = 2;
+async function tlcEnsureTabs(n) {
+  let tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] });
+  const waitDone = id => new Promise(res => {
+    const done = () => { chrome.tabs.onUpdated.removeListener(fn); res(); };
+    const fn = (tid, info) => { if (tid === id && info.status === 'complete') done(); };
+    chrome.tabs.onUpdated.addListener(fn);
+    setTimeout(done, 20000);
+  });
+  // Temu only shows its category suggestions on a page that is really on screen: a background tab of the same window waits
+  // forever. So every learning tab must be the FRONT tab of its own window: tab 1 = your Temu tab (brought to the front),
+  // every extra tab = its own small window beside it.
+  tabs = tabs.slice(0, 1);
+  if (tabs[0]) { try { await chrome.tabs.update(tabs[0].id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+  const made = [];
+  while (tabs.length + made.length < n) {
+    let t;
+    if (!tabs.length && !made.length) t = await chrome.tabs.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', active: true });
+    else {
+      const k = made.length + tabs.length;
+      const w = await chrome.windows.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', focused: false, width: 900, height: 760, left: 80 + k * 50, top: 60 + k * 50 });
+      t = w.tabs?.[0] || (await chrome.tabs.query({ windowId: w.id }))[0];
+    }
+    made.push(t);
+    await tlcRand(1.5, 3);   // not all at once
+  }
+  for (const t of made) await waitDone(t.id);
+  if (made.length) await sleep(2500);
+  tlcMadeTabs = made.map(t => t.id);   // closed again when learning ends (your own Temu tabs are never closed)
+  return [...tabs, ...made].slice(0, n);
+}
+let tlcMadeTabs = [];
+async function tlcCloseMadeTabs() {
+  const ids = tlcMadeTabs.slice(); tlcMadeTabs = [];
+  for (const id of ids) { try { await chrome.tabs.remove(id); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+}
+
+// forget the saved category of one product: its override, its learned examples and its ledger entry (used by "🔁 Learn again")
+function tlcForget(cfg, it) {
+  try { if (it.url && cfg.cat_overrides) delete cfg.cat_overrides[temuSourceIdentity(it.url)]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try {
+    const st = zhStripSourceNames(it.title || '');
+    const sigs = new Set([it.title, st, temuCleanTitle(it.title, cfg), temuCleanTitle(st, cfg)].map(t => { const { tokens } = temuExTokens(t); return tokens.length >= 2 ? tokens.slice().sort().join(' ') : ''; }).filter(Boolean));
+    if (Array.isArray(cfg.cat_examples)) cfg.cat_examples = cfg.cat_examples.filter(e => !sigs.has(e.s));
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+}
+async function tlcLedgerDel(titles) {
+  try { const L = await tlcLedgerGet(); let n = 0; for (const t of titles) { const k = tlcLedgerKey(t); if (L[k]) { delete L[k]; n++; } } if (n) await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+}
+async function temuLearnCategories(opts = {}) {
+  if (opts instanceof Event || typeof opts !== 'object' || !opts) opts = {};
   if (TlcState?.running) { $('temuLearnModal')?.classList.remove('hidden'); return; }
   const cfg0 = temuGetCfg();
   let rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
@@ -21645,90 +22045,149 @@ async function temuLearnCategories() {
   const { items } = temuEnrich(rows, cfg0);
   const todo = [], seen = new Set();
   // v9.15 — SAME test as the ⚠ mark in the list: only products that show ⚠ (or have no category) are checked
-  const doubtfulIt = (it, cfgX) => { try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
-  // products with no category AND products whose category looks doubtful (the ⚠ ones) are checked against Temu's own suggestions
-  items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
-  // v9.15 — categories you already picked earlier (even before a reload / in another store) are re-applied silently, never asked again
-  { const L = await tlcLedgerGet(); let replayed = 0; const cfgR = temuGetCfg();
-    for (let i = todo.length - 1; i >= 0; i--) { const hit = L[tlcLedgerKey(todo[i].title)]; if (hit?.path) { tlcApplyPick(cfgR, todo[i], { path: hit.path, match: '' }); todo.splice(i, 1); replayed++; } }
-    if (replayed) { await temuSaveCfg(cfgR); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} toast(`${replayed} categor${replayed > 1 ? 'ies' : 'y'} re-applied from what you picked before`, 'ok'); } }
+  const doubtfulIt = (it, cfgX) => { if (it._force) return true; try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
+  if (Array.isArray(opts.ids) && opts.ids.length) {
+    // "🔁 Learn again" (filter bar): forget what was saved for exactly these products and ask Temu again
+    const want = new Set(opts.ids), cfgF = temuGetCfg(), forgetTitles = [];
+    items.filter(it => want.has(it.id)).forEach(it => { tlcForget(cfgF, it); forgetTitles.push(it.title); it._force = true; const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
+    await temuSaveCfg(cfgF); await tlcLedgerDel(forgetTitles);
+  } else items.filter(it => it.warn.includes('NO_CATEGORY_PROFILE') || doubtfulIt(it, cfg0)).forEach(it => { const k = it.title.toLowerCase(); if (!seen.has(k)) { seen.add(k); todo.push(it); } });
+  // learned products (title → Temu path): everything you picked before (ledger) + what is picked in this run
+  const L0 = await tlcLedgerGet();
+  const learned = Object.entries(L0).map(([t, v]) => v?.path ? tlcLearnedOf(t, v.path) : null).filter(Boolean);
+  // 1) exact same title picked before → re-applied silently; 2) smart words match a learned product → that category, no Temu needed
+  let replayed = 0, smart = 0; const smartList = []; TlcSmartLast = [];
+  const applySmart = async (it, path) => { const c = temuGetCfg(); tlcApplySmart(c, it, path); await temuSaveCfg(c); try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } };
+  { const cfgR = temuGetCfg();
+    for (let i = todo.length - 1; i >= 0; i--) {
+      if (todo[i]._force) continue;   // "Learn again": Temu decides, no replay / guess
+      const hit = L0[tlcLedgerKey(todo[i].title)];
+      if (hit?.path) { tlcApplyPick(cfgR, todo[i], { path: hit.path, match: '' }); todo.splice(i, 1); replayed++; continue; }
+      const sm = tlcSmartFind(todo[i], learned);
+      if (sm) { tlcApplySmart(cfgR, todo[i], sm.path); smartList.push(`${todo[i].title.slice(0, 40)} → ${sm.path.split(' / ').pop()}`); todo.splice(i, 1); smart++; }
+    }
+    if (replayed || smart) { await temuSaveCfg(cfgR); try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      toast(`${replayed ? `${replayed} re-applied` : ''}${replayed && smart ? ' · ' : ''}${smart ? `🧠 ${smart} by similar titles` : ''} — no Temu needed`, 'ok'); } }
   if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
   TlcState = { running: true, stop: false, late: [] };
   const modal = $('temuLearnModal'); modal.classList.remove('hidden'); tlcWirePaste();
   $('tlcClose').onclick = () => { TlcState.stop = true; modal.classList.add('hidden'); };
-  let tab = null, prev = [], saved = 0, k = 0;
+  let saved = 0, k = 0, tabs = [];
+  const total = todo.length;
+  const applyAndLearn = async (it, path) => {
+    const cfg = temuGetCfg(); tlcApplyPick(cfg, it, { path, match: '' }); await temuSaveCfg(cfg); saved++;
+    tlcLedgerPut(it.title, path); learned.push(tlcLearnedOf(it.title, path));
+    try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  };
   try {
-    tlcSay('Opening Temu "Add new product" page…'); $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
-    tab = await tlcEnsureTab();
-    for (const it of todo) {
-      if (TlcState.stop) break;
-      let cfg = temuGetCfg();
-      if (!doubtfulIt(it, cfg)) continue;   // an earlier pick already covers this one   // an earlier pick already covers this one
-      k++;
-      $('tlcCount').textContent = `${k} / ${todo.length}`; $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
-      // v9.15 — AUTO first: the extension types the title like a person; if that does not work, MANUAL: you paste it (Ctrl+V)
-      let res = null;
-      TlcState.pendingPaste = null; TlcState.onPaste = path => { TlcState.pendingPaste = path; tlcSay('Got your category — saving it after this step…'); };
-      if (!TlcState.manualOnly) {
-        // v9.15 — order: 1) paste the complete title → 2) type the complete title → 3) manual. The first suggestion is accepted automatically.
-        for (const mode of ['paste', 'type']) {
-          if (res || TlcState.stop || TlcState.pendingPaste) break;
-          tlcSay(mode === 'paste' ? '🤖 Auto 1/2: pasting the complete title in Temu…' : '🤖 Auto 2/2: typing the complete title like a person…');
-          try {
-            const r = await tlcRead(tab, it.title, prev, mode);
-            if (r?.error === 'no_input') { res = { error: 'no_input' }; }
-            else if (r?.options?.length) { res = { options: r.options, auto: true }; TlcState.autoFail = 0; }
-          } catch (_) {}
+    const nTabs = Math.max(1, Math.min(TLC_TABS, todo.length));   // 1 product = 1 tab
+    tlcSay(nTabs > 1 ? `Opening ${nTabs} Temu "Add new product" pages (the 2nd in its own small window — keep both visible)…` : 'Opening Temu "Add new product" page…'); $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
+    tabs = await tlcEnsureTabs(nTabs);
+    // ── Phase 1 (auto): every tab takes the next title, pastes / types it and reads Temu's suggestions — at the same time.
+    // A title that now matches a product learned a moment ago (smart words) is not sent to Temu at all.
+    const queue = todo.slice(), results = [], manual = [];
+    let wake = null; const push = r => { results.push(r); if (wake) { const w = wake; wake = null; w(); } };
+    let active = 0;
+    // live status of every tab (shown while the window is not asking you to pick — before it said "Opening tabs…" the whole time)
+    const notes = []; let asking = false;
+    const note = (wi, t) => { notes[wi] = t; if (!asking) tlcSay(notes.filter(Boolean).join('  ·  ')); };
+    const worker = async (tab, wi) => {
+      active++;
+      const T = tabs.length > 1 ? `Tab ${wi + 1}: ` : '';
+      try {
+        if (wi) await tlcRand(2, 4);   // second tab starts a little later
+        while (queue.length && !TlcState.stop) {
+          const it = queue.shift();
+          if (!doubtfulIt(it, temuGetCfg())) { push({ it, covered: true }); continue; }
+          const sm = it._force ? null : tlcSmartFind(it, learned);
+          if (sm) { push({ it, smart: sm }); continue; }
+          let res = null;
+          for (const mode of ['paste', 'type']) {
+            if (res || TlcState.stop) break;
+            note(wi, `${T}🤖 ${mode === 'paste' ? 'pasting' : 'typing'} "${it.title.slice(0, 32)}…" — waiting for Temu`);
+            try {
+              const r = await tlcRead(tab, it.title, [], mode);
+              if (r?.error === 'no_input') { res = { error: 'no_input' }; break; }
+              if (r?.options?.length) res = { options: r.options };
+            } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+          }
+          if (res?.error === 'no_input') { queue.unshift(it); push({ tabDead: true, tab }); return; }
+          push(res ? { it, options: res.options } : { it, failed: true });
+          // Temu stopped suggesting in this tab: leave + come back once (like a person), then go on
+          if (!res && !TlcState.stop) { note(wi, `${T}no suggestion from Temu — reopening the page…`); try { await tlcReload(tab); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+          note(wi, `${T}short pause…`);
+          await tlcRand(2, 5);
         }
-        if (!res) TlcState.autoFail = (TlcState.autoFail || 0) + 1;
-        if ((TlcState.autoFail || 0) >= 1) TlcState.manualOnly = true;   // auto keeps failing → manual for the rest
-        if (!res) tlcSay('Auto did not give suggestions → manual mode');
-      }
-      const ctl = { stop: false };
-      if (TlcState.pendingPaste) res = { pasted: TlcState.pendingPaste };
-      // v9.15 — Temu gave nothing: the extension looks in YOUR own categories itself and takes the best match
-      if (!res) { try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; else { const mw = temuCatMultiWord(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM); if (mw?.prof?.full_path) res = { pasted: mw.prof.full_path, own: mw.prof.name }; } } catch (_) {} }
-      if (!res) {
-      // v9.15 — YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
-      tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
-      const copyTitle = async () => { try { await navigator.clipboard.writeText(it.title); return true; } catch (_) { try { const ta = document.createElement('textarea'); ta.value = it.title; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch (__) { return false; } } };
-      await copyTitle();
-      $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
-      const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
-      // v9.15 — if Temu gives no category within ~40 s, this product is skipped and the next one starts (listed at the end)
-      const lateP = new Promise(r => { const arm = ms => setTimeout(() => { if (Date.now() - (TlcState.pasteAt || 0) < 90000) return arm(30000); ctl.stop = true; r({ skip: true, late: true }); }, ms); arm(120000); });
-      const pasteP = new Promise(r => { TlcState.onPaste = path => { ctl.stop = true; r({ pasted: path }); }; });
-      res = await Promise.race([tlcWatch(tab, prev, ctl, () => TlcState.stop, it.title), skipP, lateP, pasteP]);
-      if (res?.late) { (TlcState.late = TlcState.late || []).push(it.title); tlcSay('⏭ No category from Temu in time — skipped, going on with the next product.'); await sleep(1200); }
-      }
-      ctl.stop = true;
-      if (TlcState.stop) break;
-      if (res.pasted) { const pk = { path: res.pasted, match: '' }; cfg = temuGetCfg(); tlcApplyPick(cfg, it, pk); await temuSaveCfg(cfg); saved++; tlcLedgerPut(it.title, pk.path); tlcSay(res.own ? `✓ Temu gave nothing — picked from your categories: ${res.own}` : '✓ Category saved from your paste'); if (res.own) await sleep(1500); try { temuRenderProfiles(); } catch (_) {} try { await temuRenderReview(); } catch (_) {} continue; }
-      if (res.skip) continue;
-      if (res.error === 'no_input') { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); break; }
-      prev = res.options || [];
-      it._onlySel = !!res.onlySelected;
-      let autoTimer = null;
-      if (res.auto && prev.length) autoTimer = setTimeout(() => { try { tlcSay('✓ First suggestion accepted automatically'); $('tlcSave').click(); } catch (_) {} }, 2200);
-      const pick = await tlcAsk(it, k, todo.length, prev);
+      } finally { active--; note(wi, ''); push({ workerDone: true }); }
+    };
+    tabs.forEach((t, i) => worker(t, i));
+    // ── the window shows one result at a time (first suggestion auto-accepted after 2 s, as before)
+    let deadTabs = 0;
+    while (!TlcState.stop) {
+      if (!results.length) { if (!active) break; await new Promise(r => { wake = r; }); continue; }
+      const r = results.shift();
+      if (r.workerDone) continue;
+      if (r.tabDead) { deadTabs++; if (deadTabs >= tabs.length) { tlcSay('Temu "Add new product" page not found. Open Add products → Blank form, then press "Learn categories" again.', true); TlcState.stop = true; } continue; }
+      const it = r.it; k++;
+      $('tlcCount').textContent = `${k} / ${total}`; $('tlcTitle').textContent = it.title;
+      if (r.covered) continue;
+      if (r.smart) { await applySmart(it, r.smart.path); smart++; smartList.push(`${it.title.slice(0, 40)} → ${r.smart.path.split(' / ').pop()}`); tlcSay(`🧠 Same kind as "${r.smart.from.slice(0, 40)}…" → ${r.smart.path.split(' / ').pop()}`); await sleep(500); continue; }
+      if (r.failed) { manual.push(it); continue; }
+      it._onlySel = false;
+      const autoTimer = setTimeout(() => { try { tlcSay('✓ First suggestion accepted automatically'); $('tlcSave').click(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 2200);
+      asking = true;
+      const pick = await tlcAsk(it, k, total, r.options);
+      asking = false;
       clearTimeout(autoTimer);
       if (TlcState.stop) break;
       if (pick.skip) continue;
-      cfg = temuGetCfg();
-      tlcApplyPick(cfg, it, pick);
-      await temuSaveCfg(cfg); saved++;
-      tlcLedgerPut(it.title, pick.path);   // v9.15 — remembered on its own too (survives store switches / reloads)
-      try { temuRenderProfiles(); } catch (_) {}
-      try { await temuRenderReview(); } catch (_) {}   // ⚠ marks and category names update immediately
+      await applyAndLearn(it, pick.path);
     }
-    if (!TlcState.stop && saved) tlcSay(`✓ Done — ${saved} categor${saved > 1 ? 'ies' : 'y'} saved. Press Export again.`);
+    // ── Phase 2 (only what Temu gave no suggestion for): smart words again → your own categories → you paste it in Temu
+    const tab = tabs[0];
+    for (const it of manual) {
+      if (TlcState.stop) break;
+      if (!doubtfulIt(it, temuGetCfg())) continue;
+      $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
+      const sm = it._force ? null : tlcSmartFind(it, learned);
+      if (sm) { await applySmart(it, sm.path); smart++; smartList.push(`${it.title.slice(0, 40)} → ${sm.path.split(' / ').pop()}`); continue; }
+      let res = null;
+      try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; else { const mw = temuCatMultiWord(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM); if (mw?.prof?.full_path) res = { pasted: mw.prof.full_path, own: mw.prof.name }; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      if (!res) {
+        // YOU paste the title in Temu (no robotic typing); the extension only watches the page and takes the suggestions the moment they appear
+        tlcSay('✂ Title copied — paste it (Ctrl+V) in Temu\'s Product name box. Suggestions are picked up automatically.');
+        try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        const copyTitle = async () => { try { await navigator.clipboard.writeText(it.title); return true; } catch (_) { try { const ta = document.createElement('textarea'); ta.value = it.title; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch (__) { return false; } } };
+        await copyTitle();
+        $('tlcTitle').title = 'Click to copy the title again'; $('tlcTitle').style.cursor = 'pointer'; $('tlcTitle').onclick = async () => { if (await copyTitle()) toast('Title copied', 'ok'); };
+        const ctl = { stop: false };
+        const skipP = new Promise(r => { $('tlcSkip').onclick = () => { ctl.stop = true; r({ skip: true }); }; });
+        const lateP = new Promise(r => { const arm = ms => setTimeout(() => { if (Date.now() - (TlcState.pasteAt || 0) < 90000) return arm(30000); ctl.stop = true; r({ skip: true, late: true }); }, ms); arm(120000); });
+        const pasteP = new Promise(r => { TlcState.onPaste = path => { ctl.stop = true; r({ pasted: path }); }; });
+        res = await Promise.race([tlcWatch(tab, [], ctl, () => TlcState.stop, it.title), skipP, lateP, pasteP]);
+        ctl.stop = true;
+        if (res?.late) { (TlcState.late = TlcState.late || []).push(it.title); tlcSay('⏭ No category from Temu in time — skipped, going on with the next product.'); await sleep(1200); }
+      }
+      if (TlcState.stop) break;
+      if (res?.pasted) { await applyAndLearn(it, res.pasted); tlcSay(res.own ? `✓ Temu gave nothing — picked from your categories: ${res.own}` : '✓ Category saved from your paste'); if (res.own) await sleep(1500); continue; }
+      if (!res || res.skip || res.error) continue;
+      it._onlySel = !!res.onlySelected;
+      const pick = await tlcAsk(it, k, total, res.options || []);
+      if (TlcState.stop) break;
+      if (pick.skip) continue;
+      await applyAndLearn(it, pick.path);
+    }
+    if (!TlcState.stop && (saved || smart)) tlcSay(`✓ Done — ${saved} categor${saved === 1 ? 'y' : 'ies'} saved${smart ? ` (🧠 ${smart} by similar titles)` : ''}. Press Export again.`);
+    if (smartList.length) { const rep = $('temuReport'); if (rep) rep.textContent = `🧠 Smart category (similar titles, no Temu needed) — check them in the list, change any that is wrong, or press "↶ Undo smart picks" above and let Temu decide:\n` + smartList.map(s => '• ' + s).join('\n'); tlcShowSmartUndo(); }
     if (TlcState?.late?.length) { const n = TlcState.late.length; toast(`${n} product${n > 1 ? 's' : ''} got no category from Temu in time and ${n > 1 ? 'were' : 'was'} skipped. Press "Learn categories" again later for ${n > 1 ? 'them' : 'it'}.`, 'warn'); tlcSay(`⚠ ${n} skipped (no category from Temu): ${TlcState.late.slice(0, 3).map(t => t.slice(0, 40)).join(' · ')}${n > 3 ? ' …' : ''}`, true); }
   } catch (e) {
     tlcSay('Error: ' + (e?.message || e), true);
   } finally {
     TlcState.running = false;
+    await tlcCloseMadeTabs();   // the "Add new product" tabs the extension opened for learning are closed (yours stay open)
     if (!TlcState.stop) setTimeout(() => $('temuLearnModal')?.classList.add('hidden'), TlcState.late?.length ? 15000 : saved ? 1800 : 6000);
-    if (saved) toast(`✓ ${saved} categor${saved > 1 ? 'ies' : 'y'} learned from Temu`, 'ok');
+    if (saved) toast(`✓ ${saved} categor${saved > 1 ? 'ies' : 'y'} learned${smart ? ` · 🧠 ${smart} by similar titles` : ''}`, 'ok');
   }
 }
 
@@ -21742,7 +22201,7 @@ async function temuLearnCategories() {
       chrome.storage.local.set({ zhFlowUseDebugger: cb.checked });
       toast(cb.checked ? 'Flow: extension will press Generate (debugger ON)' : 'Flow: you press Generate yourself (debugger OFF)', 'info');
     });
-  } catch (_) {}
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 })();
 
 // ══ Imported sheet survives a Reload / closing the panel ═══════════════════════════
@@ -21761,8 +22220,8 @@ async function temuLearnCategories() {
         if (typeof u === 'string' && /^https:\/\/flow-content\.google\//i.test(u)) {
           try {
             const res = await msg({ action: 'FETCH_FLOW_IMAGE', url: u });
-            if (res?.success && res.base64) { let d = res.base64; try { d = await compressBase64Image(d, 1500, 0.9); } catch (_) {} r.images[i] = d; }
-          } catch (_) {}
+            if (res?.success && res.base64) { let d = res.base64; try { d = await compressBase64Image(d, 1500, 0.9); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } r.images[i] = d; }
+          } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
         }
       }
     }
@@ -21790,12 +22249,12 @@ async function temuLearnCategories() {
       lastSig = sigOf(TemuSheetRows);
       const sel = $('temuSource');
       if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = st.label || `Imported sheet (${st.rows.length})`; } sel.value = 'sheet'; }
-      try { temuUpdateSrcInfo(); } catch (_) {}
-      try { temuRenderReview(); } catch (_) {}
-      try { toast(`Restored your imported sheet — ${st.rows.length} products (edits kept)`, 'ok'); } catch (_) {}
+      try { temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      try { toast(`Restored your imported sheet — ${st.rows.length} products (edits kept)`, 'ok'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     } catch (e) { console.log('[ZHunter] sheet restore', e?.message || e); }
   }
   setTimeout(restore, 1800);
   setInterval(save, 4000);
-  window.addEventListener('pagehide', () => { try { save(); } catch (_) {} });
+  window.addEventListener('pagehide', () => { try { save(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } });
 })();

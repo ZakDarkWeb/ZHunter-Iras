@@ -1,5 +1,90 @@
 # ZHunter Iras — CHANGELOG
 
+## Content Studio (Open Studio) redesign (2026-10-20, same manifest version)
+- **Kam scroll:** upar ka hissa ab chhota: patla header ("Content Studio" + 1/40 + ✕), ek product row (‹ list ›), aur **ek hi toolbar line**: [Title | Bullets | Desc] chips + violet **"Rewrite 40"** + ⚙ **Options**. Options (default band) mein: "Rewrite this product only", "Products to rewrite", "Instructions". Instructions likhi hon / custom mode on ho / kuch products untick hon to Options par violet dot. Status line patli. Title box pehle se kaafi upar aata hai.
+- **Temu Export jaisa look:** wahi cards (surface-2, line-2, 10px corners), segmented chips jaise Temu tabs, cyan save / violet sirf AI (Rewrite, Rewrite title, this product only), same buttons, fonts aur counters (mono, bina pill ke).
+- **Light mode:** cards safed par halki shadow ke saath, editor ka background alag, counters / chips / meta / compare boxes sab parhne layak.
+- **Bullets:** har point ka number badge (cyan), poori chaudai ka box, neeche counter aur "Remove" (pehle chhota ×), points ke beech zyada jagah, "+ Add point  3 / 6" poori chaudai ka dashed button.
+- Logic wahi: zhTextDecode / zhTextSplitBullets / zhTextSnapshotRaw / zhTextSnapshot, saare ids aur handlers (rewrite, compare, undo, save this/selected, Ctrl+S, unsaved patti). Narrow panel (≤440px) par footer 2 lines mein.
+
+## AI Image Studio "Select All" follows the list filter (2026-10-20, same manifest version)
+- With a filter / search on the product list (e.g. "Mars" + Not edited = 2 shown), AI Image Studio's "✓ Select All" ticked all 57 products. Now it ticks ONLY the products the filter shows (toast says so), and "✕ Clear" clears only those; with no filter both work on the whole list as before.
+
+## Store switch follows everywhere + Content Studio text fixes (2026-10-20, same manifest version)
+- After switching the store on Temu (e.g. HQ TWO → HQ- 4 SHOP) the setup card changed, but "40 products in the list · store: HQ TWO" and the store row above Upload kept the old name (one switch path never refreshed them). Now every store save (temuSaveStores) refreshes both.
+- Content Studio showed shop HTML codes ("Easy to store &amp; keep fresh") and one long bullet that holds all features in one box. The Studio now shows decoded text (& ' " …) and splits such a run-on bullet into separate points (at "• |", sentence ends, and CAPS headings like "JUST BLACK TASTING NOTES:"; max 6). Saved edits are still matched against the stored text (raw + cleaned), so nothing earlier is lost. Export already decoded "&amp;".
+
+## Smart category v2: fewer wrong guesses, guesses never spread, Undo + "Learn again" (2026-10-20, same manifest version)
+- The user's list showed wrong guesses (Mars chocolate → "Candy & Chocolate Coated Fruits", Fruit Strips → Coated Fruits): "candy" / "chocolate" are in the name of every Temu candy category, so they matched everything. Now a word that appears in 2+ different learned categories never counts; a category-name word counts only when the title has ≥ 60 % of that name's own words ("Coated Fruits" needs both). Same samples now: Mars, Hershey's, Fruit Strips, Fruit by the Foot → asked Temu; Butterfinger → Gifts, Blow Pops / Dum Dums → Lollipops, "Chocolate Coated Dried Fruit" → Coated Fruits.
+- A smart pick is now only a guess for that one product (category override): it is NOT learned (no examples, no ledger, not used for more guesses), so one wrong guess never spreads to other products.
+- "↶ Undo N smart picks" button above Details after a run takes the run's guesses back.
+- Filter bar: new "🔁 Learn category again" — forgets the saved category (override, learned examples, ledger) of the products shown and asks Temu for them again (no replay, no guess). Use it with a search ("Mars", "Hershey", "Fruit") to fix the earlier wrong ones.
+
+## Learn categories: no more "stuck at Opening tabs" (2026-10-20, same manifest version)
+- The 2nd Temu "Add new product" tab opened behind the first one in the same window; Temu only shows category suggestions on a page that is really on screen, so that tab waited — and the window kept saying "Opening 2 Temu tabs…" while it worked, so it looked frozen. Now: tab 1 = your Temu tab (brought to the front), every extra tab = its own small window (focused: false) beside it; 1 product = 1 tab only; while learning the window shows what each tab is doing ("Tab 1: 🤖 pasting "…" — waiting for Temu", "no suggestion — reopening the page…", "short pause…"). Extra windows close at the end as before.
+
+## Temu review list: bulk actions for the filtered products (2026-10-20, same manifest version)
+- While a filter or search is on, a bar under the chips shows "N shown:" with ✨ Select for images · ✕ Unselect · 🗑 Delete shown. They work ONLY on the products the filter shows (hidden ones are never touched). Select skips products without pictures; Delete asks first and removes the products from the list and the Library (same as the single 🗑). The bar is hidden when the filter is "All" with no search.
+
+## Temu review list: "Images edited" / "Not edited" filters (2026-10-20, same manifest version)
+- Two new chips under Filter: 🖼 Images edited (at least one picture of the product was edited with AI — edit journal) and 🖼 Not edited (has pictures, none edited yet) — to find the products still to do in a long list.
+
+## Flow 2 tabs: one window in background mode (2026-10-20, same manifest version)
+- Each extra Flow tab used to open in its own new window (needed in normal Chrome, where hidden tabs sleep). In background mode (lock-pause setting OFF, Chrome with the background switches) the extra Flow tab now opens as a tab in the same window as the other Flow tab (a window is only made when no Flow tab exists at all). Normal Chrome keeps the separate windows.
+
+## Gemini / ChatGPT tabs really work together + Gemini "no picture" → new chat (2026-10-20, same manifest version)
+- With 3 Gemini tabs in one window only one moved: the runner brought each tab to the front in turn ("opening the Gemini tab for a moment so it keeps working…", every 30 s) and switched to a tab before every send — needed for normal Chrome, where hidden tabs sleep. With the background switches this is not needed: when Settings → "AI images: pause when the screen is locked" is OFF ("background mode", `zhBgMode`) tabs are never brought to the front / switched, so all tabs work at the same time. ON = the old behaviour (normal Chrome).
+- Gemini sometimes finishes its answer with NO picture (text only / nothing) — the run waited up to 9 min. Now: answer finished (no Stop button, nothing loading) and quiet for ~25 s without a picture → "Gemini answered without a picture", and the same image is sent again in a NEW chat.
+- Not tested on the live Gemini page.
+
+## Gemini: finished picture read at once (2026-10-20, same manifest version)
+- Errors page showed "[ZHunter Gemini] image found but could not be read" (lh3.googleusercontent.com …=s1024-rj): the Gemini page may not read that picture (CORS; the canvas way is blocked too), so it kept retrying until a later try worked — that was the slow "replace" step. Now the picture is fetched by the extension worker with your Google sign-in first (new message `FETCH_GEMINI_IMAGE`, only from gemini.google.com and only for googleusercontent.com), the old ways stay as fallback.
+- Not tested on the live Gemini page yet.
+
+## Setting: pause image runs on a locked screen — on / off (2026-10-20, same manifest version)
+- Settings → "AI images: pause when the screen is locked" (`zhLockPause`, default ON). Turn it OFF when Chrome is started with the background switches (--disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling): then Chrome keeps the AI pages running while the window is minimized / covered / the screen is locked, and the run should not pause.
+
+## Image runs: locked screen pauses, Flow never stays stuck (2026-10-20, same manifest version)
+- Windows lock (Win+L): Chrome treats all windows as hidden and stops drawing the Gemini / ChatGPT / Flow pages → Gemini stopped, Flow's Generate click did nothing ("Generation did not start"), images timed out as failed. Now (new permission `idle`): when the screen locks the run pauses by itself (status "🔒 Screen locked — paused"), on unlock it resumes; an image that failed during the lock goes back in the line (2-tab runner) instead of counting as failed.
+- Flow single-tab run: after a Flow error (e.g. "Generation did not start after clicking Generate") it used to wait for you — 37 min stuck. Now it sends the same image again after 20 s (2×, waits while paused), then marks it failed and goes on ("Retry failed" later). Unusual activity keeps its own handling (wait + new project).
+- Note: a Flow run started BEFORE the 2-tab update still runs single-tab — reload the extension and start the run again for 2 tabs.
+
+## Flow: 2 tabs at once (2026-10-20, same manifest version) — user's choice
+- Auto image editing with engine Flow used ONE tab (one image at a time — the old rule against "unusual activity" and wrong-product results). Now a Flow run with 2+ images uses the 2-tab runner (like ChatGPT / Gemini): tab A = your open Flow tab, tab B = a second Flow window (own window, so Chrome does not throttle it). Each tab works in its own project, one image at a time, ~3–9 s pause between images. `FLOW_TABS = 2`.
+- No wrong product: each image is sent straight to its tab (`ZH_FLOW_RUN_DIRECT`) and its result comes back under its own job id (storage `zhFlowRes_<id>`) — the single-tab `pendingFlowAction` record is not used by these jobs. Pack → Background stages, edit journal, daily counter, Stop and Retry failed work as in the 2-tab runner.
+- "Unusual activity" in a tab: that tab waits 60 s, opens a new project and tries the same image again; max `FLOW_NP_MAX` (2) per run, then the run stops with a message (finished images are kept).
+- Learn categories: the extra "Add new product" tabs the extension opened are closed when learning ends (your own Temu tabs stay open).
+- Files parse; NOT tested on the real Flow / Temu pages — first try with 3–4 images.
+
+## Learn categories: 2 Temu tabs at once + smart category by similar titles (2026-10-20, same manifest version)
+- Was: one Temu "Add new product" tab, every title pasted / typed one after the other (38 candies = 38 rounds), and after some titles Temu stopped suggesting. Each pick only remembered that exact title, so "Skittles" never got the category already picked for "Tootsie Pops".
+- Smart category (user's rule): each title's product words are compared with every product learned before (your earlier picks + this run). Brand, sizes / counts and filler words (Halloween, bulk, wrapped, variety, gift, party …) are left out. ≥ 2 shared words = same category; a short title (≤ 3 product words) needs 1 strong word = a word of the category name ("Dum Dums Lollipops" → Lollipops). Two categories fitting equally = not guessed (Temu is asked). Runs before Temu and again after every new pick, so one candy pick covers the rest. The list of smart picks is shown in Details to check.
+- 2 Temu tabs (`TLC_TABS = 2`, user's choice) learn at the same time; each waits 2–5 s between titles; a tab where Temu stops suggesting leaves to the seller home and comes back once. The window still shows one result at a time (first suggestion auto-accepted after 2 s). Titles Temu gave nothing for are done at the end the old way (your own categories → you paste in Temu).
+- Tested the matcher on sample titles: Hershey's / Mars / Brach's → Candy & Chocolate Assortments, Blow Pops / Dum Dums → Lollipops, Callaway → Golf Balls; "Candy Thermometer" and coffee → asked Temu. 2-tab run NOT tested on real Temu.
+
+## Title Optimizer: Gemini next to ChatGPT (2026-10-20, same manifest version)
+- The chat tab is now "💬 GPT / Gemini" with a ChatGPT | Gemini switch (remembered). "Send to Gemini" sends the ticked titles to your open Gemini chat (or a new chat + the title prompt first), waits until the answer stops changing, reads the numbered list and shows the same preview → "Apply titles". Titles still land only on the products of that list (same batch ids as before).
+- gemini_automation.js: new titles job (`ZH_GEM_TITLES_START`, same `zhGptTitlesJob` / `zhGptTitlesResult` keys with `engine: 'gemini'`): turns "Create image" off in that chat, types → sends (or asks you to press Send) → reads the answer list; a new Gemini tab picks the job up by itself; stops with a message on a Gemini limit. A Gemini tab that the image runner is using is never taken. gpt_automation.js ignores Gemini jobs.
+- Manual copy/paste texts are now for both chats. NOT tested on the real Gemini page — first try with 3–5 titles.
+
+## Title Optimizer: one way at a time — 3 tabs (2026-10-20, same manifest version)
+- The section showed 5 ways at once (AI rewrite, own-prompt edit, Shorten / Remove brand, custom instructions, a long ChatGPT copy/paste block) — big and confusing. Now 3 tabs, each with one line of help and one main button:
+  - ⚡ AI rewrite — "AI Title Rewrite (N)"; below it the quick "Shorten Title / Remove Brand"; "+ Extra wish" (old custom instructions) folded.
+  - ✏️ My prompt — your instruction box → "AI Edit with my prompt"; saved prompts under it.
+  - 💬 ChatGPT — chat choice + "Send to ChatGPT" (Auto); the answer preview + "Apply titles" right there; the manual copy/paste (3 numbered steps) and the prompt editor folded under "Manual".
+- Progress / Stop / Undo are shared under the tabs. The last tab you used is remembered. All element ids are the same, so every button works as before.
+- Checked on a local copy with the real CSS: tabs switch, only one way visible. NOT tested in the extension.
+
+## Workflow strip: ✓ only when a step is really finished (2026-10-20, same manifest version)
+- "① Products ✓ 57" and "④ Upload ✓ 54" looked as if the products had been uploaded — the ✓ only meant "found" / "ready". Now: Products = cyan "57 found", Upload = cyan "54 ready" (tooltip: not uploaded yet), and Upload turns ✓ "N uploaded" only after Temu accepted products (counted when they are marked 'accepted', kept 30 min). New state `ready` in ui_polish.css.
+
+## Side panel: hidden errors now visible — Error log (2026-10-19, same manifest version)
+- New `error_log.js` (loaded before sidepanel.js). 326 places swallowed every error silently (`catch (_) {}`, `.catch(() => {})`), so real code bugs were never seen. They now call `zhQuiet(err)`, which keeps ONLY programming bugs (TypeError, ReferenceError, RangeError …) and ignores normal failures (closed tab, page not ready, cancelled, network, rate limit …). Also recorded: uncaught errors, unhandled promise rejections, `console.error`, and `console.warn` calls that carry an Error. Deduplicated (×count), file:line of our code, last 200, storage `zhErrorLog`.
+- Settings → Data → "Error log": count, list (newest first), Copy (to send to the developer) and Clear.
+- Files: sidepanel.js (253 + 8 + 57 + 8 catches), text_studio.js (1), temu_workspace_ui.js (2). The guard `typeof zhQuiet === 'function' &&` keeps code that runs inside web pages (executeScript) safe. Behaviour of the catches is unchanged (same return values).
+- Checked: all 6 main JS files parse; log test — TypeError recorded (×2 dedup), "No tab with id" and "Failed to fetch" ignored, unhandled ReferenceError + console.error recorded. NOT run inside the real extension yet.
+- GitHub push from this computer's terminal failed (no GitHub login here) — push from GitHub Desktop ("Push origin").
+
 ## Page frame Auto colours: really one colour per store / site (2026-10-19, same manifest version)
 - All Temu stores had the same colour: the frame was drawn before Temu showed the store name, so every store got the "Temu" colour and it was never updated. Now the frame watches the store name (and a store switch) and redraws; until the name is there it is grey.
 - Each store gets its own colour from a 16-colour list and keeps it (saved in `zhStoreColors`) — the first store the first colour, the next store the next free one, so two stores never share a colour (the old hash could).

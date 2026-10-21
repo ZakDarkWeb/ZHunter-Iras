@@ -422,6 +422,7 @@
             <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
           </select></div>
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Timeout / error par thora ruk kar ek dafa dobara try</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>AI images: pause when the screen is locked</b><span>ON (normal Chrome) = lock par run ruk jata hai, aur Gemini / ChatGPT tabs baari baari saamne laye jate hain. OFF (Chrome background switches ke saath) = lock / minimize mein bhi chalta hai, aur saare tabs ek saath kaam karte hain — koi tab switching nahi</span></div><label class="sw-wrap"><input type="checkbox" id="setLockPause" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Flow: auto Generate click</b><span>ON = extension khud Generate dabata hai (Chrome debugger use hota hai). OFF = Generate aap khud dabayen; debugger ki patti nahi aati</span></div><label class="sw-wrap"><input type="checkbox" id="setFlowDbg" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Fail hone wale tabs hamesha khule rehte hain</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Sirf image links; Master ZIP mein images nahi hongi. Hunt 3–4× tez</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
@@ -534,6 +535,12 @@
         <div class="zh-store" id="spStorageBox">
           <div id="spStorageList" class="zh-store-list"><span class="zh-store-wait">Checking…</span></div>
           <div class="zh-store-foot"><span id="spStorageFree" class="zh-store-free"></span><button class="btn btn-secondary btn-xs" type="button" id="spCleanBtn" disabled>Clean up…</button></div>
+        </div>
+        <!-- error log: real code problems that used to be hidden (error_log.js) -->
+        <div class="it"><div class="l"><b>Error log</b><span>Extension ke andar ki asli ghaltiyan (pehle chhupi rehti thin). Koi kaam theek na chale to "Copy" kar ke bhej dein</span></div><span id="zhErrLogCount" class="zh-elog-count">No problems</span></div>
+        <div class="zh-elog" id="zhErrLogBox">
+          <div id="zhErrLogList" class="zh-elog-list"><div class="zh-elog-empty">Loading…</div></div>
+          <div class="zh-elog-foot"><button class="btn btn-ghost btn-xs" type="button" id="zhErrLogCopy">Copy</button><button class="btn btn-ghost btn-xs" type="button" id="zhErrLogClear">Clear</button></div>
         </div>
         <div class="it"><div class="l"><b>Backup everything</b><span>Saara data aur settings ek JSON file mein download</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
         <div class="it"><div class="l"><b>Restore backup</b><span>ZHunter backup file (.json) wapas lao. Products, queue aur history is se badal jayenge</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRestoreBtn">Restore</button><input id="spRestoreFile" type="file" accept=".json" style="display:none"></div>
@@ -1047,57 +1054,77 @@
                 <button id="temuContentStudioBtn" class="btn btn-secondary btn-xs" type="button" title="Bulk edit titles, bullet points and descriptions with preview and save"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7l8 5-8 5z"/></svg> Open Studio</button>
               </div>
               <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
-                <p class="temu-title-help">Rewrite with your Temu title format, or make a focused edit.</p>
-                <button id="temuAiBulkRewriteBtn" class="btn btn-primary temu-title-main" type="button" title="Apply your provided Temu title format to checked products">AI Title Rewrite</button>
-                <details class="temu-title-advanced temu-fold"><summary>AI title edit <span>Your own prompt · saved prompts</span></summary>
-                <div class="temu-title-custom">
-                  <label class="temu-title-custom-lbl" for="temuTitleCustomPrompt">Your own prompt <span>applies to the current title</span></label>
-                  <textarea id="temuTitleCustomPrompt" class="inp" rows="3" placeholder="e.g. Put the brand first, remove the size, end with 'Golf Balls'. Max 120 characters."></textarea>
-                  <div class="temu-title-custom-row">
-                    <button id="temuTitleCustomBtn" class="btn btn-secondary temu-title-custom-run" type="button" title="Edit the checked products' titles with your prompt (the default Temu format is skipped)">AI Edit with my prompt</button>
+                <!-- 19 Oct 2026 — one way at a time: 3 tabs, each with one line of help and one main button (all ids unchanged) -->
+                <div class="tt-tabs" role="tablist" aria-label="How to change the titles">
+                  <button type="button" role="tab" data-tt="ai" class="active">⚡ AI rewrite</button>
+                  <button type="button" role="tab" data-tt="mine">✏️ My prompt</button>
+                  <button type="button" role="tab" data-tt="gpt" title="Send the titles to ChatGPT or Gemini">💬 GPT / Gemini</button>
+                </div>
+
+                <!-- 1 · AI rewrite (Groq) -->
+                <div class="tt-pane" data-tt-pane="ai">
+                  <p class="tt-help">AI har <b>ticked</b> product ka title aap ke Temu format mein dobara likhta hai. (Groq key: Settings → Groq API Keys)</p>
+                  <button id="temuAiBulkRewriteBtn" class="btn btn-primary temu-title-main" type="button" title="Rewrite the checked products' titles in your Temu title format">AI Title Rewrite</button>
+                  <div class="tt-sub-lbl">Ya sirf ek chhota kaam:</div>
+                  <div class="temu-title-tools">
+                    <button id="temuTitleShortenBtn" class="btn btn-secondary" type="button" title="Shorten checked titles to 60 characters">Shorten Title <span>60 max</span></button>
+                    <button id="temuTitleRemoveBrandBtn" class="btn btn-secondary" type="button" title="Remove brand names from checked titles while preserving other wording">Remove Brand</button>
+                  </div>
+                  <details class="tt-more"><summary>+ Extra wish for the rewrite <span>optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="e.g. always end with 'Golf Balls', no colours in the title" aria-label="Extra wish for AI Title Rewrite"></textarea></details>
+                </div>
+
+                <!-- 2 · My prompt (only your instruction, no Temu format) -->
+                <div class="tt-pane hidden" data-tt-pane="mine">
+                  <p class="tt-help">Apna hukam likhein — AI har ticked title par <b>sirf wahi</b> badlega jo aap ne likha.</p>
+                  <textarea id="temuTitleCustomPrompt" class="inp tt-ta" rows="3" placeholder="e.g. Put the brand first, remove the size, end with 'Golf Balls'. Max 120 characters."></textarea>
+                  <button id="temuTitleCustomBtn" class="btn btn-primary temu-title-main" type="button" title="Edit the checked products' titles with your prompt (the default Temu format is skipped)">AI Edit with my prompt</button>
+                  <div class="tt-saved">
                     <select id="temuTitleSavedPrompts" class="temu-img-sel" aria-label="Saved prompts"><option value="">Saved prompts…</option></select>
                     <button id="temuTitleSavePromptBtn" class="temu-img-pick-btn" type="button" title="Save this prompt">Save</button>
                     <button id="temuTitleDelPromptBtn" class="temu-img-pick-btn" type="button" title="Delete the selected saved prompt">Delete</button>
                   </div>
                 </div>
-                </details>
+
+                <!-- 3 · ChatGPT (auto first, manual copy / paste folded) -->
+                <div class="tt-pane hidden" data-tt-pane="gpt">
+                  <div class="temu-gpt" id="temuGptBox">
+                    <div class="tt-eng" role="radiogroup" aria-label="Which AI chat">
+                      <button type="button" data-teng="chatgpt" class="active">ChatGPT</button>
+                      <button type="button" data-teng="gemini">Gemini</button>
+                    </div>
+                    <p class="tt-help">Ticked titles <b id="temuTitleEngName">ChatGPT</b> ko bhejo, jawab khud wapas aata hai — phir <b>Apply titles</b> dabayein.</p>
+                    <div class="tt-saved">
+                      <select id="temuGptAutoMode" class="temu-img-sel" aria-label="Which chat">
+                        <option value="tab">My open chat (tab must be open)</option>
+                        <option value="new">New chat + send prompt first</option>
+                      </select>
+                    </div>
+                    <button id="temuGptAutoBtn" class="btn btn-primary temu-title-main" type="button" title="Sends the checked products' titles to the chosen AI chat and reads the answer back">Send to ChatGPT</button>
+                    <small class="temu-title-help" id="temuGptAutoStatus"></small>
+                    <div id="temuGptPreview" class="temu-gpt-preview"></div>
+                    <button id="temuGptApplyBtn" class="btn btn-primary btn-xs hidden" type="button">Apply titles</button>
+                    <details class="tt-more"><summary>Manual (copy / paste) <span>if Auto does not work</span></summary>
+                      <ol class="tt-steps">
+                        <li><button id="temuGptCopyPromptBtn" class="btn btn-secondary btn-xs" type="button">Copy prompt</button> → ChatGPT / Gemini mein paste</li>
+                        <li><button id="temuGptCopyTitlesBtn" class="btn btn-secondary btn-xs" type="button" title="Copy a numbered list of the checked products' titles">Copy titles</button> → wahin paste <small class="temu-title-help" id="temuGptBatchInfo">No list copied yet.</small></li>
+                        <li>Jawab yahan paste → <button id="temuGptPreviewBtn" class="btn btn-secondary btn-xs" type="button">Preview</button>
+                          <textarea id="temuGptPaste" class="inp" rows="3" spellcheck="false" placeholder="Paste the updated titles list here"></textarea></li>
+                      </ol>
+                      <details class="tt-more tt-more-in"><summary>Edit the title prompt</summary>
+                        <textarea id="temuGptPrompt" class="inp" rows="4" spellcheck="false" aria-label="ChatGPT prompt"></textarea>
+                        <button id="temuGptDefaultPromptBtn" class="temu-img-pick-btn" type="button" title="Put back the original prompt">Default prompt</button>
+                      </details>
+                    </details>
+                  </div>
+                </div>
+
+                <!-- shared: progress, stop, undo -->
                 <div class="temu-title-run hidden" id="temuTitleRun" aria-live="polite">
                   <div class="temu-title-prog"><i id="temuTitleProgBar"></i></div>
                   <div class="temu-title-run-row"><span id="temuTitleProgTxt">0 / 0</span><button id="temuTitleStopBtn" class="temu-title-stop" type="button" title="Stop after the current title. Titles already done are kept.">■ Stop</button></div>
                 </div>
                 <button id="temuTitleUndoBtn" class="btn btn-secondary temu-title-undo hidden" type="button" title="Put the previous titles back">↶ Undo last rewrite <span id="temuTitleUndoN"></span></button>
-                <div class="temu-title-tools">
-                  <button id="temuTitleShortenBtn" class="btn btn-secondary" type="button" title="Shorten checked titles to 60 characters">Shorten Title <span>60 max</span></button>
-                  <button id="temuTitleRemoveBrandBtn" class="btn btn-secondary" type="button" title="Remove brand names from checked titles while preserving other wording">Remove Brand</button>
-                </div>
-                <details class="temu-title-advanced"><summary>Custom instructions <span>Optional</span></summary><textarea id="temuAiPromptInp" class="inp" rows="3" placeholder="Extra preferences for AI Title Rewrite?" aria-label="Custom title instructions"></textarea></details>
-                <details class="temu-title-advanced temu-fold"><summary>ChatGPT optimizer <span>Copy / auto-send titles</span></summary>
-                <div class="temu-gpt" id="temuGptBox">
-                  <label class="temu-title-custom-lbl" for="temuGptPrompt">Titles via ChatGPT <span>1) copy the prompt → paste into ChatGPT · 2) copy titles → paste · 3) paste the answer back here</span></label>
-                  <textarea id="temuGptPrompt" class="inp" rows="3" spellcheck="false" aria-label="ChatGPT prompt"></textarea>
-                  <div class="temu-title-custom-row">
-                    <button id="temuGptCopyPromptBtn" class="btn btn-secondary btn-xs" type="button">1. Copy prompt</button>
-                    <button id="temuGptDefaultPromptBtn" class="temu-img-pick-btn" type="button" title="Put back the original prompt">Default</button>
-                    <button id="temuGptCopyTitlesBtn" class="btn btn-secondary btn-xs" type="button" title="Copy a numbered list of the checked products' titles">2. Copy titles</button>
-                  </div>
-                  <div class="temu-title-custom-row">
-                    <button id="temuGptAutoBtn" class="btn btn-primary btn-xs" type="button" title="Sends the checked products' titles to ChatGPT and reads the answer back">Auto: send to ChatGPT</button>
-                    <select id="temuGptAutoMode" class="temu-img-sel" aria-label="ChatGPT chat">
-                      <option value="tab">My open ChatGPT chat</option>
-                      <option value="new">New chat + send prompt first</option>
-                    </select>
-                  </div>
-                  <small class="temu-title-help" id="temuGptAutoStatus"></small>
-                  <small class="temu-title-help" id="temuGptBatchInfo">No list copied yet.</small>
-                  <textarea id="temuGptPaste" class="inp" rows="4" spellcheck="false" placeholder="3. Paste ChatGPT's updated titles list here"></textarea>
-                  <div class="temu-title-custom-row">
-                    <button id="temuGptPreviewBtn" class="btn btn-secondary btn-xs" type="button">Preview</button>
-                    <button id="temuGptApplyBtn" class="btn btn-primary btn-xs hidden" type="button">Apply titles</button>
-                  </div>
-                  <div id="temuGptPreview" class="temu-gpt-preview"></div>
-                </div>
-                </details>
-                <small class="temu-title-help">Applies to checked products only</small>
+                <small class="temu-title-help">Sirf ticked products par lagta hai · har badlav "↶ Undo" se wapas</small>
               </div>
             </div>
 
@@ -2134,6 +2161,7 @@
   <script src="lib/xlsx-js-style.min.js"></script>
   <script src="lib/jszip.min.js"></script>
   <script src="lib/mux-mp4.min.js"></script>
+  <script src="error_log.js"></script>
   <script src="product_url_gate.js"></script>
   <script src="temu_categories.js"></script>
   <script src="title_optimizer_rules.js"></script>

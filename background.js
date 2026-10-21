@@ -719,6 +719,24 @@ async function fetchImageAsBase64(imageUrl, settings) {
   return primary;
 }
 
+// 20 Oct 2026 — Gemini's finished picture lives on lh3.googleusercontent.com: the Gemini page cannot read it (CORS, tainted
+// canvas → "image found but could not be read", then retries = slow). The worker fetches it with your Google cookies instead.
+async function fetchGeminiImage(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || !/(^|\.)googleusercontent\.com$/i.test(u.hostname)) return { success: false, error: 'not_gemini_image' };
+    let res = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(45000) });
+    if (!res.ok) res = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(45000) });
+    if (!res.ok) return { success: false, error: 'http_' + res.status };
+    const blob = await res.blob();
+    if (!blob.size || blob.size > 30 * 1024 * 1024) return { success: false, error: 'bad_size' };
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return { success: true, dataUrl: `data:${blob.type || 'image/png'};base64,${btoa(bin)}` };
+  } catch (e) { return { success: false, error: e?.message || String(e) }; }
+}
+
 // v9.9.0 — Google Flow generated images: signed CDN URLs (no cookies needed) that expire
 // in about an hour, often 2K PNGs larger than FETCH_MAX_BYTES. Fetch up to 30 MB and
 // re-encode to JPEG (max 2048px) so the public re-host and Temu get a small, stable file.
@@ -1274,7 +1292,8 @@ const CONTENT_SCRIPT_ACTIONS = new Set([
   'FETCH_BASE64_BATCH', 'GET_PENDING_IMAGE_HUNT', 'CHECK_BULK_QUEUE',
   'ADD_TO_BULK_QUEUE',
   // v9.9.0 — Google Flow image studio (flow_automation.js / content.js lightbox)
-  'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS'
+  'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS',
+  'FETCH_GEMINI_IMAGE'   // gemini_automation.js: read the finished Gemini picture (Gemini tab only, googleusercontent.com only)
 ]);
 
 function isAuthorizedMessage(msg, sender) {
@@ -1560,6 +1579,10 @@ async function handleMessage(msg, sender, queueLocked = false) {
       }
     }
     case 'STOP_KEEPALIVE':     stopKeepAlive('panel');  return { success: true };
+    case 'FETCH_GEMINI_IMAGE': {
+      if (sender?.tab && !/^https:\/\/gemini\.google\.com\//i.test(String(sender.tab.url || ''))) return { success: false, error: 'gemini_only' };
+      return await fetchGeminiImage(msg.url);
+    }
     case 'FETCH_BASE64': {
       const storedSettings = await zhSettingsCached();
       const effectiveSettings = msg.settings ? { ...storedSettings, ...msg.settings } : storedSettings;

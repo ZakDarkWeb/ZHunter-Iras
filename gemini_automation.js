@@ -416,6 +416,13 @@
   // blob:/https image → data URL
   async function readImg(img) {
     const src = img.currentSrc || img.src;
+    // Gemini's picture is on googleusercontent.com — this page may not read it (CORS), so the extension worker fetches it first
+    if (/^https:\/\/[^/]*googleusercontent\.com\//i.test(src)) {
+      try {
+        const r = await new Promise(res => { try { chrome.runtime.sendMessage({ action: 'FETCH_GEMINI_IMAGE', url: src }, x => { void chrome.runtime.lastError; res(x); }); } catch (_) { res(null); } });
+        if (r?.success && r.dataUrl) return r.dataUrl;
+      } catch (_) {}
+    }
     try { const b = await (await fetch(src)).blob(); return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); }); } catch (_) {}
     try { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); return c.toDataURL('image/png'); } catch (_) { return null; }
   }
@@ -445,6 +452,14 @@
         const resp3 = lu3 && lu3.closest('.conversation-container')?.querySelector('model-response');
         const tx = (resp3?.innerText || '').trim();
         if (tx && !document.querySelector('button[aria-label*="Stop" i]') && /encountered an error|something went wrong|please try again|could you try again/i.test(tx)) { window.__zhGemErr = tx.slice(0, 120); return null; }
+        // 20 Oct 2026 — Gemini finished its answer but made NO picture (only text, or nothing): stop waiting after ~25 s quiet,
+        // so the side panel sends the image again in a NEW chat (before: up to 9 minutes of waiting, then "failed")
+        const busy = !!document.querySelector('button[aria-label*="Stop" i]') || !!pending || !!resp3?.querySelector('generated-image, .generated-images, [class*="loader"]:not([style*="display: none"])');
+        if (resp3 && !busy) {
+          const key = tx.slice(0, 200);
+          if (window.__zhGemQuietKey !== key) { window.__zhGemQuietKey = key; window.__zhGemQuietAt = Date.now(); }
+          else if (Date.now() - (window.__zhGemQuietAt || 0) > 25000) { window.__zhGemNoImg = (tx || '(empty answer)').slice(0, 120); return null; }
+        } else { window.__zhGemQuietKey = null; }
       }
       console.log('[ZHunter Gemini] waiting for image', { found: imgs.length, pending: !!pending, users: document.querySelectorAll('user-query').length, base: window.__zhGemUserBase });
       if (imgs.length) {
@@ -500,9 +515,9 @@
       if (msg?.action === 'ZH_GEM_GRAB_LATEST') {
         (async () => {
           try {
-            window.__zhGemLimit = false; window.__zhGemErr = '';
+            window.__zhGemLimit = false; window.__zhGemErr = ''; window.__zhGemNoImg = '';
             const dataUrl = await grabLatest(msg.waitMs || 0, !!msg.fresh);
-            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, gemErr: !!window.__zhGemErr, limit: !!window.__zhGemLimit, error: window.__zhGemLimit ? 'Gemini limit reached on this account' : 'No generated image in this chat yet' });
+            sendResponse(dataUrl ? { ok: true, dataUrl } : { ok: false, gemErr: !!window.__zhGemErr, noImage: !!window.__zhGemNoImg, answer: window.__zhGemNoImg || '', limit: !!window.__zhGemLimit, error: window.__zhGemLimit ? 'Gemini limit reached on this account' : window.__zhGemNoImg ? 'Gemini answered without a picture' : 'No generated image in this chat yet' });
           } catch (e) { try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (_) {} }
         })();
         return true;
@@ -510,8 +525,95 @@
     });
   } catch (_) {}
 
+  // ═══ Titles via Gemini (same job / result keys as ChatGPT, job.engine === 'gemini') ═══
+  // Job: chrome.storage.local.zhGptTitlesJob = { id, engine:'gemini', text, prompt?, newChat }. We make sure "Create image" is OFF
+  // (titles are text), type → send → wait until the answer stops changing → zhGptTitlesResult = { id, status:'done', text }.
+  const setTitlesResult = (job, status, extra = {}) => { try { chrome.storage.local.set({ zhGptTitlesResult: { id: job.id, status, at: Date.now(), ...extra } }); } catch (_) {} };
+  async function ensureTextMode() {   // a chat used for images may still have the "Create image" tool on
+    try {
+      const chipOff = [...document.querySelectorAll('button')].find(b => /deselect.*create image|remove.*create image|create image.*(close|remove)/i.test(b.getAttribute('aria-label') || ''));
+      if (chipOff) { chipOff.click(); await sleep(300); return; }
+      const find = () => [...document.querySelectorAll('button[role="menuitemcheckbox"]')].find(b => /create image/i.test(b.innerText || b.getAttribute('aria-label') || ''));
+      let b = find();
+      if (!b && [...document.querySelectorAll('.toolbox-drawer-item-button, .tool-chip, [class*="selected-tool"]')].some(e => /create image/i.test(e.innerText || ''))) { await openPlusMenu(); await sleep(300); b = find(); }
+      if (b && b.getAttribute('aria-checked') === 'true') { b.click(); await sleep(300); }
+      closeMenus();
+    } catch (_) {}
+  }
+  // the rendered answer → plain lines ("1. title"); innerText drops <ol> numbers, so lists are walked by hand
+  function gemAnswerText(resp) {
+    if (!resp) return '';
+    const root = resp.querySelector('message-content .markdown, .markdown, message-content') || resp;
+    const lines = [];
+    const walk = (el) => {
+      for (const c of el.children) {
+        const tag = c.tagName;
+        if (tag === 'OL') { let n = parseInt(c.getAttribute('start') || '1', 10) || 1; for (const li of c.children) lines.push(`${n++}. ${li.innerText.trim().replace(/\s*\n\s*/g, ' ')}`); }
+        else if (tag === 'UL') { for (const li of c.children) lines.push(li.innerText.trim().replace(/\s*\n\s*/g, ' ')); }
+        else if (tag === 'PRE' || tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'BLOCKQUOTE') lines.push(...c.innerText.split('\n').map(x => x.trim()).filter(Boolean));
+        else if (c.children.length) walk(c);
+        else { const t = c.innerText?.trim(); if (t) lines.push(t); }
+      }
+    };
+    walk(root);
+    return (lines.length ? lines : (root.innerText || '').split('\n').map(x => x.trim()).filter(Boolean)).join('\n');
+  }
+  async function askGemini(job, text, label) {
+    const ed = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 20000);
+    if (!ed) throw new Error('Gemini message box not found (is Gemini open and signed in?)');
+    await ensureTextMode();
+    const respBefore = document.querySelectorAll('model-response').length;
+    setTitlesResult(job, 'working', { note: `${label}: typing in Gemini…` });
+    await typePrompt(text);
+    const sent = await sendNow();
+    if (!sent) {
+      showGeminiHUD('ZHunter: press Send in Gemini yourself — I will read the answer', 'warn');
+      setTitlesResult(job, 'press_send', { note: 'Press Send in the Gemini tab' });
+      const end = Date.now() + 10 * 60000;
+      while (Date.now() < end && document.querySelectorAll('user-query').length <= (window.__zhGemUserBase || 0)) await sleep(500);
+      if (document.querySelectorAll('user-query').length <= (window.__zhGemUserBase || 0)) throw new Error('Message was not sent within 10 minutes');
+    }
+    setTitlesResult(job, 'working', { note: `${label}: Gemini is answering…` });
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60000 && document.querySelectorAll('model-response').length <= respBefore) await sleep(400);
+    // finished = no Stop button and the answer stayed the same for ~3 s
+    let last = '', stable = 0;
+    while (Date.now() - t0 < 10 * 60000) {
+      await sleep(1000);
+      const rs = document.querySelectorAll('model-response'); const cur = rs.length ? (rs[rs.length - 1].innerText || '') : '';
+      if (document.querySelector('button[aria-label*="Stop" i]')) { stable = 0; last = cur; continue; }
+      if (cur && cur === last) stable++; else { stable = 0; last = cur; }
+      if (stable >= 3) break;
+    }
+    const rs = document.querySelectorAll('model-response');
+    if (rs.length <= respBefore) throw new Error('No answer from Gemini');
+    const out = gemAnswerText(rs[rs.length - 1]);
+    if (/limit resets|reached (your|the) .{0,40}limit/i.test(out)) throw new Error('Gemini limit reached on this account');
+    return out;
+  }
+  async function runGemTitlesJob() {
+    let job;
+    try { job = (await chrome.storage.local.get(['zhGptTitlesJob']))?.zhGptTitlesJob; } catch (_) { return; }
+    if (!job || job.engine !== 'gemini' || job.started || Date.now() - (job.at || 0) > 5 * 60000) return;
+    if (window.__zhGemTitlesBusy) return;
+    window.__zhGemTitlesBusy = true;
+    try {
+      await chrome.storage.local.set({ zhGptTitlesJob: { ...job, started: true } });
+      showGeminiHUD('ZHunter: sending titles to Gemini…', 'info');
+      if (job.newChat && job.prompt) { await askGemini(job, job.prompt, 'Prompt'); await sleep(1500); }
+      const reply = await askGemini(job, job.text, 'Titles');
+      setTitlesResult(job, 'done', { text: reply });
+      showGeminiHUD('✓ Answer read — go back to ZHunter and press Apply titles', 'ok');
+    } catch (e) {
+      setTitlesResult(job, 'error', { error: e?.message || String(e) });
+      showGeminiHUD('ZHunter: ' + (e?.message || 'error'), 'warn');
+    } finally { window.__zhGemTitlesBusy = false; }
+  }
+  addGemListener((msg) => { if (msg?.action === 'ZH_GEM_TITLES_START') runGemTitlesJob(); });
+
   // Run immediately
   checkPendingAction();
+  setTimeout(runGemTitlesJob, 2500);   // a new Gemini tab opened for a titles job picks it up by itself
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkPendingAction);

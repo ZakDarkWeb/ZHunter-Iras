@@ -280,6 +280,8 @@
   // ── Job reporting ────────────────────────────────────────────────
   function reportStatus(job, phase, text, isError = false, extra = {}) {
     updateFlowHUD(text, isError ? 'warn' : 'info');
+    // 2-tab runner ("direct" job, one per Flow tab): progress goes to the job's own storage key, never to the single-tab stepper
+    if (job.direct) { try { chrome.storage.local.set({ ['zhFlowRes_' + job.jobId]: { status: 'working', phase, note: String(text || '').slice(0, 120), at: Date.now() } }); } catch (_) {} return; }
     sendBg({ action: 'ZH_FLOW_STATUS', jobId: job.jobId, productId: job.productId, imageIndex: job.imageIndex, phase, text, error: isError, ...extra });
   }
 
@@ -288,6 +290,7 @@
   let latestPending = null;
 
   async function finishJob(job, status, extra = {}) {
+    if (job.direct) { try { await chrome.storage.local.set({ ['zhFlowRes_' + job.jobId]: { status, at: Date.now(), ...extra } }); } catch (_) {} return; }
     try {
       const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
       if (cur && cur.jobId === job.jobId) {
@@ -670,7 +673,7 @@
     const beforeIds = [...before], refIdList = [...refIds];
     reportStatus(job, 'generating', `🎨 Generating${currentModelName() ? ' (' + currentModelName() + ')' : ''} · ${job.shortTitle} · Image #${(job.imageIndex ?? 0) + 1}`, false,
       { beforeIds, refIds: refIdList });
-    try {
+    if (!job.direct) try {
       const cur = (await chrome.storage.local.get(['pendingFlowAction']))?.pendingFlowAction;
       if (cur && cur.jobId === job.jobId) {
         await chrome.storage.local.set({ pendingFlowAction: { ...cur, phase: 'generating', beforeIds, refIds: refIdList } });
@@ -680,7 +683,8 @@
     let lastSnack = '';
     const result = await waitFor(() => {
       const lp = latestPending;
-      if (lp && (lp.jobId !== job.jobId || (lp.processed && lp.status === 'done'))) return { cancelled: true };
+      if (!job.direct && lp && (lp.jobId !== job.jobId || (lp.processed && lp.status === 'done'))) return { cancelled: true };
+      if (job.direct && directCancel.has(job.jobId)) return { cancelled: true };
       scrollGridTop();
       // Check for failed generation tiles immediately (don't wait 3 minutes!)
       const failed = newFailureText(Q.tiles(), failuresBefore);
@@ -719,6 +723,7 @@
 
   // ── Job runner ──────────────────────────────────────────────────
   let runningJobId = null;
+  const directCancel = new Set();   // 2-tab runner: jobs the side panel stopped
 
   async function runJob(job) {
     await useDebugger();
@@ -727,7 +732,7 @@
     log('Job start', job.jobId, job.productTitle, 'img#', job.imageIndex);
     try {
       // v9.15.1 — the image is in memory now: drop the multi-MB copy from storage (it was written for every image)
-      await chrome.storage.local.set({ pendingFlowAction: { ...job, imgBase64: '', status: 'running', startedAt: Date.now() } });
+      if (!job.direct) await chrome.storage.local.set({ pendingFlowAction: { ...job, imgBase64: '', status: 'running', startedAt: Date.now() } });
 
       reportStatus(job, 'prepare', `ZHunter: prompt box tayyar · ${job.shortTitle}`);
       // Agent panel open = no normal prompt box, so turn Agent off first.
@@ -755,7 +760,7 @@
       }
       log('Generated media', res.mediaId, res.src);
 
-      await sendBg({
+      if (!job.direct) await sendBg({
         action: 'ZH_REPLACE_IMAGE_FROM_FLOW',
         jobId: job.jobId,
         productId: job.productId,
@@ -900,7 +905,39 @@
     return { ok: added > 0, added, total: images.length, error: added ? '' : 'Images were not added to the prompt box' };
   }
 
+  // ── 2-tab runner: a job sent straight to THIS tab (each Flow tab works in its own project, one image at a time) ──
+  // The result goes to storage "zhFlowRes_<jobId>" ({status:'done', newImgUrl, mediaId} or {status:'error', error}),
+  // so two tabs never share (or overwrite) the single-tab "pendingFlowAction" record.
+  async function runDirect(job) {
+    try {
+      if (!/\/project\/[\w-]+/i.test(location.pathname)) {   // Flow home → open a new project first
+        reportStatus(job, 'prepare', `ZHunter: creating a new project · ${(job.productTitle || '').slice(0, 30)}`);
+        const btn = await waitFor(() => Q.newProjectBtn(), 15000);
+        if (!btn) throw new JobError('Press "+ New project" in this Flow tab, then the run continues');
+        await trustedClick(btn, 'new project');
+        if (!(await waitFor(() => /\/project\/[\w-]+/i.test(location.pathname), 25000, 300))) throw new JobError('New Flow project did not open');
+        await rpause(2, 4, 'new project');
+      }
+      await runJob(job);
+    } catch (e) {
+      const m = e?.message || String(e);
+      reportStatus(job, 'error', m, true);
+      await finishJob(job, 'error', { error: m });
+      runningJobId = null;
+    }
+  }
+
   chrome.runtime.onMessage?.addListener((msg, _sender, sendResponse) => {
+    if (msg?.action === 'ZH_FLOW_RUN_DIRECT') {
+      const job = msg.job || {};
+      if (!job.jobId || !job.imgBase64) { sendResponse({ ok: false, error: 'bad job' }); return; }
+      if (runningJobId && runningJobId !== job.jobId) { sendResponse({ ok: false, busy: true, error: 'This Flow tab is still busy' }); return; }
+      runningJobId = job.jobId;   // claim before any await
+      sendResponse({ ok: true });
+      runDirect({ ...job, direct: true, timestamp: Date.now() });
+      return;
+    }
+    if (msg?.action === 'ZH_FLOW_CANCEL_DIRECT') { if (msg.jobId) directCancel.add(msg.jobId); sendResponse?.({ ok: true }); return; }
     if (msg?.action === 'ZH_FLOW_EXECUTE') handlePendingFlowAction();
     if (msg?.action === 'ZH_FLOW_MANUAL_ATTACH') {
       manualAttach(msg).then(sendResponse, e => sendResponse({ ok: false, error: e?.message || String(e) }));

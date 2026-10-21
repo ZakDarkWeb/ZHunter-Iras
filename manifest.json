@@ -18,7 +18,8 @@
     "downloads",
     "sidePanel",
     "windows",
-    "debugger"
+    "debugger",
+    "idle"
   ],
   "host_permissions": [
     "<all_urls>"

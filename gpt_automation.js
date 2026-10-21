@@ -289,6 +289,7 @@
     let job;
     try { job = (await chrome.storage.local.get(['zhGptTitlesJob']))?.zhGptTitlesJob; } catch (_) { return; }
     if (!job || job.started || Date.now() - (job.at || 0) > 5 * 60000) return;
+    if (job.engine && job.engine !== 'chatgpt') return;   // a Gemini titles job is not ours
     if (window.__zhGptTitlesBusy) return;
     window.__zhGptTitlesBusy = true;
     try {

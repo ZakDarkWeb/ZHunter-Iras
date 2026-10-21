@@ -6,9 +6,38 @@ let ZhTextStudio = { items: [], page: 0, busy: false, stop: false, saving: false
 let _zhTextSaveChain = Promise.resolve();
 const zhTextClone = value => JSON.parse(JSON.stringify(value));
 const zhTextSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-function zhTextSnapshot(row) {
+// 20 Oct 2026 — shop pages sometimes leave HTML codes in the text ("Easy to store &amp; keep fresh"): turn them back into characters
+function zhTextDecode(s) {
+  return String(s ?? '').replace(/&(amp|lt|gt|quot|apos|nbsp|#39|#x27|#34|#38|#\d{2,5}|#x[0-9a-f]{2,4});/gi, (m, c) => {
+    const k = c.toLowerCase();
+    const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+    if (named[k] !== undefined) return named[k];
+    const code = k.startsWith('#x') ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
+    return Number.isFinite(code) && code > 31 ? String.fromCodePoint(code) : m;
+  }).replace(/&amp;/gi, '&');
+}
+// one long bullet that holds several features ("… Buttery Finish JUST BLACK TASTING NOTES: … . Easy to store …") → separate points
+function zhTextSplitBullets(list) {
+  const out = [];
+  for (const b of list) {
+    const t = zhTextDecode(b).replace(/\s+/g, ' ').trim(); if (!t) continue;
+    const parts = t.length > 160
+      ? t.split(/\s*[•▪●|]\s*|(?<=[.!?])\s+(?=[A-Z])|(?<=[a-z0-9.,)])\s+(?=[A-Z][A-Z0-9 &'\-]{3,}:)/).map(x => x.trim()).filter(x => x.length > 2)
+      : [t];
+    out.push(...parts);
+  }
+  // keep at most 6 points: extra short pieces are joined to the last one
+  while (out.length > 6) { const last = out.pop(); out[out.length - 1] = `${out[out.length - 1]} ${last}`.trim(); }
+  return out;
+}
+// raw = exactly what is stored (used to match saved edit records); zhTextSnapshot = cleaned for the Studio boxes
+function zhTextSnapshotRaw(row) {
   return { title: String(row.title || ''), description: String(row.description || ''),
     bullets: Array.isArray(row.bullets) ? row.bullets.map(String) : String(row.bullets || '').split(/\s*\|\s*/).filter(Boolean) };
+}
+function zhTextSnapshot(row) {
+  const raw = zhTextSnapshotRaw(row);
+  return { title: zhTextDecode(raw.title), description: zhTextDecode(raw.description), bullets: zhTextSplitBullets(raw.bullets) };
 }
 function zhTextMatches(row, change) {
   return (change.id && row.id === change.id) || (change.url && row.url === change.url);
@@ -18,10 +47,10 @@ async function zhApplyTextEdits(rows) {
   for (const row of rows || []) {
     const edit = records[row.url || row.id];
     if (!edit) continue;
-    const snapshot = zhTextSnapshot(row);
+    const snapshot = zhTextSnapshotRaw(row), clean = zhTextSnapshot(row);   // stored text as it is + the cleaned Studio version
     for (const field of ZH_TEXT_FIELDS) {
       const entry = edit.fields?.[field];
-      if (entry && (zhTextSame(snapshot[field], entry.value) || (entry.previous || []).some(v => zhTextSame(v, snapshot[field])))) {
+      if (entry && (zhTextSame(snapshot[field], entry.value) || (entry.previous || []).some(v => zhTextSame(v, snapshot[field]) || zhTextSame(v, clean[field])))) {
         row[field] = zhTextClone(entry.value);
       }
     }
@@ -48,7 +77,7 @@ function zhSaveTextChanges(changes) {
           if (!Object.prototype.hasOwnProperty.call(change.patch, field)) continue;
           const value = zhTextClone(change.patch[field]);
           const prev = record.fields[field];
-          const history = [...(prev?.previous || []), ...(prev ? [prev.value] : []), before[field], stored ? zhTextSnapshot(stored)[field] : undefined]
+          const history = [...(prev?.previous || []), ...(prev ? [prev.value] : []), before[field], stored ? zhTextSnapshot(stored)[field] : undefined, stored ? zhTextSnapshotRaw(stored)[field] : undefined]
             .filter(v => v !== undefined && !zhTextSame(v, value));
           const unique = history.filter((v, i) => history.findIndex(x => zhTextSame(x, v)) === i);
           record.fields[field] = { value, previous: unique.length > 8 ? [unique[0], ...unique.slice(-7)] : unique };
@@ -77,7 +106,7 @@ function zhSaveTextChanges(changes) {
     return { inLib, savedLib: payload.filter(c => hasPatch(saved.find(r => zhTextMatches(r, c)), c)).length,
       inFile: payload.filter(c => hasPatch(q.find(r => zhTextMatches(r, c)), c)).length };
   });
-  _zhTextSaveChain = task.catch(() => {});
+  _zhTextSaveChain = task.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
   return task;
 }
 
@@ -221,40 +250,48 @@ function zhTextFoldMeta(field, value) {
   return { meta: text ? `${text.length} characters` : 'Empty', preview: text || 'No description yet' };
 }
 
+// v9.17 — options row open/closed; a dot on the Options button when instructions are typed
+function zhTextOptsSync() {
+  const o = $('ztOpts'), b = $('ztOptsBtn'); if (!o || !b) return;
+  o.hidden = !ZhTextStudio.optsOpen;
+  b.setAttribute('aria-expanded', String(!!ZhTextStudio.optsOpen));
+  b.classList.toggle('on', !!ZhTextStudio.optsOpen);
+  b.classList.toggle('has', !!$('ztPreferences')?.value.trim() || !!$('ztCustomMode')?.checked || ZhTextStudio.items.some(x => !x.selected));
+}
 function zhTextEnsureModal() {
   if ($('zhTextStudioModal')) return;
   const modal = document.createElement('div');
   modal.id = 'zhTextStudioModal';
   modal.className = 'modal-back hidden';
-  const chipLabel = f => (f === 'bullets' ? 'Bullets' : f === 'title' ? 'Titles' : 'Description');
-  modal.innerHTML = `<section class="zt-modal" role="dialog" aria-modal="true" aria-labelledby="ztHeading">
+  // v9.17 — compact layout: slim header + product row, ONE toolbar row (fields · Rewrite · Options), options collapsed
+  const chipLabel = f => (f === 'bullets' ? 'Bullets' : f === 'title' ? 'Title' : 'Desc');
+  const chipTip = f => (f === 'bullets' ? 'Bullet points' : f === 'title' ? 'Titles' : 'Description');
+  modal.innerHTML = `<section class="zt-modal zt-v2" role="dialog" aria-modal="true" aria-labelledby="ztHeading">
     <header class="zt-head">
       <span class="zt-brand-mark" aria-hidden="true">${ZT_ICONS.spark}</span>
-      <div class="zt-head-text">
-        <h2 id="ztHeading">Content Studio</h2>
-        <p>Titles, bullet points and descriptions</p>
-      </div>
-      <button type="button" id="ztClose" class="zt-close-btn" aria-label="Close">${ZT_ICONS.brand}</button>
+      <h2 id="ztHeading">Content Studio</h2>
+      <span id="ztPosition" class="zt-pos-badge" title="Product position">1 / 1</span>
+      <button type="button" id="ztClose" class="zt-close-btn" aria-label="Close" title="Close (Esc)">${ZT_ICONS.brand}</button>
     </header>
     <div class="zt-nav">
       <button type="button" id="ztPrev" class="zt-nav-btn" aria-label="Previous product"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
       <label class="zt-product-picker"><select id="ztProduct" class="sel" aria-label="Choose product"></select></label>
-      <span id="ztPosition" class="zt-pos-badge">1 / 1</span>
       <button type="button" id="ztNext" class="zt-nav-btn" aria-label="Next product"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
     </div>
     <div class="zt-toolbar">
-      <div class="zt-fields">
-        <span class="zt-fields-lbl">Rewrite</span>
-        ${ZH_TEXT_FIELDS.map(f => `<label class="zt-field-chip"><input type="checkbox" id="ztField-${f}" checked><span>${ZT_ICONS.check}${chipLabel(f)}</span></label>`).join('')}
-      </div>
-      <div class="zt-actions">
-        <button type="button" id="ztGenerate" class="zt-ai-btn">${ZT_ICONS.spark}<span id="ztGenerateLbl">Rewrite selected</span></button>
-        <button type="button" id="ztGenerateOne" class="zt-ghost-btn" title="Rewrite only the product shown below">This product only</button>
+      <div class="zt-tbar">
+        <div class="zt-fields" role="group" aria-label="Fields to rewrite">
+          <span class="zt-fields-lbl">Rewrite</span>
+          ${ZH_TEXT_FIELDS.map(f => `<label class="zt-field-chip" title="${chipTip(f)}"><input type="checkbox" id="ztField-${f}" checked><span>${ZT_ICONS.check}${chipLabel(f)}</span></label>`).join('')}
+        </div>
+        <button type="button" id="ztGenerate" class="zt-ai-btn">${ZT_ICONS.spark}<span id="ztGenerateLbl">Rewrite</span></button>
         <button type="button" id="ztStop" class="zt-stop-btn" hidden disabled>${ZT_ICONS.stop}Stop</button>
+        <button type="button" id="ztOptsBtn" class="zt-opts-btn" aria-expanded="false" aria-controls="ztOpts" title="Options: this product only, which products, instructions"><svg viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="17" r="2.2"/></svg><i class="zt-opts-dot" aria-hidden="true"></i></button>
       </div>
-      <div class="zt-opts">
+      <div class="zt-opts" id="ztOpts" hidden>
+        <button type="button" id="ztGenerateOne" class="zt-ghost-btn" title="Rewrite only the product shown below">${ZT_ICONS.spark}Rewrite this product only</button>
         <details class="zt-selection"><summary><span id="ztSelectionLabel">Products to rewrite</span>${ZT_ICONS.chev}</summary><div class="zt-sidebar"><label class="zt-all"><input type="checkbox" id="ztSelectAll" checked>Select all</label><div id="ztQueue"></div></div></details>
-        <details class="zt-preferences"><summary>Instructions <span>Optional</span></summary><label class="zt-custom-mode"><input type="checkbox" id="ztCustomMode"><span>Use my prompt as the main instruction for titles (skip the default Temu format)</span></label><textarea id="ztPreferences" class="inp" rows="3" placeholder="Extra preferences for the selected fields…" aria-label="Extra instructions"></textarea></details>
+        <details class="zt-preferences"><summary><span>Instructions</span><span>Optional</span></summary><label class="zt-custom-mode"><input type="checkbox" id="ztCustomMode"><span>Use my prompt as the main instruction for titles (skip the default Temu format)</span></label><textarea id="ztPreferences" class="inp" rows="3" placeholder="Extra preferences for the selected fields…" aria-label="Extra instructions"></textarea></details>
       </div>
     </div>
     <div class="zt-progress" id="ztProgress" role="status" aria-live="polite" data-kind="info"></div>
@@ -272,6 +309,9 @@ function zhTextEnsureModal() {
   $('ztClose').addEventListener('click', zhTextClose);
   $('ztGenerate').addEventListener('click', () => zhTextRun(false));
   $('ztGenerateOne').addEventListener('click', () => zhTextRun(true));
+  $('ztOptsBtn').addEventListener('click', () => { ZhTextStudio.optsOpen = !ZhTextStudio.optsOpen; zhTextOptsSync(); });
+  $('ztPreferences').addEventListener('input', zhTextOptsSync);
+  $('ztCustomMode').addEventListener('change', zhTextOptsSync);
   $('ztProduct').addEventListener('change', e => { ZhTextStudio.page = Number(e.target.value); zhTextRender(); });
   $('ztStop').addEventListener('click', () => { ZhTextStudio.stop = true; zhTextStatus('Stopping — waiting for the current AI request to finish…', 'busy'); });
   $('ztSaveOne').addEventListener('click', () => zhTextSave(true));
@@ -419,7 +459,8 @@ function zhTextRender() {
   $('ztPosition').textContent = `${page + 1} / ${items.length}`;
   $('ztProduct').innerHTML = items.map((item, i) => `<option value="${i}" ${i === page ? 'selected' : ''}>${i + 1}. ${esc(item.draft.title || 'Product')}</option>`).join('');
   $('ztSelectionLabel').textContent = `Products to rewrite · ${selected} of ${items.length}`;
-  $('ztGenerateLbl').textContent = selected === 1 ? 'Rewrite 1 product' : `Rewrite ${selected} products`;
+  $('ztGenerateLbl').textContent = `Rewrite ${selected}`;
+  $('ztGenerate').title = selected === 1 ? 'Rewrite 1 product with AI' : `Rewrite ${selected} products with AI`;
   $('ztPrev').disabled = page === 0;
   $('ztNext').disabled = page === items.length - 1;
   const images = _allImgUrls(it.row);
@@ -448,8 +489,8 @@ function zhTextRender() {
         const vals = it.draft.bullets.slice();
         const boxes = Math.min(6, Math.max(vals.length, ZhTextStudio._bulletBoxes || 0, 1));
         while (vals.length < boxes) vals.push('');
-        area = `<div class="zt-bullets">${vals.map((v, i) => `<div class="zt-bullet"><span class="zt-bullet-i">${i + 1}</span><textarea class="inp inp-ta zt-bullet-ta" ${i === 0 ? 'id="ztEdit-bullets"' : ''} data-field="bullets" data-bi="${i}" rows="2" placeholder="Bullet point ${i + 1}" aria-label="Bullet point ${i + 1}" ${dis}>${esc(v)}</textarea><small class="zt-bullet-n" data-state="${v.length > lim ? 'over' : v.length > lim * 0.9 ? 'warn' : 'ok'}">${v.length}/${lim}</small><button type="button" class="zt-bullet-del" data-bullet-del="${i}" title="Remove this point" aria-label="Remove point ${i + 1}" ${dis}>×</button></div>`).join('')}
-          <button type="button" class="zt-bullet-add" data-bullet-add ${boxes >= 6 || dis ? 'disabled' : ''}>+ Add point <small>${boxes}/6</small></button></div>`;
+        area = `<div class="zt-bullets">${vals.map((v, i) => `<div class="zt-bullet"><span class="zt-bullet-i">${i + 1}</span><div class="zt-bullet-body"><textarea class="inp inp-ta zt-bullet-ta" ${i === 0 ? 'id="ztEdit-bullets"' : ''} data-field="bullets" data-bi="${i}" rows="2" placeholder="Bullet point ${i + 1}" aria-label="Bullet point ${i + 1}" ${dis}>${esc(v)}</textarea><div class="zt-bullet-meta"><small class="zt-bullet-n" data-state="${v.length > lim ? 'over' : v.length > lim * 0.9 ? 'warn' : 'ok'}">${v.length}/${lim}</small><button type="button" class="zt-bullet-del" data-bullet-del="${i}" title="Remove this point" aria-label="Remove point ${i + 1}" ${dis}>Remove</button></div></div></div>`).join('')}
+          <button type="button" class="zt-bullet-add" data-bullet-add ${boxes >= 6 || dis ? 'disabled' : ''}><span>+ Add point</span><small>${boxes} / 6</small></button></div>`;
       } else area = `<textarea class="inp inp-ta zt-field-ta" id="ztEdit-${field}" data-field="${field}" rows="${field === 'title' ? 3 : 4}" ${dis}>${esc(it.draft[field])}</textarea>`;
       // v9.16 — side-by-side compare (original source copy vs. the text in the box now)
       let orig = '';
@@ -467,6 +508,7 @@ function zhTextRender() {
         </details>`;
     }).join('')}`;
   ZhTextStudio._bulletBoxes = 0;
+  zhTextOptsSync();
   zhTextUpdateControls();
 }
 function zhTextUpdateControls() {
