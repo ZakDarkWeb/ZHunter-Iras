@@ -1,5 +1,181 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.20.9 (2026-10-21) — candy "for Piñata Fillers" is no piñata; Fix drafts fills the age group
+- HQ- 4 SHOP: 2 SOUR PATCH KIDS candy packs got the category "Home & Kitchen / … / Piñatas" because the title says "for Piñata Fillers Party Favors"; Temu then wanted "Applicable Age Group" and kept them as drafts. Use words ("for Piñata Fillers", "Party Favors", "Goodie / Treat Bags", "Stocking Stuffers" …) are now left out when the category is picked (`temuUseFree`). A real piñata ("Unicorn Piñata …") keeps its words.
+- Fix drafts: "Applicable Age Group" on candy / snacks or party-supply categories is filled with "3 Years+" when the title names no age (before: "NEEDS YOU").
+- Fix drafts report: product names were shown as ".beast-core-ellipsis-1{…}" (a <style> tag in the cell) — now the visible name.
+- Fix drafts waits up to 45 s (was 20 s) for the Temu page that "Complete product information" opens.
+
+## 9.20.8 (2026-10-21) — your own page size
+- The "25 / 50 / 100 / 200 per page" list is now a small number box: type any page size from 1 to 500 (e.g. 10, 15, 30) and press Enter. Remembered. Checked: 57 products at 10 per page → 6 pages (‹ 1 2 … 6 ›), page 6 holds the last 7.
+
+## 9.20.7 (2026-10-21) — pages in the product list, like Temu
+- The product list shows one page at a time: "☐ This page   ‹ 1 2 3 ›   [25 / page]" (25 / 50 / 100 / 200, remembered). Long lists no longer need endless scrolling. A filter or search starts again at page 1.
+- "This page" ticks / unticks only the products of the current page (✓ when all are ticked, – when some are). Products on other pages keep their tick and still go to upload; the page is only a view. Shift+click ranges stay inside the page.
+- Checked with 57 sample cards: page 1 = 1–25, page 3 = 51–57, "This page" unticked only the 7 on page 3, paging works together with the "Not listed" filter.
+
+## 9.20.6 (2026-10-21) — safer picking: Invert on the whole list, "Only new", warning before a 2nd store
+- 27 of the 30 products uploaded to Chroma Haus went to Cloverhill too (same email). "⇄ Invert" only swapped the products the filter showed at that moment, so its result depended on the filter and was hard to predict. Invert now swaps the tick of EVERY product, the filter goes back to "All" (you see the result), and the toast warns "⚠ N of the ticked are already live on a store".
+- New "✚ Only new" button next to Invert: ticks only the products that are listed on no store yet and unticks all others, whatever filter is on.
+- Upload sheet: "⚠ Pehle se live — 27 · Chroma Haus par" when ticked products are already live, with one button "Sirf naye bhejo — 27 untick karo". Nothing is blocked: Upload still sends what you ticked.
+- Checked with today's numbers (57 products, 24 on Charmhouse, 30 on Chroma Haus): Invert → the other 27 (0 of the Chroma Haus ones) + warning "24 already live"; Only new → the 3 products listed nowhere.
+
+## 9.20.5 (2026-10-21) — fresh SKU for imported Temu files too
+- Hunted / Library products and sheets made by this extension already got a new SKU code on every upload (since 9.18.0). A Temu file imported "as-is" (any other Temu template file) still went up with its old SKU. Now its Contribution Goods (`listing_id`) and Contribution SKU (`seller_sku`) get a fresh 4-letter code on every upload and on "Export file only" (an older code is replaced). Titles, prices and everything else in the file stay as they are. Checked on the real built-in Temu template: `CH-SAMSCLUB-20203019292-Multipack` → `CH-SAMSCLUB-20203019292-VLDD-Multipack`, `…-K7Q2-…` → `…-VLDD-…`.
+
+## 9.20.4 (2026-10-21) — the filter decides what is uploaded
+- Filter "Not listed" showed 33 products, but the upload sheet said "Jayenge 57 products": the filter only hid the others, their ticks stayed. Now products the filter / search hides count as unticked — "N selected", the ready row, AI titles and the upload use only the ticked products you can SEE (`temuRvOff`). Back to "All" → the hidden ones count again with their own tick. The "Unticked" view is only for looking and changes nothing.
+
+## 9.20.3 (2026-10-21) — one toolbar line
+- The product count ("57 products" / "33 of 57") is shown faintly inside the search box (right side, stays while you type) instead of next to it.
+- Search · Filter · Tools · Collapse now stay on ONE line (Collapse no longer drops to a second line).
+
+## 9.20.2 (2026-10-21) — more room for the products
+- The filter bar under the chips keeps only "N shown · 🗑 Delete shown" — "Select for images", "Unselect" and "Learn category again" are removed (the ticks / Tick first / Invert already do this).
+- The filter chips fold up again after you pick one (the chosen filter stays on the Filter button).
+- The product list uses the panel's height (it stopped at 62 % of the screen, leaving empty space below), and the search box no longer shrinks to "Searc".
+
+## 9.20.1 (2026-10-21) — hide the toolbar rows above the product list
+- New "Hide" button next to Filter / Collapse: folds away the "Tick first … Apply / Invert" row, the filter chips and the filter buttons, so the products are not squeezed under a tall sticky toolbar. Press "Tools" to show them again. Remembered (per browser). The top row may wrap on a narrow panel instead of overflowing.
+
+## 9.20.0 (2026-10-21) — simple: the tick decides
+- No automatic skip and no questions any more: every ticked product is uploaded. Already-listed products are never left out or blocked (the "Skip them / Upload anyway / Fix duplicates" rows and the Settings switch "Pehle se listed product dobara nahi" are gone). Every file still gets a fresh SKU, so Temu's "SKU duplicated" does not come back.
+- Filters: "✓ Listed" and "Not listed" come first (a Temu-rejected product counts as Not listed). The "Duplicate" filter and the "Fix duplicates" / "Unmark listed" buttons are removed.
+- Card label: only a green "Listed" (store + date in the tooltip).
+- The source line only notes "N ticked products are already listed — they will be uploaded again".
+
+## 9.19.2 (2026-10-21) — separate choice for listed and duplicate products; "Fix duplicates" works
+- The ready row has one line per kind, each with its own buttons: "24 listed on Charmhouse — [Skip] [Upload again]" and "6 duplicate on Charmhouse — [Skip] [Upload again] [Fix duplicates]". Click a chosen button again to undo. Only a kind you have not decided yet stops the upload. The source line follows each kind ("— skip honge" / "— upload honge" / "— faisla baqi"). Checked with 57 sample products: skip/skip → 27 go, skip/again → 33, again/skip → 51, again/again → 57.
+- "Fix duplicates" said "No duplicate products in the list" when the list was collapsed (it looked at the drawn cards). It now works on the product data: ticks only the duplicates, sets them to "Upload again" and starts the AI title rewrite.
+
+## 9.19.1 (2026-10-21) — one rule, one count, with the store name
+- On Cloverhill the ready row said "30 already listed … on this store" while the source line said "24 already listed · 6 duplicate" — two different rules, and the products were on Charmhouse, not Cloverhill. Now ONE function (`temuListedWhere`) decides for the export, the ready row, the source line and the card label, on the same (ticked) products: "24 listed on Charmhouse · 6 duplicate on Charmhouse" (checked with 57 sample products, on Cloverhill and on Charmhouse).
+- Ready row question: "Upload these products again? [Skip them] [Upload anyway] [Fix duplicates]".
+
+## 9.19.0 (2026-10-21) — simpler: two labels and one "Fix duplicates" button
+- Product cards show only two labels: green "Listed" (store + date in the tooltip) and red "Duplicate" (Temu rejected it in this store: "Contribution SKU duplicated"). The "✓ Charmhouse · 10-21" / "✗ Charmhouse · duplicate" store labels are gone.
+- Filters renamed to match: "✓ Listed" and "Duplicate".
+- New "Fix duplicates" button (in the ready row when duplicates are ticked, and in the filter bar): ticks ONLY the duplicate products, lets them through ("Upload anyway"), and starts the AI title rewrite (Title Optimizer, GPT / Gemini) for them. The SKU is new anyway (every file gets a fresh code). Then press Upload.
+
+## 9.18.9 (2026-10-21) — "24 already listed · 6 duplicate", not "30 already listed"
+- The marks were right after "Upload errors" (24 uploaded, 6 duplicate) but the ready row and the source line counted both as "30 already listed". Duplicates now have their own red chip "6 duplicate (old listing in store)" and the source line says "24 already listed · 6 duplicate". Skip them / Upload anyway still apply to both.
+
+## 9.18.8 (2026-10-21) — checked live on Temu (read only): Upload errors finds the right history
+- Tested in the user's Chrome without uploading or submitting: Bulky Candies "Processing results" → 30 lines, 24 Added, 6 duplicates (lines 8, 11, 24, 29, 31, 34), one page, complete — the reader gets all of it. "View failed details" names now read correctly ("HERSHEY'S Sweets Mix…"; the old code got ".beast-core-ellipsis-2{…").
+- Found live: the plain `upload-goods-multiple.html` link opens the "Add products by categories" tab, whose Upload history holds other, old files (September) — the upload was "not found". "Upload errors" now switches to "Add products via general template" first.
+- The page keeps the hidden tab's history block too; the history finder now takes the VISIBLE block first (a hidden one could be picked because its text still matched). The same finder is used to spot a new upload, so this also protects auto upload.
+
+## 9.18.7 (2026-10-21) — review of today's changes: 4 more mistakes fixed
+- Categories tab: a category you deleted came back — since 9.17.5 every store's categories are shared, but the delete removed it from the active store only. It is now removed from every store.
+- History "listed today" number and the daily chart counted Temu-rejected duplicates as listed. They are left out now.
+- Learn categories: after a 75 s time-out the old typing could still run in the Temu page while the next try typed into the same box. The page is reloaded before trying again.
+- After an upload the "already listed — skip / upload again" source line kept the old choice until something else changed. It is refreshed when the upload ends.
+
+## 9.18.6 (2026-10-21) — source line follows "Upload anyway"
+- After choosing "Upload anyway" the source line still said "6 already listed — skip honge" (it only looked at the Settings checkbox). It now follows the choice in the ready row: "6 already listed — dobara upload honge (aap ka faisla)" / "skip honge".
+
+## 9.18.5 (2026-10-21) — "✓ Uploaded" shows what Temu really added
+- Bulky Candies: "✓ Uploaded" showed the 6 products Temu REJECTED (duplicates were marked like uploaded products) and none of the 24 it added (that upload ended "nothing marked" because the result list was not read completely).
+- Duplicates get their own mark: red "✗ Charmhouse · duplicate" label, counted under "✗ Temu rejected" and "Not uploaded yet" — never under "✓ Uploaded" (they are still skipped / asked about on the next upload, since an older listing is in that store).
+- Reading Temu's processing results ("Upload errors" or after an upload) now also marks the products Temu ADDED as uploaded — only when every line was read and matched.
+
+## 9.18.4 (2026-10-21) — you choose: skip already-listed products or upload them anyway
+- Ticked products that are already listed (this store, or another store of this Chrome) no longer just block the button ("Fix first · 6 already listed"). The ready row asks: "Some products are already listed on this store: [Skip them] [Upload anyway]".
+- Skip them → they are left out, the others are uploaded. Upload anyway → they go to the store again (with the fresh SKU of 9.18.0). Undo → asks again. The choice is for one upload only (reset afterwards); the Settings checkbox stays the default.
+
+## 9.18.3 (2026-10-21) — "Upload errors" reconnects to the Temu tab
+- After reloading the extension, "Upload errors" said "Tab …: cannot reach the page (reload it)" and 'Store "Charmhouse" has no "Add products via upload" tab' although that page was open. It now reconnects to the tab by itself (script injected again / page refreshed), the same way "Fix drafts" does.
+
+## 9.18.2 (2026-10-21) — "Upload errors" knows which products Temu rejected
+- More tools → "Upload errors" read Temu's rows but said "Line 8 (no product of this export)" for every one: it had no product list (only the last export in memory, empty after a reload). It now takes the newest upload of the active store from History — its product list and Upload ID — so every line is matched to its product (marked, and shown by "✗ Temu rejected").
+- The older "failed details" popup gave ".beast-core-ellipsis-2{-webkit-line-clamp…" as product name (a <style> tag inside the cell). The name is now read as visible text.
+
+## 9.18.1 (2026-10-21) — upload only the products Temu rejected
+- When Temu's failed details are read (automatically after an upload, or History → errors button), the products Temu did NOT add are saved in that History record (`failedIds`). The History errors button now uses THAT upload's products (before: the last export in memory, which could be another file).
+- New filter "✗ Temu rejected": products Temu did not add in an upload to the active store (and did not accept later).
+- New button in the filter bar: "↺ Unmark listed" — forgets that the shown products were uploaded to the active store, so "Skip already listed" lets them through again. Workflow: History → read errors → Filter "✗ Temu rejected" → ↺ Unmark listed → Tick first N / Select all → upload (fresh SKUs since 9.18.0).
+
+## 9.18.0 (2026-10-21) — a fresh SKU for every file
+- Temu spots a product it already has by its Contribution SKU, which was always the same for a source product (`CH-SAMSCLUB-20203019292-Multipack`). Now every new file gets its own 4-letter code after the source id: `CH-SAMSCLUB-20203019292-K7Q2-Multipack` (Contribution Goods the same, without the variant). "Store export" (ZC-) no longer copies the exact Temu Goods ID either: `ZC-610054921121032-K7Q2-Std`.
+- The source id stays in its place, so "Import sheet" in the other Chrome still finds the product (checked). On by default (`sku_fresh: false` in the store config turns it off).
+- The extension's own "Skip already listed" check is unchanged (it works on the source link, not the SKU) — switch it off in Settings when you want to upload a product to the same store again.
+
+## 9.17.9 (2026-10-21) — "Contribution SKU duplicated" shown as what it is, not as drafts
+- Bulky Candies on Charmhouse: 24 added, 6 "drafts". Temu's "View failed details" said for all 6: "Contribution SKU duplicated with another product (Goods ID …)" — those products were already listed in that store. "Fix drafts" had nothing to fill and only pressed Submit.
+- After an upload with errors ZHunter reads Temu's failed details (once more after 6 s if the popup was not complete), marks every "SKU duplicated" product as listed in that store (skipped next time) and saves the count + the most common other reason in the History record (`dups`, `failWhy`).
+- Result card: "N already in store" number and a plain reason line; those are no longer counted as drafts. "Fix drafts" shows / runs automatically only for real drafts — not when every error was a duplicate.
+
+## 9.17.8 (2026-10-21) — "Fix drafts" presses Temu's Submit again
+- "No Submit button could be pressed": Temu renamed the bottom bar's class (`.flexCenter-2dxu4` → `.btn_wrapper-3JoSo`). The page's Submit is now found by its text (last visible, enabled "Submit" outside the table) — checked on the saved "Complete product details" page.
+- "12 drafts" for 6 products: every variant (SKU) line was counted and listed as its own draft. Now the products are counted; a variant line is still checked but shown only when it needs something.
+- When nothing was submitted the report no longer says "Drafts submitted" — it says to press Submit on the Temu page by hand.
+
+## 9.17.7 (2026-10-21) — "Fix drafts" finds the page it just opened
+- "Fix drafts" pressed "Complete product information" on Temu's upload history, but then said '"Product action required" or "Complete product details" page is not open' — the click opens `products-excel-multiple-edit.html` in a new tab, and only `product-action.html` was looked for, for 2.5 s. Now both pages are looked for, up to 20 s, the newest tab first.
+
+## 9.17.6 (2026-10-21) — product count in the file name, "⇄ Invert" ticks
+- Every exported / uploaded sheet has its product count in the name: `temu_upload_Bulky_Candies_30.xlsx` (download, Temu upload and History copy).
+- New "⇄ Invert" button next to "Tick first … ✓ Apply": the ticked products of the list become unticked and the others ticked — 30 done on Charmhouse → one click → the other 27 for Cloverhill.
+
+## 9.17.5 (2026-10-21) — learned categories follow the product (other store, other Chrome, new title)
+- One category list for ALL stores of this Chrome: categories made in any store, every per-product choice and every learned title are shared (`temuCatShared` in settings; built once from what each store had saved). A category learned on Charmhouse is known on Cloverhill.
+- A category that Temu or you picked for a product is remembered for that product (by its source link / SKU) and is never marked ⚠ again — also after "AI titles" gave it a new title (`cat_trusted`). "Learn category again" forgets it as before.
+- Import sheet in the other Chrome: the category written in a sheet made by this extension is now used as that product's category (no ⚠, no "Learn categories" needed). If the store does not have that category yet it is added. A category you already chose for that product in this Chrome stays.
+
+## 9.17.4 (2026-10-21) — tick 20 / 30 products in one go
+- New row above the product list: "Tick first [30] of 57 ✓ Apply" (Enter works too). The first N products the list shows (after filter / search) are ticked, all others unticked — so exactly N go to upload / AI titles. The number is remembered.
+- Shift+click a tick: every shown product between the last clicked tick and this one gets the same tick (tick or untick a whole range).
+
+## 9.17.3 (2026-10-21) — "Learn categories" no longer gets stuck while opening the Temu pages
+- It sat at "Opening 2 Temu 'Add new product' pages…" with an empty Product name box: the small 2nd window covered the 1st Temu page, and a covered page never answers. Now the two pages take turns at the front (like the Gemini tabs): the page whose title is pasted comes forward with its window, Temu's suggestions are read, then the other page gets its turn.
+- Every Chrome step has a time limit (open page 15 s, page load 20 s, paste + read 75 s); a page that does not answer is tried again, and a 2nd page that cannot be opened is simply left out. Live status: "Opening Temu page 2 of 2…", "Waiting for the Temu pages to load…".
+- ✕ stops the run at once and closes the pages it opened; "Learn categories" can be started again right away. The counter starts at "0 / N" (it showed the old "1 / 1").
+
+## 9.17.2 (2026-10-21) — "Learn categories" no longer says "good category" for ⚠ products
+- "Learn categories" gave 4 ⚠ products a smart guess (e.g. Mars Fun Size Fruity Candy → Coated Fruits) and then said "All products already have a good category ✓", while the list still showed ⚠. A smart guess is now used only when the list would NOT mark it ⚠; otherwise Temu is asked for that product.
+- "All products already have a good category" shows only when nothing was guessed. "pcs / ct / oz / lbs / qty" no longer count as matching words.
+
+## 9.17.1 (2026-10-21) — smart category: fewer wrong guesses
+- Wrong picks like "Mars Halloween Variety Pack Mini & Fun Size → Coated Fruits", "Airheads Spooky Mix → Candy Mints" and "Swiss Miss Hot Cocoa Single Serve → Coffee Capsules & Pods": the match was made on size / pack / form words. Words such as mini, fun size, single serve, flavored, assorted, count, pack, original, spooky, king size no longer count — neither in titles nor in the category name.
+- A long title now needs about a third of its product words to match a learned product (2 shared words were enough before). Unsure → no smart guess; Temu suggests the category instead.
+
+## 9.17.0 (2026-10-21) — split one product list over several stores
+- Every product card on the Upload tab shows where it already went: "✓ Charmhouse · 10-21" in that store's page-frame colour (tooltip: store, date, accepted). The label appears right after an upload and goes away after "Unmark last upload".
+- Two new filters: "Not uploaded yet" and "✓ Uploaded". Workflow for 2 stores: tick the half you want → upload to store 1 → switch store → filter "Not uploaded yet" → Select All → upload.
+- One product goes to ONE store: while "Skip already listed" is on, a product that already went to another store is skipped too ("already on Charmhouse (date)"), and the source line counts it as already listed.
+
+## 9.16.3 (2026-10-21) — daily counter is plain text, not a round chip
+- The "TODAY [25 Gemini #1]" pill under AI Image Studio looked like a round button. It is now one plain line: "Made today: 25 images · Gemini account 1" (amber / red text only near or at a real limit). Same counter, same tooltip.
+- No round buttons or pill-shaped labels left: filter chips, source counts, preset chips, History / bulk badges, step numbers, image tags, the lightbox close button and the category search clear button now have small square corners (override block at the end of `ui_polish.css`). Tiny status dots, spinners, switch knobs and progress bars stay round.
+
+## 9.16.2 (2026-10-21) — Gemini / ChatGPT tabs take turns at the front (user's idea)
+- Instead of moving every Gemini / ChatGPT tab into its own window (9.16.1), the tabs stay in one window and take turns: the tab whose image + prompt go in is brought to the front, the image is attached, the prompt typed and Send pressed while it is visible, then the next tab gets the front (`zhFrontTurn`). Waiting for the picture happens in the background (a tab that has been in front once keeps working, as the user saw). ChatGPT keeps the front ~20 s after its send. Flow keeps its own windows.
+
+## 9.16.1 (2026-10-21) — AI tabs really work together, no false limit warning
+- 4 Gemini tabs: only the front tab worked, the others showed "press Send in this Gemini tab" until you clicked them. Chrome never draws a tab that sits behind another tab of the same window (even with the background switches), and Gemini / ChatGPT need a drawn page to finish the upload and Send. Now every Gemini / ChatGPT / Flow slot is the front tab of its OWN window: the first stays where it is, every other one that shares a window is moved to a new small window beside it (`zhSlotOwnWindow`). Keep those windows open (not minimized). Flow's "one window in background mode" is undone for the same reason.
+- "⚠ … left today (usual limit ~20)" appeared although Gemini never showed a limit: ~20 was only a built-in guess. The warning (and the amber "near ~N" chip) now shows only after Gemini / Flow really showed a limit on this or another account (`zhDailyReal`).
+
+## 9.16.0 (2026-10-21) — version bump
+- manifest.json 9.15.0 → 9.16.0 (the side panel header shows it). Covers everything below since 9.15.0: error log, parallel AI tabs (Gemini / ChatGPT / Flow), screen-lock pause, smart categories, Title Optimizer tabs + Gemini titles, filters + bulk bar, Content Studio redesign, Settings / History / Upload upgrades, page frame labels. From now on every change round bumps the version (user's wish).
+- Products source buttons: label + count stay on one line ("Import sheet 40" wrapped to 2 lines).
+
+## Export + Upload button names the store (2026-10-21, same manifest version)
+- The main button now says "Export + Upload to HQ- 4 SHOP" (the active store; "… to Temu" when no store is set) and changes as soon as the store changes. While uploading it still says "Processing...". A long store name is cut with "…".
+
+## Temu Export mockup redesign — wapas liya (2026-10-21)
+- User ko pasand nahi aaya; Upload + Settings tab pichli haalat (5 upgrades + Settings/History) par wapas. `View on Temu` → products.html fix rakha.
+
+## Temu Export → Upload tab: 5 upgrades (2026-10-21, same manifest version)
+- **Store naam ek dafa:** sirf setup card mein. "N products in the list · store: …" aur Upload ke upar wali row se hataya; woh row ab sirf "Ready to upload / Fix first / No store" + "N of M ready" + issue chips.
+- **Products source ek line:** "📚 Library · 40 products · avg 2.4× (lowest 2.0×)" (Last hunt / Library (selected) / Imported sheet; "last hunt khaali" jab khud Library chuni). "N already listed — skip honge / skip OFF: dobara jayenge!" warning wahi (amber, usi line ke neeche). Purani 3 alag lines chhupa di.
+- **Upload se pehle confirm:** "Export + Upload to Temu" (aur list ka ⬆ Upload) pehle ek chhoti sheet kholta hai: **Store naam bara**, "Jayenge N products", "Bahar rahenge M" (no category / too heavy … ginti ke saath), batch name (yahin badal sakte hain). **Upload** = purana upload flow chalta hai, **Cancel** / Esc = kuch nahi.
+- **Batch name suggestions:** box ke neeche "Pichle:" chips — aakhri 5 batch names (`zhTemuBatchRecent`, purana `zhTemuBatchLast` bhi shamil). Click = box bhar jata hai. Naam upload shuru hote waqt save hota hai. Purana "↺ Last" chip chhupa diya.
+- **Result card:** Upload button ke neeche: upload ke dauran "⏳ Uploading…", Temu processing ke waqt "⏳ Temu processing…", mukammal par "✓ Sab upload ho gaya" ya "⚠ kuch kaam baqi" + **38 added · 2 drafts · 0 failed (· skipped)**. Buttons: **Fix drafts** (sirf drafts hon to; wahi temuFixDrafts), **View on Temu** (Temu ka Upload history page), **Details** (Activity log khol kar wahan scroll), ✕. Numbers history record se aate hain, is liye late-confirm / failed-read / draft fix ke baad card khud update hota hai.
+
+## Temu Export: Settings aasaan + History naya (2026-10-20, same manifest version)
+- **Settings → Price & stock (pehli dafa khula):** 4 numbered steps Roman Urdu mein: ① Price kaise banegi (Cost + gap / Multiplier), ② **Misaal** — live: "Source $10 → $61.74 (6.2×)", $20, $45, $100 aur Frozen $20 (kati hui price tooltip mein); jo number likhein foran yahan dikhta hai, save se pehle bhi, ③ Gap ki **table** ("Cost $10 tak → +$50 … $120 se zyada → +40%") + gap list box aur Frozen extra (Multiplier wale par: Price ×, kam se kam, zyada se zyada), ④ Stock min / max. List price × "Advanced" mein. Description & bullets: "Mana lafz" box "Advanced" mein band. Package, Automatic kaam, Title ke lafz, Listed history — saaf Roman Urdu naam / hint; kam badalne wale cards "ADVANCED" heading ke neeche. Settings ka matlab aur storage keys wahi (sirf labels / tarteeb). Jab tak aap ne koi card khola/band nahi kiya, "Price & stock" khula rehta hai.
+- **History (poora naya):** "Aaj" card — Target / din, 4 tiles (Listed · Uploads · Errors · Baqi), bar (target poora = hara), **Pichle 7 din** chhote bars asli ginti ke saath (dashed line = target, target poora din = hara, tooltip mein uploads). "Upload history": search (title, SKU, upload ID, batch, file) + store, **segmented filter** All / Uploaded / Needs fix / Files ginti ke saath. Har record ek **card**: status (Uploaded / N need fix / Sent — check / Not uploaded / File banai / Listed), waqt, batch / file naam, store · source, chips (products, +added, errors, skipped, **Upload ID — click = copy**), "Products (N) · Skipped (N)" kholo = list (skipped ki wajah ke saath). Buttons: ✓ Mark listed, **Read errors** (Temu se is Upload ID ke failed products — Upload tab ki Activity mein), ⬇ File, CSV, 🗑 delete. Khaali / filter mein kuch nahi = saaf empty state + "Show all". Export all (CSV), Manage → Clear all.
+
 ## Content Studio (Open Studio) redesign (2026-10-20, same manifest version)
 - **Kam scroll:** upar ka hissa ab chhota: patla header ("Content Studio" + 1/40 + ✕), ek product row (‹ list ›), aur **ek hi toolbar line**: [Title | Bullets | Desc] chips + violet **"Rewrite 40"** + ⚙ **Options**. Options (default band) mein: "Rewrite this product only", "Products to rewrite", "Instructions". Instructions likhi hon / custom mode on ho / kuch products untick hon to Options par violet dot. Status line patli. Title box pehle se kaafi upar aata hai.
 - **Temu Export jaisa look:** wahi cards (surface-2, line-2, 10px corners), segmented chips jaise Temu tabs, cyan save / violet sirf AI (Rewrite, Rewrite title, this product only), same buttons, fonts aur counters (mono, bina pill ke).

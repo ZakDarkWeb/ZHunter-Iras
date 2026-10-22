@@ -3701,7 +3701,38 @@ async function gptEnsureSlotInner(S, idx) {
     slot = { tabId: tab.id, n: 0, fresh: true };
   } else slot = { tabId: tab.id, n: 0, fresh: false, reused: true };   // v9.15 — a tab is already open: keep working in ITS chat (no new chat); a new chat only starts after the chat limit
   S.gptSlots[idx] = slot;
-  return slot;
+  return slot;   // tabs stay in one window — each one is brought to the front only while its image + prompt go in (zhFrontTurn)
+}
+// 21 Oct 2026 (user's idea) — a Gemini / ChatGPT tab only finishes the upload + Send while it is the FRONT tab (Chrome does not
+// draw tabs behind it); once sent, it keeps working from the back. So the slots take turns: bring this tab forward, paste +
+// send, then hand the front to the next tab. Waiting for the picture happens in the background.
+let _zhFrontChain = Promise.resolve();
+async function zhFrontTurn(tabId, work) {
+  let release; const mine = new Promise(r => { release = r; });
+  const prev = _zhFrontChain; _zhFrontChain = prev.then(() => mine);
+  await prev;
+  try {
+    try { await chrome.tabs.update(tabId, { active: true }); await sleepMs(700); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    return await work();
+  } finally { release(); }
+}
+// 21 Oct 2026 — Chrome never DRAWS a tab that is behind another tab of the same window (even with the background switches),
+// and Gemini / ChatGPT only finish the upload + Send on a drawn page → only the front tab worked, the others waited for you
+// ("press Send in this Gemini tab"). So every slot is the FRONT tab of its OWN window: slot A stays where it is, every other
+// slot that shares a window is moved to a new small window next to it (keep these windows open, not minimized).
+async function zhSlotOwnWindow(S, idx, tabId) {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    let share = false;
+    for (const x of (S.gptSlots || [])) {
+      if (!x?.tabId || x.tabId === tabId) continue;
+      const o = await chrome.tabs.get(x.tabId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
+      if (o && o.windowId === t.windowId) { share = true; break; }
+    }
+    if (!share) { if (!t.active) await chrome.tabs.update(tabId, { active: true }); return; }
+    const w = await chrome.windows.get(t.windowId).catch(_zq => (typeof zhQuiet === 'function' && zhQuiet(_zq), null));
+    await chrome.windows.create({ tabId, focused: false, width: 760, height: 780, left: Math.max(0, (w?.left || 0) + 40 + idx * 50), top: Math.max(0, (w?.top || 0) + 30 + idx * 40) });
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 // Google's "unusual traffic / I'm not a robot" page — only the person can solve it (the extension never touches CAPTCHAs)
 const ZH_SORRY_RE = /^https:\/\/(www\.)?google\.[a-z.]+\/sorry\//i;
@@ -3779,10 +3810,12 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
     const tA = Date.now(), tick = setInterval(() => onNote?.(`attaching image… ${Math.round((Date.now() - tA) / 1000)}s`), 1000);
     let r; const peekT = setTimeout(() => gemPeekTab(S, tabId), 20000);
     try {
-      r = await Promise.race([
+      // this tab's turn at the front: image + prompt + Send happen while it is visible, then the next tab gets the front
+      onNote?.('waiting for its turn at the front…');
+      r = await zhFrontTurn(tabId, () => (onNote?.('attaching image…'), Promise.race([
         manualSend(tabId, { action: 'ZH_GEM_MANUAL_ATTACH', imgs: [b64], prompt: text, send: true }, 'gemini_automation.js'),
         new Promise(res => setTimeout(() => res({ ok: false, error: 'Gemini tab did not answer in 120s — press F5 on it, then Retry failed' }), 120000))
-      ]);
+      ])));
     } finally { clearInterval(tick); clearTimeout(peekT); }
     if (!r?.ok) throw new Error(r?.error || 'image not attached');
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
@@ -3865,12 +3898,16 @@ async function gptSendAndWait(S, idx, b64, prompt, onNote, setup, item) {
     chrome.storage.onChanged.addListener(lis);
     (async () => {
       const job = { id, imgBase64: b64, prompt: text };
-      for (let t = 0; t < 3 && !done; t++) {
-        try { const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_GPT_IMG_RUN', job }); if (r?.ok) return; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
-        try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['gpt_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
-        await sleepMs(1500);
-      }
-      fin(reject, new Error('Could not reach the ChatGPT tab — refresh it (F5) once'));
+      // this tab's turn at the front while ChatGPT takes the image + prompt and sends (≈20 s), then the next tab
+      const sent = await zhFrontTurn(slot.tabId, async () => {
+        for (let t = 0; t < 3 && !done; t++) {
+          try { const r = await chrome.tabs.sendMessage(slot.tabId, { action: 'ZH_GPT_IMG_RUN', job }); if (r?.ok) { const end = Date.now() + 20000; while (!done && Date.now() < end) await sleepMs(500); return true; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+          try { await chrome.scripting.executeScript({ target: { tabId: slot.tabId }, files: ['gpt_automation.js'] }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+          await sleepMs(1500);
+        }
+        return false;
+      });
+      if (!sent && !done) fin(reject, new Error('Could not reach the ChatGPT tab — refresh it (F5) once'));
     })();
   });
 }
@@ -3891,9 +3928,10 @@ async function flowEnsureSlot(S, idx) {
   const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
   const free = (await chrome.tabs.query({ url: '*://flow.google.com/*' })).filter(t => !used.has(t.id));
   let tab = free.find(t => t.active) || free[0] || null;
-  // background mode (Chrome with the background switches): hidden tabs keep working → all Flow tabs share ONE window
+  // 21 Oct 2026 — back to "own window per Flow tab" in every mode: a tab behind another tab is never drawn, even with the
+  // background switches, so the Flow page there stalls (same as Gemini / ChatGPT, see zhSlotOwnWindow)
   let homeWin = null;
-  if (!tab && zhBgMode) {
+  if (false && !tab && zhBgMode) {
     for (const x of S.gptSlots) { if (x?.tabId) { const t0 = await alive(x.tabId); if (t0) { homeWin = t0.windowId; break; } } }
     if (homeWin == null) { const any = (await chrome.tabs.query({ url: '*://flow.google.com/*' }))[0]; if (any) homeWin = any.windowId; }
   }
@@ -3911,6 +3949,7 @@ async function flowEnsureSlot(S, idx) {
     await sleepMs(2500);
   }
   S.gptSlots[idx] = { tabId: tab.id, n: 0 };
+  await zhSlotOwnWindow(S, idx, tab.id);   // two Flow tabs you opened in one window → the 2nd gets its own window
   return S.gptSlots[idx];
 }
 function flowSendAndWait(S, idx, b64, prompt, onNote, item) {
@@ -4739,6 +4778,11 @@ function zhDailyCount(key, limitHit = false) {
   }).catch(e => console.warn('[ZHunter] daily counter', e));
   return _zhDailyChain;
 }
+// true only when a limit was really SEEN (this account, or another account of the same engine) — not the built-in guess
+function zhDailyReal(key, seen) {
+  const eng = key.split('#')[0];
+  return !!seen[key] || Object.keys(seen).some(k => k.split('#')[0] === eng && seen[k] > 0);
+}
 function zhDailyUsual(key, seen) {
   const eng = key.split('#')[0];
   const same = Object.keys(seen).filter(k => k.split('#')[0] === eng).map(k => seen[k]).filter(n => n > 0);
@@ -4750,21 +4794,22 @@ async function zhDailyRoom(engine) {
   const eng = engine === 'auto' ? 'gemini' : engine;
   const keys = Object.keys(d.n).filter(k => k.split('#')[0] === eng);
   if (!keys.length) keys.push(eng === 'gemini' ? 'gemini#1' : eng);
-  const best = keys.map(k => ({ k, used: d.n[k] || 0, usual: zhDailyUsual(k, seen), hit: k in d.hit })).sort((a, b) => (b.usual - b.used) - (a.usual - a.used))[0];
+  const best = keys.map(k => ({ k, used: d.n[k] || 0, usual: zhDailyUsual(k, seen), hit: k in d.hit, real: zhDailyReal(k, seen) })).sort((a, b) => (b.usual - b.used) - (a.usual - a.used))[0];
   return { ...best, left: best.hit ? 0 : Math.max(0, best.usual - best.used) };
 }
 async function zhDailyRender() {
   const box = $('zhAiDailyBox'); if (!box) return;
   const { d, seen } = await zhDailyLoad();
   const keys = Object.keys(d.n).sort();
-  const label = k => k === 'flow' ? 'Flow' : k === 'chatgpt' ? 'ChatGPT' : 'Gemini ' + (k.split('#')[1] ? '#' + k.split('#')[1] : '');
+  const label = k => k === 'flow' ? 'Flow' : k === 'chatgpt' ? 'ChatGPT' : 'Gemini' + (k.split('#')[1] ? ' account ' + k.split('#')[1] : '');
   const chips = keys.map(k => {
-    const used = d.n[k] || 0, usual = zhDailyUsual(k, seen), hit = k in d.hit;
-    const st = hit ? 'bad' : usual && used >= usual * 0.8 ? 'warn' : 'ok';
+    const used = d.n[k] || 0, usual = zhDailyUsual(k, seen), hit = k in d.hit, real = zhDailyReal(k, seen);
+    // amber "near ~N" only when that limit was really seen (a guessed ~20 made a false alarm)
+    const st = hit ? 'bad' : real && usual && used >= usual * 0.8 ? 'warn' : 'ok';
     const tip = hit ? `Limit reached today after ${d.hit[k]} images` : `${used} images today · usual limit ~${usual}${seen[k] ? ' (seen before)' : ' (guess)'}`;
-    return `<span class="zh-daily-chip ${st}" title="${esc(tip)}"><b>${used}</b>${esc(label(k))}${hit ? ' · limit' : st === 'warn' ? ` · near ~${usual}` : ''}</span>`;
-  }).join('');
-  box.innerHTML = `<span class="zh-daily-lbl">Today</span>${chips || '<span class="zh-daily-none">no AI images yet</span>'}`;
+    return `<span class="zh-daily-chip ${st}" title="${esc(tip)}"><b>${used}</b> images · ${esc(label(k))}${hit ? ' · limit reached' : st === 'warn' ? ` · near limit ~${usual}` : ''}</span>`;
+  }).join('<span class="zh-daily-sep">|</span>');
+  box.innerHTML = `<span class="zh-daily-lbl">Made today:</span>${chips || '<span class="zh-daily-none">no AI images yet</span>'}`;
 }
 
 // v9.16 — "12 images · ~18 generations · ~10–15 min" (rough: Gemini ≈ 25–45 s, Flow ≈ 20–40 s + the chosen pause per generation)
@@ -13800,6 +13845,27 @@ function temuListedMap() {
   const m = State.data?.settings?.temuListed;
   return (m && typeof m === 'object') ? m : {};
 }
+// v9.17 — which stores a product already went to: { identity: [{ store, d, state }] } (one pass over the listed map)
+function temuListedByProduct() {
+  const out = {};
+  for (const [k, v] of Object.entries(temuListedMap())) {
+    const i = k.indexOf('|'); if (i < 0) continue;
+    const store = k.slice(0, i), id = k.slice(i + 1);
+    (out[id] = out[id] || []).push({ store, d: v?.d || '', state: v?.state || 'listed' });
+  }
+  return out;
+}
+// v9.19.1 — where a product already is: { store, d, dup } (the ACTIVE store first, then any other store of this Chrome) or null.
+// "dup" = Temu rejected it there ("Contribution SKU duplicated"). Used by the export, the ready row and the source line alike.
+function temuListedWhere(url, listedBy) {
+  if (!url) return null;
+  const lb = listedBy || temuListedByProduct();
+  const recs = lb[temuSourceIdentity(url)] || lb[temuSourceId(url)] || [];
+  if (!recs.length) return null;
+  const act = temuActiveStoreName() || 'default';
+  const r = recs.find(x => x.store === act) || recs.find(x => x.state !== 'dup') || recs[0];
+  return { store: r.store === 'default' ? 'this store' : r.store, d: r.d || '', dup: r.state === 'dup' };
+}
 // v9.1.1: agar auto-upload fail/unconfirmed ho to listed-history se wapas hata do (warna agli baar skip ho jate)
 async function temuUnmarkListed(items) {
   const store = temuActiveStoreName() || 'default';
@@ -13808,7 +13874,7 @@ async function temuUnmarkListed(items) {
   (items || []).forEach(it => { const k = store + '|' + (it.url ? temuSourceIdentity(it.url) : it.sid); if (m[k]) { delete m[k]; n++; } });
   if (!n) return 0;
   const ok = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: m } });
-  if (ok?.success) State.data.settings.temuListed = m;
+  if (ok?.success) { State.data.settings.temuListed = m; temuStoreTagsSoon(); }
   return n;
 }
 async function temuMarkListed(items, targetStore, state = 'listed') {
@@ -13829,8 +13895,11 @@ async function temuMarkListed(items, targetStore, state = 'listed') {
   const keys = Object.keys(m);
   if (keys.length > 20000) keys.slice(0, keys.length - 20000).forEach(k => delete m[k]);
   const ok = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: m } });
-  if (ok?.success) State.data.settings.temuListed = m;
+  if (ok?.success) { State.data.settings.temuListed = m; temuStoreTagsSoon(); }
 }
+// v9.17 — redraw the product list so the "✓ store" labels show right after an upload (or disappear after an unmark)
+let _temuStoreTagT = 0;
+function temuStoreTagsSoon() { clearTimeout(_temuStoreTagT); _temuStoreTagT = setTimeout(() => { try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 400); }
 
 // ── v8.8.0 Multi-store ──────────────────────────────────────
 function temuStores() {
@@ -13895,10 +13964,36 @@ function temuGetCfg() {
     base.category_profiles = JSON.parse(JSON.stringify(TEMU_OFFICIAL_CATEGORIES));
   }
   const saved = temuActiveStore()?.config;
-  if (!saved || typeof saved !== 'object' || !saved.defaults) return base;
+  const sh = temuCatShared();
+  // v9.17.5 — learned categories are shared by ALL stores of this Chrome: categories made in any store + one list of per-product
+  // choices / learned titles (temuCatShared), so a category learned on Charmhouse is known on Cloverhill too
+  const withShared = c => Object.assign(c, { category_profiles: { ...c.category_profiles, ...sh.profiles, ...(saved?.category_profiles || {}) } }, JSON.parse(JSON.stringify({ cat_overrides: sh.overrides, cat_examples: sh.examples, cat_learned: sh.learned, cat_trusted: sh.trusted })));
+  if (!saved || typeof saved !== 'object' || !saved.defaults) return withShared(base);
   // merge: ensure official categories from base are always present alongside any store custom categories
-  const mergedProfiles = { ...base.category_profiles, ...(saved.category_profiles || {}) };
-  return { ...base, ...saved, category_profiles: mergedProfiles, defaults: { ...base.defaults, ...saved.defaults } };
+  return withShared({ ...base, ...saved, category_profiles: { ...base.category_profiles }, defaults: { ...base.defaults, ...saved.defaults } });
+}
+// shared category data: { overrides: {productId: key}, examples: [...], learned: {phrase: key}, trusted: {productId: key} } + the custom
+// categories of every store. First use: built from what every store had saved on its own until now.
+function temuCatShared() {
+  const st = temuStores();
+  const profiles = {}; for (const s of Object.values(st)) Object.assign(profiles, s?.config?.category_profiles || {});   // custom categories of all stores
+  let sh = State.data?.settings?.temuCatShared;
+  if (!sh || typeof sh !== 'object') {
+    const cfgs = Object.values(st).map(s => s?.config).filter(c => c && typeof c === 'object');
+    const act = temuActiveStore()?.config || {};
+    const seenEx = new Set(), examples = [];
+    for (const c of [act, ...cfgs]) for (const e of (Array.isArray(c.cat_examples) ? c.cat_examples : [])) { const k = (e?.s || '') + '|' + (e?.k || ''); if (!seenEx.has(k)) { seenEx.add(k); examples.push(e); } }
+    sh = { overrides: Object.assign({}, ...cfgs.map(c => c.cat_overrides || {}), act.cat_overrides || {}), examples, learned: Object.assign({}, ...cfgs.map(c => c.cat_learned || {}), act.cat_learned || {}), trusted: {} };
+    if (State.data?.settings) State.data.settings.temuCatShared = sh;
+  }
+  return { profiles, overrides: sh.overrides || {}, examples: sh.examples || [], learned: sh.learned || {}, trusted: sh.trusted || {} };
+}
+// a category YOU (or Temu, or your imported sheet) confirmed for exactly this product is never doubtful — even after the title changed
+function temuCatTrusted(url, key, cfg) {
+  try { return !!(url && key && (cfg || temuGetCfg()).cat_trusted?.[temuSourceIdentity(url)] === key); } catch (_) { return false; }
+}
+function temuTrustCat(cfg, url, key) {
+  try { if (url && key) { cfg.cat_trusted = cfg.cat_trusted || {}; cfg.cat_trusted[temuSourceIdentity(url)] = key; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 // v9.15 — a source site's name never belongs in a listing title ("… | BJ's Wholesale Club", "Amazon.com: …", "… - Etsy")
@@ -14135,7 +14230,16 @@ function temuExModel(cfg) {
   _zhExModelCache = { sig, model };
   return model;
 }
+// v9.20.9 — words that say what a product is USED for, not what it IS: "Candy … for Piñata Fillers" was put in "Piñatas"
+// (Home & Kitchen → Temu then asked for "Applicable Age Group"). These phrases are left out when a category is chosen.
+function temuUseFree(title) {
+  return String(title || '')
+    .replace(/\b(?:for|as|perfect for|great for|ideal for)\s+[^,;|()]{0,40}?\b(?:pi[ñn]atas?|goodie|treat|party|gift|easter|stocking|loot|candy)\s*(?:fillers?|stuffers?|bags?|favou?rs?|baskets?|bowls?)\b/gi, ' ')
+    .replace(/\bpi[ñn]atas?\s*(?:fillers?|stuffers?|candy|treats?)\b/gi, ' ')
+    .replace(/\b(?:goodie|loot|treat)\s*bags?\b|\bparty\s*favou?rs?\b|\bstocking\s*stuffers?\b/gi, ' ');
+}
 function temuScoreProfiles(title, cfg) {
+  title = temuUseFree(title);
   const tt = temuCatTokens(title);
   if (!tt.length) return [];
   const have = new Set(); tt.forEach(w => temuCatForms(w).forEach(x => have.add(x)));
@@ -14390,10 +14494,19 @@ function temuPrice(src, cfg, prof, seed) {
   return [Math.round(base * 100) / 100, Math.round(list * 100) / 100, rule];
 }
 
+// 4 letters / digits, new for every file (no 0/O/1/I so it can be read without mistakes)
+function temuSkuTag() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const b = new Uint8Array(4); crypto.getRandomValues(b);
+  return [...b].map(x => A[x % A.length]).join('');
+}
 // rows: bulk/master row objects → enriched Temu items + warnings
 function temuEnrich(rows, cfg) {
   const items = [], usedSku = new Set(), seenSrc = new Set(), skipped = [];
   const d = cfg.defaults;
+  // v9.18 — every new file gets its own short code in Contribution Goods / SKU (CH-SAMSCLUB-20203019292-K7Q2-Multipack), so a
+  // product uploaded again never repeats an old SKU exactly. The source id stays in place (sheet import still finds the product).
+  const skuTag = cfg.sku_fresh === false ? '' : temuSkuTag();
+  const _listedBy = temuListedByProduct();
   rows.forEach(r => {
     const title = temuCleanTitle(r.title, cfg, r);
     const url = r.url || '';
@@ -14407,10 +14520,8 @@ function temuEnrich(rows, cfg) {
     const identity = temuSourceIdentity(url);
     if (seenSrc.has(identity)) { skipped.push('duplicate: ' + title.slice(0, 40)); return; }
     seenSrc.add(identity);
-    if (cfg.skip_listed !== false) {
-      const rec = temuListedMap()[(temuActiveStoreName() || 'default') + '|' + identity] || temuListedMap()[(temuActiveStoreName() || 'default') + '|' + sid];
-      if (rec) { skipped.push(`already listed (${rec.d}): ` + title.slice(0, 40)); return; }
-    }
+    // v9.20 — no automatic skip of listed products: the tick in the product list decides what is uploaded
+    // (filters "✓ Listed" / "Not listed" help to pick; every file gets a fresh SKU)
 
     // profile
     const tl = title.toLowerCase();
@@ -14448,7 +14559,7 @@ function temuEnrich(rows, cfg) {
       }
     }
     const supplier = new URL(url).hostname.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9]/gi, '').toUpperCase();
-    const goods = `${cfg.sku_prefix}-${supplier}-${sid}`;
+    const goods = `${cfg.sku_prefix}-${supplier}-${sid}${skuTag ? '-' + skuTag : ''}`;
     const vsfx = color.replace(/[^A-Za-z0-9]+/g, '') || 'Std';
     let sku = `${goods}-${vsfx}`;
     let n = 2; while (usedSku.has(sku)) sku = `${goods}-${vsfx}-${n++}`;
@@ -14635,7 +14746,8 @@ async function temuStoreExport() {
         } else notes.push(nm + `: no category matched the title — kept "${leaf}" (check it)`);
       }
       items.push({
-        goods: 'ZC-' + p.goodsId, sku: `ZC-${p.goodsId}-${color.replace(/[^A-Za-z0-9]+/g, '') || 'Std'}`,
+        // v9.18 — never the exact Temu Goods ID as code: a fresh 4-letter tag after it (import still reads "ZC-<goods id>-")
+        ...(() => { const tg = temuGetCfg().sku_fresh === false ? '' : '-' + temuSkuTag(); return { goods: `ZC-${p.goodsId}${tg}`, sku: `ZC-${p.goodsId}${tg}-${color.replace(/[^A-Za-z0-9]+/g, '') || 'Std'}` }; })(),
         title: d.title, category_keyword: leaf, brand: d.brand, trademark: d.trademark,
         keyword_attributes: (d.attrs || []).map(a => a.values.join(' ')).join(', '),
         bullets: d.bullets || [], description: d.description || '', vtype: d.vtype || 'Color', color, images: d.images,
@@ -14648,7 +14760,7 @@ async function temuStoreExport() {
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
-    zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile());
+    zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile(n));
     say(`✓ ${n} products → sheet download (Temu bulk template)\nDusre Chrome me: Upload page → "Import sheet" se yehi file daalein.\n` + [...notes, ...problems].map(x => '• ' + x).join('\n'));
     toast(`Store export ready — ${n} products`, 'ok');
   } catch (e) { say('✗ ' + (e?.message || e)); toast('Store export failed', 'err'); }
@@ -14694,12 +14806,23 @@ function temuZcParse(buf) {
   return rows.length ? rows : null;
 }
 async function temuZcApplyCategories(rows) {
+  // v9.17.5 — the category in a sheet made by this extension is the one you already learned (other Chrome / other store):
+  // it becomes this product's category (no ⚠, no learning again). Unknown in this store → added as a category.
+  // A category you already chose for this product HERE stays.
   const cfg = temuGetCfg(); let changed = 0;
+  cfg.category_profiles = cfg.category_profiles || {}; cfg.cat_overrides = cfg.cat_overrides || {};
   rows.forEach(r => {
-    return;   // v9.15 — copied categories are no longer forced; the title-matched one is used (copied one = fallback)
-    const leaf = String(r.copyCat || '').toLowerCase(); if (!leaf) return;
-    const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) => String(p.category_keyword || '').toLowerCase() === leaf);
-    if (hit) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(r.url)] = hit[0]; changed++; }
+    const leaf = String(r.copyCat || '').trim(); if (!leaf || !r.url) return;
+    const id = temuSourceIdentity(r.url);
+    if (cfg.cat_trusted?.[id] && cfg.category_profiles[cfg.cat_trusted[id]]) return;
+    const same = Object.entries(cfg.category_profiles).filter(([, p]) => String(p.category_keyword || '').toLowerCase() === leaf.toLowerCase());
+    let key = (same.find(([, p]) => p.full_path) || same[0] || [])[0];
+    if (!key) {
+      key = leaf.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'category';
+      let n = 2; while (cfg.category_profiles[key]) key = key.replace(/_\d+$/, '') + '_' + n++;
+      cfg.category_profiles[key] = { name: leaf, category_keyword: leaf, full_path: '', match: [], keyword_attributes: r.copyKw || '' };
+    }
+    cfg.cat_overrides[id] = key; temuTrustCat(cfg, r.url, key); changed++;
   });
   if (changed) await temuSaveCfg(cfg);
   return changed;
@@ -14771,7 +14894,10 @@ async function temuRunExport(opts = {}) {
   const say = t => { if (rep) { rep.textContent = t; try { rep.scrollIntoView({ block: 'nearest' }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } };
   // v9.7.1: imported Temu file as-is — koi conversion nahi
   if (($('temuSource')?.value || '') === 'sheet' && TemuLast?.asIs) {
-    if (!opts.forUpload) { zhSaveBlob(new Blob([TemuLast.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile()); toast('Temu file download', 'ok'); }
+    if (!opts.forUpload) {
+      if (temuGetCfg().sku_fresh !== false) { const fr = temuRefreshSkus(TemuLast.bytes, TemuLast.items); if (fr) TemuLast = { ...TemuLast, bytes: fr.bytes, items: fr.items }; }   // v9.20.5 — fresh SKU in the download too
+      zhSaveBlob(new Blob([TemuLast.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile(TemuLast.n)); toast('Temu file download', 'ok');
+    }
     return;
   }
   try {
@@ -14800,7 +14926,7 @@ async function temuRunExport(opts = {}) {
       if (w) cfg.defaults.weight_lb = w; if (l) cfg.defaults.length_in = l;
       if (wd) cfg.defaults.width_in = wd; if (ht) cfg.defaults.height_in = ht; }
     const source = $('temuSource')?.value || 'bulk';
-    let rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+    let rows = (await temuGetQueuedRows()).filter(r => !temuRvOff(r.id));
     rows = JSON.parse(JSON.stringify(rows));
     if (!rows.length) { say('✗ No products found for export.\n→ Run Bulk tab → "Hunt all open tabs" (or set the data source to "Library"), then try again.'); toast('No products — hunt first', 'warn'); return; }
     say('Checking images & converting ' + rows.length + ' products…');
@@ -14872,20 +14998,9 @@ async function temuRunExport(opts = {}) {
     if (opts.forUpload && TemuUploadCancel) return;
     let enr = temuEnrich(rows, cfg);
     const { items, skipped } = enr;
-    // v9.15 — products already listed on THIS store: warn and stop the upload (nothing is sent)
-    if (opts.forUpload) {
-      const dup = skipped.filter(x => /^already listed/i.test(x));
-      if (dup.length) {
-        const st = temuActiveStoreName() || 'this store';
-        say(`⚠ ${dup.length} product(s) were already listed on "${st}" — upload STOPPED, nothing was sent:\n` + dup.slice(0, 40).map(x => '• ' + x).join('\n') +
-          `\n\nUntick / delete these products in the list, or turn off "Skip already listed" in Settings if you really want to list them again. Then press Export + Upload again.`);
-        toast(`${dup.length} product(s) already listed on ${st} — upload stopped`, 'warn');
-        return;
-      }
-    }
+    // v9.20 — no "already listed" stop any more: what is ticked is uploaded
     if (!items.length) {
-      say('No new products:\n' + (skipped.length ? skipped.map(x => '• ' + x).join('\n') : '(the list is empty)') +
-        '\n\nTo list them again, turn off the "Skip already listed" checkbox.');
+      say('No products to upload:\n' + (skipped.length ? skipped.map(x => '• ' + x).join('\n') : '(nothing is ticked)'));
       return;
     }
     // v9.15 — a missing category never stops the whole export: that product is left out and the error is shown, the rest goes on
@@ -14902,8 +15017,8 @@ async function temuRunExport(opts = {}) {
     TemuLast = { bytes: out, items, skipped, n, marked: false, store: temuActiveStoreName(), sourcingId: 'src_' + crypto.randomUUID() };
     // v9.3.1: listed-history ab sirf CONFIRMED upload ke baad mark hoti hai (export-only par nahi).
     { const mb = $('temuMarkListedBtn'); if (mb) { mb.hidden = !!opts.forUpload; mb.textContent = `Mark ${n} as listed`; } }
-    zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile());
-    if (!opts.forUpload) { try { const _hid = await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); await temuHistKeepFile(_hid, out, temuBatchFile()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+    zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile(n));
+    if (!opts.forUpload) { try { const _hid = await temuHistAdd({ kind: 'export', store: temuActiveStoreName() || '—', n, skipped: skipped.length, source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', items: temuHistItems(items), skippedList: skipped.slice(0, 300) }); await temuHistKeepFile(_hid, out, temuBatchFile(n)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const lines = items.map(it => `${it.sku}  ${it.brand || '—'}  ${it.vtype || 'Color'}: ${it.color}  ${it.weight}lb(${it.wsrc || '?'})  img=${it.images.length}  $${it.base ?? '—'}${it.pxLabel ? ' ' + it.pxLabel : ''}  bullets=${(it.bullets || []).length}${it.warn.length ? '  ⚠ ' + it.warn.join(',') : ''}`);
     say(`✓ ${n} products → temu_upload.xlsx\n` + (skipped.length ? `Skipped: ${skipped.length} (${skipped.slice(0,3).join('; ')}${skipped.length>3?'…':''})\n` : '') + lines.join('\n'));
     toast(`Temu file ready — ${n} products`, 'ok');
@@ -14935,6 +15050,140 @@ function temuShowCancelBtn(on) {
     });
   }
 }
+// ═══ v9.17 — Upload tab: confirm sheet before upload, recent batch names, result card ═══
+// Confirm sheet: what is sent, to which store (big), what is left out, batch name. Resolves true = go on.
+function temuConfirmUpload() {
+  return new Promise(async resolve => {
+    const box = document.querySelector('#temuModal .temu-modal-box'); if (!box) { resolve(true); return; }
+    // v9.20.6 — say plainly when ticked products are ALREADY LIVE on a store (same email = Temu may flag it), with a one-click way out
+    let live = [], liveBy = {};
+    try {
+      const lb = temuListedByProduct();
+      for (const r of (await temuGetQueuedRows()).filter(r => !temuRvOff(r.id))) {
+        const recs = (lb[temuSourceIdentity(r.url || '')] || []).filter(x => x.state !== 'dup');
+        if (recs.length) { live.push(r.id); recs.forEach(x => { liveBy[x.store] = (liveBy[x.store] || 0) + 1; }); }
+      }
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    const R = TemuReadyLast || {};
+    const store = temuActiveStoreName() || '—';
+    const left = (R.groups || []).filter(g => g.cls !== 'bad');
+    const leftN = left.reduce((n, g) => n + g.ids.length, 0);
+    const batchInp = $('temuBatchNameInp');
+    const e2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    $('temuUpConfirm')?.remove();
+    const el = document.createElement('div');
+    el.id = 'temuUpConfirm'; el.className = 'tuc'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Confirm upload');
+    el.innerHTML = `<div class="tuc-sheet">
+        <div class="tuc-h">Upload to Temu?</div>
+        <div class="tuc-store"><small>Store</small><b>${e2(store)}</b></div>
+        <div class="tuc-rows">
+          <div class="tuc-row ok"><span>Jayenge</span><b>${R.ok ?? '?'} products</b></div>
+          ${leftN ? `<div class="tuc-row warn"><span>Bahar rahenge</span><b>${leftN}</b></div><ul class="tuc-left">${left.map(g => `<li>${g.ids.length} · ${e2(g.label.replace(/\s*—\s*left out$/i, ''))}</li>`).join('')}</ul>` : ''}
+          ${live.length ? `<div class="tuc-row bad"><span>⚠ Pehle se live</span><b>${live.length}</b></div><ul class="tuc-left">${Object.entries(liveBy).map(([s, n]) => `<li>${n} · ${e2(s === 'default' ? 'store' : s)} par</li>`).join('')}</ul>
+            <button type="button" class="btn btn-ghost tuc-newonly" data-tuc="newonly" title="Untick the ${live.length} products that are already live, then press Upload again">Sirf naye bhejo — ${live.length} untick karo</button>` : ''}
+        </div>
+        <label class="tuc-batch"><small>Batch name (optional)</small><input class="inp" type="text" maxlength="60" value="${e2(batchInp?.value || '')}" placeholder="e.g. Frozen Oct 20" /></label>
+        <div class="tuc-acts"><button type="button" class="btn btn-ghost" data-tuc="no">Cancel</button><button type="button" class="btn btn-primary" data-tuc="yes">⬆ Upload ${R.ok ?? ''}</button></div>
+      </div>`;
+    const inp = el.querySelector('.tuc-batch input');
+    const done = ok => {
+      if (ok && batchInp && inp.value.trim() !== batchInp.value.trim()) { batchInp.value = inp.value.trim(); batchInp.dispatchEvent(new Event('input', { bubbles: true })); }
+      el.classList.add('out'); setTimeout(() => el.remove(), 140);
+      resolve(ok);
+    };
+    el.addEventListener('click', e => {
+      const b = e.target.closest('[data-tuc]');
+      if (b && b.dataset.tuc === 'newonly') {   // untick the already-live ones; the user checks the list and presses Upload again
+        live.forEach(id => TemuReviewExcluded.add(id)); TemuLast = null;
+        done(false);
+        temuRenderReview().catch(() => {}); temuScheduleReady(); try { temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        toast(`${live.length} already-live product${live.length === 1 ? '' : 's'} unticked — check the list, then press Upload`, 'ok');
+        return;
+      }
+      if (b) done(b.dataset.tuc === 'yes'); else if (e.target === el) done(false);
+    });
+    el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } if (e.key === 'Enter' && e.target === inp) { e.preventDefault(); done(true); } });
+    box.appendChild(el);
+    el.querySelector('[data-tuc="yes"]').focus();
+  });
+}
+async function temuStartUploadFlow() {
+  if (TemuUploadBusy) { toast('Upload already running', 'info'); return; }
+  if (!(await temuConfirmUpload())) return;
+  temuBatchRemember($('temuBatchNameInp')?.value || '');
+  temuResultCard({ state: 'run' });
+  await temuAutoUpload();
+}
+// recent batch names (zhTemuBatchRecent, newest first, max 5; the old single zhTemuBatchLast is merged in)
+async function temuBatchRemember(name) {
+  name = String(name || '').trim().slice(0, 60); if (!name) return;
+  try {
+    const r = await chrome.storage.local.get(['zhTemuBatchRecent', 'zhTemuBatchLast']);
+    const prev = [...(r?.zhTemuBatchRecent || []), ...(r?.zhTemuBatchLast ? [r.zhTemuBatchLast] : [])];
+    const list = [name, ...prev].filter((x, i, a) => x && a.findIndex(y => y.toLowerCase() === x.toLowerCase()) === i).slice(0, 5);
+    await chrome.storage.local.set({ zhTemuBatchRecent: list });
+    temuRenderBatchChips(list);
+  } catch (_) { /* storage busy — chips stay as they are */ }
+}
+function temuRenderBatchChips(list) {
+  const box = $('temuBatchChips'), inp = $('temuBatchNameInp'); if (!box || !inp) return;
+  const cur = inp.value.trim().toLowerCase();
+  const e2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  box.innerHTML = (list || []).length ? `<span class="tb-chips-l">Pichle:</span>` + list.map(n => `<button type="button" class="tb-chip${n.toLowerCase() === cur ? ' on' : ''}" data-batch="${e2(n)}" title="Use this batch name">${e2(n)}</button>`).join('') : '';
+  box.hidden = !(list || []).length;
+  if (!box._b) {
+    box._b = 1;
+    box.addEventListener('click', e => { const b = e.target.closest('[data-batch]'); if (!b) return; inp.value = b.dataset.batch; inp.dispatchEvent(new Event('input', { bubbles: true })); box.querySelectorAll('.tb-chip').forEach(x => x.classList.toggle('on', x === b)); });
+  }
+}
+async function temuBatchChipsInit() {
+  try {
+    const r = await chrome.storage.local.get(['zhTemuBatchRecent', 'zhTemuBatchLast']);
+    let list = r?.zhTemuBatchRecent || [];
+    if (r?.zhTemuBatchLast && !list.some(x => x.toLowerCase() === String(r.zhTemuBatchLast).toLowerCase())) list = [r.zhTemuBatchLast, ...list].slice(0, 5);
+    temuRenderBatchChips(list);
+  } catch (_) { /* no chips */ }
+}
+// Result card: numbers from the history record of this upload (kept in sync by temuHistPatch → late confirm / failures / drafts)
+const TemuResult = { histId: '' };
+async function temuResultCard(opt = {}) {
+  const el = $('temuResultCard'); if (!el) return;
+  if (opt.histId !== undefined) TemuResult.histId = opt.histId;
+  const e2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if (opt.state === 'run') { TemuResult.histId = ''; el.hidden = false; el.dataset.tone = 'run'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">⏳</span><b>Uploading…</b><span class="tru-sub">steps neeche dikh rahe hain</span></div>`; return; }
+  if (opt.state === 'fail') { el.hidden = false; el.dataset.tone = 'bad'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">✗</span><b>Upload nahi hua</b><span class="tru-sub">${e2(opt.msg || 'file Downloads mein hai — Details dekhein')}</span></div><div class="tru-acts"><button type="button" class="tru-btn" data-tru="details">Details</button><button type="button" class="tru-x" data-tru="close" aria-label="Close">✕</button></div>`; return; }
+  const h = TemuResult.histId ? (await temuHistGet()).find(x => x.id === TemuResult.histId) : null;
+  if (!h) { if (opt.state === 'cancel') el.hidden = true; return; }
+  // v9.17.9 — Temu's "Contribution SKU duplicated" errors are no drafts: those products already are in this store
+  const dups = h.confirmed ? Math.min(h.dups || 0, h.errors || 0) : 0;
+  const n = h.n || 0, added = h.added ?? null, drafts = h.confirmed ? (h.fixedAt ? 0 : Math.max(0, (h.errors || 0) - dups)) : 0;
+  const failed = h.confirmed && added != null ? Math.max(0, n - added - (h.errors || 0)) : 0;
+  const tone = !h.confirmed ? (h.uploadId ? 'run' : 'bad') : drafts || failed || dups ? 'warn' : 'ok';
+  const head = !h.confirmed ? (h.uploadId ? ['⏳', 'Temu processing…', 'ZHunter dekh raha hai — mukammal hote hi yahan number aa jayenge'] : ['✗', 'Upload confirm nahi hua', 'Temu tab mein Upload history dekhein'])
+    : drafts || failed ? ['⚠', 'Upload ho gaya — kuch kaam baqi', h.store || '']
+    : dups ? ['⚠', `${dups} product${dups === 1 ? '' : 's'} pehle se ${h.store || 'is store'} par`, h.store || ''] : ['✓', 'Sab upload ho gaya', h.store || ''];
+  const why = [];
+  if (dups) why.push(`Temu: "Contribution SKU duplicated" — ${dups} product${dups === 1 ? '' : 's'} add nahi ${dups === 1 ? 'hua' : 'hue'} (SKU purana tha). ${dups === 1 ? 'Yeh' : 'Yeh'} "Not listed" filter mein hain — tick kar ke dobara upload karein, naya SKU khud lagega.`);
+  if (drafts && h.failWhy) why.push(`Temu: ${h.failWhy}`);
+  el.hidden = false; el.dataset.tone = tone;
+  el.innerHTML = `<div class="tru-h"><span class="tru-ico">${head[0]}</span><b>${e2(head[1])}</b><span class="tru-sub">${e2(head[2])}${h.batch ? ' · ' + e2(h.batch) : ''}</span></div>
+    ${h.confirmed ? `<div class="tru-nums"><span class="ok"><b>${added ?? '?'}</b>added</span>${dups ? `<span class="warn"><b>${dups}</b>already in store</span>` : ''}<span class="${drafts ? 'warn' : ''}"><b>${drafts}</b>draft${drafts === 1 ? '' : 's'}</span><span class="${failed ? 'bad' : ''}"><b>${failed}</b>failed</span>${h.skipped ? `<span><b>${h.skipped}</b>skipped</span>` : ''}</div>` : ''}
+    ${why.length ? `<div class="tru-why">${why.map(w => `<p>${e2(w)}</p>`).join('')}</div>` : ''}
+    <div class="tru-acts">
+      ${drafts ? '<button type="button" class="tru-btn warn" data-tru="fix">Fix drafts</button>' : ''}
+      <button type="button" class="tru-btn" data-tru="temu" title="Temu ka Manage products page kholo">View on Temu</button>
+      <button type="button" class="tru-btn" data-tru="details">Details</button>
+      <button type="button" class="tru-x" data-tru="close" aria-label="Close">✕</button>
+    </div>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('#temuResultCard [data-tru]'); if (!b) return;
+  const a = b.dataset.tru;
+  if (a === 'close') { $('temuResultCard').hidden = true; return; }
+  if (a === 'fix') { temuFixDrafts(); return; }
+  if (a === 'temu') { try { chrome.tabs.create({ url: 'https://seller.temu.com/products.html', active: true }); } catch (_) { toast('Could not open Temu', 'warn'); } return; }   // Temu "Manage products" list
+  if (a === 'details') { const w = $('temuActivityWrap'); if (w) { w.open = true; w.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
+});
 async function temuAutoUpload() {
   if (TemuUploadBusy) { toast('Upload already running', 'info'); return; }
   TemuUploadBusy = true; TemuUploadCancel = false;
@@ -14942,7 +15191,9 @@ async function temuAutoUpload() {
   temuShowCancelBtn(true);
   _zhUploadProg = null;
   try { await temuAutoUploadJob(); }
-  finally { TemuUploadBusy = false; TemuUploadCancel = false; _temuCancelWake = null; _zhUploadProg = null; temuShowCancelBtn(false); if (button) button.disabled = false; temuScheduleReady(); }
+  finally {
+    { const rc = $('temuResultCard'); if (rc && rc.dataset.tone === 'run' && !TemuResult.histId) rc.hidden = true; }   // v9.17 — cancelled before anything was recorded
+    TemuUploadBusy = false; TemuUploadCancel = false; _temuCancelWake = null; _zhUploadProg = null; TemuPick = { listed: '', dup: '' }; temuShowCancelBtn(false); if (button) button.disabled = false; temuScheduleReady(); try { temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
 }
 async function temuAutoUploadJob() {
   const rep = $('temuReport');
@@ -14950,6 +15201,10 @@ async function temuAutoUploadJob() {
   // Build fresh if nothing exported yet in this session
   temuStepsReset(); temuStep('file', 'run', 'building the Temu file…');
   if (!TemuLast?.asIs) { TemuLast = null; await temuRunExport({ forUpload: true }); }
+  else if (temuGetCfg().sku_fresh !== false) {   // v9.20.5 — as-is Temu file: fresh SKU / Contribution Goods on every upload
+    const fr = temuRefreshSkus(TemuLast.bytes, TemuLast.items);
+    if (fr) { TemuLast = { ...TemuLast, bytes: fr.bytes, items: fr.items }; say((rep?.textContent || '') + `\n• New SKU code for this upload (e.g. ${fr.items[0]?.sku || '—'})`); }
+  }
   if (TemuUploadCancel) { temuStep('file', 'err', 'cancelled'); say((rep?.textContent || '') + '\n✕ Cancelled — nothing was sent to Temu.'); toast('Export cancelled', 'info'); return; }
   if (!TemuLast) { temuStep('file', 'err', 'not built — see Details'); return; }
   temuStep('file', 'ok', `${TemuLast.n} product${TemuLast.n === 1 ? '' : 's'}`);
@@ -14989,7 +15244,7 @@ async function temuAutoUploadJob() {
     if (TemuUploadCancel) { try { chrome.runtime.onMessage.removeListener(onProg); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuStep('store', 'err', 'cancelled'); say(base + '\n✕ Cancelled — nothing was sent to Temu.'); toast('Upload cancelled', 'info'); return; }
     try {
       result = await Promise.race([
-        msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: temuBatchFile(), expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }),
+        msg({ action: 'TEMU_AUTO_UPLOAD', b64, filename: temuBatchFile(sourcingSnapshot.items?.length), expectStore: sourcingSnapshot.store, background: bg, sourcing: sourcingSnapshot }),
         new Promise(res => { _temuCancelWake = res; })
       ]);
     }
@@ -15054,8 +15309,9 @@ async function temuAutoUploadJob() {
       histId = await temuHistAdd({ kind: 'upload', store: uploadSnapshot.store, n: uploadSnapshot.items.length, skipped: (uploadSnapshot.skipped || []).length,
         source: $('temuSource')?.selectedOptions?.[0]?.textContent || '', confirmed: !!(result?.success && result?.confirmed), uploadId: idm ? idm[1] : '',
         added: result?.added ?? (rm ? +rm[2] : null), errors: result?.errors ?? (rm ? +rm[3] : null), items: temuHistItems(uploadSnapshot.items), skippedList: (uploadSnapshot.skipped || []).slice(0, 300) });
-      await temuHistKeepFile(histId, uploadSnapshot.bytes, temuBatchFile());
+      await temuHistKeepFile(histId, uploadSnapshot.bytes, temuBatchFile(uploadSnapshot.items?.length));
     } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    if (histId) temuResultCard({ histId }).catch(() => {}); else if (!result?.success) temuResultCard({ state: 'fail' });   // v9.17
     const completeBatch = result?.success && result?.confirmed && result.status === 'Completed' && result.errors === 0 && result.processed === uploadSnapshot.items.length && result.added === uploadSnapshot.items.length;
     if (completeBatch) {
       if (!uploadSnapshot.marked) { await temuMarkListed(uploadSnapshot.items, uploadSnapshot.store, 'accepted'); uploadSnapshot.marked = true; }
@@ -15087,6 +15343,7 @@ async function temuAutoUploadJob() {
     toast(completeBatch ? 'Temu accepted all products; verify listing status' : result?.success ? 'Upload needs review; check Temu before retrying' : 'Auto-upload failed — the file has been downloaded', completeBatch ? 'ok' : 'warn');
   } catch (e) {
     say((rep?.textContent || '') + '\n✗ ' + (e?.message || e));
+    if (!TemuResult.histId) temuResultCard({ state: 'fail', msg: String(e?.message || e).slice(0, 120) });   // v9.17
   }
 }
 
@@ -15181,8 +15438,19 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
   }
   add(`• Temu finished: ${added ?? '?'} added, ${errs} error(s)${info?.status ? ' · ' + info.status : ''}`);
   if (errs === 0 && added != null && added < items.length) { add(`• Temu added only ${added} of ${items.length} and reported no errors — NOT marked. Check "View processing results" on Temu.`); temuStep('result', 'warn', `${added} of ${items.length} added — check Temu`); return; }
+  let allDupF = false;
   if (errs > 0) {
-    const fr = await temuReadFailed({ tabId, uploadId, silent: true, items, store });            // duplicates → listed history (of THIS upload's store)
+    let fr = await temuReadFailed({ tabId, uploadId, silent: true, items, store });            // duplicates → listed history (of THIS upload's store)
+    // v9.17.9 — Temu's popup is sometimes not ready yet: read once more after a few seconds before giving up
+    if (!fr?.success || (fr.failed || []).length < errs) {
+      add('• Temu failed details not complete yet — reading again in 6 s…');
+      await sleep(6000);
+      const fr2 = await temuReadFailed({ tabId, uploadId, silent: true, items, store });
+      if (fr2?.success && (fr2.failed || []).length >= (fr?.failed || []).length) fr = fr2;
+    }
+    const allDup = errs > 0 && (fr?.failed || []).filter(f => f.duplicate).length >= errs;   // every error = "Contribution SKU duplicated"
+    allDupF = allDup;
+    if (allDup) add(`✓ All ${errs} error(s) are "Contribution SKU duplicated" — those products are already listed in "${store || 'this store'}" (marked, skipped next time). Nothing to fix.`);
     // v9.15.1 — products are marked ONLY when Temu's complete result list was read; otherwise nothing is marked (a failed product could be marked by mistake)
     const nFailed = (fr?.failed || []).length;
     const fullList = fr?.mode === 'results'
@@ -15193,8 +15461,9 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
       if (okR.length) { await temuMarkListed(okR, store, 'accepted'); add(`✓ ${okR.length} product(s) that Temu added are marked`); const sm = await temuSourcingRecord(okR, store); if (sm) add(sm); }
       const badR = items.length - okR.length;
       if (badR) add(`• ${badR} product(s) not added on Temu (duplicates are already in the store; others are NOT marked and will show again in the next export)`);
-      temuStep('result', badR ? 'warn' : 'ok', `${okR.length} added${badR ? ` · ${badR} not added` : ''}`);
+      temuStep('result', badR ? 'warn' : 'ok', allDup ? `${okR.length} added · ${errs} already in store` : `${okR.length} added${badR ? ` · ${badR} not added` : ''}`);
       temuUpdateSrcInfo();
+      if (allDup) return;   // duplicates are no drafts: nothing to fill, nothing to submit
       add('⏳ Fixing drafts automatically…');
       await temuFixDrafts();
       return;
@@ -15211,8 +15480,9 @@ async function temuFinishConfirmed({ info, items, store, histId, uploadId, tabId
   if (okItems.length) { await temuMarkListed(okItems, store, 'accepted'); add(`✓ ${okItems.length} product(s) that Temu accepted are marked`); const sm = await temuSourcingRecord(okItems, store); if (sm) add(sm); }
   const bad = items.length - okItems.length;
   if (bad) add(`• ${bad} product(s) failed on Temu (duplicates are already in the store; others are NOT marked and will show again in the next export)`);
-  temuStep('result', bad ? 'warn' : 'ok', `${okItems.length} accepted${bad ? ` · ${bad} failed` : ''}`);
+  temuStep('result', bad ? 'warn' : 'ok', `${okItems.length} accepted${bad ? (allDupF ? ` · ${bad} already in store` : ` · ${bad} failed`) : ''}`);
   temuUpdateSrcInfo();
+  if (allDupF) return;   // v9.17.9 — only duplicates: no drafts to fix
   add('⏳ Fixing drafts automatically…');
   await temuFixDrafts();
 }
@@ -15359,9 +15629,18 @@ async function temuFixDrafts() {
           });
         });
         if (clicked) {
-          await new Promise(r => setTimeout(r, 2500));
-          tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/product-action.html*', 'https://seller.temu.com/*product-action*'] });
-          tab = tabs.find(t => t.active) || tabs[0];
+          // v9.17.7 — the click opens "Complete product details" (products-excel-multiple-edit) in a NEW tab, often after a few
+          // seconds: wait up to 20 s for either page (before, only product-action was looked for, 2.5 s → "page is not open")
+          say('Clicked — waiting for the Temu "Complete product details" page to open…');
+          for (let i = 0; i < 45 && !tab; i++) {   // v9.20.9 — Temu can take longer than 20 s to open the page
+            await new Promise(r => setTimeout(r, 1000));
+            tabs = await chrome.tabs.query({ url: [
+              'https://seller.temu.com/product-action.html*', 'https://seller.temu.com/*product-action*',
+              'https://seller.temu.com/products-excel-multiple-edit.html*', 'https://seller.temu.com/*products-excel-multiple-edit*'
+            ] });
+            tab = tabs.find(t => t.active) || tabs.sort((a, b) => b.id - a.id)[0];   // newest = the one just opened
+          }
+          if (tab) await new Promise(r => setTimeout(r, 1500));   // let the table draw
         }
       }
     }
@@ -15383,7 +15662,9 @@ async function temuFixDrafts() {
     say((result?.report || []).join('\n'));
     // v9.15.1 — Fix drafts no longer marks any upload record / products as "listed": pressing Submit does not prove Temu accepted the draft,
     // and the newest unfixed history record is not necessarily the upload these drafts came from. Check Temu, then use "Mark as listed".
-    if (result?.success && !result.stillEmpty) say((rep?.textContent || '') + '\n\n• Drafts submitted — check them on Temu. Nothing was marked as listed automatically.');
+    if (result?.success && !result.stillEmpty) say((rep?.textContent || '') + (result.submitted > 0
+      ? '\n\n• Drafts submitted — check them on Temu. Nothing was marked as listed automatically.'
+      : '\n\n• Nothing was submitted — press "Submit" at the bottom of the Temu page by hand.'));
     toast(result?.success ? (result.stillEmpty ? `${result.stillEmpty} field(s) still empty — see the report` : `Drafts: ${result.changed ?? 0} fields set; ${result.submitted ?? 0} submit clicks — verify the result on Temu`) : 'Fix drafts failed — see the report', result?.success && !result.stillEmpty ? 'ok' : 'warn');
   } catch (e) {
     say('✗ ' + (e?.message || e));
@@ -15438,6 +15719,13 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false, i
     rep.textContent = rep.textContent.replace('⏳ Reading failed details…', '• Checking failed details…');
   }
   try {
+    // v9.18.2 — no upload given (More tools → "Upload errors"): use the newest upload of the active store from History —
+    // its products are needed to know WHICH product each Temu line is (before: "Line 8 (no product of this export)")
+    if (!upItems && !uploadId) {
+      const st = temuActiveStoreName() || '';
+      const last = (await temuHistGet()).find(h => h.kind === 'upload' && h.uploadId && (!st || (h.store || '') === st) && (h.items || []).length);
+      if (last) { uploadId = last.uploadId; upItems = last.items; upStore = upStore || last.store || null; }
+    }
     // v9.6.3: kai Temu upload tabs (mukhtalif stores) khule ho sakte hain — us tab ko dhoondo jis ka mall name active store se match kare
     const expectStore = temuActiveStoreName() || '';
     let cands = [];
@@ -15452,7 +15740,8 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false, i
     const pingOk = id => new Promise(res => { let n = 0; const ping = () => chrome.tabs.sendMessage(id, { action: 'PING' }, r => { if (!chrome.runtime.lastError && r?.ready) return res(true); if (++n > 10) return res(false); setTimeout(ping, 400); }); ping(); });
     let result = null, tab = null;
     for (const t of cands) {
-      if (!(await pingOk(t.id))) { add(`• Tab ${t.id}: cannot reach the page (reload it)`); continue; }
+      // v9.18.3 — after an extension reload the Temu tab's old script is gone: reconnect (inject / refresh) like "Fix drafts" does
+      if (!(await pingOk(t.id)) && !(await temuEnsurePageReady(t.id, s => add('• ' + s)))) { add(`• Tab ${t.id}: cannot reach the page (reload it)`); continue; }
       const r = await new Promise(res => chrome.tabs.sendMessage(t.id, { action: 'TEMU_READ_FAILED', uploadId, expectStore }, x => res(chrome.runtime.lastError ? { success: false, report: ['✗ ' + chrome.runtime.lastError.message] } : x)));
       if (r?.wrongStore) { add(`• Tab "${r.mall}" skip (active store: ${expectStore})`); continue; }
       result = r; tab = t; break;
@@ -15476,35 +15765,60 @@ async function temuReadFailed({ tabId = null, uploadId = null, silent = false, i
       }
       const dupItems = notAdded.filter(f => f.duplicate && f.item).map(f => f.item);
       if (dupItems.length && result.matched) {
-        await temuMarkListed(dupItems, store);
-        add(`✓ ${dupItems.length} duplicate product(s) marked as listed in "${store || 'default'}" — skipped in the next export`);
+        await temuMarkListed(dupItems, store, 'dup');   // v9.18.5 — own mark: Temu did NOT add them (the old listing is in the store)
+        add(`✓ ${dupItems.length} duplicate product(s) marked "duplicate" in "${store || 'default'}" — not counted as uploaded`);
+        temuUpdateSrcInfo();
+      }
+      // v9.18.5 — the products Temu DID add in this file are marked as uploaded too (complete list only — never a guess)
+      if (result.complete && result.matched && result.addedItems?.length) {
+        await temuMarkListed(result.addedItems, store, 'accepted');
+        add(`✓ ${result.addedItems.length} product(s) that Temu added are marked as uploaded in "${store || 'default'}"`);
         temuUpdateSrcInfo();
       }
       const other = notAdded.filter(f => !f.duplicate).length;
       if (other) add(`• ${other} product(s) not added (draft / failed) — reasons above. Fix them on Temu ("Complete product infomation") or in the Categories tab.`);
+      await temuFailNote(uploadId, notAdded);
       return result;
     }
     const failed = result.failed || [];
     TemuLastFailed = new Set(failed.map(f => temuNormTitle(f.name)));   // v9.15 — these products are NOT uploaded: never mark them as listed
     if (!failed.length) return result;
-    const items = (TemuLast?.items || []);
+    const items = upItems || TemuLast?.items || [];
     const byTitle = new Map(items.map(it => [temuNormTitle(it.title), it]));
     const dupItems = [];
     for (const f of failed) {
       const it = byTitle.get(temuNormTitle(f.name)) || items.find(it => temuNormTitle(it.title).startsWith(temuNormTitle(f.name).slice(0, 40)));
+      if (it) f.item = it;   // v9.18.1 — remembered in History ("✗ Temu rejected" filter)
       const tag = f.duplicate ? 'DUPLICATE — already in the store' + (f.dupGoodsId ? ` (Goods ${f.dupGoodsId})` : '') : f.reason;
       add(`✗ ${f.name.slice(0, 55)} → ${tag}${it ? '' : '  (no match in this export)'}`);
       if (f.duplicate && it) dupItems.push(it);
     }
     if (dupItems.length) {
-      await temuMarkListed(dupItems, upStore || undefined);
-      add(`✓ ${dupItems.length} duplicate product(s) marked in listed history — they will be skipped in the next export`);
+      await temuMarkListed(dupItems, upStore || undefined, 'dup');
+      add(`✓ ${dupItems.length} duplicate product(s) marked "duplicate" — not counted as uploaded`);
       temuUpdateSrcInfo();
     }
     const other = failed.filter(f => !f.duplicate).length;
     if (other) add(`• ${other} product(s) — reasons are listed above. Fix them on Temu via "Complete product information" / "Edit product", or add that attribute to the profile in the Categories tab`);
+    await temuFailNote(uploadId, failed);
     return result;
   } catch (e) { add('✗ ' + (e?.message || e)); return null; }
+}
+// v9.17.9 — Temu's own reasons go into the History record of that upload (and on the result card): how many were
+// "Contribution SKU duplicated" (= already listed in this store) and the most common other reason
+async function temuFailNote(uploadId, list) {
+  try {
+    const hl = await temuHistGet();
+    const h = (uploadId && hl.find(x => String(x.uploadId || '') === String(uploadId))) || hl.find(x => x.id === TemuResult.histId);
+    if (!h) return;
+    const dups = (list || []).filter(f => f.duplicate).length;
+    const cnt = {}; for (const f of list || []) if (!f.duplicate) { const r = String(f.reason || f.status || '').trim().slice(0, 120); if (r) cnt[r] = (cnt[r] || 0) + 1; }
+    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+    // v9.18.1 — which products Temu did NOT add (source identity) → "✗ Temu rejected" filter in the product list
+    const failedIds = [...new Set((list || []).map(f => f.item ? (f.item.url ? temuSourceIdentity(f.item.url) : f.item.sid) : '').filter(Boolean))];
+    await temuHistPatch(h.id, { dups, failWhy: top ? `${top[0]}${top[1] > 1 ? ` (${top[1]}×)` : ''}` : '', ...(failedIds.length ? { failedIds } : {}) });
+    if (TemuResult.histId === h.id) temuResultCard().catch(() => {});
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 
 // ── v9.7.0 Temu upload history (chrome.storage.local.temuUploadHistory, max 100) ──
@@ -15546,7 +15860,8 @@ async function temuHistKeepFile(histId, bytes, name) {   // save the xlsx for a 
 async function temuHistGet() { return new Promise(r => chrome.storage.local.get('temuUploadHistory', x => r(Array.isArray(x?.temuUploadHistory) ? x.temuUploadHistory : []))); }
 // v9.15 — optional batch name typed on the Upload tab (used in file name + History)
 function temuBatchName() { return (document.getElementById('temuBatchNameInp')?.value || '').trim().slice(0, 60); }
-function temuBatchFile() { const b = temuBatchName().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, ''); return b ? `temu_upload_${b}.xlsx` : 'temu_upload.xlsx'; }
+// v9.17.6 — the number of products is part of the file name: temu_upload_Bulky_Candies_30.xlsx
+function temuBatchFile(n) { const b = temuBatchName().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, ''); const c = n > 0 ? `_${n}` : ''; return b ? `temu_upload_${b}${c}.xlsx` : `temu_upload${c}.xlsx`; }
 // v9.15.1 — every History write waits for the one before it (a late confirmation and a new upload used to overwrite each other)
 let _temuHistChain = Promise.resolve();
 function temuHistSerial(work) { const p = _temuHistChain.then(work); _temuHistChain = p.catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); return p; }
@@ -15569,6 +15884,7 @@ async function temuHistPatch(histId, patch) {
     return true;
   });
   if (found) temuRenderHistory();
+  if (found && histId === TemuResult.histId) temuResultCard().catch(() => {});   // v9.17 — result card follows late confirm / failures / drafts
 }
 let TemuHistFilter = 'all';
 
@@ -15600,7 +15916,7 @@ async function temuRenderHistory() {
   };
 
   const listedMap = Object.fromEntries(Object.entries(temuListedMap()).filter(([key]) => !selectedHistoryStore || key.startsWith(selectedHistoryStore + '|')));
-  let todayListedCount = Object.values(listedMap).filter(x => x && x.d === todayStr).length;
+  let todayListedCount = Object.values(listedMap).filter(x => x && x.d === todayStr && x.state !== 'dup').length;   // v9.18.7 — Temu-rejected duplicates are not "listed"
   
   let todayUploadsCount = 0;
   let todayErrorsCount = 0;
@@ -15632,40 +15948,30 @@ async function temuRenderHistory() {
 
   const stat = $('temuProgressStatus');
   if (stat) {
-    if (finalListed === 0) {
-      stat.textContent = 'Nothing listed yet today';
-    } else {
-      stat.textContent = `${finalListed} of ${dailyTarget} accepted/marked today (${pct}%)`;
-    }
+    stat.textContent = finalListed === 0 ? 'Aaj abhi kuch list nahi hua'
+      : finalListed >= dailyTarget ? `✓ Target poora — ${finalListed} listed (${dailyTarget} target)`
+      : `${finalListed} / ${dailyTarget} listed (${pct}%) · ${remaining} baqi`;
   }
+  bar?.classList.toggle('done', finalListed >= dailyTarget && finalListed > 0);
 
-  // Last 7 days tracker
+  // v9.17 — last 7 days: a mini bar per day with the real count (listed; uploads in the tooltip)
   const weekBox = $('temuWeekDays');
   if (weekBox) {
-    weekBox.innerHTML = '';
-    const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const days = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+      const d = new Date(); d.setDate(d.getDate() - i);
       const dStr = dayKey(d);
-      const isCur = i === 0;
-      const dayIdx = d.getDay();
-      const letter = dayLetters[dayIdx];
-
-      const dayUploads = scopedList.filter(h => dayKey(h.t) === dStr);
-      const dayListed = Object.values(listedMap).filter(x => x && x.d === dStr).length;
-      const hasActivity = dayUploads.length > 0 || dayListed > 0;
-
-      const col = document.createElement('div');
-      col.className = 'temu-day-col' + (isCur ? ' today' : '');
-      col.innerHTML = `
-        <div class="temu-day-box${isCur ? ' today' : ''}">
-          ${hasActivity ? `<div class="temu-day-bar" style="height:${Math.min(100, Math.max(25, (dayListed || dayUploads.length) * 15))}%"></div>` : ''}
-        </div>
-        <span class="temu-day-lbl">${letter}</span>
-      `;
-      weekBox.appendChild(col);
+      const ups = scopedList.filter(h => h.kind === 'upload' && dayKey(h.t) === dStr);
+      days.push({ d, cur: i === 0, listed: Object.values(listedMap).filter(x => x && x.d === dStr && x.state !== 'dup').length, ups: ups.length, added: ups.reduce((n, h) => n + (h.added || 0), 0) });
     }
+    const max = Math.max(dailyTarget, ...days.map(x => x.listed), 1);
+    weekBox.innerHTML = days.map(x => {
+      const h = x.listed ? Math.max(8, Math.round(x.listed / max * 100)) : 0;
+      const tip = `${x.d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}: ${x.listed} listed · ${x.ups} upload${x.ups === 1 ? '' : 's'}`;
+      return `<div class="th-day${x.cur ? ' today' : ''}${x.listed >= dailyTarget ? ' hit' : ''}" title="${esc(tip)}"><span class="th-day-n">${x.listed || ''}</span><div class="th-day-track"><i style="height:${h}%"></i></div><span class="th-day-l">${x.cur ? 'Aaj' : x.d.toLocaleDateString('en-US', { weekday: 'short' })}</span></div>`;
+    }).join('');
+    weekBox.style.setProperty('--goal', Math.round(dailyTarget / max * 100) + '%');   // dashed target line in every day's track
+    const tot = $('temuWeekTotal'); if (tot) tot.textContent = `${days.reduce((n, x) => n + x.listed, 0)} listed`;
   }
 
   // Populate Store Filter dropdown
@@ -15681,29 +15987,29 @@ async function temuRenderHistory() {
   // 2. Filter records list
   const search = ($('temuHistSearch')?.value || '').trim().toLowerCase();
   const selectedStore = $('temuHistStoreFilter')?.value || '';
-
-  const filtered = list.filter(h => {
+  const okRecOf = h => h.kind === 'upload' && (h.fixedAt || (h.confirmed && !(h.errors > 0)));
+  const kindOk = (h, f) => f === 'success' ? !!okRecOf(h) : f === 'errors' ? (h.kind === 'upload' && !okRecOf(h)) : f === 'file' ? h.kind === 'export' : true;
+  const matches = h => {
     if (selectedStore && (h.store || '') !== selectedStore) return false;
-    const okRec = h.kind === 'upload' && (h.fixedAt || (h.confirmed && !(h.errors > 0)));
-    if (TemuHistFilter === 'success') {
-      if (!okRec) return false;
-    } else if (TemuHistFilter === 'errors') {
-      if (h.kind !== 'upload' || okRec) return false;
-    } else if (TemuHistFilter === 'file') {
-      if (h.kind !== 'export') return false;
-    }
     if (search) {
-      const matchStore = (h.store || '').toLowerCase().includes(search);
+      const matchStore = (h.store || '').toLowerCase().includes(search) || (h.batch || '').toLowerCase().includes(search) || (h.fileName || '').toLowerCase().includes(search);
       const matchUpId = (h.uploadId || '').toLowerCase().includes(search);
       const matchItems = (h.items || []).some(it => (it.sku || '').toLowerCase().includes(search) || (it.title || '').toLowerCase().includes(search));
       if (!matchStore && !matchUpId && !matchItems) return false;
     }
     return true;
-  });
+  };
+  const base = list.filter(matches);
+  // v9.17 — counts on the filter buttons
+  for (const f of ['all', 'success', 'errors', 'file']) { const c = document.querySelector(`#temuModal [data-hcount="${f}"]`); if (c) c.textContent = String(base.filter(h => kindOk(h, f)).length); }
+  document.querySelectorAll('#temuModal .temu-hist-fbtn').forEach(b => b.classList.toggle('active', (b.dataset.hfilter || 'all') === TemuHistFilter));
+  const filtered = base.filter(h => kindOk(h, TemuHistFilter));
 
   box.innerHTML = '';
   if (!filtered.length) {
-    box.innerHTML = '<div class="temu-hist-empty">No matching Temu upload record found.</div>';
+    const none = !list.length;
+    box.innerHTML = `<div class="th-empty"><div class="th-empty-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><b>${none ? 'Abhi koi upload nahi' : 'Is filter mein kuch nahi'}</b><span>${none ? 'Upload tab se "Export + Upload to Temu" karein — har upload yahan dikhega.' : 'Search saaf karein ya "All" chunein.'}</span>${none ? '' : '<button type="button" class="btn btn-ghost btn-xs" data-hreset>Show all</button>'}</div>`;
+    box.querySelector('[data-hreset]')?.addEventListener('click', () => { TemuHistFilter = 'all'; const s = $('temuHistSearch'); if (s) s.value = ''; const st = $('temuHistStoreFilter'); if (st) st.value = ''; temuRenderHistory(); });
     return;
   }
 
@@ -15711,64 +16017,55 @@ async function temuRenderHistory() {
     const d = new Date(h.t);
     const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
-    let statusBadge = '';
-    if (h.kind === 'export') {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-file">📁 Export File</span>';
-    } else if (h.kind === 'manual') {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok">✓ Listed</span>';
-    } else if (h.fixedAt) {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok" title="Drafts were fixed and submitted">✓ Fixed &amp; listed</span>';
-    } else if (h.confirmed && !h.errors) {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-ok">✓ Uploaded</span>';
-    } else if (h.confirmed && h.errors) {
-      statusBadge = `<span class="temu-hist-badge temu-hist-badge-warn" title="Uploaded to Temu as drafts — use Fix drafts on Temu">⚠ ${h.errors} need fix</span>`;
-    } else if (h.uploadId) {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-warn" title="Temu received the file but the result was not confirmed — check the Temu upload history">⏳ Sent — check Temu</span>';
-    } else {
-      statusBadge = '<span class="temu-hist-badge temu-hist-badge-bad">✗ Not uploaded</span>';
-    }
-
-    let chipsHtml = '';
-    if (h.uploadId) {
-      chipsHtml += `<span class="temu-hist-chip" title="Upload ID">ID ${esc(h.uploadId)}</span>`;
-    }
-    if (h.added != null) {
-      chipsHtml += `<span class="temu-hist-chip temu-chip-ok">+${h.added} added</span>`;
-    }
-    if (h.errors) {
-      chipsHtml += `<span class="temu-hist-chip temu-chip-err">${h.errors} errors</span>`;
-    }
-    if (h.skipped) {
-      chipsHtml += `<span class="temu-hist-chip temu-chip-warn">${h.skipped} skipped</span>`;
-    }
-    if (h.source) {
-      chipsHtml += `<span class="temu-hist-chip">Source: ${esc(h.source)}</span>`;
-    }
+    // v9.17 — readable record card: status · time / name · store · numbers / actions; products + skipped open below
+    const st = h.kind === 'export' ? ['file', 'File banai', 'Export file (upload nahi hui)']
+      : h.kind === 'manual' ? ['ok', 'Listed', 'Aap ne listed mark kiya']
+      : h.fixedAt ? ['ok', 'Fixed & listed', 'Drafts theek kar ke list hue']
+      : h.confirmed && !h.errors ? ['ok', 'Uploaded', 'Temu ne sab le liye']
+      : h.confirmed && h.errors ? ['warn', `${h.errors} need fix`, 'Temu par draft ban gaye — Fix drafts chalayein']
+      : h.uploadId ? ['warn', 'Sent — check', 'Temu ne file li, nateeja confirm nahi hua — Temu history dekhein']
+      : ['bad', 'Not uploaded', 'Upload nahi hua'];
+    const name = h.batch || (h.fileName && h.fileName !== 'temu_upload.xlsx' ? h.fileName.replace(/^temu_upload_/i, '').replace(/\.xlsx$/i, '').replace(/_/g, ' ') : '')
+      || (h.kind === 'export' ? 'Export file' : h.kind === 'manual' ? 'Marked as listed' : 'Upload');
+    const stats = [
+      `<span class="th-chip">${h.n} products</span>`,
+      h.added != null ? `<span class="th-chip ok">+${h.added} added</span>` : '',
+      h.errors ? `<span class="th-chip bad">${h.errors} errors</span>` : '',
+      h.skipped ? `<span class="th-chip warn">${h.skipped} skipped</span>` : '',
+      h.uploadId ? `<button type="button" class="th-chip id" data-act="copyid" title="Upload ID — click to copy">ID ${esc(h.uploadId)}</button>` : ''
+    ].join('');
+    const its = (h.items || []).slice(0, 200), skl = (h.skippedList || []).slice(0, 200);
+    const needsMark = h.kind === 'upload' && !h.fixedAt && !(h.confirmed && !(h.errors > 0));
 
     const el = document.createElement('div');
-    el.className = 'temu-hist';
+    el.className = 'th-rec ' + st[0];
     el.innerHTML = `
-      <div class="temu-hist-card-inner">
-        <div class="temu-hist-info-col">
-          <div class="temu-hist-header-line">
-            ${statusBadge}
-            <span class="temu-hist-store-pill">${esc(h.store || 'Default')}</span>
-            ${h.batch ? `<span class="temu-hist-store-pill" title="Batch name">${esc(h.batch)}</span>` : ''}
-          </div>
-          <div class="temu-hist-meta-line">
-            <span class="temu-hist-date">${esc(when)}</span>
-            <span class="temu-hist-qty-badge">${h.n} items</span>
-          </div>
-          ${chipsHtml ? `<details class="temu-hist-details"><summary>Upload details</summary><div class="temu-hist-chips-line">${chipsHtml}</div></details>` : ''}
-        </div>
-        <div class="temu-hist-acts">
-          ${(h.kind === 'upload' && !h.fixedAt && !(h.confirmed && !(h.errors > 0))) ? '<button class="btn btn-ghost btn-xs" type="button" data-act="mark" title="Temu has finished this upload — mark its products as listed">✓ Mark listed</button>' : ''}
-          ${h.fileName ? `<button class="btn btn-ghost btn-xs" type="button" data-act="xlsx" title="Download the Temu upload file (${esc(h.fileName)}${h.fileSize ? ', ' + Math.max(1, Math.round(h.fileSize / 1024)) + ' KB' : ''})">XLSX</button>` : ''}
-          <button class="btn btn-ghost btn-xs temu-hist-csv-btn" type="button" data-act="csv" title="Download record CSV">CSV</button>
-          <button class="btn btn-ghost btn-xs btn-danger temu-hist-del-btn" type="button" data-act="del" title="Delete this history record">Delete</button>
-        </div>
+      <div class="th-rec-top"><span class="th-badge ${st[0]}" title="${esc(st[2])}">${esc(st[1])}</span><span class="th-when">${esc(when)}</span></div>
+      <div class="th-rec-name" title="${esc(name)}">${esc(name)}</div>
+      <div class="th-rec-sub">${esc(h.store || 'Default store')}${h.source ? ' · ' + esc(String(h.source).replace(/\s*\(\d+\)\s*$/, '')) : ''}</div>
+      <div class="th-rec-stats">${stats}</div>
+      ${its.length || skl.length ? `<details class="th-rec-more"><summary>${its.length ? `Products (${h.items.length})` : ''}${its.length && skl.length ? ' · ' : ''}${skl.length ? `Skipped (${h.skippedList.length})` : ''}</summary>
+        ${its.length ? `<ol class="th-items">${its.map(it => `<li><span title="${esc(it.title || '')}">${esc(it.title || it.sku || '—')}</span>${it.base ? `<b>$${esc(String(it.base))}</b>` : ''}</li>`).join('')}</ol>` : ''}
+        ${skl.length ? `<div class="th-skip-h">Skipped (upload mein nahi gaye)</div><ul class="th-items skip">${skl.map(s => `<li><span>${esc(typeof s === 'string' ? s : (s?.t || s?.title || JSON.stringify(s)))}</span></li>`).join('')}</ul>` : ''}
+      </details>` : ''}
+      <div class="th-acts">
+        ${needsMark ? '<button class="th-act" type="button" data-act="mark" title="Temu par ye upload mukammal ho gaya — products ko listed mark karo">✓ Mark listed</button>' : ''}
+        ${h.kind === 'upload' && h.uploadId && (h.errors > 0 || !h.confirmed) ? '<button class="th-act" type="button" data-act="errors" title="Temu tab se is upload ke failed products aur wajah parho (Activity mein dikhega)">Read errors</button>' : ''}
+        ${h.fileName ? `<button class="th-act" type="button" data-act="xlsx" title="Upload wali file download karo (${esc(h.fileName)}${h.fileSize ? ', ' + Math.max(1, Math.round(h.fileSize / 1024)) + ' KB' : ''})">⬇ File</button>` : ''}
+        <button class="th-act temu-hist-csv-btn" type="button" data-act="csv" title="Is record ke products CSV mein">CSV</button>
+        <span class="th-sp"></span>
+        <button class="th-act danger temu-hist-del-btn" type="button" data-act="del" title="Ye record mitao" aria-label="Delete record"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
       </div>
     `;
+    el.querySelector('[data-act="copyid"]')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(h.uploadId); toast('Upload ID copied', 'ok'); } catch (_) { toast('Upload ID: ' + h.uploadId, 'info'); }
+    });
+    el.querySelector('[data-act="errors"]')?.addEventListener('click', async () => {
+      temuSwitchTab('upload');
+      const act = document.querySelector('#temuModal .temu-activity'); act?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // v9.18.1 — read with THIS upload's products (not the last export in memory)
+      try { await temuReadFailed({ uploadId: h.uploadId, store: h.store || null, items: h.items?.length ? h.items : null }); } catch (e) { toast('Could not read errors: ' + (e?.message || e), 'warn'); }
+    });
 
     el.querySelector('[data-act="mark"]')?.addEventListener('click', async () => {
       const its = (h.items || []).filter(it => it && it.url);
@@ -15836,6 +16133,38 @@ async function temuExportAllHistoryCsv() {
 const temuHistItems = items => (items || []).map(it => ({ sku: it.sku, title: it.title || '', url: it.url, base: it.base, sourcingPrice: it.sourcingPrice ?? '', list: it.list ?? '', variation: `${it.vtype || 'Color'}: ${it.color}` }));
 
 // v9.7.1 — Temu general-template file (temu_upload.xlsx) pehchano: row 3 mein keys (seller_sku, item_name), data row 5 se
+// v9.20.5 — an imported Temu file that goes up "as-is" gets a fresh SKU too: the 4-letter code after the source id in
+// Contribution Goods (listing_id) and Contribution SKU (seller_sku) is new on every upload ("CH-SAMSCLUB-2020…-K7Q2-Multipack").
+// Everything else in the file stays as it is. Returns { bytes, items } or null when the file is not a Temu template.
+function temuRefreshSkus(buf, items) {
+  if (typeof XLSX === 'undefined') return null;
+  let wb; try { wb = XLSX.read(buf, { type: 'array' }); } catch (_) { return null; }
+  const name = wb.Sheets['Template'] ? 'Template' : wb.SheetNames[0]; const ws = wb.Sheets[name]; if (!ws) return null;
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const keys = (aoa[2] || []).map(x => String(x || '').trim());
+  const cSku = keys.indexOf('seller_sku'), cGoods = keys.indexOf('listing_id');
+  if (cSku < 0) return null;
+  const tag = temuSkuTag();
+  const retag = v => {
+    const p = String(v || '').trim().split('-'); if (!p[0]) return v;
+    if (p.length >= 4 && /^[A-HJ-NP-Z2-9]{4}$/.test(p[3])) p[3] = tag;   // replace an older code
+    else if (p.length >= 3) p.splice(3, 0, tag);                         // CH-SUP-ID[-variant] → CH-SUP-ID-TAG[-variant]
+    else p.push(tag);
+    return p.join('-');
+  };
+  const map = new Map();
+  for (let r = 4; r < aoa.length; r++) {
+    for (const c of [cSku, cGoods]) {
+      if (c < 0) continue;
+      const addr = XLSX.utils.encode_cell({ r, c }); const cell = ws[addr];
+      if (!cell || cell.v == null || String(cell.v).trim() === '') continue;
+      const nv = retag(cell.v); if (c === cSku) map.set(String(cell.v).trim(), nv);
+      ws[addr] = { t: 's', v: nv };
+    }
+  }
+  const out = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+  return { bytes: out, items: (items || []).map(it => ({ ...it, sku: map.get(String(it.sku || '').trim()) || it.sku })) };
+}
 function temuParseTemuFile(buf) {
   if (typeof XLSX === 'undefined') return null;
   let wb; try { wb = XLSX.read(buf, { type: 'array' }); } catch (_) { return null; }
@@ -16025,6 +16354,16 @@ function temuUpdateTplStatus() {
 async function temuSaveCfg(cfg) {
   const stores = temuStores(); const n = temuActiveStoreName();
   if (!n) { toast('Add a store first', 'warn'); return 'no active store'; }
+  { // v9.17.5 — per-product choices + learned titles go to the list ALL stores share
+    const sh = { overrides: cfg.cat_overrides || {}, examples: Array.isArray(cfg.cat_examples) ? cfg.cat_examples : [], learned: cfg.cat_learned || {}, trusted: cfg.cat_trusted || {} };
+    const r = await msg({ action: 'UPDATE_SETTINGS', settings: { temuCatShared: sh } });
+    if (r?.success && State.data?.settings) State.data.settings.temuCatShared = sh;
+    // v9.18.7 — categories are shared: one you deleted is removed from EVERY store (before it came back from another store)
+    if (cfg.category_profiles) {
+      const gone = Object.keys(temuGetCfg().category_profiles || {}).filter(k => !(k in cfg.category_profiles));
+      if (gone.length) for (const s of Object.values(stores)) if (s?.config?.category_profiles) gone.forEach(k => { delete s.config.category_profiles[k]; });
+    }
+  }
   stores[n] = { ...(stores[n] || {}), config: cfg };
   return temuSaveStores(stores);
 }
@@ -16609,6 +16948,7 @@ function temuFillForm() {
   chk('tgSkipListed', cfg.skip_listed !== false);
   chk('tgSmartVar', cfg.smart_variations !== false);
   chk('tgBgUpload', cfg.upload_in_background !== false);
+  setTimeout(() => { try { temuRenderPxPreview(); } catch (_) {} }, 0);   // v9.17 — examples use the filled numbers
   chk('tgSmartWeight', cfg.smart_weight !== false);
   chk('tgDescOn', cfg.fill_description !== false);
   set('tgAvoidWords', (cfg.desc_avoid_words || []).join(', '));
@@ -16655,9 +16995,38 @@ function temuReadDeptTable() {
 // v9.15.1 — pricing strategy: "gap" (cost + tier gap, default) or "legacy" (Price ×, Min/Max, Department, Category Price ×).
 // Only the chosen strategy's boxes are shown; the Upload-tab chip says which one is active.
 function temuPxMode() { const v = $('tgPriceStrategy')?.value; return v === 'legacy' || (!v && temuGetCfg().price_strategy === 'legacy') ? 'legacy' : 'gap'; }
+// v9.17 — Settings: plain-language gap table + live "Source $20 → Temu $69.xx" examples from the numbers typed now (not saved yet)
+function temuPxPreviewCfg() {
+  const cfg = JSON.parse(JSON.stringify(temuGetCfg()));
+  const num = (id, key) => { const v = parseFloat(String($(id)?.value ?? '').replace(/[$,×]/g, '')); if (isFinite(v) && v > 0) cfg[key] = v; };
+  cfg.price_strategy = temuPxMode();
+  const g = $('tgGap')?.value; if (g != null && g.trim()) cfg.ask_tiers = g;
+  num('tgGapFz', 'ask_gap_frozen'); num('tgListPx', 'list_price_multiplier'); num('tgPx2', 'price_multiplier'); num('tgMinPx', 'price_min'); num('tgMaxPx', 'price_max');
+  return cfg;
+}
+function temuRenderPxPreview() {
+  const ex = $('tgPxExample'); if (!ex) return;
+  let cfg; try { cfg = temuPxPreviewCfg(); } catch (_) { return; }
+  const money = n => '$' + (Math.round(n * 100) / 100).toFixed(2);
+  const rows = [[10, ''], [20, ''], [45, ''], [100, ''], [20, 'frozen']];
+  ex.innerHTML = rows.map(([c, kind]) => {
+    let r; try { r = temuPrice(c, cfg, null, kind ? 'Frozen example ' + c : 'example ' + c); } catch (e) { return `<div class="tg-ex-row bad"><span>Source ${money(c)}</span><b>${esc(e.message || 'error')}</b></div>`; }
+    if (!r || r[0] == null) return '';
+    return `<div class="tg-ex-row${kind ? ' frozen' : ''}" title="Kati hui (list) price: ${money(r[1])}"><span>Source ${money(c)}${kind ? ' <i>Frozen</i>' : ''}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg><b>${money(r[0])}</b><small>${(r[0] / c).toFixed(1)}×</small></div>`;
+  }).join('');
+  const tb = $('tgGapTable');
+  if (tb) {
+    const t = temuParseTiers(cfg.ask_tiers);
+    let from = 0;
+    tb.innerHTML = t.steps.map(([upTo, gap]) => { const s = `<div class="tg-gap-row"><span>Cost ${from ? '$' + from + ' – ' : ''}$${upTo} tak</span><b>+$${gap}</b></div>`; from = upTo; return s; }).join('')
+      + `<div class="tg-gap-row"><span>Cost $${from} se zyada</span><b>+${Math.round(t.pct * 100)}%</b></div>`;
+  }
+}
+document.addEventListener('input', e => { if (e.target?.closest?.('#temuModal [data-tpane="settings"]')) { clearTimeout(temuRenderPxPreview._t); temuRenderPxPreview._t = setTimeout(temuRenderPxPreview, 150); } });
 function temuApplyPxMode() {
   const mode = temuPxMode();
   document.querySelectorAll('#temuModal [data-px-mode]').forEach(el => { el.style.display = el.dataset.pxMode === mode ? '' : 'none'; });
+  try { temuRenderPxPreview(); } catch (_) {}
   const lbl = $('temuSrcPxLbl'), val = $('temuSrcPxVal');
   if (lbl) lbl.textContent = mode === 'legacy' ? 'Price ×' : 'Pricing:';
   if (val) val.textContent = mode === 'legacy' ? ($('tgPx2')?.value || $('tgPx')?.value || '5') : 'Cost + gap';
@@ -16676,20 +17045,28 @@ async function temuUpdateSrcInfo() {
   const el = $('temuSrcInfo'); if (!el) return;
   try {
     const source = $('temuSource')?.value || 'bulk';
-    if (source === 'sheet' && TemuLast?.asIs) { el.textContent = `${TemuLast.n} products — Temu file as-is (${TemuLast.name}) · store: ${temuActiveStoreName() || '—'}`; return; }
+    // v9.17 — one line: source · count · price ratio (added by the ready check) · listed warning. The store name lives in the setup card only.
+    let auto = false; try { auto = source === 'master' && TemuSrcAutoLib && !TemuSrcUserPicked; } catch (_) { /* not set up yet */ }
+    const label = source === 'bulk' ? '🗂 Last hunt' : source === 'library_sel' ? '📚 Library (selected)' : source === 'sheet' ? '📄 Imported sheet' : auto ? '📚 Library (last hunt khaali)' : '📚 Library';    TemuSrcLine.warn = '';
+    if (source === 'sheet' && TemuLast?.asIs) { TemuSrcLine.base = `📄 ${TemuLast.name} · ${TemuLast.n} products (Temu file as-is)`; TemuSrcLine.px = ''; temuRenderSrcLine(); return; }
     let rows = [];
     if (source === 'bulk') rows = (BulkState?.results || []).filter(x => x.status !== 'fail');
     else if (source === 'library_sel' && TemuLibPick?.ids) rows = (await getMasterRows()).filter(r => TemuLibPick.ids.has(r.id));
     else if (source === 'sheet' && TemuSheetRows) rows = TemuSheetRows;
     else rows = await getMasterRows();
     const n = rows.length;
-    if (!n) { el.textContent = source === 'bulk' ? '0 products — run Bulk → Hunt all open tabs first' : '0 products in Library'; return; }
+    if (!n) { TemuSrcLine.base = source === 'bulk' ? `${label} · 0 products — pehle Bulk → Hunt chalayein` : `${label} · 0 products`; TemuSrcLine.px = ''; temuRenderSrcLine(); return; }
     const cfg = temuGetCfg();
     const store = temuActiveStoreName() || 'default';
     const skipOn = $('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false; // v9.7.4: export ki tarah live checkbox
-    const listed = rows.filter(r => temuListedMap()[store + '|' + temuSourceIdentity(r.url || '')]).length;
-    el.textContent = `${n} products in the list` + (listed ? ` · ${listed} already listed (${skipOn ? 'skip' : 'skip OFF — they will be sent again!'})` : '') + ` · store: ${temuActiveStoreName() || '—'}`;
-  } catch (_) { el.textContent = '—'; }
+    // v9.19.1 — the SAME rule and the SAME products (the ticked ones) as the ready row: "24 listed on Charmhouse · 6 duplicate on Charmhouse"
+    // v9.20 — only a note: ticked products that are already listed somewhere ARE uploaded (the tick decides)
+    const _lb = temuListedByProduct();
+    const nListed = rows.filter(r => !temuRvOff(r.id) && (_lb[temuSourceIdentity(r.url || '')] || []).some(x => x.state !== 'dup')).length;
+    TemuSrcLine.base = `${label} · ${n} products`;
+    TemuSrcLine.warn = nListed ? `${nListed} ticked product${nListed === 1 ? ' is' : 's are'} already listed — ${nListed === 1 ? 'it' : 'they'} will be uploaded again (untick or use filter "Not listed")` : '';
+    temuRenderSrcLine();
+  } catch (_) { TemuSrcLine.base = ''; temuRenderSrcLine(); }
 }
 function temuSwitchTab(name) {
   document.querySelectorAll('#temuModal .temu-tab').forEach(b => b.classList.toggle('active', b.dataset.ttab === name));
@@ -16722,7 +17099,7 @@ const TemuImgPick = new Map();         // productId -> Set(image indexes) chosen
 function temuUpdateReviewCount(rows) {
   const countEl = $('temuReviewCount');
   if (!countEl) return;
-  const included = rows.filter(r => !TemuReviewExcluded.has(r.id)).length;
+  const included = rows.filter(r => !temuRvOff(r.id)).length;
   countEl.textContent = `${included} / ${rows.length}`;
   const bulkBtn = $('temuAiBulkRewriteBtn');
   if (bulkBtn && !bulkBtn.disabled) {
@@ -16739,22 +17116,31 @@ function temuUpdateReviewCount(rows) {
 // Amber = left out but the rest goes on (no category / too heavy / not a usable link). Click a chip → that product in the list.
 let _temuReadyT = null, _temuReadySeq = 0;
 function temuScheduleReady() { clearTimeout(_temuReadyT); _temuReadyT = setTimeout(() => { temuUpdateReady().catch(e => console.warn('[ZHunter] ready check', e)); }, 350); }
+// main button names the store the file goes to: "Export + Upload to HQ- 4 SHOP" (no store → "… to Temu")
+function temuUploadBtnText() {
+  const t = $('temuAutoBtnTxt'); if (!t) return;
+  if (TemuUploadBusy) { t.textContent = 'Processing...'; return; }
+  const st = (temuActiveStoreName() || '').trim();
+  t.textContent = `Export + Upload to ${st || 'Temu'}`;
+  const b = $('temuAutoBtn'); if (b && st) b.setAttribute('aria-label', `Export and upload to Temu store ${st}`);
+}
 async function temuUpdateReady() {
   const box = $('temuReadyBox'), btn = $('temuAutoBtn');
   if (!box || !btn) return;
   const seq = ++_temuReadySeq;
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const store = temuActiveStoreName();
+  temuUploadBtnText();   // "Export + Upload to <store>" follows the active store
   const source = $('temuSource')?.value || 'bulk';
   let total = 0, ok = 0, groups = [], mult = [], flowRows = null;
   if (source === 'sheet' && TemuLast?.asIs) { total = ok = TemuLast.n || 0; }
   else {
-    const rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+    const rows = (await temuGetQueuedRows()).filter(r => !temuRvOff(r.id));
     if (seq !== _temuReadySeq) return;
     total = rows.length; flowRows = rows;
     const cfg = temuApplyLiveCopyPrice(temuGetCfg()); cfg.price_strategy = temuPxMode();
+    const LG = {};   // already listed / duplicate, per store
     const G = {
-      listed: { cls: 'bad', label: 'already listed', ids: [] },
       noimg: { cls: 'bad', label: 'no image', ids: [] },
       noprice: { cls: 'bad', label: 'no / suspicious price', ids: [] },
       nocat: { cls: 'warn', label: 'no category — left out', ids: [] },
@@ -16767,7 +17153,13 @@ async function temuUpdateReady() {
       if (Array.isArray(r.images)) r.images = r.images.map(u => typeof u === 'string' && /^(data:image\/|blob:|https:\/\/flow-content\.google\/)/i.test(u) ? 'https://edited.image.pending/x.jpg' : u);
       let res; try { res = temuEnrich([r], cfg); } catch (_) { continue; }
       const it = res.items[0], why = res.skipped[0] || '', t = String(r0.title || r0.url || '').slice(0, 70);
-      if (!it) { G[/^already listed/i.test(why) ? 'listed' : /^too heavy/i.test(why) ? 'heavy' : 'other'].ids.push({ id: r0.id, t: why || t }); continue; }
+      if (!it) {
+        // v9.19.1 — "24 listed on Charmhouse" / "6 duplicate on Charmhouse": one chip per kind + store (same words as the source line)
+        const lm = why.match(/^already (listed|duplicate) on (.+?) \(/i);
+        if (lm) { const key = lm[1].toLowerCase() + ' on ' + lm[2]; const kind = lm[1].toLowerCase() === 'duplicate' ? 'dup' : 'listed'; const sk = TemuPick[kind] === 'skip';
+          (LG[key] = LG[key] || { cls: sk ? 'warn' : 'bad', label: key + (sk ? ' — skipped' : ''), listed: true, dup: kind === 'dup', ids: [] }).ids.push({ id: r0.id, t: why }); continue; }
+        G[/^too heavy/i.test(why) ? 'heavy' : 'other'].ids.push({ id: r0.id, t: why || t }); continue;
+      }
       if (it.warn.includes('NO_IMAGES')) G.noimg.ids.push({ id: r0.id, t });
       else if (it.warn.includes('NO_PRICE') || it.warn.includes('PRICE_SUSPICIOUS')) G.noprice.ids.push({ id: r0.id, t });
       else if (it.warn.includes('NO_CATEGORY_PROFILE')) G.nocat.ids.push({ id: r0.id, t });
@@ -16777,7 +17169,7 @@ async function temuUpdateReady() {
         if (c > 0 && it.base > 0) mult.push(it.base / c);
       }
     }
-    groups = Object.values(G).filter(g => g.ids.length);
+    groups = [...Object.values(LG), ...Object.values(G)].filter(g => g.ids.length);
   }
   if (seq !== _temuReadySeq) return;
   let stop = '';
@@ -16796,7 +17188,8 @@ async function temuUpdateReady() {
   const chip = g => `<button type="button" class="temu-ready-item ${g.cls}" data-ready-ids="${esc(g.ids.map(x => x.id).join(','))}" title="${esc(g.ids.slice(0, 12).map(x => '• ' + x.t).join('\n'))}"><b>${g.ids.length}</b> ${esc(g.label)}</button>`;
   box.innerHTML = `<div class="trs" data-tone="${tone}" title="${esc(stop)}">`
     + `<div class="trs-checks">`
-    + `<span class="trs-chk ${store ? 'ok' : 'todo'}">${svg('store')}${store ? '<b>' + esc(store) + '</b>' : 'No store'}</span>`
+    // v9.17 — the store name is shown once (setup card above); this row says only whether the upload can go
+    + `<span class="trs-chk ${store ? (stop ? 'part' : 'ok') : 'todo'}">${svg('store')}${!store ? 'No store' : !total ? 'No products yet' : stop ? 'Fix first' : '<b>Ready to upload</b>'}</span>`
     + `<span class="trs-chk trs-chk-n ${ok && ok === total ? 'ok' : ok ? 'part' : 'todo'}">${svg('box')}<b>${ok}</b>&nbsp;of ${total} ready</span>`
     + `</div>`
     + (groups.length ? `<div class="trs-issues">${groups.map(chip).join('')}</div>` : '')
@@ -16808,6 +17201,43 @@ async function temuUpdateReady() {
     if (mult.length) { const avg = mult.reduce((a, b) => a + b, 0) / mult.length; ps.textContent = `Price vs source: avg ${avg.toFixed(1)}× · lowest ${Math.min(...mult).toFixed(1)}× (${mult.length} products)`; ps.hidden = false; }
     else ps.hidden = true;
   }
+  // v9.17 — the same numbers go into the one-line source summary, and the confirm sheet uses this check
+  TemuSrcLine.px = mult.length ? `avg ${(mult.reduce((a, b) => a + b, 0) / mult.length).toFixed(1)}× (lowest ${Math.min(...mult).toFixed(1)}×)` : '';
+  temuRenderSrcLine();
+  TemuReadyLast = { store, total, ok, stop, groups };
+}
+let TemuReadyLast = null;
+// v9.19.2 — your choice PER KIND: listed / dup → '' (ask; the upload stops) · 'skip' · 'again'. Reset after each upload.
+var TemuPick = { listed: '', dup: '' };
+// v9.19 — "Fix duplicates": tick ONLY the duplicates, allow them through, and start the AI title rewrite (Title Optimizer) for them.
+// The SKU is new anyway (every file gets a fresh code). Then the user presses Upload.
+// v9.19.2 — works on the DATA (before: on the drawn cards → "No duplicate products" while the list was collapsed)
+async function temuFixDuplicates() {
+  const rows = await temuGetQueuedRows();
+  const lb = temuListedByProduct();
+  const dupIds = new Set(rows.filter(r => temuListedWhere(r.url, lb)?.dup).map(r => r.id));
+  if (!dupIds.size) { toast('No duplicate products in the list', 'info'); return; }
+  rows.forEach(r => { if (dupIds.has(r.id)) TemuReviewExcluded.delete(r.id); else TemuReviewExcluded.add(r.id); });
+  TemuPick.dup = 'again'; TemuLast = null;
+  try { await temuRenderReview(); temuScheduleReady(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  toast(`${dupIds.size} duplicate product${dupIds.size === 1 ? '' : 's'} ticked (all others unticked) — writing new titles… then press Upload (new SKU is automatic)`, 'ok');
+  const tb = $('temuAiBulkRewriteBtn');
+  if (tb && !tb.disabled) tb.click(); else toast('Open "Title Optimizer" and press the rewrite button for the ticked products', 'warn');
+}
+document.addEventListener('click', e => {
+  if (e.target.closest?.('[data-fix-dups]')) { temuFixDuplicates(); return; }
+  const b = e.target.closest?.('[data-pick-kind]'); if (!b) return;
+  const k = b.dataset.pickKind, v = b.dataset.pickVal;
+  TemuPick[k] = TemuPick[k] === v ? '' : v;   // click the chosen one again = undo
+  TemuLast = null;
+  try { temuScheduleReady(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+});
+// v9.17 — ONE source line: "📚 Library · 40 products · avg 2.4× (lowest 2.0×)" (+ the already-listed warning)
+const TemuSrcLine = { base: '', warn: '', px: '' };
+function temuRenderSrcLine() {
+  const el = $('temuSrcInfo'); if (!el) return;
+  const esc2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  el.innerHTML = TemuSrcLine.base ? `<span>${esc2(TemuSrcLine.base)}</span>${TemuSrcLine.px ? `<span class="tsl-px" title="Temu price ÷ source price">${esc2(TemuSrcLine.px)}</span>` : ''}${TemuSrcLine.warn ? `<span class="tsl-warn">${esc2(TemuSrcLine.warn)}</span>` : ''}` : '—';
 }
 let TemuFlowSent = null;   // { n, at } — products Temu accepted in this session (set by temuMarkListed 'accepted')
 // ═══ v9.16 — Workflow strip (Upload tab): ① Products → ② Titles → ③ Images → ④ Upload ═══
@@ -17012,27 +17442,66 @@ async function temuRenderReview() {
   // v9.16 — "✨ edited" badge: this image URL is a recorded AI/manual edit of this product (zhImgEdits)
   const _imgEdits = Object.values(await zhEditsLoad());
   const isEditedImg = (r, url) => !!url && _imgEdits.some(e => ((e.id && e.id === r.id) || (e.url && e.url === r.url)) && (e.newUrl === url || (e.via || []).includes(url)));
+  // v9.17 — "✓ Charmhouse · 2026-10-21" on every product that already went to a store (each store in its own page-frame colour)
+  const _listedBy = temuListedByProduct();
+  const _storeCols = await new Promise(res => { try { chrome.storage.local.get('zhStoreColors', x => res(x?.zhStoreColors || {})); } catch (_) { res({}); } });
+  const storesOf = r => { if (!r.url) return []; const id = temuSourceIdentity(r.url); return _listedBy[id] || _listedBy[temuSourceId(r.url)] || []; };
+  // v9.18.1 — products Temu did NOT add in an upload to the active store (History: failedIds), unless Temu accepted them later
+  const _actStore = temuActiveStoreName() || 'default';
+  const _rejIds = new Set();
+  try { for (const h of await temuHistGet()) if ((h.store || 'default') === _actStore) (h.failedIds || []).forEach(x => _rejIds.add(x)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  const isRejected = r => {
+    if (!r.url) return false;
+    // v9.19.1 — same rule as the ready row: rejected as duplicate in a store and listed nowhere
+    const st = storesOf(r);
+    if (st.some(s => s.state !== 'dup')) return false;
+    return st.some(s => s.state === 'dup') || _rejIds.has(temuSourceIdentity(r.url));
+  };
+  const storeTag = s => s.state === 'dup'
+    ? `<span class="temu-rv-store dup" title="${esc(`Temu did not add it to ${s.store} on ${s.d}: "Contribution SKU duplicated" — an older listing of this product is in that store`)}">✗ ${esc(s.store === 'default' ? 'Store' : s.store)} · duplicate</span>`
+    : `<span class="temu-rv-store" style="--sc:${esc(_storeCols[String(s.store).replace(/\s+/g, ' ').trim().toLowerCase()] || '#94A3B8')}" title="${esc(`Uploaded to ${s.store} on ${s.d}${s.state === 'accepted' ? ' (Temu accepted it)' : ''} — other stores will skip this product`)}">✓ ${esc(s.store === 'default' ? 'Uploaded' : s.store)}${s.d ? ` · ${esc(s.d.slice(5))}` : ''}</span>`;
 
   const _rvScroll = list.scrollTop;
   list.innerHTML = '';
   { // v9.12.5 — sticky mini toolbar (list now scrolls inside its own box)
     const tools = document.createElement('div');
-    tools.className = 'temu-rv-tools';
+    tools.className = 'temu-rv-tools' + (temuRvToolsMin() ? ' tools-min' : '');
     // v9.15.1 — search + filter chips (B9): find a product fast in a long list
     // filter chips sit behind a "Filter" toggle (collapsed by default) so they don't take space
-    const RV_FILTERS = [['all', 'All'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['edit', '✨ For images'], ['imged', '🖼 Images edited'], ['notimged', '🖼 Not edited'], ['upd', 'AI titles']];
+    // v9.20 — "Listed" / "Not listed" first; the duplicate / rejected filters are gone (the tick decides, SKU is new every time)
+    const RV_FILTERS = [['all', 'All'], ['up', '✓ Listed'], ['notup', 'Not listed'], ['cat', '⚠ Category'], ['noimg', 'No image'], ['off', 'Unticked'], ['edit', '✨ For images'], ['imged', '🖼 Images edited'], ['notimged', '🖼 Not edited'], ['upd', 'AI titles']];
     const fLabel = f => (RV_FILTERS.find(x => x[0] === f) || RV_FILTERS[0])[1];
     tools.innerHTML = `<div class="temu-rv-tools-top">
-        <input type="search" class="inp temu-rv-search" placeholder="Search…" value="${esc(TemuRvFilter.q)}" title="Type to show only matching products (title, link)">
-        <span class="temu-rv-tools-n">${rows.length} products</span>
+        <label class="temu-rv-search-wrap">
+          <input type="search" class="inp temu-rv-search" placeholder="Search…" value="${esc(TemuRvFilter.q)}" title="Type to show only matching products (title, link)">
+          <span class="temu-rv-tools-n" aria-hidden="true">${rows.length} products</span>
+        </label>
         <button type="button" class="temu-rv-icon-btn temu-rv-ftgl${TemuRvFilter.f !== 'all' ? ' active' : ''}${TemuRvFilter.open ? ' open' : ''}" data-t="filters" aria-expanded="${TemuRvFilter.open ? 'true' : 'false'}" title="Show filters">
           <svg viewBox="0 0 24 24"><polygon points="3 4 21 4 14 12.5 14 19 10 21 10 12.5 3 4"/></svg>
           <span class="temu-rv-ftgl-l">${TemuRvFilter.f === 'all' ? 'Filter' : esc(fLabel(TemuRvFilter.f))}</span>
+        </button>
+        <button type="button" class="temu-rv-icon-btn temu-rv-tmin${temuRvToolsMin() ? ' on' : ''}" data-t="toolsmin" title="Hide / show the 'Tick first' row and the filter buttons, so the product list gets more room">
+          <svg viewBox="0 0 24 24"><polyline points="${temuRvToolsMin() ? '6 9 12 15 18 9' : '18 15 12 9 6 15'}"/></svg>
+          ${temuRvToolsMin() ? 'Tools' : 'Hide'}
         </button>
         <button type="button" class="temu-rv-icon-btn" data-t="close" title="Collapse all expanded product cards">
           <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
           Collapse
         </button>
+      </div>
+      <div class="temu-rv-pager">
+        <label class="temu-rv-pg-all" title="Tick / untick every product on THIS page"><input type="checkbox" class="temu-rv-pg-chk"> This page</label>
+        <span class="temu-rv-pg-nums"></span>
+        <label class="temu-rv-pg-sizewrap" title="Products per page — type any number (e.g. 10, 15, 30), Enter"><input type="number" class="inp temu-rv-pg-size" min="1" max="500" step="1" value="${temuRvPageSize()}"><span>/ page</span></label>
+      </div>
+      <div class="temu-rv-pickn" title="Ticks the first N products shown (top of the list, after the filter) and unticks all others. Then fine-tune by hand — Shift+click a tick to tick / untick a whole range.">
+        <span>Tick first</span>
+        <input type="number" class="inp temu-rv-pickn-inp" min="1" max="${rows.length}" step="1" value="${Math.min(rows.length, temuPickNGet() || 30)}" aria-label="How many products to tick">
+        <span>of ${rows.length}</span>
+        <button type="button" data-t="pickn">✓ Apply</button>
+        <button type="button" data-t="newonly" title="Tick ONLY the products that are listed on no store yet — all others are unticked (whatever filter is on)">✚ Only new</button>
+        <button type="button" data-t="invert" title="Every product swaps its tick (the whole list, not only what a filter shows). The list then shows All so you can see the result.">⇄ Invert</button>
+        <small>Shift+click = range</small>
       </div>
       <div class="temu-rv-fchips"${TemuRvFilter.open ? '' : ' hidden'}>
         ${RV_FILTERS.map(([k, l]) =>
@@ -17040,20 +17509,32 @@ async function temuRenderReview() {
       </div>
       <div class="temu-rv-fbulk" hidden>
         <span class="temu-rv-fbulk-n"></span>
-        <button type="button" data-fb="img-on" title="Tick ✨ (image editing) on every product shown by this filter">✨ Select for images</button>
-        <button type="button" data-fb="img-off" title="Remove the ✨ tick from every product shown">✕ Unselect</button>
-        <button type="button" data-fb="relearn" title="Forget the saved category of the products shown and ask Temu again (fixes wrong smart picks)">🔁 Learn category again</button>
         <button type="button" data-fb="del" class="danger" title="Delete every product shown by this filter (asks first)">🗑 Delete shown</button>
       </div>`;
-    tools.querySelector('.temu-rv-search').addEventListener('input', e => { TemuRvFilter.q = e.target.value; temuApplyRvFilter(); });
+    tools.querySelector('.temu-rv-search').addEventListener('input', e => { TemuRvFilter.q = e.target.value; TemuRvPage = 1; temuApplyRvFilter(); });
+    // v9.20.7 — pages like Temu: ‹ 1 2 3 ›, 25/50/100/200 per page, "This page" tick box
+    { const ps = tools.querySelector('.temu-rv-pg-size');
+      const applyPs = () => { const n = Math.min(500, Math.max(1, parseInt(ps.value, 10) || 25)); ps.value = n; try { localStorage.setItem('zhRvPageSize', String(n)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } TemuRvPage = 1; temuApplyRvFilter(); list.scrollTo({ top: 0 }); };
+      ps?.addEventListener('change', applyPs);
+      ps?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyPs(); } }); }
+    tools.querySelector('.temu-rv-pg-chk')?.addEventListener('change', e => {
+      const want = e.target.checked;
+      for (const c of list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out):not(.rv-page-out)')) { const x = c.querySelector('.temu-rv-chk'); if (x && x.checked !== want) { x.checked = want; x.dispatchEvent(new Event('change', { bubbles: true })); } }
+      temuRvPagerSync(list);
+    });
+    tools.querySelector('.temu-rv-pg-nums')?.addEventListener('click', e => { const b = e.target.closest('button[data-pg]'); if (!b || b.disabled) return; TemuRvPage = +b.dataset.pg; temuApplyRvFilter(); list.scrollTo({ top: 0 }); });
+    tools.querySelector('.temu-rv-pickn-inp')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); temuPickFirstN(list, parseInt(e.target.value, 10)); } });
     tools.addEventListener('click', e => {
       // bulk actions for the products the filter / search shows right now (the bar is visible only while a filter is on)
       const fb = e.target.closest('button[data-fb]');
       if (fb) { temuRvFilterBulk(fb.dataset.fb, list); return; }
       const fc = e.target.closest('button[data-f]');
       if (fc) {
-        TemuRvFilter.f = fc.dataset.f;
+        TemuRvFilter.f = fc.dataset.f; TemuRvPage = 1;
         tools.querySelectorAll('.temu-rv-fchip').forEach(x => x.classList.toggle('on', x === fc));
+        // v9.20.2 — the chips fold up again after a pick (the chosen filter stays visible on the Filter button)
+        TemuRvFilter.open = false; tools.querySelector('.temu-rv-fchips').hidden = true;
+        { const tg0 = tools.querySelector('.temu-rv-ftgl'); if (tg0) { tg0.classList.remove('open'); tg0.setAttribute('aria-expanded', 'false'); } }
         const tg = tools.querySelector('.temu-rv-ftgl');
         if (tg) { tg.classList.toggle('active', TemuRvFilter.f !== 'all'); tg.querySelector('.temu-rv-ftgl-l').textContent = TemuRvFilter.f === 'all' ? 'Filter' : fc.textContent; }
         list.classList.remove('only-upd');
@@ -17062,6 +17543,17 @@ async function temuRenderReview() {
       }
       const b = e.target.closest('button[data-t]');
       if (!b) return;
+      if (b.dataset.t === 'toolsmin') {
+        const min = !tools.classList.contains('tools-min');
+        tools.classList.toggle('tools-min', min);
+        try { localStorage.setItem('zhRvToolsMin', min ? '1' : '0'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        b.classList.toggle('on', min);
+        b.innerHTML = `<svg viewBox="0 0 24 24"><polyline points="${min ? '6 9 12 15 18 9' : '18 15 12 9 6 15'}"/></svg> ${min ? 'Tools' : 'Hide'}`;
+        return;
+      }
+      if (b.dataset.t === 'pickn') { temuPickFirstN(list, parseInt(tools.querySelector('.temu-rv-pickn-inp')?.value, 10)); return; }
+      if (b.dataset.t === 'invert') { temuPickInvert(); return; }
+      if (b.dataset.t === 'newonly') { temuPickNewOnly(); return; }
       if (b.dataset.t === 'filters') {
         TemuRvFilter.open = !TemuRvFilter.open;
         tools.querySelector('.temu-rv-fchips').hidden = !TemuRvFilter.open;
@@ -17092,7 +17584,7 @@ async function temuRenderReview() {
     const rawPrice = r.temuBase || r.price;
     const [calcBase] = temuPrice(temuCostOf(rawPrice, title), cfg, temuProfileFor(temuCleanTitle(title, cfg), cfg)[1], temuCleanTitle(title, cfg));
     const [catKey, catProf] = temuCatFor(r.url, temuCleanTitle(title, cfg), cfg);
-    const catWeak = temuCatDoubtful(title, catProf);
+    const catWeak = !temuCatTrusted(r.url, catKey, cfg) && temuCatDoubtful(title, catProf);
     const _tb = parseFloat(String(r.temuBase || '').replace(/[$,]/g, ''));   // store-export rows keep the source store's base price as-is
     const _fz = temuIsFrozen(catProf?.full_path, catProf?.name, title);
     const _tbF = (_tb > 0 && !r.temuManual) ? parseFloat(temuFloored(_tb, temuCostOf(r.price, title), cfg, _fz)) : _tb;
@@ -17143,7 +17635,9 @@ async function temuRenderReview() {
     // v9.15.1 — 2-line row: the full title gets its own space (it used to shrink to "M." next to two checkboxes and two price chips);
     // ONE tick = this product is used (upload, AI titles and image editing all work on the ticked products)
     // 'imged' = at least one picture of this product was edited with AI (edit journal) — for the "Images edited / not edited" filters
-    card.dataset.flags = [!catProf?.category_keyword || catWeak ? 'cat' : '', allImgs.length ? '' : 'noimg', allImgs.some(u => isEditedImg(r, u)) ? 'imged' : ''].filter(Boolean).join(' ');
+    const _stores = storesOf(r);
+    card.dataset.flags = [!catProf?.category_keyword || catWeak ? 'cat' : '', allImgs.length ? '' : 'noimg', allImgs.some(u => isEditedImg(r, u)) ? 'imged' : '', _stores.some(s => s.state !== 'dup') ? 'up' : '', isRejected(r) ? 'rej' : ''].filter(Boolean).join(' ');
+    card.dataset.url = r.url || '';
     card.dataset.search = (String(title) + ' ' + String(r.url || '')).toLowerCase();
     card.innerHTML = `
       <div class="temu-rv-collapsed-row">
@@ -17161,6 +17655,10 @@ async function temuRenderReview() {
             <span class="temu-rv-pricechip"><span class="temu-rv-price-badge">${calcBase !== null ? '$' + displayPrice : '—'}</span><span class="temu-rv-ratio" title="Temu price ÷ source price"></span></span>
             <span class="temu-rv-catmini${!catProf?.category_keyword || catWeak ? ' weak' : ''}" title="${esc(catProf?.full_path || 'No category')}">${catWeak ? '<span class="temu-rv-catwarn">⚠</span> ' : ''}${esc(catProf?.category_keyword || 'No category')}</span>
             <span class="temu-rv-imgn${allImgs.length ? '' : ' weak'}">${allImgs.length} img</span>
+            ${(() => {   // v9.20 — one label only: green "Listed" (store + date in the tooltip)
+              const ok = _stores.filter(s => s.state !== 'dup');
+              return ok.length ? `<span class="temu-rv-store ok" title="${esc('Listed on: ' + ok.map(s => `${s.store === 'default' ? 'store' : s.store} (${s.d})`).join(', '))}">Listed</span>` : '';
+            })()}
           </div>
         </div>
         <button class="temu-rv-del-btn" title="Delete product" type="button">🗑</button>
@@ -17204,10 +17702,21 @@ async function temuRenderReview() {
 
     // Checkbox toggle
     const chk = card.querySelector('.temu-rv-chk');
+    // v9.17.4 — Shift+click: every shown product between the last clicked tick and this one gets the same tick
+    chk?.addEventListener('click', e => {
+      const shown = [...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out):not(.rv-page-out)')];
+      const me = shown.indexOf(card), last = shown.findIndex(c => c.dataset.id === TemuPickLast);
+      if (e.shiftKey && last >= 0 && me >= 0 && last !== me) {
+        const [a, z] = me < last ? [me, last] : [last, me];
+        shown.slice(a, z + 1).forEach(c => { const x = c.querySelector('.temu-rv-chk'); if (x && x !== chk && x.checked !== chk.checked) { x.checked = chk.checked; x.dispatchEvent(new Event('change', { bubbles: true })); } });
+      }
+      TemuPickLast = card.dataset.id;
+    });
     chk?.addEventListener('change', () => {
       if (chk.checked) TemuReviewExcluded.delete(r.id);
       else TemuReviewExcluded.add(r.id);
       card.classList.toggle('excluded', !chk.checked);
+      temuRvPagerSync(list);
       TemuLast = null;
       temuUpdateReviewCount(rows);
     });
@@ -17220,6 +17729,7 @@ async function temuRenderReview() {
       const learn = (cfg2, key) => {
         cfg2.cat_overrides = cfg2.cat_overrides || {};
         cfg2.cat_overrides[temuSourceIdentity(r.url)] = key;
+        temuTrustCat(cfg2, r.url, key);
         temuLearnExample(cfg2, temuCleanTitle(r.title || '', cfg2), key);
         cfg2.cat_learned = cfg2.cat_learned || {}; temuProductPhrases(temuCleanTitle(r.title || '', cfg2)).filter(ph => /\s/.test(ph)).forEach(ph => { cfg2.cat_learned[ph] = key; });   // remember this kind of product
         const ks = Object.keys(cfg2.cat_learned); if (ks.length > 600) ks.slice(0, ks.length - 600).forEach(k => delete cfg2.cat_learned[k]);
@@ -17664,10 +18174,84 @@ async function temuRenderReview() {
 
 // v9.15.1 — review list search + filter chips (B9)
 const TemuRvFilter = { q: '', f: 'all', open: false };
+// v9.17.4 — "Tick first N": the first N products the list shows now (after filter / search) are ticked, every other product is
+// unticked (also the ones the filter hides), so exactly N go to upload / AI titles. The number is remembered.
+let TemuPickLast = '';
+// v9.20.4 — what the filter / search HIDES counts as unticked: upload, AI titles, "N selected" and the ready row use
+// only the ticked products you can SEE (before: 33 shown + ticked, but all 57 ticked ones were uploaded)
+var TemuRvHidden = new Set();
+function temuRvOff(id) { return TemuReviewExcluded.has(id) || TemuRvHidden.has(id); }
+// v9.20.7 — pages for the product list (like Temu's list): page size remembered, page number per session
+var TemuRvPage = 1;
+function temuRvPageSize() { try { const n = parseInt(localStorage.getItem('zhRvPageSize') || '', 10); return n >= 1 && n <= 500 ? n : 25; } catch (_) { return 25; } }   // any number 1–500 (v9.20.8)
+function temuRvPagerRender(list, pages, n) {
+  const box = list.querySelector('.temu-rv-pg-nums'); if (!box) return;
+  const cur = TemuRvPage, nums = [];
+  for (let p = 1; p <= pages; p++) if (p === 1 || p === pages || Math.abs(p - cur) <= 1) nums.push(p); else if (nums[nums.length - 1] !== '…') nums.push('…');
+  box.innerHTML = `<button type="button" data-pg="${cur - 1}" ${cur <= 1 ? 'disabled' : ''} aria-label="Previous page">‹</button>`
+    + nums.map(p => p === '…' ? '<span class="pg-gap">…</span>' : `<button type="button" data-pg="${p}" class="${p === cur ? 'on' : ''}">${p}</button>`).join('')
+    + `<button type="button" data-pg="${cur + 1}" ${cur >= pages ? 'disabled' : ''} aria-label="Next page">›</button>`;
+  const pager = list.querySelector('.temu-rv-pager'); if (pager) pager.hidden = !n;
+  temuRvPagerSync(list);
+}
+// the "This page" box shows ✓ when every product on the page is ticked, – when some are
+function temuRvPagerSync(list) {
+  const chk = list?.querySelector('.temu-rv-pg-chk'); if (!chk) return;
+  const xs = [...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out):not(.rv-page-out) .temu-rv-chk')];
+  const on = xs.filter(x => x.checked).length;
+  chk.checked = xs.length > 0 && on === xs.length; chk.indeterminate = on > 0 && on < xs.length;
+}
+// v9.20.1 — toolbar rows ("Tick first" + filter buttons) hidden? remembered per browser
+function temuRvToolsMin() { try { return localStorage.getItem('zhRvToolsMin') === '1'; } catch (_) { return false; } }
+function temuPickNGet() { try { return parseInt(localStorage.getItem('zhPickN') || '', 10) || 0; } catch (_) { return 0; } }
+async function temuPickFirstN(list, n) {
+  if (!list) return;
+  if (!(n > 0)) { toast('Type how many products to tick', 'warn'); return; }
+  try { localStorage.setItem('zhPickN', String(n)); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  const cards = [...list.querySelectorAll('.temu-rv-card')];
+  const shown = cards.filter(c => !c.classList.contains('rv-filtered-out'));
+  const want = new Set(shown.slice(0, n));
+  for (const c of cards) {
+    const on = want.has(c), x = c.querySelector('.temu-rv-chk');
+    if (x && x.checked !== on) { x.checked = on; x.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+  TemuPickLast = '';
+  toast(`✓ ${want.size} product${want.size === 1 ? '' : 's'} ticked, ${cards.length - want.size} unticked${shown.length < n ? ` (only ${shown.length} shown)` : ''}`, 'ok');
+  try { temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+}
+// v9.20.6 — "⇄ Invert" swaps the tick of EVERY product (not only the ones a filter shows — that was hard to predict and
+// sent the same products to a 2nd store). The filter goes back to "All" so you SEE the result; the toast says how many
+// of the newly ticked products are already live somewhere.
+async function temuPickInvert() {
+  const rows = await temuGetQueuedRows(); if (!rows.length) return;
+  rows.forEach(r => { if (TemuReviewExcluded.has(r.id)) TemuReviewExcluded.delete(r.id); else TemuReviewExcluded.add(r.id); });
+  await temuPickShowAll();
+  const on = rows.filter(r => !TemuReviewExcluded.has(r.id));
+  const lb = temuListedByProduct();
+  const live = on.filter(r => (lb[temuSourceIdentity(r.url || '')] || []).some(x => x.state !== 'dup')).length;
+  toast(`⇄ Inverted — ${on.length} ticked, ${rows.length - on.length} unticked${live ? ` · ⚠ ${live} of the ticked are already live on a store` : ''}`, live ? 'warn' : 'ok');
+}
+// v9.20.6 — "✚ Only new": tick ONLY the products that are listed on no store yet (all others unticked), whatever the filter
+async function temuPickNewOnly() {
+  const rows = await temuGetQueuedRows(); if (!rows.length) return;
+  const lb = temuListedByProduct();
+  const isNew = r => !(lb[temuSourceIdentity(r.url || '')] || []).some(x => x.state !== 'dup');
+  let n = 0;
+  rows.forEach(r => { if (isNew(r)) { TemuReviewExcluded.delete(r.id); n++; } else TemuReviewExcluded.add(r.id); });
+  await temuPickShowAll();
+  toast(n ? `✚ ${n} new product${n === 1 ? '' : 's'} ticked — ${rows.length - n} already listed are unticked` : 'No new products — every product is already listed on a store', n ? 'ok' : 'warn');
+}
+// after a whole-list pick: filter / search off, list drawn again (so what is ticked is what you see)
+async function temuPickShowAll() {
+  TemuPickLast = ''; TemuLast = null;
+  TemuRvFilter.f = 'all'; TemuRvFilter.q = ''; TemuRvHidden = new Set(); TemuRvPage = 1;
+  try { await temuRenderReview(); temuScheduleReady(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+}
 function temuApplyRvFilter() {
   const list = $('temuReviewList'); if (!list) return;
   const q = TemuRvFilter.q.trim().toLowerCase(), f = TemuRvFilter.f;
   let shown = 0, total = 0;
+  const hidden = new Set(), okCards = [];
   list.querySelectorAll('.temu-rv-card').forEach(c => {
     total++;
     const flags = (c.dataset.flags || '').split(' ');
@@ -17679,9 +18263,22 @@ function temuApplyRvFilter() {
     else if (ok && f === 'imged') ok = flags.includes('imged');
     else if (ok && f === 'notimged') ok = !flags.includes('imged') && !flags.includes('noimg');
     else if (ok && f === 'upd') ok = c.matches('.rv-updated, .rv-same');
+    else if (ok && f === 'up') ok = flags.includes('up');
+    else if (ok && f === 'notup') ok = !flags.includes('up');
+    else if (ok && f === 'rej') ok = flags.includes('rej');
     c.classList.toggle('rv-filtered-out', !ok);
-    if (ok) shown++;
+    if (ok) { shown++; okCards.push(c); } else { if (c.dataset.id) hidden.add(c.dataset.id); c.classList.remove('rv-page-out'); }
   });
+  // v9.20.7 — pages: only the cards of the current page are drawn (the others keep their tick and still go to upload)
+  { const size = temuRvPageSize(), pages = Math.max(1, Math.ceil(okCards.length / size));
+    if (TemuRvPage > pages) TemuRvPage = pages; if (TemuRvPage < 1) TemuRvPage = 1;
+    okCards.forEach((c, i) => c.classList.toggle('rv-page-out', Math.floor(i / size) + 1 !== TemuRvPage));
+    temuRvPagerRender(list, pages, okCards.length); }
+  // v9.20.4 — hidden products are left out of upload / titles / counts ("Unticked" view excepted: it is only for looking)
+  { const next = f === 'off' ? new Set() : hidden;
+    const changed = next.size !== TemuRvHidden.size || [...next].some(id => !TemuRvHidden.has(id));
+    TemuRvHidden = next;
+    if (changed) { TemuLast = null; temuGetQueuedRows().then(rs => { try { temuUpdateReviewCount(rs); temuScheduleReady(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }).catch(() => {}); } }
   const n = list.querySelector('.temu-rv-tools-n');
   if (n) n.textContent = (q || f !== 'all') ? `${shown} of ${total}` : `${total} products`;
   let empty = list.querySelector('.temu-rv-filter-empty');
@@ -17706,6 +18303,13 @@ async function temuRvFilterBulk(act, list) {
     }
     toast(act === 'img-on' ? `✨ ${n} product${n === 1 ? '' : 's'} selected for image editing` : `✨ removed from ${n} product${n === 1 ? '' : 's'}`, 'ok');
     try { temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    return;
+  }
+  if (act === 'unmark') {   // v9.18.1 — "upload these again": the listed mark of the ACTIVE store is removed for the products shown
+    const its = cards.map(c => c.dataset.url).filter(Boolean).map(url => ({ url }));
+    const n = await temuUnmarkListed(its);
+    toast(n ? `↺ ${n} product${n === 1 ? '' : 's'} unmarked in "${temuActiveStoreName() || 'default'}" — tick them and upload again` : 'None of the shown products was marked in this store', n ? 'ok' : 'info');
+    try { temuUpdateSrcInfo(); temuScheduleReady(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     return;
   }
   if (act === 'relearn') {
@@ -17741,7 +18345,7 @@ async function temuRvFilterBulk(act, list) {
 }
 function temuUpdateActionBar(rows) {
   const bar = document.querySelector('#temuReviewList .temu-rv-actionbar'); if (!bar) return;
-  const n = rows.filter(r => !TemuReviewExcluded.has(r.id)).length;
+  const n = rows.filter(r => !temuRvOff(r.id)).length;
   bar.querySelector('.temu-rv-ab-n').innerHTML = `<b>${n}</b> selected`;
   bar.classList.toggle('none', !n);
   // ✨ Images works on the ✨ ticks (separate from the upload tick)
@@ -18060,7 +18664,7 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
   $('temuGptDefaultPromptBtn')?.addEventListener('click', () => { ta.value = ZH_GPT_DEFAULT_PROMPT; chrome.storage.local.set({ [KEY]: ta.value }); toast('Default prompt restored', 'ok'); });
   // builds the numbered list of the CHECKED products and remembers their ids (so the answer can only land on them)
   const makeBatch = async () => {
-    const rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+    const rows = (await temuGetQueuedRows()).filter(r => !temuRvOff(r.id));
     if (!rows.length) { toast('Tick the products first', 'warn'); return null; }
     const titles = rows.map(r => {
       const card = document.querySelector(`.temu-rv-card[data-id="${r.id}"]`);
@@ -18220,7 +18824,7 @@ async function temuAiBulkRewrite(action = 'rewrite') {
   try {
     rows = await temuGetQueuedRows();
     // Filter ONLY products whose checkbox is checked!
-    const targetRows = rows.filter(r => !TemuReviewExcluded.has(r.id));
+    const targetRows = rows.filter(r => !temuRvOff(r.id));
     if (!targetRows.length) {
       toast('No checked product selected! Tick a checkbox first.', 'warn');
       return;
@@ -18742,7 +19346,7 @@ async function temuStartBulkImageEdit(opts = {}) {
   // v9.16 — warn before the usual daily limit (counter per engine / Gemini account)
   try {
     const need = queue.reduce((n, q) => n + Math.max(1, q.stages?.length || 1), 0), room = await zhDailyRoom(engine);
-    if (room.usual && need > room.left) {
+    if ((room.real || room.hit) && room.usual && need > room.left) {   // only a limit Gemini / Flow really showed (not the guess)
       const nm = (engine === 'auto' ? 'gemini' : engine).replace(/^./, c => c.toUpperCase());
       TemuImgStepper.limitWarn = `⚠ ${nm}: ~${room.left} left today (usual limit ~${room.usual}), this run needs ~${need}`;
       toast(`${TemuImgStepper.limitWarn}. ${engine === 'flow' ? '' : 'At the limit it switches account / Flow.'}`, 'warn');
@@ -19850,7 +20454,7 @@ function initTemuExport() {
       const rep = $('temuReport'); if (rep) rep.textContent += `\n✓ ${TemuLast.items.length} products listed mark kiye`;
       temuUpdateSrcInfo();
     })();
-    if (e.target.closest('#temuAutoBtn')) temuAutoUpload();
+    if (e.target.closest('#temuAutoBtn')) temuStartUploadFlow();   // v9.17 — confirm sheet first, then the upload
     if (e.target.closest('#temuFixDraftsBtn')) temuFixDrafts();
     if (e.target.closest('#temuLearnAttrBtn')) temuLearnAttributes();
     if (e.target.closest('#temuStoreExportBtn')) temuStoreExport();
@@ -21557,7 +22161,8 @@ function temuSyncSrcSeg() {
     try { chrome.storage.local.get(['zhTemuBatchName', 'zhTemuBatchLast'], r => { if (!batchInp.value && typeof r?.zhTemuBatchName === 'string') { batchInp.value = r.zhTemuBatchName; updateBatchCount(); } if (r?.zhTemuBatchLast) temuShowLastBatch(r.zhTemuBatchLast); }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     let _bnT = null;
     const saveBatchName = () => { clearTimeout(_bnT); _bnT = setTimeout(() => { try { chrome.storage.local.set({ zhTemuBatchName: batchInp.value.trim().slice(0, 60) }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }, 300); };
-    batchInp.addEventListener('input', () => { updateBatchCount(); saveBatchName(); });
+    batchInp.addEventListener('input', () => { updateBatchCount(); saveBatchName(); const v = batchInp.value.trim().toLowerCase(); document.querySelectorAll('#temuBatchChips .tb-chip').forEach(x => x.classList.toggle('on', x.dataset.batch.toLowerCase() === v)); });
+    temuBatchChipsInit();   // v9.17 — recent batch names
     batchInp.addEventListener('change', saveBatchName); batchInp.addEventListener('blur', saveBatchName);
     updateBatchCount();
   }
@@ -21572,7 +22177,7 @@ function temuSyncSrcSeg() {
     const obs = new MutationObserver(() => {
       const busy = autoBtn.disabled && TemuUploadBusy;   // v9.15.1 — disabled by the Ready checklist ≠ processing
       autoBtnSpinner?.classList.toggle('hidden', !busy);
-      if (autoBtnTxt) autoBtnTxt.textContent = busy ? 'Processing...' : 'Export + Upload to Temu';
+      if (autoBtnTxt) { if (busy) autoBtnTxt.textContent = 'Processing...'; else temuUploadBtnText(); }
     });
     obs.observe(autoBtn, { attributes: true, attributeFilter: ['disabled'] });
   }
@@ -21799,8 +22404,9 @@ function tlcPageRead(title, prev, mode) {   // mode 'paste' = whole title at onc
   })();
 }
 async function tlcRead(tab, title, prev, mode) {
-  const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageRead, args: [title, prev || [], mode || 'paste'] });
-  return r?.result || { error: 'no_result' };
+  // v9.17.3 — a covered / sleeping Temu page can keep this call open for ever: give up after 75 s (typing letter by letter needs time)
+  const out = await tlcLimit(chrome.scripting.executeScript({ target: { tabId: tab.id }, func: tlcPageRead, args: [title, prev || [], mode || 'paste'] }).then(x => x?.[0]?.result), 75000, { error: 'timeout' });
+  return out || { error: 'no_result' };
 }
 // runs INSIDE the Temu page: read-only snapshot (no typing, no clicking)
 function tlcPageSnap() {
@@ -21907,6 +22513,7 @@ function tlcApplyPick(cfg, it, pick) {
   const _k = same ? same[0] : key; const _st = zhStripSourceNames(it.title || '');
   [it.title, _st, temuCleanTitle(it.title, cfg), temuCleanTitle(_st, cfg)].forEach(t => temuLearnExample(cfg, t, _k));
   try { if (it.url) { cfg.cat_overrides = cfg.cat_overrides || {}; cfg.cat_overrides[temuSourceIdentity(it.url)] = _k; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  temuTrustCat(cfg, it.url, _k);   // v9.17.5 — Temu / you picked it for this product: stays good even after a new title
   return _k;
 }
 // v9.15 — ledger of every category you have already picked (title → Temu path). Saved at once, so nothing has to be learned twice.
@@ -21924,13 +22531,16 @@ async function tlcLedgerPut(title, path) {
 // enough "smart words" (the product words — brand, sizes, counts and filler like Halloween / bulk / wrapped are left out):
 // at least 2 shared words, or for a short title (≤ 3 smart words) 1 strong word (a word that is also in the category name).
 const TLC_GENERIC = new Set('halloween christmas easter valentine valentines holiday holidays thanksgiving party parties gift gifts bulk individually wrapped wrap bag bags box boxes treat treats favor favors fun snack snacks mix mixed variety bundle value pouch pouches jar tub container resealable sharing share kid kids adult adults men women girl boy perfect great ideal office home school bowl candy-bowl stocking stuffer stuffers goodie goody basket baskets filler fillers pinata trick bowl'.split(' '));
+// v9.17.1 — size / pack / form words tell nothing about WHAT the product is ("Mini & Fun Size", "Single Serve", "Flavored",
+// "Spooky Mix" made Mars chocolate look like Coated Fruits and hot cocoa like coffee pods) → they never count either
+'pcs pce ct oz lbs qty mini minis size sized single serve serving servings assorted assortment flavor flavored flavour flavoured count piece pack packs packed packet multipack multi case ounce pound gram original classic spooky king standard regular large small medium jumbo family premium edition limited new total net per each pantry supply supplies favorite favourite delicious tasty sweet sweets'.split(' ').forEach(w => TLC_GENERIC.add(w));
 function tlcSmartWords(title, brand) {
   const b = new Set(tlcToks(brand).map(tlcStem));
   const t = String(title || '').replace(/^\s*\d+\s*pack\s*[-–]\s*/i, '');
   return [...new Set(tlcToks(t).map(tlcStem).filter(w => w.length >= 3 && !TLC_STOP.has(w) && !TLC_GENERIC.has(w) && !b.has(w)))];
 }
 function tlcLearnedOf(title, path) {
-  const leaf = new Set(tlcToks(String(path || '').split(' / ').pop()).map(tlcStem).filter(w => !TLC_STOP.has(w)));   // the last part only ("Lollipops"), so two sister categories never look alike
+  const leaf = new Set(tlcToks(String(path || '').split(' / ').pop()).map(tlcStem).filter(w => !TLC_STOP.has(w) && !TLC_GENERIC.has(w)));   // the last part only ("Lollipops"), so two sister categories never look alike
   return { words: new Set(tlcSmartWords(title, '')), leaf, path, title };
 }
 // best learned product for this title, or null (also null when two different categories fit equally well)
@@ -21952,7 +22562,8 @@ function tlcSmartFind(it, learned) {
     const leafOwn = [...L.leaf].filter(telling);
     const leafHit = leafOwn.filter(w => ws2.includes(w));
     const leafOk = leafOwn.length > 0 && leafHit.length >= Math.ceil(leafOwn.length * 0.6);   // "Coated Fruits" needs BOTH words, "Lollipops" its one word
-    if (shared.length < 2 && !leafOk) continue;
+    // v9.17.1 — 2 shared words are not enough for a long title: at least ~a third of its telling words must match too
+    if (!leafOk && shared.length < Math.max(2, Math.ceil(ws2.length * 0.34))) continue;
     const score = shared.length + (leafOk ? leafHit.length * 1.5 : 0);
     if (score > bestScore + 0.01) { best = L; bestScore = score; tie = false; }
     else if (Math.abs(score - bestScore) <= 0.01 && best && best.path !== L.path) tie = true;
@@ -21988,8 +22599,10 @@ function tlcShowSmartUndo() {
 }
 // 2 "Add new product" tabs (opened in the background) — each learns its own titles at the same time
 const TLC_TABS = 2;
+// v9.17.3 — never wait forever on one Chrome call (learning used to sit at "Opening 2 Temu pages…")
+const tlcLimit = (p, ms, fallback) => Promise.race([p, new Promise(r => setTimeout(() => r(fallback), ms))]);
 async function tlcEnsureTabs(n) {
-  let tabs = await chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] });
+  let tabs = await tlcLimit(chrome.tabs.query({ url: ['https://seller.temu.com/goods-category.html*'] }), 8000, []);
   const waitDone = id => new Promise(res => {
     const done = () => { chrome.tabs.onUpdated.removeListener(fn); res(); };
     const fn = (tid, info) => { if (tid === id && info.status === 'complete') done(); };
@@ -22003,17 +22616,22 @@ async function tlcEnsureTabs(n) {
   if (tabs[0]) { try { await chrome.tabs.update(tabs[0].id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
   const made = [];
   while (tabs.length + made.length < n) {
-    let t;
-    if (!tabs.length && !made.length) t = await chrome.tabs.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', active: true });
-    else {
-      const k = made.length + tabs.length;
-      const w = await chrome.windows.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', focused: false, width: 900, height: 760, left: 80 + k * 50, top: 60 + k * 50 });
-      t = w.tabs?.[0] || (await chrome.tabs.query({ windowId: w.id }))[0];
-    }
+    let t = null;
+    const k = made.length + tabs.length;
+    tlcSay(`Opening Temu page ${k + 1} of ${n}…`);
+    try {
+      if (!k) t = await tlcLimit(chrome.tabs.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', active: true }), 15000, null);
+      else {
+        const w = await tlcLimit(chrome.windows.create({ url: 'https://seller.temu.com/goods-category.html?from_source=1', focused: false, width: 900, height: 760, left: 80 + k * 50, top: 60 + k * 50 }), 15000, null);
+        t = w ? (w.tabs?.[0] || (await chrome.tabs.query({ windowId: w.id }))[0]) : null;
+      }
+    } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    if (!t) { if (!k) throw new Error('Could not open the Temu "Add new product" page'); break; }   // the extra page failed → go on with fewer tabs
     made.push(t);
     await tlcRand(1.5, 3);   // not all at once
   }
-  for (const t of made) await waitDone(t.id);
+  tlcSay('Waiting for the Temu page' + (made.length > 1 ? 's' : '') + ' to load…');
+  await Promise.all(made.map(t => waitDone(t.id)));
   if (made.length) await sleep(2500);
   tlcMadeTabs = made.map(t => t.id);   // closed again when learning ends (your own Temu tabs are never closed)
   return [...tabs, ...made].slice(0, n);
@@ -22027,6 +22645,7 @@ async function tlcCloseMadeTabs() {
 // forget the saved category of one product: its override, its learned examples and its ledger entry (used by "🔁 Learn again")
 function tlcForget(cfg, it) {
   try { if (it.url && cfg.cat_overrides) delete cfg.cat_overrides[temuSourceIdentity(it.url)]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { if (it.url && cfg.cat_trusted) delete cfg.cat_trusted[temuSourceIdentity(it.url)]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   try {
     const st = zhStripSourceNames(it.title || '');
     const sigs = new Set([it.title, st, temuCleanTitle(it.title, cfg), temuCleanTitle(st, cfg)].map(t => { const { tokens } = temuExTokens(t); return tokens.length >= 2 ? tokens.slice().sort().join(' ') : ''; }).filter(Boolean));
@@ -22040,12 +22659,12 @@ async function temuLearnCategories(opts = {}) {
   if (opts instanceof Event || typeof opts !== 'object' || !opts) opts = {};
   if (TlcState?.running) { $('temuLearnModal')?.classList.remove('hidden'); return; }
   const cfg0 = temuGetCfg();
-  let rows = (await temuGetQueuedRows()).filter(r => !TemuReviewExcluded.has(r.id));
+  let rows = (await temuGetQueuedRows()).filter(r => !temuRvOff(r.id));
   rows = JSON.parse(JSON.stringify(rows));
   const { items } = temuEnrich(rows, cfg0);
   const todo = [], seen = new Set();
   // v9.15 — SAME test as the ⚠ mark in the list: only products that show ⚠ (or have no category) are checked
-  const doubtfulIt = (it, cfgX) => { if (it._force) return true; try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); return temuCatDoubtful(t, pr); } catch (_) { return false; } };
+  const doubtfulIt = (it, cfgX) => { if (it._force) return true; try { if (!temuCatFor(it.url, it.title, cfgX)[0]) return true; /* same test the export uses: no category = must learn */ const t = zhStripSourceNames(it.title || ''); const [kx, pr] = temuCatFor(it.url, temuCleanTitle(t, cfgX), cfgX); if (temuCatTrusted(it.url, kx, cfgX)) return false; return temuCatDoubtful(t, pr); } catch (_) { return false; } };
   if (Array.isArray(opts.ids) && opts.ids.length) {
     // "🔁 Learn again" (filter bar): forget what was saved for exactly these products and ask Temu again
     const want = new Set(opts.ids), cfgF = temuGetCfg(), forgetTitles = [];
@@ -22057,23 +22676,28 @@ async function temuLearnCategories(opts = {}) {
   const learned = Object.entries(L0).map(([t, v]) => v?.path ? tlcLearnedOf(t, v.path) : null).filter(Boolean);
   // 1) exact same title picked before → re-applied silently; 2) smart words match a learned product → that category, no Temu needed
   let replayed = 0, smart = 0; const smartList = []; TlcSmartLast = [];
+  // v9.17.2 — a smart guess that the list would still mark ⚠ (doubtful) is no answer: then Temu decides instead
+  const smartOk = (it, path) => { try { const p = Object.values(temuGetCfg().category_profiles || {}).find(x => (x.full_path || '') === path); return !!p && !temuCatDoubtful(zhStripSourceNames(it.title || ''), p); } catch (_) { return false; } };
+  const smartFind = it => { if (it._force) return null; const s = tlcSmartFind(it, learned); return s && smartOk(it, s.path) ? s : null; };
   const applySmart = async (it, path) => { const c = temuGetCfg(); tlcApplySmart(c, it, path); await temuSaveCfg(c); try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } };
   { const cfgR = temuGetCfg();
     for (let i = todo.length - 1; i >= 0; i--) {
       if (todo[i]._force) continue;   // "Learn again": Temu decides, no replay / guess
       const hit = L0[tlcLedgerKey(todo[i].title)];
       if (hit?.path) { tlcApplyPick(cfgR, todo[i], { path: hit.path, match: '' }); todo.splice(i, 1); replayed++; continue; }
-      const sm = tlcSmartFind(todo[i], learned);
+      const sm = smartFind(todo[i]);
       if (sm) { tlcApplySmart(cfgR, todo[i], sm.path); smartList.push(`${todo[i].title.slice(0, 40)} → ${sm.path.split(' / ').pop()}`); todo.splice(i, 1); smart++; }
     }
     if (replayed || smart) { await temuSaveCfg(cfgR); try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       toast(`${replayed ? `${replayed} re-applied` : ''}${replayed && smart ? ' · ' : ''}${smart ? `🧠 ${smart} by similar titles` : ''} — no Temu needed`, 'ok'); } }
-  if (!todo.length) { toast('All products already have a good category ✓', 'ok'); return; }
+  if (!todo.length) { if (!smart) toast(replayed ? 'Nothing left to ask Temu ✓' : 'All products already have a good category ✓', 'ok'); return; }
   TlcState = { running: true, stop: false, late: [] };
   const modal = $('temuLearnModal'); modal.classList.remove('hidden'); tlcWirePaste();
-  $('tlcClose').onclick = () => { TlcState.stop = true; modal.classList.add('hidden'); };
+  // ✕ = stop; "Learn categories" can be started again at once (a stuck run no longer blocks the next one)
+  $('tlcClose').onclick = () => { TlcState.stop = true; TlcState.running = false; modal.classList.add('hidden'); tlcCloseMadeTabs(); };
   let saved = 0, k = 0, tabs = [];
   const total = todo.length;
+  { const c = $('tlcCount'); if (c) c.textContent = `0 / ${total}`; }   // v9.17.3 — not the old "1 / 1" of the last run
   const applyAndLearn = async (it, path) => {
     const cfg = temuGetCfg(); tlcApplyPick(cfg, it, { path, match: '' }); await temuSaveCfg(cfg); saved++;
     tlcLedgerPut(it.title, path); learned.push(tlcLearnedOf(it.title, path));
@@ -22100,14 +22724,22 @@ async function temuLearnCategories(opts = {}) {
         while (queue.length && !TlcState.stop) {
           const it = queue.shift();
           if (!doubtfulIt(it, temuGetCfg())) { push({ it, covered: true }); continue; }
-          const sm = it._force ? null : tlcSmartFind(it, learned);
+          const sm = smartFind(it);
           if (sm) { push({ it, smart: sm }); continue; }
           let res = null;
           for (const mode of ['paste', 'type']) {
             if (res || TlcState.stop) break;
             note(wi, `${T}🤖 ${mode === 'paste' ? 'pasting' : 'typing'} "${it.title.slice(0, 32)}…" — waiting for Temu`);
             try {
-              const r = await tlcRead(tab, it.title, [], mode);
+              // v9.17.3 — Temu suggests only on a page that is really on screen: the tabs take turns at the front (like the
+              // Gemini tabs) — this tab + its window come forward for the paste / read, then the other tab gets its turn
+              const r = await zhFrontTurn(tab.id, async () => {
+                try { if (tab.windowId != null) await tlcLimit(chrome.windows.update(tab.windowId, { focused: true }), 5000, null); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+                await sleep(400);
+                return tlcRead(tab, it.title, [], mode);
+              });
+              // v9.18.7 — the timed-out typing may still run inside the page: reload it first, so two attempts never type into the same box
+              if (r?.error === 'timeout') { note(wi, `${T}Temu did not answer in time — reloading the page, then trying again…`); try { await tlcReload(tab); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
               if (r?.error === 'no_input') { res = { error: 'no_input' }; break; }
               if (r?.options?.length) res = { options: r.options };
             } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
@@ -22150,7 +22782,7 @@ async function temuLearnCategories(opts = {}) {
       if (TlcState.stop) break;
       if (!doubtfulIt(it, temuGetCfg())) continue;
       $('tlcTitle').textContent = it.title; $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
-      const sm = it._force ? null : tlcSmartFind(it, learned);
+      const sm = smartFind(it);
       if (sm) { await applySmart(it, sm.path); smart++; smartList.push(`${it.title.slice(0, 40)} → ${sm.path.split(' / ').pop()}`); continue; }
       let res = null;
       try { const cfgM = temuGetCfg(); const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM).filter(x => x.prof?.full_path).sort((a, b) => b.score - a.score); const top = lst[0]; if (top && top.score >= 10) res = { pasted: top.prof.full_path, own: top.prof.name }; else { const mw = temuCatMultiWord(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgM), cfgM); if (mw?.prof?.full_path) res = { pasted: mw.prof.full_path, own: mw.prof.name }; } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }

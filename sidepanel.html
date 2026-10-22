@@ -1205,16 +1205,20 @@
               <svg class="i i-xs" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
               <input id="temuBatchNameInp" class="inp temu-batch-name-inp" type="text" placeholder="Batch name (optional)..." maxlength="60" autocomplete="off" /><span id="temuBatchNameCount" class="temu-batch-name-count">0/60</span>
             </div>
+            <!-- v9.17 — recent batch names, one click fills the box -->
+            <div id="temuBatchChips" class="tb-chips" hidden></div>
             <!-- v9.15.1 — Ready checklist: what will be uploaded and what still needs you -->
             <div id="temuReadyBox" class="temu-ready" aria-live="polite"></div>
             <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button">
               <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt">Export + Upload to Temu</span>
+              <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt" class="temu-auto-txt">Export + Upload to Temu</span>
             </button>
             <button id="temuCancelBtn" class="btn btn-ghost temu-cancel-btn" type="button" hidden title="Stop this export / upload">
               <svg class="i i-xs" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               <span>Cancel</span>
             </button>
+            <!-- v9.17 — result of the last upload as a card (numbers + next actions) -->
+            <div id="temuResultCard" class="tru" hidden aria-live="polite"></div>
             <details class="temu-more-tools" id="temuMoreTools">
               <summary><span>More tools</span><small>Export file only · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
             <div class="temu-actions-sub-bar">
@@ -1279,99 +1283,110 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M17 6H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H6"/></svg>
                 <div>
-                  <div class="temu-card-title">Pricing &amp; Inventory</div>
-                  <div class="temu-card-subtitle">Automated markup multipliers, price boundaries and stock counts</div>
+                  <div class="temu-card-title">Price &amp; stock</div>
+                  <div class="temu-card-subtitle">Temu par price kitni lagegi, aur kitna stock dikhega</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
 
-            <!-- v9.15.1 — pricing strategy: only the chosen strategy's settings are used (and shown) -->
-            <div class="temu-setting-box tg-px-strategy">
-              <div class="temu-setting-lbl">Pricing strategy</div>
-              <select id="tgPriceStrategy" class="inp">
-                <option value="gap">Cost + gap (tiers) — default</option>
-                <option value="legacy">Multiplier (Price ×, Min / Max, Department)</option>
+            <!-- v9.17 — simple view: 1) how the price is made  2) live example  3) the few numbers that matter; the rest under "Advanced" -->
+            <div class="tg-step">
+              <div class="tg-step-h"><b>1</b><span>Price kaise banegi?</span></div>
+              <select id="tgPriceStrategy" class="inp" aria-label="Pricing strategy">
+                <option value="gap">Cost + gap — source price par ek fix raqam jodo (recommended)</option>
+                <option value="legacy">Multiplier — source price × number (Min / Max ke saath)</option>
               </select>
-              <span class="temu-setting-sub">Only the settings of the chosen strategy are used</span>
             </div>
 
-            <div class="temu-settings-grid temu-grid-3">
-              <div class="temu-setting-box" data-px-mode="legacy">
-                <div class="temu-setting-lbl">Price Multiplier</div>
-                <div class="temu-input-with-affix">
-                  <input id="tgPx2" class="inp" placeholder="5" inputmode="decimal" />
-                  <span class="temu-affix">×</span>
-                </div>
-                <span class="temu-setting-sub">Base price multiplier</span>
-              </div>
+            <div class="tg-step">
+              <div class="tg-step-h"><b>2</b><span>Misaal — in settings se price</span></div>
+              <div id="tgPxExample" class="tg-px-example" aria-live="polite"></div>
+              <div class="tg-px-note">Har product ki cents alag hoti hain. Kabhi source ke 2× se kam nahi (Frozen 3×). "N Pack -" title par source × N.</div>
+            </div>
 
-              <div class="temu-setting-box">
-                <div class="temu-setting-lbl">List Price Multiplier</div>
-                <div class="temu-input-with-affix">
-                  <input id="tgListPx" class="inp" placeholder="1.25" inputmode="decimal" title="Base price × ye = List (crossed-out) price" />
-                  <span class="temu-affix">×</span>
+            <div class="tg-step" data-px-mode="gap">
+              <div class="tg-step-h"><b>3</b><span>Kitna jodna hai (gap)</span></div>
+              <div id="tgGapTable" class="tg-gap-table"></div>
+              <div class="temu-settings-grid temu-grid-2 tg-compact-grid">
+                <div class="temu-setting-box tg-gap-edit">
+                  <div class="temu-setting-lbl">Gap list (badalne ke liye)</div>
+                  <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
+                    <input id="tgGap" class="inp" placeholder="10:50, 25:45, 60:40, 120:60, 40%" title="cost up to : gap in $. Example 10:50 = cost up to 10 → price = cost + 50 (cost 10 = 60). The last % is used above the last tier." /></div>
+                  <span class="temu-setting-sub">"10:50" = cost $10 tak → +$50 · aakhir mein "40%" = us se upar</span>
                 </div>
-                <span class="temu-setting-sub">Crossed-out MSRP</span>
-              </div>
-
-              <div class="temu-setting-box" data-px-mode="gap">
-                <div class="temu-setting-lbl">Price gap tiers</div>
-                <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                  <input id="tgGap" class="inp" placeholder="10:50, 25:45, 60:40, 120:60, 40%" title="cost up to : gap in $. Example 10:50 = cost up to 10 → price = cost + 50 (cost 10 = 60). The last % is used above the last tier." /></div>
-                <span class="temu-setting-sub">Cost up to : gap</span>
-              </div>
-              <div class="temu-setting-box" data-px-mode="gap">
-                <div class="temu-setting-lbl">Frozen extra ($)</div>
-                <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                  <input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
-                <span class="temu-setting-sub">Added for Frozen</span>
-              </div>
-
-              <div class="temu-setting-box" data-px-mode="legacy">
-                <div class="temu-setting-lbl">Min Price ($)</div>
-                <div class="temu-input-with-affix">
-                  <span class="temu-prefix">$</span>
-                  <input id="tgMinPx" class="inp" placeholder="80" inputmode="decimal" title="Har product ki kam se kam Temu price" />
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Frozen par extra</div>
+                  <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
+                    <input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
+                  <span class="temu-setting-sub">Frozen products par gap ke upar</span>
                 </div>
-                <span class="temu-setting-sub">Floor price</span>
-              </div>
-
-              <div class="temu-setting-box" data-px-mode="legacy">
-                <div class="temu-setting-lbl">Max Price ($)</div>
-                <div class="temu-input-with-affix">
-                  <span class="temu-prefix">$</span>
-                  <input id="tgMaxPx" class="inp" placeholder="999" inputmode="decimal" title="Maximum Temu price per product" />
-                </div>
-                <span class="temu-setting-sub">Ceiling price</span>
-              </div>
-
-              <div class="temu-setting-box">
-                <div class="temu-setting-lbl">Min Quantity</div>
-                <div class="temu-input-with-affix">
-                  <input id="tgQtyMin" class="inp" placeholder="250" inputmode="numeric" />
-                  <span class="temu-affix">pcs</span>
-                </div>
-                <span class="temu-setting-sub">Stock range min</span>
-              </div>
-
-              <div class="temu-setting-box">
-                <div class="temu-setting-lbl">Max Quantity</div>
-                <div class="temu-input-with-affix">
-                  <input id="tgQtyMax" class="inp" placeholder="500" inputmode="numeric" />
-                  <span class="temu-affix">pcs</span>
-                </div>
-                <span class="temu-setting-sub">Stock range max</span>
               </div>
             </div>
 
-            <div class="temu-hint-pill" data-px-mode="legacy">
-              <span>💡</span>
-              <div>Base price = source price × multiplier (Min $ aur Max $ ke beech, .99 par). Kabhi source ke 2× se kam nahi (Frozen 3×). Quantity min–max ke beech random.</div>
+            <div class="tg-step" data-px-mode="legacy">
+              <div class="tg-step-h"><b>3</b><span>Multiplier aur had (limit)</span></div>
+              <div class="temu-settings-grid temu-grid-3 tg-compact-grid">
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Price ×</div>
+                  <div class="temu-input-with-affix">
+                    <input id="tgPx2" class="inp" placeholder="5" inputmode="decimal" />
+                    <span class="temu-affix">×</span>
+                  </div>
+                  <span class="temu-setting-sub">Source × ye number</span>
+                </div>
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Kam se kam</div>
+                  <div class="temu-input-with-affix">
+                    <span class="temu-prefix">$</span>
+                    <input id="tgMinPx" class="inp" placeholder="80" inputmode="decimal" title="Har product ki kam se kam Temu price" />
+                  </div>
+                  <span class="temu-setting-sub">Lowest Temu price</span>
+                </div>
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Zyada se zyada</div>
+                  <div class="temu-input-with-affix">
+                    <span class="temu-prefix">$</span>
+                    <input id="tgMaxPx" class="inp" placeholder="999" inputmode="decimal" title="Maximum Temu price per product" />
+                  </div>
+                  <span class="temu-setting-sub">Highest Temu price</span>
+                </div>
+              </div>
             </div>
-            <div class="temu-hint-pill" data-px-mode="gap">
-              <span>💡</span>
-              <div>Base price = source cost + us tier ka gap (Frozen par extra), kabhi source ke 2× se kam nahi (Frozen 3×); cents har product ke liye fix. "N Pack -" titles par source × N. Quantity min–max ke beech random.</div>
+
+            <div class="tg-step">
+              <div class="tg-step-h"><b>4</b><span>Stock (quantity)</span></div>
+              <div class="temu-settings-grid temu-grid-2 tg-compact-grid">
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Kam se kam</div>
+                  <div class="temu-input-with-affix">
+                    <input id="tgQtyMin" class="inp" placeholder="250" inputmode="numeric" />
+                    <span class="temu-affix">pcs</span>
+                  </div>
+                </div>
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">Zyada se zyada</div>
+                  <div class="temu-input-with-affix">
+                    <input id="tgQtyMax" class="inp" placeholder="500" inputmode="numeric" />
+                    <span class="temu-affix">pcs</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tg-px-note">Har product ko in dono ke beech koi bhi number milta hai.</div>
             </div>
+
+            <details class="tg-adv" data-settings-fold="pricing-advanced">
+              <summary><span>Advanced</span><small>List price (kati hui price)</small></summary>
+              <div class="temu-settings-grid temu-grid-2 tg-compact-grid">
+                <div class="temu-setting-box">
+                  <div class="temu-setting-lbl">List price ×</div>
+                  <div class="temu-input-with-affix">
+                    <input id="tgListPx" class="inp" placeholder="1.25" inputmode="decimal" title="Base price × ye = List (crossed-out) price" />
+                    <span class="temu-affix">×</span>
+                  </div>
+                  <span class="temu-setting-sub">Temu price × ye = kati hui (MSRP) price</span>
+                </div>
+              </div>
+            </details>
 
             <!-- v9.12.0 — department pricing -->
             <details class="tg-dept-wrap" data-settings-fold="department-pricing" data-px-mode="legacy">
@@ -1394,16 +1409,16 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/></svg>
                 <div>
-                  <div class="temu-card-title">Description &amp; Bullet Points</div>
-                  <div class="temu-card-subtitle">Shorter, cleaner bullets (max 6) and a description built from the hunt bullets</div>
+                  <div class="temu-card-title">Description &amp; bullets</div>
+                  <div class="temu-card-subtitle">Temu file mein product ki details (6 points tak)</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
             <div class="temu-switches-list">
               <label class="temu-switch-row" for="tgDescOn">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Put the description + bullets in the Temu file</div>
-                  <div class="temu-switch-desc">Links, emojis, web items like "Add to cart", store names (Amazon/Walmart…) and the words below are removed.</div>
+                  <div class="temu-switch-title">Description + bullets file mein daalo</div>
+                  <div class="temu-switch-desc">On = details bhi upload hongi. Links, emojis, "Add to cart", Amazon/Walmart jaise naam khud hat jate hain.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgDescOn" class="temu-toggle-chk" checked />
@@ -1411,17 +1426,20 @@
                 </div>
               </label>
             </div>
-            <div class="temu-field-block">
-              <label class="temu-field-header" for="tgAvoidWords">
-                <span class="temu-field-title">Avoid words</span>
-                <span class="temu-badge-soft">Comma-separated</span>
-              </label>
-              <textarea id="tgAvoidWords" class="inp temu-full-inp tg-avoid-inp" rows="3" placeholder="e.g. Best Seller, Guaranteed, FDA approved, Cure, Free shipping"></textarea>
-              <div class="tg-avoid-foot">
-                <div class="temu-field-hint">Jis line mein in mein se koi lafz ho, woh description/bullets se poori hata di jati hai (koi jumla adhoora nahi rehta).</div>
-                <button id="tgAvoidReset" class="btn btn-ghost btn-xs" type="button">↺ Default list</button>
+            <details class="tg-adv" data-settings-fold="avoid-words">
+              <summary><span>Advanced</span><small>Mana lafz (in wali line hat jati hai)</small></summary>
+              <div class="temu-field-block">
+                <label class="temu-field-header" for="tgAvoidWords">
+                  <span class="temu-field-title">Ye lafz hon to line hata do</span>
+                  <span class="temu-badge-soft">comma se alag</span>
+                </label>
+                <textarea id="tgAvoidWords" class="inp temu-full-inp tg-avoid-inp" rows="3" placeholder="e.g. Best Seller, Guaranteed, FDA approved, Cure, Free shipping"></textarea>
+                <div class="tg-avoid-foot">
+                  <div class="temu-field-hint">Jis line mein in mein se koi lafz ho, woh poori line hat jati hai (jumla adhoora nahi rehta).</div>
+                  <button id="tgAvoidReset" class="btn btn-ghost btn-xs" type="button">↺ Default list</button>
+                </div>
               </div>
-            </div>
+            </details>
           </div></details>
 
           <!-- 2. Default Package Specs -->
@@ -1429,8 +1447,8 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/></svg>
                 <div>
-                  <div class="temu-card-title">Default Package Specs</div>
-                  <div class="temu-card-subtitle">Fallback dimensions &amp; weight when not detected in category or title</div>
+                  <div class="temu-card-title">Package (weight &amp; size)</div>
+                  <div class="temu-card-subtitle">Jab product ka weight / size na mile, to ye lagega</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
@@ -1442,7 +1460,7 @@
                   <input id="tgW" class="inp" placeholder="1.4" inputmode="decimal" />
                   <span class="temu-affix">lb</span>
                 </div>
-                <span class="temu-setting-sub">Default wzn</span>
+                <span class="temu-setting-sub">Agar na mile</span>
               </div>
               <div class="temu-setting-box">
                 <div class="temu-setting-lbl">Length</div>
@@ -1450,7 +1468,7 @@
                   <input id="tgL" class="inp" placeholder="7.5" inputmode="decimal" />
                   <span class="temu-affix">in</span>
                 </div>
-                <span class="temu-setting-sub">Package L</span>
+                <span class="temu-setting-sub">Lambai</span>
               </div>
               <div class="temu-setting-box">
                 <div class="temu-setting-lbl">Width</div>
@@ -1458,7 +1476,7 @@
                   <input id="tgWd" class="inp" placeholder="5.2" inputmode="decimal" />
                   <span class="temu-affix">in</span>
                 </div>
-                <span class="temu-setting-sub">Package W</span>
+                <span class="temu-setting-sub">Chaurai</span>
               </div>
               <div class="temu-setting-box">
                 <div class="temu-setting-lbl">Height</div>
@@ -1466,40 +1484,44 @@
                   <input id="tgH" class="inp" placeholder="1.5" inputmode="decimal" />
                   <span class="temu-affix">in</span>
                 </div>
-                <span class="temu-setting-sub">Package H</span>
+                <span class="temu-setting-sub">Oonchai</span>
               </div>
               <div class="temu-setting-box">
-                <div class="temu-setting-lbl">Max Skip</div>
+                <div class="temu-setting-lbl">Max weight</div>
                 <div class="temu-input-with-affix">
                   <input id="tgMaxW" class="inp" placeholder="8" inputmode="decimal" title="Is se bhari product export se skip ho jayega" />
                   <span class="temu-affix">lb</span>
                 </div>
-                <span class="temu-setting-sub">Heavy limit</span>
+                <span class="temu-setting-sub">Is se bhari = skip</span>
               </div>
             </div>
 
             <div class="temu-hint-pill">
               <span>⚖️</span>
-              <div>Weight ki tarteeb: hunt se mila weight → category profile → title (smart) → default. "N Pack -" par weight × N. Max Skip se bhari product khud nikal jata hai.</div>
+              <div>Weight pehle hunt se, phir category se, phir title se ("24 oz"), aakhir mein yahan wala. "N Pack -" par weight × N.</div>
             </div>
           </div></details>
+
+          <!-- v9.17 — everything below is rarely changed -->
+          <div class="tg-sec-lbl"><span>Advanced</span><small>kam badalne wali settings</small></div>
 
           <!-- 3. Automation & Rules -->
           <details class="temu-card temu-settings-card" data-settings-fold="automation"><summary class="temu-card-header temu-settings-summary">
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6z"/></svg>
                 <div>
-                  <div class="temu-card-title">Automation &amp; Behaviour</div>
-                  <div class="temu-card-subtitle">Smart listing rules, duplicate prevention, and tab focus</div>
+                  <div class="temu-card-title">Automatic kaam</div>
+                  <div class="temu-card-subtitle">Duplicate rokna, rang / pack pehchanna, weight, tab focus</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
 
             <div class="temu-switches-list">
-              <label class="temu-switch-row" for="tgSkipListed">
+              <!-- v9.20 — no auto skip any more: the tick in the product list decides (filter "Listed" / "Not listed") -->
+              <label class="temu-switch-row" for="tgSkipListed" hidden style="display:none">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Skip Already-Listed Products</div>
-                  <div class="temu-switch-desc">A product already uploaded to this store will not be uploaded again (duplicate prevention).</div>
+                  <div class="temu-switch-title">Pehle se listed product dobara nahi</div>
+                  <div class="temu-switch-desc">Jo product is store par upload ho chuka, woh dobara upload nahi hoga.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgSkipListed" class="temu-toggle-chk" checked />
@@ -1509,8 +1531,8 @@
 
               <label class="temu-switch-row" for="tgSmartVar">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Smart Variation Detection</div>
-                  <div class="temu-switch-desc">Real color → Color; multi-pack → Multipack; single → 1 Pack; otherwise clean fallback values.</div>
+                  <div class="temu-switch-title">Variation khud pehchano</div>
+                  <div class="temu-switch-desc">Asli rang → Color, kai pack → Multipack, ek → 1 Pack; warna neeche wali saaf value.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgSmartVar" class="temu-toggle-chk" checked />
@@ -1520,8 +1542,8 @@
 
               <label class="temu-switch-row" for="tgSmartWeight">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Smart Weight Parsing</div>
-                  <div class="temu-switch-desc">Detect weight from the title automatically:  "24 oz" → 1.7 lb, "3.15 Lb" → 3.5 lb, "2 oz × 6" → 0.9 lb.</div>
+                  <div class="temu-switch-title">Title se weight nikalo</div>
+                  <div class="temu-switch-desc">"24 oz" → 1.7 lb, "3.15 Lb" → 3.5 lb, "2 oz × 6" → 0.9 lb.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgSmartWeight" class="temu-toggle-chk" checked />
@@ -1531,8 +1553,8 @@
 
               <label class="temu-switch-row" for="tgBgUpload">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Return Focus to Tab After Upload</div>
-                  <div class="temu-switch-desc">The Temu tab stays in front during upload (for speed); focus returns to your tab as soon as it reaches 100%.</div>
+                  <div class="temu-switch-title">Upload ke baad apne tab par wapas</div>
+                  <div class="temu-switch-desc">Upload ke dauran Temu tab saamne rehta hai (tez), 100% par aap ka tab wapas aa jata hai.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgBgUpload" class="temu-toggle-chk" checked />
@@ -1547,15 +1569,15 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v15M8 20h8"/></svg>
                 <div>
-                  <div class="temu-card-title">Title &amp; Variation Rules</div>
-                  <div class="temu-card-subtitle">Keyword stripping and variation theme fallbacks</div>
+                  <div class="temu-card-title">Title ke lafz &amp; variation</div>
+                  <div class="temu-card-subtitle">Title se kaunse lafz hatane hain, aur khaali variation ki value</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
 
             <div class="temu-field-block">
               <label class="temu-field-header" for="tgWords">
-                <span class="temu-field-title">Remove Words from Titles</span>
+                <span class="temu-field-title">Title se ye lafz hatao</span>
                 <span class="temu-badge-soft">Comma-separated</span>
               </label>
               <input id="tgWords" class="inp temu-full-inp" placeholder="e.g. Amazon, Walmart, Sam's Club, Prime, Kirkland..." />
@@ -1564,7 +1586,7 @@
 
             <div class="temu-field-block">
               <label class="temu-field-header" for="tgVarValues">
-                <span class="temu-field-title">Fallback Variation Values</span>
+                <span class="temu-field-title">Variation ki saaf values</span>
                 <span class="temu-badge-soft">Comma-separated</span>
               </label>
               <input id="tgVarValues" class="inp temu-full-inp" placeholder="e.g. Standard, Special, New, Classic" />
@@ -1577,8 +1599,8 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/></svg>
                 <div>
-                  <div class="temu-card-title">Store History Maintenance</div>
-                  <div class="temu-card-subtitle">Manage duplicate tracking history for active store</div>
+                  <div class="temu-card-title">Listed history (duplicate list)</div>
+                  <div class="temu-card-subtitle">Is store ke "pehle se listed" products ki list theek karo</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
@@ -1631,109 +1653,72 @@
 
         <!-- ═══════════ TAB: HISTORY ═══════════ -->
         <div class="temu-pane" data-tpane="history">
-          <!-- Today's Progress Card -->
-          <div class="temu-card temu-prog-card">
-            <div class="temu-prog-head">
-              <div class="temu-prog-head-left">
-                <div class="temu-prog-ico">
-                  <svg viewBox="0 0 24 24" class="i"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                </div>
+          <!-- v9.17 — History redesign: today card (tiles + bar + 7-day chart) and upload records as readable cards -->
+          <div class="temu-card th-today">
+            <div class="th-head">
+              <div class="th-head-l">
+                <div class="th-ico"><svg viewBox="0 0 24 24" class="i"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
                 <div>
-                  <div class="temu-prog-title">Today's Progress</div>
-                  <div id="temuTodayDate" class="temu-prog-sub">Fri, Sep 25</div>
+                  <div class="th-title">Aaj</div>
+                  <div id="temuTodayDate" class="th-sub">—</div>
                 </div>
               </div>
-              <div class="temu-prog-target-wrap">
-                <span class="temu-lbl-inline">Daily Target</span>
-                <input id="temuDailyTarget" type="number" min="1" max="999" value="50" class="inp temu-target-inp" />
-                <span class="temu-lbl-inline">/ day</span>
-              </div>
+              <label class="th-target" title="Roz kitne products list karne hain">
+                <span>Target</span>
+                <input id="temuDailyTarget" type="number" min="1" max="999" value="50" class="inp" />
+                <span>/ din</span>
+              </label>
             </div>
 
-            <!-- 4 Metric Cards -->
-            <div class="temu-metrics-grid">
-              <div class="temu-metric-card temu-metric-ok">
-                <div class="temu-metric-badge">
-                  <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                </div>
-                <div id="temuMetricListed" class="temu-metric-val">0</div>
-                <div class="temu-metric-lbl">LISTED</div>
-              </div>
-              <div class="temu-metric-card temu-metric-up">
-                <div class="temu-metric-badge">
-                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                </div>
-                <div id="temuMetricUploads" class="temu-metric-val">0</div>
-                <div class="temu-metric-lbl">UPLOADS</div>
-              </div>
-              <div class="temu-metric-card temu-metric-err">
-                <div class="temu-metric-badge">
-                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                </div>
-                <div id="temuMetricErrors" class="temu-metric-val">0</div>
-                <div class="temu-metric-lbl">ERRORS</div>
-              </div>
-              <div class="temu-metric-card temu-metric-rem">
-                <div class="temu-metric-badge">
-                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <div id="temuMetricRemaining" class="temu-metric-val">50</div>
-                <div class="temu-metric-lbl">REMAINING</div>
-              </div>
+            <div class="th-tiles">
+              <div class="th-tile ok"><b id="temuMetricListed">0</b><span>Listed</span></div>
+              <div class="th-tile up"><b id="temuMetricUploads">0</b><span>Uploads</span></div>
+              <div class="th-tile bad"><b id="temuMetricErrors">0</b><span>Errors</span></div>
+              <div class="th-tile rem"><b id="temuMetricRemaining">50</b><span>Baqi</span></div>
             </div>
 
-            <!-- Progress bar -->
-            <div class="temu-bar-track">
-              <div id="temuProgressBar" class="temu-bar-fill" style="width: 0%"></div>
-            </div>
-            <div id="temuProgressStatus" class="temu-prog-status">Nothing listed yet today</div>
+            <div class="th-bar"><div id="temuProgressBar" class="th-bar-fill" style="width:0%"></div></div>
+            <div id="temuProgressStatus" class="th-status">Aaj abhi kuch list nahi hua</div>
 
-            <!-- Last 7 Days — always visible mini sparkline -->
-            <div class="temu-week-section">
-              <div class="temu-week-title">Last 7 days</div>
-              <div id="temuWeekDays" class="temu-week-days"></div>
+            <div class="th-week">
+              <div class="th-week-h"><span>Pichle 7 din</span><small id="temuWeekTotal"></small></div>
+              <div id="temuWeekDays" class="th-week-days"></div>
             </div>
           </div>
 
-          <!-- History Records Card -->
-          <div class="temu-card temu-hist-card">
-            <div class="temu-hist-head-title">
-              <svg class="i temu-hist-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h6"/></svg>
+          <div class="temu-card th-log">
+            <div class="th-log-h">
               <div>
-                <div class="temu-card-title">Upload History Logs</div>
-                <div class="temu-card-subtitle">Search, filter, export CSVs, or delete individual upload records</div>
-              </div>
-            </div>
-            
-            <div class="temu-hist-toolbar">
-              <div class="temu-hist-search-wrap">
-                <svg class="temu-hist-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input id="temuHistSearch" type="text" class="inp" placeholder="Search SKU, title, upload ID, store..." />
+                <div class="temu-card-title">Upload history</div>
+                <div class="temu-card-subtitle">Har upload / file ka record — file dobara lo, products dekho, errors parho</div>
               </div>
             </div>
 
-            <div class="temu-hist-filter-row">
-              <div class="temu-hist-store-pill">
-                <select id="temuHistStoreFilter" class="sel temu-hist-store-sel">
-                  <option value="">All Stores</option>
-                </select>
+            <div class="th-tools">
+              <div class="th-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input id="temuHistSearch" type="search" class="inp" placeholder="Search: title, SKU, upload ID, batch…" />
               </div>
-              <div class="temu-hist-filters">
-                <button type="button" class="temu-hist-fbtn active" data-hfilter="all">All</button>
-                <button type="button" class="temu-hist-fbtn" data-hfilter="success"><span class="temu-dot-ok"></span> Success</button>
-                <button type="button" class="temu-hist-fbtn" data-hfilter="errors"><span class="temu-dot-bad"></span> Needs fix</button>
-                <button type="button" class="temu-hist-fbtn" data-hfilter="file"><span class="temu-dot-file"></span> File</button>
-              </div>
+              <select id="temuHistStoreFilter" class="sel th-store" aria-label="Store">
+                <option value="">All stores</option>
+              </select>
             </div>
 
-            <div id="temuHistList" class="temu-hist-records"></div>
+            <div class="th-seg" role="tablist" aria-label="Filter">
+              <button type="button" class="temu-hist-fbtn active" data-hfilter="all">All <i data-hcount="all"></i></button>
+              <button type="button" class="temu-hist-fbtn" data-hfilter="success">Uploaded <i data-hcount="success"></i></button>
+              <button type="button" class="temu-hist-fbtn" data-hfilter="errors">Needs fix <i data-hcount="errors"></i></button>
+              <button type="button" class="temu-hist-fbtn" data-hfilter="file">Files <i data-hcount="file"></i></button>
+            </div>
 
-            <div class="temu-hist-foot">
-              <button id="temuHistExportAll" class="btn btn-ghost btn-xs" type="button">
+            <div id="temuHistList" class="th-list"></div>
+
+            <div class="th-foot">
+              <button id="temuHistExportAll" class="btn btn-ghost btn-xs" type="button" title="Saare records ke products ek CSV mein">
                 <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export All CSV
+                Export all (CSV)
               </button>
-              <details class="temu-history-manage"><summary>Manage history</summary><button id="temuHistClear" class="btn btn-ghost btn-xs btn-danger" type="button">Clear history</button></details>
+              <details class="th-manage"><summary>Manage</summary><button id="temuHistClear" class="btn btn-ghost btn-xs btn-danger" type="button">Clear all history</button></details>
             </div>
           </div>
         </div>

@@ -21,7 +21,7 @@ Temu template sample: `C:\Users\Basit\Downloads\Temu\TEMU_GENERAL_UPLOAD_TEMPLAT
 - **Har color = alag Temu listing** (single variant), multi-variant listing nahi. Variation value baad mein Temu par edit nahi hoti, isliye numbers/weights variation mein nahi.
 
 ### Baat-cheet
-- Small updates par version bump, naya ZIP, ya naya release folder na banayein; existing files aur version update karein. Version/release packaging sirf user ke kehne par.
+- **Har badlav ke round par `manifest.json` version barhayein** (user ne 21 Oct 2026 ko kaha: chhota fix = 9.16.0 → 9.16.1, bara round = 9.17.0) aur CHANGELOG mein usi number ki heading. Naya ZIP / release folder sirf user ke kehne par.
 - **Zaban:** Roman Urdu (Urdu, English letters mein), simple aur chhota. Extension UI texts bhi zyada tar Roman Urdu.
 - **User coder nahi.** Code chat mein na dikhayein, code edit karne ko na kahein. **Changed files seedha connected folder mein likhein**, phir bolein: `chrome://extensions` → Reload.
 - **Pehle plan, phir code** (`.agents/AGENTS.md`): kya badlega, kaunsi file, kyun → user "haan/yes" kahe tab code. Minimal changes, aakhir mein chhota summary (kya badla, kya test nahi hua).

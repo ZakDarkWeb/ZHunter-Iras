@@ -2821,7 +2821,9 @@ function temuHistorySection() {
     // v9.15.1 — the page can hold more than one "Upload history" block (categories + general template); use the one with real uploads
     const heads = [...document.querySelectorAll('div,span,h1,h2,h3')].filter(e => /^\s*upload history\s*$/i.test((e.textContent || '').trim()));
     const secs = heads.map(h => h.closest('[class*="wrap-"]') || h.closest('[class]')?.parentElement || h.parentElement).filter(Boolean);
-    return secs.find(s => /\b\d{15}\b/.test(s.innerText || s.textContent || '')) || secs.find(s => s.offsetParent) || secs[0] || null;
+    // v9.18.8 — the VISIBLE block first: the hidden "by categories" tab keeps its own old uploads (innerText "" → textContent matched it)
+    const vis = secs.filter(s => s.offsetParent !== null);
+    return vis.find(s => /\b\d{15}\b/.test(s.innerText || '')) || vis[0] || secs.find(s => /\b\d{15}\b/.test(s.innerText || s.textContent || '')) || secs[0] || null;
   } catch (_) { return null; }
 }
 // Sab se upar wali (naya-tareen) upload row ki "signature" — uska Upload ID (13-20 digit number)
@@ -3308,7 +3310,8 @@ function temuDraftMaterialClean(title) {
 }
 function temuDraftSmart(lbl, title, cat) {
   const t = /age group/.test(lbl) ? temuDraftAgeClean(title) : lbl === 'material' ? temuDraftMaterialClean(title) : String(title || '').toLowerCase();
-  const toys = /^toys & games/i.test(cat || '');
+  // v9.20.9 — party supplies (piñatas, favors…) and candy / snacks also ask for an age group: "3 Years+" when the title names no age
+  const toys = /^toys & games/i.test(cat || '') || /party supplies|pi[ñn]ata|party favou?rs?/i.test(cat || '') || /\b(candy|candies|chocolate|gum|lollipops?|snacks?|gummy|gummies|treats?)\b/i.test(title || '');
   if (/age group/.test(lbl)) {
     const Y = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18], M = [1, 3, 4, 5, 6, 10, 12, 18];
     if (!temuDraftAgeContext(t)) return toys ? { dept: '3 Years+' } : {};
@@ -3372,7 +3375,9 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     return null;
   };
   for (const row of rows) {
-    const name = (row.querySelector('[data-testid*="ellipsis"], [class*="elli_outerWrapper"], [class*="p_name"], [class*="title"], td:nth-child(2)')?.textContent || '').trim();
+    // v9.20.9 — visible text only: the cell holds a <style> tag (".beast-core-ellipsis-1{…}" was shown as the product name)
+    const name = String(row.querySelector('[data-testid*="ellipsis"], [class*="elli_outerWrapper"], [class*="p_name"], [class*="title"], td:nth-child(2)')?.innerText || '')
+      .replace(/\.[\w-]+\{[^}]*\}/g, ' ').split(/\n/).map(s => s.trim()).filter(s => s && !/^(Goods ID|SKU ID|Category):/i.test(s))[0] || '';
     const catTxt = ([...row.querySelectorAll('div, span')].map(d => d.childNodes[0]?.nodeValue || d.textContent || '').find(t => /^\s*Category:/i.test(t)) || '').replace(/^\s*Category:\s*/i, '').trim();
     const tl = (name + ' ' + catTxt).toLowerCase();
     const rule = rules.find(r => (r.match || []).some(m => m && tl.includes(String(m).toLowerCase())));
@@ -3380,7 +3385,9 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const fields = temuRowFields(row);
     const need = fields.filter(f => f.required && f.empty);
     const notes = [];
-    if (!need.length) { ok(`${name.slice(0, 45) || 'Product'} — all required fields are filled` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
+    // v9.17.7 — the variant (SKU) line under a product is its own table row: checked too, but reported only when it needs something
+    const isSkuRow = !/Goods ID:/i.test(row.textContent || '') && /SKU ID:/i.test(row.textContent || '');
+    if (!need.length) { if (!isSkuRow) ok(`${name.slice(0, 45) || 'Product'} — all required fields are filled` + (catTxt ? ` [${catTxt.split('/').pop()}]` : '')); continue; }
     for (const f of need) {
       const lbl = f.label.trim().toLowerCase();
       let want = pick(ruleAttrs, f.label) ?? null;
@@ -3425,8 +3432,12 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     if (incomplete.length) warn(`${incomplete.length} product(s) still have an empty required field - skipped (fill them by hand on the page); all the others are submitted one by one`);
     zhS('fixing draft — checking before Submit');
     await temuSleep(temuRand(1500, 3000));
-    const bottomBtn = document.querySelector('.flexCenter-2dxu4 [role="button"], .flexCenter-2dxu4 button');
-    if (!incomplete.length && bottomBtn && /^submit$/i.test((bottomBtn.textContent || '').trim()) && temuVisible(bottomBtn) && !bottomBtn.disabled && bottomBtn.getAttribute('aria-disabled') !== 'true' && !bottomBtn.classList.contains('disable-2fw28')) {
+    // v9.17.7 — the page's own Submit (bottom bar) is found by its text, not by Temu's changing class names
+    // (".flexCenter-2dxu4" became ".btn_wrapper-3JoSo" → "No Submit button could be pressed"); never a Submit inside a table row
+    const btnOff = b => b.disabled || b.getAttribute('aria-disabled') === 'true' || /\bdisable/i.test(b.className || '');
+    const bottomBtn = [...document.querySelectorAll('[role="button"], button')]
+      .filter(b => /^submit$/i.test((b.textContent || '').trim()) && !b.closest('tr') && temuVisible(b) && !btnOff(b)).pop() || null;
+    if (!incomplete.length && bottomBtn) {
       await temuHumanClick(bottomBtn); submitted++;
       ok('Pressed the main Submit button — check the result on Temu!');
     } else {
@@ -3445,8 +3456,9 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     }
   }
   zhS(stillEmpty ? `${stillEmpty} field(s) need you` : 'draft fixed ✓', stillEmpty ? 'error' : 'done');
-  report.unshift(`${rows.length} drafts, ${changed} fields set, ${stillEmpty} still empty`);
-  return { success: stillEmpty === 0, report, changed, total: rows.length, stillEmpty, submitted, confirmed: false };
+  const nProducts = rows.filter(r => /Goods ID:/i.test(r.textContent || '')).length || rows.length;   // products, not product + variant rows
+  report.unshift(`${nProducts} drafts, ${changed} fields set, ${stillEmpty} still empty`);
+  return { success: stillEmpty === 0, report, changed, total: nProducts, stillEmpty, submitted, confirmed: false };
 }
 
 // ═══ v9.6.0 — "View failed details" popup parhna (upload-goods-multiple.html) ═══
@@ -3458,6 +3470,17 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const mall = expectStore ? await temuReadMall(8000) : temuMallNameNow();
   if (expectStore && mall && temuStoreNorm(mall) !== temuStoreNorm(expectStore))
     return { success: false, wrongStore: true, mall, report: [`✗ This tab belongs to store "${mall}", the extension has "${expectStore}" active`] };
+  // v9.18.8 — the plain upload-goods-multiple.html link opens the "by categories" tab, whose Upload history holds OTHER (old) files:
+  // switch to "Add products via general template" first (that is where our uploads are listed)
+  { const title = await temuWait(() => [...document.querySelectorAll('[class*="upload_page_tab_item_title"]')].find(d => /general template/i.test(d.textContent)), 6000);
+    const item = title ? (title.closest('[class*="upload_page_tab_item-"]') || title.parentElement || title) : null;
+    if (item && !/active/i.test(item.className)) {
+      item.click(); title.click();
+      await temuWait(() => /active/i.test((title.closest('[class*="upload_page_tab_item-"]') || title.parentElement || {}).className || ''), 6000);
+      await temuSleep(1500);
+      report.push('• Switched to the "general template" tab');
+    }
+  }
   const sec = temuHistorySection();
   if (!sec) return { success: false, report: ['✗ Upload history section not found'] };
   const rowsOf = () => [...sec.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')];
@@ -3549,7 +3572,9 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   const failed = [];
   for (const tr of modal.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')) {
     const tds = tr.querySelectorAll('td');
-    const name = (tr.querySelector('[class*="elli_outerWrapper"]')?.textContent || tds[0]?.innerText || '').trim();
+    // v9.18.2 — innerText, not textContent: the cell holds a <style> tag (".beast-core-ellipsis-2{…}" was read as the product name)
+    const nameEl = tr.querySelector('[class*="elli_outerWrapper"]') || tr.querySelector('[data-testid="beast-core-ellipsis"]') || tds[0];
+    const name = String(nameEl?.innerText || '').replace(/\.[\w-]+\{[^}]*\}/g, ' ').split(/\n/).map(s => s.trim()).filter(s => s && !/^Goods ID:/i.test(s))[0] || '';
     const goodsId = ((tr.querySelector('[class*="id-"]')?.textContent || '').match(/\d{10,}/) || [''])[0];
     const reason = (tds[1]?.innerText || '').trim();
     const dup = reason.match(/Goods ID:\s*(\d{10,})/i);

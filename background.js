@@ -72,7 +72,7 @@ const PUBLIC_SETTING_KEYS = new Set([
   'bulkQueueAutoCapture', 'bulkSheetColumns', 'customBulkColumns',
   'temuConfig', 'temuTemplateB64', 'temuTemplateName',
   'temuStores', 'temuActiveStore',
-  'temuListed',
+  'temuListed', 'temuCatShared',
   'productSheetColumns', 'customProductColumns', 'migratedToOriginal_2'
 ]);
 

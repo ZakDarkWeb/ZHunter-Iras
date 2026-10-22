@@ -406,13 +406,15 @@ html[data-fx] .toast-item.leaving { opacity: 0; }
 
 /* ── 20. Daily AI image counter (AI Image Studio bar) ── */
 .zh-daily { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 8px; }
-.zh-daily-lbl { font: 600 10px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-right: 2px; }
+/* v9.16.3 — plain text line, not a pill (user: no round shapes, nothing that looks like a button) */
+.zh-daily-lbl { font: 500 11px var(--font); color: var(--ink-3); margin-right: 2px; }
 .zh-daily-none { font-size: 11px; color: var(--ink-3); }
-.zh-daily-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; font: 500 10.5px var(--font); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line-2); }
+.zh-daily-sep { font-size: 11px; color: var(--ink-4); }
+.zh-daily-chip { display: inline; font: 500 11px var(--font); color: var(--ink-2); cursor: default; }
 .zh-daily-chip b { font: 700 11px var(--mono); color: var(--ink); }
-.zh-daily-chip.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.zh-daily-chip.warn { color: var(--warn); }
 .zh-daily-chip.warn b { color: var(--warn); }
-.zh-daily-chip.bad { color: var(--bad); border-color: var(--bad-line); background: var(--bad-soft); }
+.zh-daily-chip.bad { color: var(--bad); }
 .zh-daily-chip.bad b { color: var(--bad); }
 .tsp-eta.warn { color: var(--warn); }
 
@@ -577,6 +579,189 @@ body.light-mode #zhTextStudioModal .zt-fold > summary .zt-fold-meta, body.light-
 body.light-mode #zhTextStudioModal .zt-progress { background: var(--surface-2); }
 body.light-mode #zhTextStudioModal .zt-opts > details { background: var(--surface); }
 
+/* ── 23. Temu Export → Settings: simple steps, live price example, gap table, Advanced folds ── */
+.temu-setting-content .temu-grid-2, .temu-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tg-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); }
+.tg-step + .tg-step, .tg-step + .tg-adv, .tg-adv + .tg-dept-wrap { margin-top: 8px; }
+.tg-step-h { display: flex; align-items: center; gap: 8px; font: 600 12px var(--font); color: var(--ink); }
+.tg-step-h b { width: 20px; height: 20px; flex-shrink: 0; display: grid; place-items: center; border-radius: 6px; font: 700 10.5px var(--mono); color: var(--accent-ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.tg-step .temu-setting-box { background: var(--surface-2); }
+.tg-compact-grid .temu-setting-box { padding: 8px 9px; }
+.tg-px-note { font-size: 10.5px; line-height: 1.45; color: var(--ink-3); }
+.tg-px-example { display: flex; flex-direction: column; gap: 3px; }
+.tg-ex-row { display: grid; grid-template-columns: minmax(0, 1fr) 14px auto 38px; column-gap: 8px; align-items: center; padding: 5px 9px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+.tg-ex-row span { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ex-row span i { font-style: normal; font: 600 9.5px var(--font); color: var(--run); background: var(--run-soft); padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
+.tg-ex-row svg { width: 14px; height: 14px; stroke: var(--ink-4); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tg-ex-row b { font: 700 12.5px var(--mono); color: var(--ok); text-align: right; }
+.tg-ex-row small { text-align: right; font: 500 10px var(--mono); color: var(--ink-3); }
+.tg-ex-row.bad b { color: var(--bad); font: 600 11px var(--font); }
+.tg-gap-table { display: grid; grid-template-columns: 1fr; border-radius: 8px; border: 1px solid var(--line-2); overflow: hidden; }
+.tg-gap-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 11.5px; color: var(--ink-2); background: var(--surface-2); }
+.tg-gap-row + .tg-gap-row { border-top: 1px solid var(--line); }
+.tg-gap-row b { font: 700 11.5px var(--mono); color: var(--accent-ink); }
+.tg-gap-edit .temu-setting-sub { line-height: 1.4; }
+.tg-adv { margin-top: 8px; border-radius: 10px; border: 1px dashed var(--line-3); background: transparent; }
+.tg-adv > summary { list-style: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; cursor: pointer; font: 600 11.5px var(--font); color: var(--ink-2); }
+.tg-adv > summary::-webkit-details-marker { display: none; }
+.tg-adv > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--t) var(--ease); margin-right: 2px; }
+.tg-adv[open] > summary::before { transform: rotate(45deg); }
+.tg-adv > summary small { margin-left: auto; font-size: 10.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-adv > summary:hover { color: var(--ink); }
+.tg-adv[open] { border-style: solid; border-color: var(--line-2); }
+.tg-adv > :not(summary) { margin: 0 10px 10px; }
+.tg-sec-lbl { display: flex; align-items: baseline; gap: 8px; margin: 14px 2px 2px; font: 700 10.5px var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.tg-sec-lbl small { font: 500 10.5px var(--font); letter-spacing: 0; text-transform: none; color: var(--ink-4); }
+.tg-sec-lbl::after { content: ""; flex: 1; height: 1px; background: var(--line-2); align-self: center; }
+@media (max-width: 380px) { .tg-step .temu-grid-2, .tg-step .temu-grid-3 { grid-template-columns: 1fr; } }
+
+/* ── 24. Temu Export → History: today card, 7-day bars, segmented filter, record cards ── */
+.th-today, .th-log { gap: 10px; }
+.th-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.th-head-l { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.th-ico { width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.th-ico svg { width: 15px; height: 15px; }
+.th-title { font: 700 13px var(--font); color: var(--ink); }
+.th-sub { font-size: 11px; color: var(--ink-3); }
+.th-target { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.th-target .inp { width: 58px; height: 28px; padding: 0 6px; text-align: center; font: 600 12px var(--mono); }
+.th-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.th-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); position: relative; overflow: hidden; }
+.th-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--tc, var(--line-3)); }
+.th-tile b { font: 700 17px var(--mono); color: var(--ink); line-height: 1.2; }
+.th-tile span { font: 600 10px var(--font); letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.th-tile.ok { --tc: var(--ok); } .th-tile.up { --tc: var(--accent); } .th-tile.bad { --tc: var(--bad); } .th-tile.rem { --tc: var(--warn); }
+.th-tile.ok b { color: var(--ok); }
+.th-bar { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.th-bar-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-dark), var(--accent)); transition: width .5s var(--ease-out); }
+.th-bar-fill.done { background: linear-gradient(90deg, #059669, var(--ok)); }
+.th-status { font-size: 11px; color: var(--ink-2); }
+.th-week { padding: 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); }
+.th-week-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; font: 600 11px var(--font); color: var(--ink-2); }
+.th-week-h small { font: 600 10.5px var(--mono); color: var(--ink-3); }
+.th-week-days { --goal: 100%; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; align-items: end; }
+.th-day { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.th-day-n { height: 13px; font: 700 10px var(--mono); color: var(--ink-2); }
+.th-day-track { position: relative; width: 100%; max-width: 30px; height: 56px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.th-day-track::after { content: ""; position: absolute; left: 0; right: 0; bottom: var(--goal); border-top: 1px dashed var(--line-3); }
+.th-day-track i { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 6px 6px 0 0; background: var(--accent-line); transition: height .5s var(--ease-out); }
+.th-day.today .th-day-track i { background: var(--accent); }
+.th-day.hit .th-day-track i { background: var(--ok); }
+.th-day-l { font: 600 10px var(--font); color: var(--ink-3); }
+.th-day.today .th-day-l { color: var(--accent-ink); }
+.th-log-h { display: flex; align-items: flex-start; gap: 8px; }
+.th-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.th-search { position: relative; }
+.th-search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; stroke: var(--ink-3); fill: none; stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+.th-search .inp { height: 32px; padding-left: 28px; }
+.th-store { height: 32px; max-width: 150px; }
+.th-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface-2); }
+.th-seg .temu-hist-fbtn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 6px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--ink-3); font: 600 11px var(--font); white-space: nowrap; transition: background-color var(--t), color var(--t), border-color var(--t); }
+.th-seg .temu-hist-fbtn:hover { color: var(--ink); }
+.th-seg .temu-hist-fbtn.active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
+.th-seg .temu-hist-fbtn i { font: 600 9.5px var(--mono); font-style: normal; padding: 0 5px; border-radius: 5px; background: var(--surface-3); color: var(--ink-3); }
+.th-seg .temu-hist-fbtn.active i { background: var(--surface); color: var(--accent-ink); }
+.th-list { display: flex; flex-direction: column; gap: 6px; max-height: none; }
+.th-rec { --tc: var(--line-3); display: flex; flex-direction: column; gap: 4px; padding: 9px 10px 8px 12px; border-radius: 10px; border: 1px solid var(--line-2); border-left: 3px solid var(--tc); background: var(--surface); transition: border-color var(--t), box-shadow var(--t); }
+.th-rec:hover { box-shadow: var(--shadow-md); }
+.th-rec.ok { --tc: var(--ok); } .th-rec.warn { --tc: var(--warn); } .th-rec.bad { --tc: var(--bad); } .th-rec.file { --tc: var(--accent); }
+.th-rec-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.th-badge { display: inline-flex; align-items: center; height: 19px; padding: 0 7px; border-radius: 5px; font: 700 10px var(--font); letter-spacing: .02em; color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); }
+.th-when { font: 500 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
+.th-rec-name { font: 600 12.5px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-rec-sub { font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-rec-stats { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.th-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); font: 600 10px var(--mono); white-space: nowrap; }
+.th-chip.ok { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
+.th-chip.bad { color: var(--bad); border-color: var(--bad-line); background: var(--bad-soft); }
+.th-chip.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.th-chip.id { cursor: copy; transition: border-color var(--t), color var(--t); }
+.th-chip.id:hover { border-color: var(--accent-line); color: var(--accent-ink); }
+.th-rec-more > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; font: 600 10.5px var(--font); color: var(--accent-ink); }
+.th-rec-more > summary::-webkit-details-marker { display: none; }
+.th-rec-more > summary::before { content: "▸"; transition: transform var(--t); }
+.th-rec-more[open] > summary::before { transform: rotate(90deg); }
+.th-items { margin: 6px 0 2px; padding: 0; list-style: none; max-height: 180px; overflow-y: auto; border-radius: 7px; border: 1px solid var(--line); background: var(--surface-2); counter-reset: thi; }
+.th-items li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 11px; color: var(--ink-2); counter-increment: thi; }
+.th-items li + li { border-top: 1px solid var(--line); }
+ol.th-items li::before { content: counter(thi); min-width: 16px; font: 600 9.5px var(--mono); color: var(--ink-4); }
+.th-items li span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-items li b { font: 600 10.5px var(--mono); color: var(--ink); }
+.th-items.skip li span { white-space: normal; color: var(--warn); }
+.th-skip-h { margin-top: 6px; font: 600 10.5px var(--font); color: var(--ink-3); }
+.th-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.th-sp { flex: 1; }
+.th-act { height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 4px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); font: 600 11px var(--font); transition: background-color var(--t), border-color var(--t), color var(--t), transform var(--t-fast) var(--ease); }
+.th-act:hover { color: var(--ink); border-color: var(--line-3); }
+.th-act:active { transform: scale(.96); }
+.th-act[data-act="mark"] { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
+.th-act[data-act="errors"] { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.th-act.danger { width: 26px; padding: 0; justify-content: center; color: var(--ink-3); background: transparent; border-color: transparent; }
+.th-act.danger:hover { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+.th-act svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.th-empty { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 22px 12px; text-align: center; border-radius: 10px; border: 1px dashed var(--line-3); }
+.th-empty-ico { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: var(--surface-3); color: var(--ink-3); margin-bottom: 2px; }
+.th-empty-ico svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.th-empty b { font-size: 12.5px; color: var(--ink); }
+.th-empty span { font-size: 11px; color: var(--ink-3); max-width: 260px; }
+.th-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.th-manage > summary { list-style: none; cursor: pointer; font: 600 11px var(--font); color: var(--ink-3); padding: 4px 6px; }
+.th-manage > summary::-webkit-details-marker { display: none; }
+.th-manage[open] { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 380px) { .th-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .th-seg .temu-hist-fbtn i { display: none; } }
+body.light-mode .th-tile, body.light-mode .th-week, body.light-mode .th-rec, body.light-mode .tg-step { box-shadow: var(--shadow); }
+
+/* ── 25. Upload tab: one source line, batch chips, confirm sheet, result card ── */
+#temuSrcNote, #temuPxStats, #temuLastBatchChip { display: none !important; }   /* merged into the one source line / batch chips */
+#temuSrcInfo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface-2); font: 500 11.5px var(--font) !important; color: var(--ink-2); letter-spacing: 0; }
+#temuSrcInfo > span:first-child { color: var(--ink); font-weight: 600; }
+#temuSrcInfo .tsl-px { font: 600 10.5px var(--mono); color: var(--ink-3); }
+#temuSrcInfo .tsl-px::before { content: "·"; margin-right: 8px; color: var(--ink-4); }
+#temuSrcInfo .tsl-warn { flex-basis: 100%; font-size: 11px; font-weight: 600; color: var(--warn); }
+.tb-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: -2px 0 2px; }
+.tb-chips[hidden] { display: none; }
+.tb-chips-l { font: 600 10px var(--font); color: var(--ink-3); margin-right: 2px; }
+.tb-chip { max-width: 160px; height: 22px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); font: 500 10.5px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: border-color var(--t), color var(--t), background-color var(--t); }
+.tb-chip:hover { border-color: var(--accent-line); color: var(--ink); }
+.tb-chip.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-ink); }
+/* confirm sheet */
+.tuc { position: absolute; inset: 0; z-index: 45; display: flex; align-items: flex-end; justify-content: center; padding: 12px; background: rgba(2,6,15,.55); backdrop-filter: blur(3px); border-radius: inherit; animation: zpFade var(--t) var(--ease) both; }
+body.light-mode .tuc { background: rgba(15,23,42,.28); }
+.tuc.out { animation: zpFadeOut 140ms var(--ease) forwards; }
+.tuc-sheet { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--surface); box-shadow: var(--shadow-pop); animation: zpModalIn var(--t-slow) var(--ease-out) both; }
+.tuc-h { font: 700 14px var(--font); color: var(--ink); }
+.tuc-store { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent-line); background: var(--accent-soft); }
+.tuc-store small { font: 600 10px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.tuc-store b { font: 800 18px var(--font); color: var(--accent-ink); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.tuc-rows { display: flex; flex-direction: column; gap: 4px; }
+.tuc-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
+.tuc-row b { font: 700 12.5px var(--mono); }
+.tuc-row.ok b { color: var(--ok); } .tuc-row.warn b { color: var(--warn); }
+.tuc-left { margin: 0 0 0 4px; padding: 0 0 0 14px; font-size: 11px; color: var(--ink-3); }
+.tuc-batch { display: flex; flex-direction: column; gap: 4px; }
+.tuc-batch small { font: 600 10.5px var(--font); color: var(--ink-3); }
+.tuc-acts { display: grid; grid-template-columns: 1fr 1.6fr; gap: 8px; }
+.tuc-acts .btn { height: 38px; }
+/* result card */
+.tru { --tc: var(--accent); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); border-left: 3px solid var(--tc); background: var(--surface-2); animation: zpSlideDown var(--t-slow) var(--ease-out) both; }
+.tru[hidden] { display: none; }
+.tru[data-tone="ok"] { --tc: var(--ok); } .tru[data-tone="warn"] { --tc: var(--warn); } .tru[data-tone="bad"] { --tc: var(--bad); } .tru[data-tone="run"] { --tc: var(--accent); }
+.tru-h { display: grid; grid-template-columns: 24px 1fr; column-gap: 8px; align-items: center; }
+.tru-ico { grid-row: 1 / 3; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; font: 700 12px var(--font); color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); }
+.tru-h b { font: 700 12.5px var(--font); color: var(--ink); }
+.tru-sub { font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tru-nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 4px; }
+.tru-nums span { display: flex; flex-direction: column; align-items: flex-start; padding: 5px 8px; border-radius: 7px; background: var(--surface); border: 1px solid var(--line); font: 600 9.5px var(--font); letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.tru-nums b { font: 700 15px var(--mono); color: var(--ink); text-transform: none; letter-spacing: 0; }
+.tru-nums .ok b { color: var(--ok); } .tru-nums .warn b { color: var(--warn); } .tru-nums .bad b { color: var(--bad); }
+.tru-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.tru-btn { height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); font: 600 11px var(--font); transition: border-color var(--t), color var(--t), transform var(--t-fast) var(--ease); }
+.tru-btn:hover { color: var(--ink); border-color: var(--line-3); }
+.tru-btn:active { transform: scale(.96); }
+.tru-btn.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.tru-x { margin-left: auto; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-3); }
+.tru-x:hover { background: var(--surface-3); color: var(--ink); }
+
 /* ── Keyframes (all finite) ────────────────────────────────── */
 @keyframes zpFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes zpFadeOut { to { opacity: 0; } }
@@ -700,3 +885,92 @@ body.light-mode #zhTextStudioModal .zt-opts > details { background: var(--surfac
 .temu-rv-ftgl.open { border-color: var(--accent-line); color: var(--ink); }
 .temu-rv-ftgl.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .temu-rv-ftgl.active svg { stroke: currentColor; }
+
+/* Export + Upload button names the store (21 Oct 2026): a long store name is cut with ... instead of breaking the button */
+#temuAutoBtn { min-width: 0; }
+.temu-auto-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Products source buttons: label + count stay on ONE line inside the button ("Import sheet 40" used to wrap to 2 lines) (21 Oct 2026) */
+.temu-src-seg button { min-width: 0; padding: 0 6px; white-space: nowrap; gap: 5px; }
+.temu-src-seg button > span:not(.src-cnt) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temu-src-seg button .src-cnt { flex-shrink: 0; margin-left: 0; padding: 0 5px; min-width: 18px; height: 16px; line-height: 16px; font-size: 10px; border-radius: 5px; text-align: center; }
+@media (max-width: 380px) { .temu-src-seg button svg { display: none; } }
+
+/* ── v9.16.3 — no round buttons / pill labels anywhere (user wish). Small status dots, spinners, switch knobs and progress bars stay round. ── */
+.trs .temu-ready-item, .temu-pill-count, .rh-latest-chip, .temu-setup-badge, .temu-src-seg button .src-cnt,
+.bp-chip, .bp-live, .bp-cov, .bp-filter button, .bp-filter button b, .zs-badge, .temu-src-px, .temu-ai-preset,
+.temu-rv-chip, .temu-tc-tgl, .zt-field-chip span, .pq-chip, .filter-chip,
+.temu-rv-img-tag, .temu-rv-img-ed, .tsp-t-n, .tsp-t-retry { border-radius: 6px !important; }
+.temu-step-num, .lib-step-num, .temu-tc-n, .tf-step i, .tsp-t-st, .zs-ok, .bp-pending-ico,
+.temu-cat-search-clear, .lightbox-close { border-radius: 5px !important; }
+.bp-done-ico, .bp-done-ico.bp-ico-in::after { border-radius: 10px !important; }
+
+/* ── v9.17 — "✓ Charmhouse · 10-21" label on products already uploaded to a store (store colour from the page frame) ── */
+.temu-rv-store { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font: 600 10px var(--font); white-space: nowrap;
+  color: var(--sc, #94A3B8); background: color-mix(in srgb, var(--sc, #94A3B8) 14%, transparent); border: 1px solid color-mix(in srgb, var(--sc, #94A3B8) 45%, transparent); }
+
+/* ── v9.17.4 — "Tick first [30] of 57 ✓ Apply" row above the product list ── */
+.temu-rv-pickn { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font: 500 11px var(--font); color: var(--ink-3); }
+.temu-rv-pickn .temu-rv-pickn-inp { width: 58px; height: 26px; padding: 0 6px; border-radius: 6px; font: 700 11.5px var(--mono); text-align: center; }
+.temu-rv-pickn button { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--accent-line, rgba(34,211,238,.4)); background: var(--accent-soft, rgba(34,211,238,.1)); color: var(--accent); font: 700 11px var(--font); cursor: pointer; white-space: nowrap; }
+.temu-rv-pickn button:hover { background: var(--accent); color: var(--accent-fg, #031018); }
+.temu-rv-pickn small { margin-left: auto; font-size: 10px; color: var(--ink-4); }
+
+/* ── v9.17.9 — Temu's own reason on the result card ("Contribution SKU duplicated" = already in this store) ── */
+.tru-why { margin: 2px 0 6px; padding: 7px 9px; border-radius: 6px; background: var(--warn-soft); border: 1px solid var(--warn-line); }
+.tru-why p { margin: 0; font: 500 11px/1.45 var(--font); color: var(--ink-2); }
+.tru-why p + p { margin-top: 4px; }
+
+/* ── v9.18.4 — "Some products are already listed: [Skip them] [Upload anyway]" in the ready row ── */
+.trs-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font: 500 11px var(--font); color: var(--ink-2); }
+.trs-choice span { flex: 1 1 100%; }
+.trs-choice button { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface-3); color: var(--ink); font: 700 11px var(--font); cursor: pointer; }
+.trs-choice button[data-listed-choice="skip"] { border-color: var(--accent-line, rgba(34,211,238,.4)); color: var(--accent); }
+.trs-choice button[data-listed-choice="again"] { border-color: var(--warn-line); color: var(--warn); }
+.trs-choice button:hover { background: var(--surface-2); }
+.temu-rv-store.dup { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+
+/* ── v9.19 — only two card labels: green "Listed", red "Duplicate" (+ "Fix duplicates" button) ── */
+.temu-rv-store.ok { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+.trs-choice button[data-fix-dups] { border-color: var(--bad-line); color: var(--bad); }
+.trs-choice button.on { background: var(--accent); color: var(--accent-fg, #031018); border-color: var(--accent); }
+
+/* ── v9.20.1 — "Hide" toggle: the Tick-first row, filter chips and filter buttons fold away (more room for the products) ── */
+.temu-rv-tools.tools-min .temu-rv-pickn,
+.temu-rv-tools.tools-min .temu-rv-fbulk,
+.temu-rv-tools.tools-min .temu-rv-fchips { display: none !important; }
+.temu-rv-tools-top { flex-wrap: wrap; row-gap: 6px; }
+.temu-rv-tmin.on { color: var(--accent); border-color: var(--accent-line, rgba(34,211,238,.4)); }
+
+/* ── v9.20.2 — the product list uses the panel height (it stopped at 62vh, leaving empty space below) ── */
+.temu-review-list { max-height: calc(100vh - 140px) !important; }
+.temu-rv-tools-top .temu-rv-search { flex: 1 1 110px; min-width: 110px; }
+
+/* ── v9.20.3 — product count sits faintly INSIDE the search box; Filter · Tools · Collapse stay on one line ── */
+.temu-rv-tools-top { flex-wrap: nowrap !important; }
+.temu-rv-search-wrap { position: relative; flex: 1 1 auto; min-width: 110px; display: block; }
+.temu-rv-search-wrap .temu-rv-search { width: 100%; min-width: 0 !important; padding-right: 84px; }
+.temu-rv-search-wrap .temu-rv-tools-n { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;
+  font: 500 10.5px var(--mono); color: var(--ink-4); opacity: .75; white-space: nowrap; }
+.temu-rv-tools-top > .temu-rv-icon-btn { flex: none; white-space: nowrap; padding-left: 8px; padding-right: 8px; }
+
+/* ── v9.20.6 — upload sheet: "⚠ Pehle se live" row + "Sirf naye bhejo" button ── */
+.tuc-row.bad { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+.tuc-row.bad b { color: var(--bad); }
+.tuc-newonly { width: 100%; margin-top: 6px; border-color: var(--bad-line) !important; color: var(--bad) !important; }
+
+/* ── v9.20.7 — pages for the product list: [☐ This page]  ‹ 1 2 3 ›  [25 / page] ── */
+.temu-rv-card.rv-page-out { display: none !important; }
+.temu-rv-pager { display: flex; align-items: center; gap: 8px; margin-top: 6px; font: 500 11px var(--font); color: var(--ink-2); }
+.temu-rv-pager[hidden] { display: none; }
+.temu-rv-pg-all { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.temu-rv-pg-all input { accent-color: var(--accent); width: 15px; height: 15px; }
+.temu-rv-pg-nums { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.temu-rv-pg-nums button { min-width: 24px; height: 24px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface-3); color: var(--ink-2); font: 700 11px var(--mono); cursor: pointer; }
+.temu-rv-pg-nums button.on { background: var(--accent); color: var(--accent-fg, #031018); border-color: var(--accent); }
+.temu-rv-pg-nums button:disabled { opacity: .35; cursor: default; }
+.temu-rv-pg-nums .pg-gap { color: var(--ink-4); padding: 0 2px; }
+.temu-rv-pg-size { height: 24px; padding: 0 4px; border-radius: 6px; font: 600 10.5px var(--font); width: auto; }
+/* v9.20.8 — page size is a small number box: [ 10 ] / page */
+.temu-rv-pg-sizewrap { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font: 500 10.5px var(--font); color: var(--ink-3); }
+.temu-rv-pg-sizewrap .temu-rv-pg-size { width: 46px; height: 24px; padding: 0 4px; text-align: center; font: 700 11px var(--mono); }
