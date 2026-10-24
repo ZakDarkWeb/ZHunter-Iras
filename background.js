@@ -302,6 +302,12 @@ async function getData() {
         : [...DEFAULT_DATA.settings.customProductColumns]
     };
     
+    // v9.20.20 — once: 3 images per product (the user's choice — faster hunting); can be changed again in Settings
+    if (!settings.migratedImg3) {
+      settings.maxHuntImages = 3;
+      settings.migratedImg3 = true;
+      await chrome.storage.local.set({ [STORAGE_KEY]: { ...stored, settings } });
+    }
     // Auto-migrate old defaults to the new "Original" values
     if (!settings.migratedToOriginal_2) {
       settings.imageFormat = 'jpg';

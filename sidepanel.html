@@ -427,7 +427,10 @@
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Fail hone wale tabs hamesha khule rehte hain</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Sirf image links; Master ZIP mein images nahi hongi. Hunt 3–4× tez</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Har download (sheet, ZIP, images) Downloads → <b>ZHunter Export</b> → aaj ki date wale folder mein jata hai (jaise ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>Shopping aur Temu Seller Center pages par patli border + label ("ZHunter · Hunting…", "ZHunter · Uploading to Temu · 45%"). Off = koi border nahi. Animation sirf "Moving / Animated Border" on ho to, aur sirf saamne wale tab mein.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>Sirf us tab par patli border + label jahan ZHunter kaam kar raha ho ("ZHunter · Hunting…", "ZHunter · Uploading to Temu · 45%") — kaam khatam hone ke kuch second baad hat jati hai. Baaki Temu / Walmart / Sam's pages par koi border nahi. Off = kahin bhi nahi.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <!-- v9.20.12 — the border look settings fold away (they were a long block) -->
+        <details class="zh-frame-more">
+        <summary>Border look — colour, style, speed, thickness</summary>
         <div class="it zh-frame-setting-row" id="zhFramePreviewRow">
           <div class="l"><b>Preview</b><span id="zhFramePreviewNote">Auto: har site / har Temu store ka apna rang · kaam ke dauran cyan → hara · error laal</span></div>
           <div class="zh-fprev-wrap">
@@ -516,6 +519,7 @@
             </div>
           </div>
         </div>
+        </details>
         <div class="it"><div class="l"><b>Auto-skip duplicates</b><span>Jo complete products pehle se Library mein hain, unke tabs ka tick hata do</span></div><label class="sw-wrap"><input type="checkbox" data-setting="autoSkipDuplicates"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Sheet filename prefix</b></div><input class="inp" style="width:120px;font-family:var(--mono)" data-setting="bulkFilenamePrefix" maxlength="40" placeholder="zhunter_"></div>
       </div>
@@ -525,7 +529,7 @@
         <div class="it"><div class="l"><b>Ratio</b><span>Temu aur marketplaces ke liye 1:1 square (kam az kam 800x800)</span></div><select class="sel" style="width:120px" data-setting="imageRatio"><option value="original">Original</option><option value="1:1">1:1 square (Temu)</option><option value="3:4">3:4</option><option value="4:3">4:3</option></select></div>
         <div class="it"><div class="l"><b>Padding colour</b><span>Image ke khaali kinaron ka rang</span></div><select class="sel" style="width:120px" data-setting="imageBg"><option value="original">Transparent</option><option value="white">White</option></select></div>
         <div class="it"><div class="l"><b>Keep files under 5 MB</b><span>Bari images ko chhota kar ke save karo</span></div><label class="sw-wrap"><input type="checkbox" data-setting="imageMax5MB" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Max images to hunt (Temu upload)</b><span>Har product ki zyada se zyada images (hunt aur upload) — Temu 7 kehta hai</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="1" max="30" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="maxHuntImages" placeholder="7" value="7"><span class="hint">imgs</span></div></div>
+        <div class="it"><div class="l"><b>Max images to hunt (Temu upload)</b><span>Har product ki zyada se zyada images (hunt aur upload). 3 = tez hunt</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="1" max="15" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="maxHuntImages" placeholder="3" value="3"><span class="hint">imgs</span></div></div>
         <div class="it"><div class="l"><b>Minimum size</b><span>Is se chhoti images chhor do (0 = sab)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="0" max="4000" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="imageMinSize" placeholder="0"><span class="hint">px</span></div></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg> Data</span>

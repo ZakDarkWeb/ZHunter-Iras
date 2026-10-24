@@ -1,5 +1,48 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.20.20 (2026-10-23) — 3 images per product
+- Hunting keeps at most 3 images per product (was 7) — fewer images to fetch, faster hunts. The same number is used for the Temu sheet (main + 2). Set once for existing installs too (`migratedImg3`); Settings → "Max images to hunt" can still change it (1–15).
+
+## 9.20.19 (2026-10-23) — no CSS code in Amazon descriptions
+- Amazon descriptions arrived in the Temu sheet as "#productDescription { color: #333333; word-wrap: break-word; … }": the description box holds a hidden <style> block that was read as text. Hunting now reads the box without <style>/<script> and drops leftover CSS rules; the sheet builder also removes such CSS from products hunted before, so the real text ("Full throttle speed for maximum distance…") stays. Normal text with ":" or "( )" is not touched (checked).
+
+## 9.20.18 (2026-10-23) — working Sam's Club links in the Google Sheet
+- Products uploaded from an imported sheet (2nd Chrome) went to the sourcing Google Sheet with links like `samsclub.com/p/item/20203019292`, which Sam's Club answers with "Uh-oh…" (page not found). The link is rebuilt from the SKU on import, and that form was wrong. It is now `samsclub.com/ip/20203019292` (checked live: opens "HERSHEY'S Sweets Mix … 275 pcs."); old 6–9 digit "prod" ids become `/p/prod<id>`.
+- Links made by older versions are repaired before they are written to the Google Sheet (also for products already imported). Rows already in the Google Sheet are not changed.
+
+## 9.20.17 (2026-10-22) — Image Studio "Select All" follows the page
+- With 10 products per page, AI Image Studio → "Select All" picked all 35 products. It now picks only the products the list shows — the current page (and the filter / search, as before); "Clear" clears the same ones.
+
+## 9.20.16 (2026-10-22) — categories without asking Temu
+- Temu now hides its category suggestions for 1–2 days when titles are pasted and not listed, so asking Temu every time does not work any more.
+- Automatic match (no Temu), in this order when the title words match no category: (1) the category of the most similar product you already learned (smart words), (2) the category whose NAME is in the title — only when every word of that name is there and no other category scores the same. "Pops" counts as lollipops (Blow Pops, Dum Dums Pops → Suckers & Lollipops); with "ice / freezer / frozen" in the title it does not (Fla-Vor-Ice Giant Pops → Ice Pops, if that category is in your list).
+- "Learn categories" first shows up to 5 of YOUR categories for each product (the most similar learned product's category first). Click one, paste a Temu path, or press "Ask Temu instead" — Temu is asked only for those. If every product was picked from your list, no Temu tab is opened at all.
+
+## 9.20.15 (2026-10-22) — a learned category is really kept
+- After "Learn categories" products still showed "No category". Every store's config held a full copy of 400+ categories and up to 6000 learned titles; with 9 stores the settings grew past the 20 MB save limit, so the store save was refused — the per-product choice (saved separately) pointed to a new category that was never stored. Learning did not report the failed save.
+- Your own categories (everything that is not an untouched built-in one) are now saved in the shared category list together with the per-product choices and learned titles; the store configs keep only their own settings (shared parts are no longer copied into each store). Checked with data like yours: 20.6 MB → 13.5 MB, the learned category is still there after a reload.
+- A failed save is reported (toast, and in the Learn window "✗ Category could not be saved: …") instead of saying "learned".
+
+## 9.20.14 (2026-10-22) — picking row removed
+- The "✚ Only new · ⇄ Invert · Shift+click = range" row above the product list is gone; picking is done with the filters ("✓ Listed" / "Not listed"), pages and the "This page" box. (Shift+click on a tick still selects a range.)
+
+## 9.20.13 (2026-10-22) — price cap $600, weights fixed instead of skipped, no "Tick first"
+- Every Temu price is capped at $599.99 (also a price typed by hand); the list price stays ≥ the base price and ≤ $749.99. A very high source price ("suspicious") no longer blocks the product or the export — it uploads with the capped price and shows a blue note chip "price capped / check price".
+- Weight: "YumEarth … 8.5 oz, 40 Ct" was read as 40 × 8.5 oz = 23 lb → "too heavy — left out". "Ct / Count" now multiplies only small units (≤ 3 oz each, e.g. "0.8 oz, 24 Count"): 8.5 oz, 40 Ct → 0.6 lb. A weight above the max never leaves a product out any more: the title weight is used, else a scraped number that was really ounces (÷ 16), else just under the max — blue note chip "weight fixed".
+- Note chips (price capped, weight fixed) are not counted as "Bahar rahenge" in the upload sheet — those products DO go up.
+- "Tick first N ✓ Apply" removed (pages + "This page" replace it); "✚ Only new" and "⇄ Invert" stay.
+
+## 9.20.12 (2026-10-22) — border only where ZHunter works; shorter Settings
+- The page border no longer sits on every Temu / Walmart / Sam's Club page. It appears only on a tab ZHunter is working on (bulk hunt, sheet / Temu upload, Fix drafts, learning …) and disappears a few seconds after "done" / "error" (`zhFrameIdle` now removes it).
+- Settings: the long border-look block (Preview, Shine colour, Moving style, Speed, Corners, Thickness, Glow) is folded under "Border look — colour, style, speed, thickness". The on/off switch stays visible.
+
+## 9.20.11 (2026-10-22) — the moving page border no longer slows Temu down
+- "Page Unresponsive" on Temu "Manage products" with two Temu tabs at ~40 % CPU each and the GPU at ~46 %: the moving (rotating) page border repaints the whole screen 60× a second, and it only paused when a tab was hidden — with Chrome's "keep background windows awake" switches nothing counts as hidden, so every Temu window animated at once.
+- The border now also pauses when its window is not the one you are using (focus / blur), and it moves in 52 steps per turn (~15 repaints a second instead of 60). Labels (Uploading…, colours) still show; turning "Moving / Animated Border" off in Settings stops it completely.
+
+## 9.20.10 (2026-10-22) — problem chips show their products
+- Clicking "1 no / suspicious price", "1 no category — left out", "1 too heavy — left out" in the ready row jumped to a card that a filter or another page was hiding, so nothing appeared. The list now shows ONLY those products (page 1) and the Filter button reads "✕ 1 no category" — click it to see all products again. This view never unticks anything: the other products keep their tick and still go to upload.
+
 ## 9.20.9 (2026-10-21) — candy "for Piñata Fillers" is no piñata; Fix drafts fills the age group
 - HQ- 4 SHOP: 2 SOUR PATCH KIDS candy packs got the category "Home & Kitchen / … / Piñatas" because the title says "for Piñata Fillers Party Favors"; Temu then wanted "Applicable Age Group" and kept them as drafts. Use words ("for Piñata Fillers", "Party Favors", "Goodie / Treat Bags", "Stocking Stuffers" …) are now left out when the category is picked (`temuUseFree`). A real piñata ("Unicorn Piñata …") keeps its words.
 - Fix drafts: "Applicable Age Group" on candy / snacks or party-supply categories is filled with "3 Years+" when the title names no age (before: "NEEDS YOU").

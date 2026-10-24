@@ -7575,7 +7575,7 @@ async function sendQueueScrape(tabId) {
 
 function getMaxHuntImages() {
   const custom = parseInt(State?.data?.settings?.maxHuntImages, 10);
-  return (Number.isFinite(custom) && custom > 0) ? custom : 7;
+  return (Number.isFinite(custom) && custom > 0) ? custom : 3;   // v9.20.20 — 3 images per product (faster hunting)
 }
 window.getMaxHuntImages = getMaxHuntImages;
 
@@ -13693,6 +13693,8 @@ function temuWordRe(w) {
 function temuCleanText(t) {
   t = String(t || '');
   t = t.replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&');
+  // v9.20.19 — CSS rules copied with Amazon descriptions ("#productDescription { color: #333333; … }") — also in products hunted before
+  t = t.replace(/[#.\w\-\s>,:()[\]="']{1,200}\{[^{}]*\}?/g, m => /[{]/.test(m) && /[:;]/.test(m) ? ' ' : m);
   t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B50}\u{2705}\u{2714}\u{2716}\u{2728}]/gu, ' ');
   t = t.replace(/[【〖\[]\s*([^】〗\]]{1,60}?)\s*[】〗\]]\s*[:\-–]?\s*/g, '$1: ');   // 【SOFT】 → "SOFT: "
   t = t.replace(/^[\s•●▪◆◇■□★☆✓✔➤►▶\-–*·>]+/, '');
@@ -13986,7 +13988,8 @@ function temuCatShared() {
     sh = { overrides: Object.assign({}, ...cfgs.map(c => c.cat_overrides || {}), act.cat_overrides || {}), examples, learned: Object.assign({}, ...cfgs.map(c => c.cat_learned || {}), act.cat_learned || {}), trusted: {} };
     if (State.data?.settings) State.data.settings.temuCatShared = sh;
   }
-  return { profiles, overrides: sh.overrides || {}, examples: sh.examples || [], learned: sh.learned || {}, trusted: sh.trusted || {} };
+  // v9.20.15 — + the categories you made, saved in the shared list itself
+  return { profiles: { ...profiles, ...(sh.profiles || {}) }, overrides: sh.overrides || {}, examples: sh.examples || [], learned: sh.learned || {}, trusted: sh.trusted || {} };
 }
 // a category YOU (or Temu, or your imported sheet) confirmed for exactly this product is never doubtful — even after the title changed
 function temuCatTrusted(url, key, cfg) {
@@ -14147,8 +14150,12 @@ function temuWeightFromTitle(title) {
   else if ((m = t.match(new RegExp('\\b' + num + '\\s*(?:ml|milliliters?)\\b')))) lb = +m[1] / 473 * 1.04;
   if (lb === null || !isFinite(lb) || lb <= 0) return null;
   // per-unit weight × pack count ("2 oz, 6 Count", "16 oz 4 pack") — sirf jab result maqool ho
-  const c = t.match(/\b(\d{1,3})\s*[- ]?\s*(?:ct|count|pk|pack|packs|pouches|bars|cans|bottles|jars|boxes)\b/);
-  if (c) { const n = +c[1]; if (n >= 2 && n <= 48 && lb < 3) lb = lb * n; }   // heavy total → max_weight skip handles it
+  // v9.20.13 — "Ct / Count" is usually the number of PIECES inside the weight ("8.5 oz, 40 Ct" = one 8.5 oz bag of 40 pops — it
+  // was read as 40 × 8.5 oz = 23 lb → "too heavy"). Count multiplies only a small unit (≤ 3 oz each, e.g. "0.8 oz, 24 Count").
+  const c = t.match(/\b(\d{1,3})\s*[- ]?\s*(?:pk|pack|packs|pouches|bars|cans|bottles|jars|boxes)\b/);
+  const cc = c ? null : t.match(/\b(\d{1,3})\s*[- ]?\s*(?:ct|count)\b/);
+  if (c) { const n = +c[1]; if (n >= 2 && n <= 48 && lb < 3) lb = lb * n; }
+  else if (cc) { const n = +cc[1]; if (n >= 2 && n <= 48 && lb * 16 <= 3) lb = lb * n; }
   lb = lb * 1.10;                          // packaging
   return Math.max(0.2, Math.ceil(lb * 10) / 10);
 }
@@ -14173,8 +14180,44 @@ function temuCatFor(url, title, cfg) {
     const ov = cfg.cat_overrides && url ? cfg.cat_overrides[temuSourceIdentity(url)] : '';
     if (ov && cfg.category_profiles && cfg.category_profiles[ov]) return [ov, cfg.category_profiles[ov]];
   } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
-  return temuProfileFor(title, cfg);
+  const byTitle = temuProfileFor(title, cfg);
+  if (byTitle[0]) return byTitle;
+  // v9.20.16 — nothing matched by words: the category of the most similar product you ALREADY learned (same smart-word
+  // rule as "Learn categories"), so a new "… Pops" product gets the category without asking Temu again
+  try {
+    if (TlcLedgerCache?.length) {
+      const sm = tlcSmartFind({ title, brand: '' }, TlcLedgerCache);
+      if (sm) { const hit = Object.entries(cfg.category_profiles || {}).find(([, p]) => (p.full_path || '') === sm.path); if (hit) return hit; }
+    }
+    // then the category whose NAME is in the title — only when one category clearly wins
+    const lm = temuLeafMatches(title, cfg);
+    // (every word of that category's name is in the title, and no other category scores the same)
+    if (lm.length && lm[0].full && (lm.length === 1 || lm[0].score > lm[1].score)) return [lm[0].key, lm[0].prof];
+  } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  return byTitle;
 }
+// v9.20.16 — match by the category's own NAME (leaf): "Blow Pops …" (pops → lollipops) ↔ "Suckers & Lollipops",
+// "… Hard Candy" ↔ "Hard Candy". A one-word name must match that word, a longer name at least 2 of its words.
+// Returns [{ key, prof, score }] best first.
+function temuLeafMatches(title, cfg) {
+  const have = new Set(); temuCatTokens(temuCatSyn(temuUseFree(title))).forEach(w => temuCatForms(w).forEach(x => have.add(x)));
+  const out = [];
+  for (const [key, p] of Object.entries(cfg.category_profiles || {})) {
+    const leaf = p.category_keyword || String(p.full_path || '').split('/').pop() || p.name || '';
+    const lt = [...new Set(temuCatTokens(leaf).filter(w => w.length > 2 && w !== 'and' && !TEMU_CAT_STOP.has(w)))];
+    if (!lt.length) continue;
+    const hit = lt.filter(w => [...temuCatForms(w)].some(x => have.has(x)));
+    if (!hit.length || (lt.length > 1 && hit.length < Math.min(2, lt.length) && hit.length < lt.length * 0.5)) continue;
+    out.push({ key, prof: p, score: hit.length * 10 + Math.round(hit.length / lt.length * 10), full: hit.length === lt.length });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+// learned products (title → Temu path) kept in memory for the match above; refreshed when you learn something
+var TlcLedgerCache = null;
+async function tlcLedgerWarm() {
+  try { const L = await tlcLedgerGet(); TlcLedgerCache = Object.entries(L).map(([t, v]) => v?.path ? tlcLearnedOf(t, v.path) : null).filter(Boolean); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+}
+setTimeout(() => { tlcLedgerWarm(); }, 0);
 // v9.15 — SMART category matching: every category is scored (words in the title, how many, side by side, plus context words like "frozen"/"deli" found in the category path); the best score wins
 const TEMU_CAT_STOP = new Set(['the','and','of','for','with','a','an','in','to','pack','packs','count','ct','oz','lb','lbs','ounce','ounces','fl','size','new','all','by','from','your','our','non','free','style','bulk','variety','assorted','original','classic','flavor','flavored']);
 function temuCatForms(w) {
@@ -14238,8 +14281,15 @@ function temuUseFree(title) {
     .replace(/\bpi[ñn]atas?\s*(?:fillers?|stuffers?|candy|treats?)\b/gi, ' ')
     .replace(/\b(?:goodie|loot|treat)\s*bags?\b|\bparty\s*favou?rs?\b|\bstocking\s*stuffers?\b/gi, ' ');
 }
+// v9.20.16 — "Pops" (Blow Pops, Dum Dums Pops, Tootsie Pops) are lollipops → also matches "Suckers & Lollipops".
+// Ice / freezer pops (Fla-Vor-Ice) are NOT lollipops: they keep their own words.
+function temuCatSyn(title) {
+  const t = String(title || '');
+  if (/\b(ice|freezer|freeze|frozen|popsicles?|juice)\b/i.test(t)) return t;   // "Fla-Vor-Ice Giant Pops" = ice pops
+  return t.replace(/\bpops\b/gi, 'pops lollipops suckers');
+}
 function temuScoreProfiles(title, cfg) {
-  title = temuUseFree(title);
+  title = temuCatSyn(temuUseFree(title));
   const tt = temuCatTokens(title);
   if (!tt.length) return [];
   const have = new Set(); tt.forEach(w => temuCatForms(w).forEach(x => have.add(x)));
@@ -14578,19 +14628,35 @@ function temuEnrich(rows, cfg) {
     const customPx = base !== null;
     const costRaw = temuCostOf(r.price, r.title);   // v9.15 — packs: source × N
     if (!customPx) [base, list, priceRule] = temuPrice(costRaw, cfg, prof, title);
+    // v9.20.13 — no Temu price above $600 (599.99), also not a price typed by hand; the list price stays ≥ the base price
+    let pxCapped = false;
+    { const cap = parseFloat(cfg.price_cap) || 600;
+      if (base != null && base > cap) { base = Math.round((cap - 0.01) * 100) / 100; pxCapped = true; }
+      if (base != null && list != null) { const lcap = Math.round((cap * 1.25 - 0.01) * 100) / 100; list = Math.max(base, Math.min(list, lcap)); } }
     const pxLabel = customPx ? '(custom price)' : priceRule ? `×${priceRule.px} (${priceRule.src === 'category' ? (profName || 'category') : priceRule.src})` : '';
 
     const warn = [];
     if (!images.length) warn.push('NO_IMAGES');
     if (!brand) warn.push('NO_BRAND_MATCH');
     if (base === null) warn.push('NO_PRICE');
-    { const srcP = parseFloat(String(costRaw ?? '').replace(/[$,]/g, '')); const lim = parseFloat(cfg.max_source_price) || 300; if (isFinite(srcP) && srcP > lim) warn.push('PRICE_SUSPICIOUS'); }
+    // v9.20.13 — a very high SOURCE price is only a note now ("check the price") — it no longer blocks; the Temu price is capped above
+    { const srcP = parseFloat(String(costRaw ?? '').replace(/[$,]/g, '')); const lim = parseFloat(cfg.max_source_price) || 300; if (!customPx && isFinite(srcP) && srcP > lim) warn.push('PRICE_SUSPICIOUS'); }
+    if (pxCapped) warn.push('PRICE_CAPPED');
     if (!profName && !r.copyCat) warn.push('NO_CATEGORY_PROFILE');
 
-    // weight: profile → title (smart) → scraped (0.1–8 lb) → global default; > max → skip
-    const scrapedWeight = parseFloat(r.weight);
-    if (Number.isFinite(scrapedWeight) && scrapedWeight > (cfg.max_weight_lb || 8)) { skipped.push('too heavy (sourced ' + scrapedWeight + ' lb): ' + title.slice(0, 40)); return; }
-    let weight = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? scrapedWeight : (prof.weight_lb ?? null), wsrc = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? 'scraped' : weight != null ? 'profile' : '';
+    // weight: profile → title (smart) → scraped (0.1–8 lb) → global default
+    // v9.20.13 — a weight above the max no longer leaves the product out ("too heavy" for a 3 oz bag): the weight from the title
+    // is used, else a scraped number that was really ounces (÷16), else just under the max
+    const maxW = cfg.max_weight_lb || 8;
+    const fitW = w => {
+      if (!(w > 0) || w <= maxW) return w;
+      const tw = temuWeightFromTitle(title); if (tw && tw <= maxW) return tw;
+      if (w / 16 <= maxW) return Math.max(0.1, Math.round(w / 16 * 10) / 10);
+      return Math.round((maxW - 0.1) * 10) / 10;
+    };
+    let scrapedWeight = parseFloat(r.weight), wFixed = false;
+    if (Number.isFinite(scrapedWeight) && scrapedWeight > maxW) { scrapedWeight = fitW(scrapedWeight); wFixed = true; }
+    let weight = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? scrapedWeight : (prof.weight_lb ?? null), wsrc = Number.isFinite(scrapedWeight) && scrapedWeight > 0 ? (wFixed ? 'scraped, fixed' : 'scraped') : weight != null ? 'profile' : '';
     if (weight == null && cfg.smart_weight !== false) {
       const tw = temuWeightFromTitle(title);
       if (tw) { weight = tw; wsrc = 'title'; }
@@ -14600,7 +14666,7 @@ function temuEnrich(rows, cfg) {
     // v9.15.1 — your own "N Pack - " title (made with the Pack buttons) ships N units: weight × N (price already uses source × N)
     { const packN = temuPackCount(r.title);
       if (packN > 1 && Number.isFinite(+weight) && +weight > 0) { weight = Math.round(+weight * packN * 10) / 10; wsrc += ` ×${packN} pack`; } }
-    if (cfg.max_weight_lb && weight > cfg.max_weight_lb) { skipped.push(`too heavy (${weight} lb from ${wsrc}): ` + title.slice(0, 40)); return; }
+    if (weight > maxW) { weight = Math.round((maxW - 0.1) * 10) / 10; wsrc += ', capped'; warn.push('WEIGHT_CAPPED'); }   // v9.20.13 — never left out for weight
     if (wsrc === 'default') warn.push('DEFAULT_WEIGHT');
 
     // v9.12.0 — description + bullet points
@@ -14787,7 +14853,8 @@ function temuZcParse(buf) {
       const sup = c[1].toUpperCase(), sid = c[2];
       if (sup === 'AMAZON') { rurl = `https://www.amazon.com/dp/${sid}`; rplat = 'amazon'; }
       else if (sup === 'WALMART') { rurl = `https://www.walmart.com/ip/${sid}`; rplat = 'walmart'; }
-      else if (sup === 'SAMSCLUB') { rurl = `https://www.samsclub.com/p/item/${sid}`; rplat = 'samsclub'; }
+      // v9.20.18 — "samsclub.com/p/item/<id>" shows Sam's "Uh-oh…" (not found); "/ip/<id>" opens the product (checked live)
+      else if (sup === 'SAMSCLUB') { rurl = temuSamsLink(sid); rplat = 'samsclub'; }
       else return null;
       rid = 'sh_' + sup.toLowerCase() + '_' + sid;
       if (rows.some(x => x.id === rid)) continue;   // same product listed twice (variants) → one card
@@ -14833,10 +14900,21 @@ let TemuLibPick = null; // v9.6.1: Library tab se chune huay products {ids:Set, 
 let TemuSheetRows = null; // v9.7.0: Temu window mein import ki hui sheet ke rows
 
 function temuSourcingSnapshot() {
-  return { id: TemuLast.sourcingId || (TemuLast.sourcingId = 'src_' + crypto.randomUUID()), t: Date.now(), store: TemuLast.store || temuActiveStoreName(), items: TemuLast.items.map(it => ({ title: it.title, url: it.url, sourcingPrice: it.sourcingPrice, list: it.list })) };
+  return { id: TemuLast.sourcingId || (TemuLast.sourcingId = 'src_' + crypto.randomUUID()), t: Date.now(), store: TemuLast.store || temuActiveStoreName(), items: TemuLast.items.map(it => ({ title: it.title, url: temuFixSourceLink(it.url), sourcingPrice: it.sourcingPrice, list: it.list })) };   // v9.20.18 — working Sam's links
 }
 // v9.15.1 — the Google Sheet sourcing record is written ONLY for products Temu confirmed (never for a failed / unconfirmed upload)
+// v9.20.18 — a working Sam's Club product link from its id: 10+ digit item ids → /ip/<id>, old 6–9 digit "prod" ids → /p/prod<id>
+function temuSamsLink(id) {
+  const s = String(id || '').replace(/^prod/i, '');
+  return s.length >= 10 ? `https://www.samsclub.com/ip/${s}` : `https://www.samsclub.com/p/prod${s}`;
+}
+// links rebuilt by older versions ("/p/item/<id>") are repaired before they reach the sheet
+function temuFixSourceLink(url) {
+  const m = String(url || '').match(/^https?:\/\/(?:www\.)?samsclub\.com\/p\/item\/(\d{6,})/i);
+  return m ? temuSamsLink(m[1]) : url;
+}
 async function temuSourcingRecord(items, store) {
+  items = (items || []).map(it => it && it.url ? { ...it, url: temuFixSourceLink(it.url) } : it);
   const list = (items || []).filter(it => it && it.url && it.title);
   if (!list.length) return '';
   try {
@@ -15009,8 +15087,8 @@ async function temuRunExport(opts = {}) {
         say(`⚠ ${noCat.length} product(s) have no category and were left out (the rest goes on):\n` + noCat.map(it => '• ' + it.title.slice(0, 70)).join('\n') + '\nPress "Learn categories" (or add the category) and export those again.');
         toast(`${noCat.length} product(s) left out: no category`, 'warn');
         if (!items.length) return; } }
-    const blockers = items.filter(it => it.warn.some(w => ['NO_IMAGES', 'NO_PRICE', 'PRICE_SUSPICIOUS'].includes(w)));
-    if (blockers.length) throw new Error('Export blocked: ' + blockers.map(it => it.title.slice(0, 45) + ': ' + it.warn.filter(w => ['NO_IMAGES','NO_PRICE','PRICE_SUSPICIOUS'].includes(w)).join(', ')).join(' | '));
+    const blockers = items.filter(it => it.warn.some(w => ['NO_IMAGES', 'NO_PRICE'].includes(w)));   // v9.20.13 — a suspicious source price no longer blocks
+    if (blockers.length) throw new Error('Export blocked: ' + blockers.map(it => it.title.slice(0, 45) + ': ' + it.warn.filter(w => ['NO_IMAGES','NO_PRICE'].includes(w)).join(', ')).join(' | '));
     const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
     const n = temuFillTemplate(wb, items, cfg);
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
@@ -15066,7 +15144,7 @@ function temuConfirmUpload() {
     } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const R = TemuReadyLast || {};
     const store = temuActiveStoreName() || '—';
-    const left = (R.groups || []).filter(g => g.cls !== 'bad');
+    const left = (R.groups || []).filter(g => g.cls !== 'bad' && g.cls !== 'note');   // notes (price capped, weight fixed) DO go up
     const leftN = left.reduce((n, g) => n + g.ids.length, 0);
     const batchInp = $('temuBatchNameInp');
     const e2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -16354,18 +16432,33 @@ function temuUpdateTplStatus() {
 async function temuSaveCfg(cfg) {
   const stores = temuStores(); const n = temuActiveStoreName();
   if (!n) { toast('Add a store first', 'warn'); return 'no active store'; }
+  // v9.20.15 — your own categories (everything that is not an untouched built-in one) are saved in the SHARED list too.
+  // Before, a learned category lived only inside the store's big config: when that save failed (all stores together got
+  // too big) the product still pointed to the new category, which was never stored → "No category" after learning.
+  const off = typeof TEMU_OFFICIAL_CATEGORIES !== 'undefined' ? TEMU_OFFICIAL_CATEGORIES : {};
+  const own = {};
+  for (const [k, p] of Object.entries(cfg.category_profiles || {})) { const o = off[k]; if (!o || JSON.stringify(o) !== JSON.stringify(p)) own[k] = p; }
   { // v9.17.5 — per-product choices + learned titles go to the list ALL stores share
-    const sh = { overrides: cfg.cat_overrides || {}, examples: Array.isArray(cfg.cat_examples) ? cfg.cat_examples : [], learned: cfg.cat_learned || {}, trusted: cfg.cat_trusted || {} };
+    const sh = { overrides: cfg.cat_overrides || {}, examples: Array.isArray(cfg.cat_examples) ? cfg.cat_examples : [], learned: cfg.cat_learned || {}, trusted: cfg.cat_trusted || {}, profiles: own };
     const r = await msg({ action: 'UPDATE_SETTINGS', settings: { temuCatShared: sh } });
-    if (r?.success && State.data?.settings) State.data.settings.temuCatShared = sh;
+    if (!r?.success) { toast('Categories could not be saved: ' + (r?.error || 'unknown error'), 'bad'); return 'categories not saved: ' + (r?.error || 'unknown error'); }
+    if (State.data?.settings) State.data.settings.temuCatShared = sh;
     // v9.18.7 — categories are shared: one you deleted is removed from EVERY store (before it came back from another store)
     if (cfg.category_profiles) {
       const gone = Object.keys(temuGetCfg().category_profiles || {}).filter(k => !(k in cfg.category_profiles));
       if (gone.length) for (const s of Object.values(stores)) if (s?.config?.category_profiles) gone.forEach(k => { delete s.config.category_profiles[k]; });
     }
   }
-  stores[n] = { ...(stores[n] || {}), config: cfg };
-  return temuSaveStores(stores);
+  // v9.20.15 — keep the store configs small: the shared parts (categories you made, per-product choices, learned titles)
+  // are no longer copied into every store (9 stores × 400+ categories × 6000 learned titles made the save fail)
+  const lean = c => { const x = { ...c }; delete x.cat_overrides; delete x.cat_examples; delete x.cat_learned; delete x.cat_trusted;
+    const p = {}; for (const [k, v] of Object.entries(c.category_profiles || {})) { const o = off[k]; if (!o || JSON.stringify(o) !== JSON.stringify(v)) p[k] = v; }
+    x.category_profiles = p; return x; };
+  for (const [k, s] of Object.entries(stores)) if (k !== n && s?.config && typeof s.config === 'object') stores[k] = { ...s, config: lean(s.config) };
+  stores[n] = { ...(stores[n] || {}), config: lean(cfg) };
+  const ok = await temuSaveStores(stores);
+  if (ok !== true) toast('Store settings could not be saved — check Settings → Error log', 'bad');
+  return ok;
 }
 
 let TemuExpandedProfiles = new Set(['golf_balls']);
@@ -17142,7 +17235,10 @@ async function temuUpdateReady() {
     const LG = {};   // already listed / duplicate, per store
     const G = {
       noimg: { cls: 'bad', label: 'no image', ids: [] },
-      noprice: { cls: 'bad', label: 'no / suspicious price', ids: [] },
+      noprice: { cls: 'bad', label: 'no price', ids: [] },
+      // v9.20.13 — only notes (they ARE uploaded): click to see them
+      pxnote: { cls: 'note', label: 'price capped / check price', ids: [] },
+      wnote: { cls: 'note', label: 'weight fixed', ids: [] },
       nocat: { cls: 'warn', label: 'no category — left out', ids: [] },
       heavy: { cls: 'warn', label: 'too heavy — left out', ids: [] },
       other: { cls: 'warn', label: 'not usable — left out', ids: [] }
@@ -17161,10 +17257,12 @@ async function temuUpdateReady() {
         G[/^too heavy/i.test(why) ? 'heavy' : 'other'].ids.push({ id: r0.id, t: why || t }); continue;
       }
       if (it.warn.includes('NO_IMAGES')) G.noimg.ids.push({ id: r0.id, t });
-      else if (it.warn.includes('NO_PRICE') || it.warn.includes('PRICE_SUSPICIOUS')) G.noprice.ids.push({ id: r0.id, t });
+      else if (it.warn.includes('NO_PRICE')) G.noprice.ids.push({ id: r0.id, t });
       else if (it.warn.includes('NO_CATEGORY_PROFILE')) G.nocat.ids.push({ id: r0.id, t });
       else {
         ok++;
+        if (it.warn.includes('PRICE_CAPPED') || it.warn.includes('PRICE_SUSPICIOUS')) G.pxnote.ids.push({ id: r0.id, t: `${t} — $${it.base}` });
+        if (it.warn.includes('WEIGHT_CAPPED') || /fixed/.test(it.wsrc || '')) G.wnote.ids.push({ id: r0.id, t: `${t} — ${it.weight} lb` });
         const c = parseFloat(String(it.sourcingPrice ?? '').replace(/[$,]/g, ''));
         if (c > 0 && it.base > 0) mult.push(it.base / c);
       }
@@ -17290,12 +17388,18 @@ async function temuFlowGo(step) {
 }
 
 // chip click → open the product list and jump to the first product of that group
-async function temuReadyJump(ids) {
-  const id = (ids || [])[0]; if (!id) return;
+// v9.20.10 — a problem chip ("1 no category", "1 no / suspicious price" …) shows ONLY those products in the list (page 1), so you
+// can fix them; before, it jumped to a card that a filter or another page was hiding → nothing appeared. Only a view: the
+// other products keep their tick and still count. "All" (or ✕ on the Filter button) shows everything again.
+async function temuReadyJump(ids, label) {
+  ids = (ids || []).filter(Boolean); if (!ids.length) return;
   const list = $('temuReviewList');
+  TemuRvFilter.f = 'ids'; TemuRvFilter.ids = new Set(ids); TemuRvFilter.idsLabel = label || `${ids.length} product${ids.length === 1 ? '' : 's'}`; TemuRvFilter.q = ''; TemuRvPage = 1;
   if (list?.classList.contains('hidden')) $('temuReviewToggleBtn')?.click();
-  for (let i = 0; i < 20 && !document.querySelector(`.temu-rv-card[data-id="${CSS.escape(id)}"]`); i++) await new Promise(r => setTimeout(r, 150));
-  temuJumpToCard(id);
+  else { try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+  for (let i = 0; i < 20 && !document.querySelector(`.temu-rv-card[data-id="${CSS.escape(ids[0])}"]`); i++) await new Promise(r => setTimeout(r, 150));
+  temuApplyRvFilter();
+  temuJumpToCard(ids[0]);
 }
 
 // ═══ v9.15.1 — Upload steps (File → Store → Processing → Result) shown above the text report ═══
@@ -17494,15 +17598,6 @@ async function temuRenderReview() {
         <span class="temu-rv-pg-nums"></span>
         <label class="temu-rv-pg-sizewrap" title="Products per page — type any number (e.g. 10, 15, 30), Enter"><input type="number" class="inp temu-rv-pg-size" min="1" max="500" step="1" value="${temuRvPageSize()}"><span>/ page</span></label>
       </div>
-      <div class="temu-rv-pickn" title="Ticks the first N products shown (top of the list, after the filter) and unticks all others. Then fine-tune by hand — Shift+click a tick to tick / untick a whole range.">
-        <span>Tick first</span>
-        <input type="number" class="inp temu-rv-pickn-inp" min="1" max="${rows.length}" step="1" value="${Math.min(rows.length, temuPickNGet() || 30)}" aria-label="How many products to tick">
-        <span>of ${rows.length}</span>
-        <button type="button" data-t="pickn">✓ Apply</button>
-        <button type="button" data-t="newonly" title="Tick ONLY the products that are listed on no store yet — all others are unticked (whatever filter is on)">✚ Only new</button>
-        <button type="button" data-t="invert" title="Every product swaps its tick (the whole list, not only what a filter shows). The list then shows All so you can see the result.">⇄ Invert</button>
-        <small>Shift+click = range</small>
-      </div>
       <div class="temu-rv-fchips"${TemuRvFilter.open ? '' : ' hidden'}>
         ${RV_FILTERS.map(([k, l]) =>
           `<button type="button" class="temu-rv-fchip${TemuRvFilter.f === k ? ' on' : ''}" data-f="${k}">${l}</button>`).join('')}
@@ -17554,6 +17649,12 @@ async function temuRenderReview() {
       if (b.dataset.t === 'pickn') { temuPickFirstN(list, parseInt(tools.querySelector('.temu-rv-pickn-inp')?.value, 10)); return; }
       if (b.dataset.t === 'invert') { temuPickInvert(); return; }
       if (b.dataset.t === 'newonly') { temuPickNewOnly(); return; }
+      if (b.dataset.t === 'filters' && TemuRvFilter.f === 'ids') {   // "✕ 1 no category" → back to all products
+        TemuRvFilter.f = 'all'; TemuRvFilter.ids = null; TemuRvPage = 1;
+        b.classList.remove('active'); b.title = 'Show filters'; const l = b.querySelector('.temu-rv-ftgl-l'); if (l) l.textContent = 'Filter';
+        tools.querySelectorAll('.temu-rv-fchip').forEach(x => x.classList.toggle('on', x.dataset.f === 'all'));
+        temuApplyRvFilter(); return;
+      }
       if (b.dataset.t === 'filters') {
         TemuRvFilter.open = !TemuRvFilter.open;
         tools.querySelector('.temu-rv-fchips').hidden = !TemuRvFilter.open;
@@ -18266,6 +18367,7 @@ function temuApplyRvFilter() {
     else if (ok && f === 'up') ok = flags.includes('up');
     else if (ok && f === 'notup') ok = !flags.includes('up');
     else if (ok && f === 'rej') ok = flags.includes('rej');
+    else if (ok && f === 'ids') ok = !!TemuRvFilter.ids?.has(c.dataset.id);
     c.classList.toggle('rv-filtered-out', !ok);
     if (ok) { shown++; okCards.push(c); } else { if (c.dataset.id) hidden.add(c.dataset.id); c.classList.remove('rv-page-out'); }
   });
@@ -18275,7 +18377,9 @@ function temuApplyRvFilter() {
     okCards.forEach((c, i) => c.classList.toggle('rv-page-out', Math.floor(i / size) + 1 !== TemuRvPage));
     temuRvPagerRender(list, pages, okCards.length); }
   // v9.20.4 — hidden products are left out of upload / titles / counts ("Unticked" view excepted: it is only for looking)
-  { const next = f === 'off' ? new Set() : hidden;
+  { const next = f === 'off' || f === 'ids' ? new Set() : hidden;   // the problem-chip view only shows, it never unticks
+    const tg = list.querySelector('.temu-rv-ftgl');
+    if (tg && f === 'ids') { tg.classList.add('active'); const l = tg.querySelector('.temu-rv-ftgl-l'); if (l) l.textContent = '✕ ' + (TemuRvFilter.idsLabel || 'Selected'); tg.title = 'Showing only these products — click All in the filters to see everything'; }
     const changed = next.size !== TemuRvHidden.size || [...next].some(id => !TemuRvHidden.has(id));
     TemuRvHidden = next;
     if (changed) { TemuLast = null; temuGetQueuedRows().then(rs => { try { temuUpdateReviewCount(rs); temuScheduleReady(); temuUpdateSrcInfo(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }).catch(() => {}); } }
@@ -19104,13 +19208,15 @@ function temuInitReviewToggle() {
   // 20 Oct 2026 — a filter / search on the product list limits "Select All" to the products it shows ("Clear" then only clears those)
   const imgSelAll = async (on) => {
     const rows = await temuGetQueuedRows();
-    const filtered = !!(TemuRvFilter.f !== 'all' || TemuRvFilter.q.trim()) && !!list.querySelector('.temu-rv-card');
-    const shown = filtered ? new Set([...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out)')].map(c => c.dataset.id).filter(Boolean)) : null;
+    // v9.20.17 — follows what the list SHOWS: the filter AND the current page (10 per page → only those 10)
+    const paged = !!list.querySelector('.temu-rv-card.rv-page-out');
+    const filtered = !!(TemuRvFilter.f !== 'all' || TemuRvFilter.q.trim() || paged) && !!list.querySelector('.temu-rv-card');
+    const shown = filtered ? new Set([...list.querySelectorAll('.temu-rv-card:not(.rv-filtered-out):not(.rv-page-out)')].map(c => c.dataset.id).filter(Boolean)) : null;
     if (on) {
       TemuImgEditSelected.clear();
       rows.forEach(r => { if (_allImgUrls(r).length && (!shown || shown.has(r.id))) TemuImgEditSelected.add(r.id); });
-      if (shown) toast(`✨ ${TemuImgEditSelected.size} product${TemuImgEditSelected.size === 1 ? '' : 's'} selected — only the ones your filter shows`, 'ok');
-    } else if (shown) { shown.forEach(id => TemuImgEditSelected.delete(id)); toast('✨ cleared for the products your filter shows', 'ok'); }
+      if (shown) toast(`✨ ${TemuImgEditSelected.size} product${TemuImgEditSelected.size === 1 ? '' : 's'} selected — only the ones shown on this page`, 'ok');
+    } else if (shown) { shown.forEach(id => TemuImgEditSelected.delete(id)); toast('✨ cleared for the products shown on this page', 'ok'); }
     else TemuImgEditSelected.clear();
     temuUpdateImgEditCount(rows);
     if (!list.classList.contains('hidden')) await temuRenderReview();
@@ -22252,7 +22358,7 @@ function temuSyncSrcSeg() {
 
   document.addEventListener('change', (e) => { if (e.target?.id === 'tgPx2') temuSyncSrcSeg(); });
   document.addEventListener('change', (e) => { if (e.target?.id === 'tgPriceStrategy') { temuApplyPxMode(); try { temuRefreshReviewPrices(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuScheduleReady(); } });
-  $('temuReadyBox')?.addEventListener('click', e => { const b = e.target.closest('[data-ready-ids]'); if (b) temuReadyJump(b.dataset.readyIds.split(',').filter(Boolean)); });
+  $('temuReadyBox')?.addEventListener('click', e => { const b = e.target.closest('[data-ready-ids]'); if (b) temuReadyJump(b.dataset.readyIds.split(',').filter(Boolean), (b.textContent || '').replace(/\s+/g, ' ').trim()); });
   $('temuFlow')?.addEventListener('click', e => { const b = e.target.closest('[data-flow]'); if (b) temuFlowGo(b.dataset.flow); });
   temuSyncSrcSeg();
 })();
@@ -22476,8 +22582,12 @@ function tlcWirePaste() {
   inp.oninput = () => { if (TlcState) TlcState.pasteAt = Date.now(); };   // typing/pasting here pauses the 40 s skip timer
   inp.onpaste = () => { if (TlcState) TlcState.pasteAt = Date.now(); setTimeout(go, 150); };
 }
-function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category you pick
+function tlcAsk(it, k, n, options, o = {}) {   // v9.15: match words follow the category you pick
   return new Promise(resolve => {
+    // v9.20.16 — o.local: the options come from YOUR category list (no Temu); "Skip" becomes "Ask Temu instead"
+    const skipBtn = $('tlcSkip');
+    if (skipBtn) { skipBtn.dataset.lbl = skipBtn.dataset.lbl || skipBtn.textContent; skipBtn.textContent = o.local ? 'Ask Temu instead' : skipBtn.dataset.lbl; }
+    const _res = resolve; resolve = v => { if (skipBtn) skipBtn.textContent = skipBtn.dataset.lbl; _res(v); };
     $('tlcCount').textContent = `${k} / ${n}`;
     $('tlcTitle').textContent = it.title;
     let matchDirty = false;
@@ -22494,9 +22604,10 @@ function tlcAsk(it, k, n, options) {   // v9.15: match words follow the category
       box.appendChild(lab);
     });
     { const first = box.querySelector('input'); if (first) { first.checked = true; first.dispatchEvent(new Event('change')); } }   // Temu's top suggestion is pre-selected
-    $('tlcSkip').onclick = () => resolve({ skip: true });
+    $('tlcSkip').onclick = () => resolve(o.local ? { temu: true } : { skip: true });
     if (TlcState) TlcState.onPaste = path => resolve({ path, match: '' });
     save.onclick = () => resolve({ path: options[chosen], match: '' });   // v9.15 — no word rules: the whole title is the lesson
+    if (o.local) { tlcSay('Pick from YOUR categories — no Temu needed. None fits? "Ask Temu instead" (or paste a Temu path below).'); return; }
     tlcSay(it._onlySel ? 'Temu picked this category by itself and showed no list. If it is wrong, press Skip and set the category in the product row.' : options.length ? 'Pick the right category (Temu suggestions):' : 'Temu gave no suggestion — Skip, or fix the title and try later.', !options.length);
   });
 }
@@ -22525,6 +22636,7 @@ async function tlcLedgerPut(title, path) {
     const L = await tlcLedgerGet(); L[tlcLedgerKey(title)] = { path, at: Date.now() };
     const ks = Object.keys(L); if (ks.length > 4000) ks.sort((a, b) => L[a].at - L[b].at).slice(0, ks.length - 4000).forEach(k => delete L[k]);
     await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L });
+    tlcLedgerWarm();   // v9.20.16 — the auto-match above knows it at once
   } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 // ── 20 Oct 2026 — smart category: a product gets the category of an already learned product when their titles share
@@ -22653,7 +22765,7 @@ function tlcForget(cfg, it) {
   } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 async function tlcLedgerDel(titles) {
-  try { const L = await tlcLedgerGet(); let n = 0; for (const t of titles) { const k = tlcLedgerKey(t); if (L[k]) { delete L[k]; n++; } } if (n) await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { const L = await tlcLedgerGet(); let n = 0; for (const t of titles) { const k = tlcLedgerKey(t); if (L[k]) { delete L[k]; n++; } } if (n) { await chrome.storage.local.set({ [TLC_LEDGER_KEY]: L }); tlcLedgerWarm(); } } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
 }
 async function temuLearnCategories(opts = {}) {
   if (opts instanceof Event || typeof opts !== 'object' || !opts) opts = {};
@@ -22699,12 +22811,39 @@ async function temuLearnCategories(opts = {}) {
   const total = todo.length;
   { const c = $('tlcCount'); if (c) c.textContent = `0 / ${total}`; }   // v9.17.3 — not the old "1 / 1" of the last run
   const applyAndLearn = async (it, path) => {
-    const cfg = temuGetCfg(); tlcApplyPick(cfg, it, { path, match: '' }); await temuSaveCfg(cfg); saved++;
+    const cfg = temuGetCfg(); tlcApplyPick(cfg, it, { path, match: '' });
+    const sv = await temuSaveCfg(cfg);   // v9.20.15 — a failed save is said out loud (before: "learned", but nothing was kept)
+    if (sv !== true) { tlcSay('✗ Category could not be saved: ' + sv, true); return; }
+    saved++;
     tlcLedgerPut(it.title, path); learned.push(tlcLearnedOf(it.title, path));
     try { temuRenderProfiles(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   };
   try {
+    // v9.20.16 — YOUR category list first (no Temu): for every product the 5 closest of your categories (+ the category of the
+    // most similar learned product). Pick one with a click, paste a Temu path, or "Ask Temu instead" for that product.
+    { const cfgL = temuGetCfg(), rest = [];
+      for (const it of todo.slice()) {
+        if (TlcState.stop) break;
+        const opts = [];
+        if (!it._force) { const sm = tlcSmartFind(it, learned); if (sm) opts.push(sm.path); }
+        try {
+          const lst = temuScoreProfiles(temuCleanTitle(zhStripSourceNames(it.title || ''), cfgL), cfgL).filter(x => x.prof?.full_path && x.score > 0).sort((a, b) => b.score - a.score);
+          for (const x of lst) { if (opts.length >= 5) break; if (!opts.includes(x.prof.full_path)) opts.push(x.prof.full_path); }
+          for (const x of temuLeafMatches(it.title || '', cfgL)) { if (opts.length >= 5) break; if (x.prof.full_path && !opts.includes(x.prof.full_path)) opts.push(x.prof.full_path); }
+        } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+        if (!opts.length) { rest.push(it); continue; }
+        k++;
+        const pick = await tlcAsk(it, k, total, opts, { local: true });
+        if (TlcState.stop) break;
+        if (pick.temu) { k--; rest.push(it); continue; }
+        if (pick.skip || !pick.path) continue;
+        await applyAndLearn(it, pick.path);
+      }
+      todo.length = 0; rest.forEach(x => todo.push(x));
+      if (TlcState.stop) return;
+      if (!todo.length) { tlcSay(`✓ Done — ${saved} categor${saved === 1 ? 'y' : 'ies'} saved from your list, no Temu needed.`); return; }
+    }
     const nTabs = Math.max(1, Math.min(TLC_TABS, todo.length));   // 1 product = 1 tab
     tlcSay(nTabs > 1 ? `Opening ${nTabs} Temu "Add new product" pages (the 2nd in its own small window — keep both visible)…` : 'Opening Temu "Add new product" page…'); $('tlcOpts').innerHTML = ''; $('tlcSave').disabled = true;
     tabs = await tlcEnsureTabs(nTabs);

@@ -2606,7 +2606,13 @@ function extractProductDetails(platform) {
         const t = txt(li); if (t && t.length > 3 && !/^(make sure this fits|see more product details)/i.test(t)) d.bullets.push(t);
       });
       const descEl = document.querySelector('#productDescription p, #productDescription, [data-feature-name="productDescription"]');
-      if (descEl) { const dt = txt(descEl); if (dt && dt.length > 20) d.description = dt; }
+      // v9.20.19 — Amazon puts a <style> block inside the description box: read a copy WITHOUT <style>/<script>, and drop any
+      // leftover CSS rules ("#productDescription { color: #333333; … }" ended up in the Temu sheet as the description)
+      if (descEl) {
+        const cl = descEl.cloneNode(true); cl.querySelectorAll('style, script, noscript').forEach(x => x.remove());
+        const dt = String(txt(cl) || '').replace(/[#.\w\-\s>,:()[\]="']{1,200}\{[^{}]*\}/g, ' ').replace(/\s{2,}/g, ' ').trim();
+        if (dt && dt.length > 20) d.description = dt;
+      }
     }
     // ── Walmart / Sam's Club (same front-end family) ──
     else if (h.includes('walmart.') || h.includes('samsclub.com')) {
@@ -2656,7 +2662,13 @@ function extractProductDetails(platform) {
       // DOM description fallback
       if (!d.description) {
         const descEl = document.querySelector('[data-testid="product-description-content"], [data-testid="item-description"], .dangerous-html, #product-description-section, .sc-product-description');
-        if (descEl) { const dt = txt(descEl); if (dt && dt.length > 20) d.description = dt; }
+        // v9.20.19 — Amazon puts a <style> block inside the description box: read a copy WITHOUT <style>/<script>, and drop any
+      // leftover CSS rules ("#productDescription { color: #333333; … }" ended up in the Temu sheet as the description)
+      if (descEl) {
+        const cl = descEl.cloneNode(true); cl.querySelectorAll('style, script, noscript').forEach(x => x.remove());
+        const dt = String(txt(cl) || '').replace(/[#.\w\-\s>,:()[\]="']{1,200}\{[^{}]*\}/g, ' ').replace(/\s{2,}/g, ' ').trim();
+        if (dt && dt.length > 20) d.description = dt;
+      }
       }
     }
     // ── Generic: JSON-LD + any spec table ──
@@ -5605,7 +5617,9 @@ function zhFrame(state, label, color, pct) {
 /* "Moving / Animated Border" is the user's own opt-in → it keeps moving (v9.16 had cut it to one sweep, so it looked broken).
    CPU stays low: it only runs in the tab you look at (zh-paused while hidden), the default (off) is still a still frame. */
 #zh-frame.zh-moving #zh-frame-beam{
-  animation:zhRotateFrame var(--zh-anim-speed,3.5s) linear infinite;
+  /* v9.20.11 — steps(): ~15 repaints per second instead of 60 (a rotating conic border repaints the WHOLE screen each frame:
+     on Temu's big product list that made "Page Unresponsive" with 40 % CPU per tab) */
+  animation:zhRotateFrame var(--zh-anim-speed,3.5s) steps(52) infinite;
 }
 #zh-frame.zh-moving.zh-breath #zh-frame-beam{animation:zhBreath var(--zh-anim-speed,3.5s) ease-in-out infinite alternate}
 @keyframes zhBreath{from{opacity:.3}to{opacity:1}}
@@ -5677,11 +5691,10 @@ function zhFrame(state, label, color, pct) {
 }
 
 function zhFrameIdle() {
-  if (!_zhFrameOn || !zhFramePageOk()) {
-    const f = document.getElementById('zh-frame');
-    if (f) f.remove();
-    return;
-  }
+  // v9.20.12 — the border shows ONLY while ZHunter works on this tab (bulk hunt, sheet / Temu upload, Fix drafts, learning …)
+  // and for a few seconds after "done" / "error". An idle Temu / Walmart / Sam's Club page gets no border any more.
+  { const f = document.getElementById('zh-frame'); if (f) f.remove(); _zhFrameLast = { state: 'idle' }; return; }
+  // (old idle frame with the site / store name — no longer used)
   if (/seller\.temu\.com$/i.test(location.hostname)) {
     const mall = zhTemuMallNow();
     zhFrame('idle', mall ? `ZHunter · ${mall}` : 'ZHunter · Temu', mall ? zhStoreColor(mall) : '#94A3B8');
@@ -5702,13 +5715,17 @@ function zhFrameRefresh() {
 (function zhFrameBoot() {
   try {
     let _lastHref = location.href;
+    // v9.20.11 — the moving border also stops when this window is not the one you use: with Chrome's "keep background windows
+    // awake" switches document.hidden stays false for every window, so all Temu windows kept animating at once
     const _zhVis = () => {
       try {
         const f = document.getElementById('zh-frame');
-        if (f) f.classList.toggle('zh-paused', document.hidden);
+        if (f) f.classList.toggle('zh-paused', document.hidden || !document.hasFocus());
       } catch (_) {}
     };
     document.addEventListener('visibilitychange', _zhVis);
+    window.addEventListener('focus', _zhVis);
+    window.addEventListener('blur', _zhVis);
     setInterval(() => {
       _zhVis();
       try {

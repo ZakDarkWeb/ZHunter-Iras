@@ -974,3 +974,15 @@ body.light-mode .tuc { background: rgba(15,23,42,.28); }
 /* v9.20.8 — page size is a small number box: [ 10 ] / page */
 .temu-rv-pg-sizewrap { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font: 500 10.5px var(--font); color: var(--ink-3); }
 .temu-rv-pg-sizewrap .temu-rv-pg-size { width: 46px; height: 24px; padding: 0 4px; text-align: center; font: 700 11px var(--mono); }
+
+/* ── v9.20.12 — Settings: the page-border look block folds away ── */
+details.zh-frame-more { border-top: 1px solid var(--line); }
+details.zh-frame-more > summary { list-style: none; cursor: pointer; padding: 10px 12px; font: 600 11.5px var(--font); color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+details.zh-frame-more > summary::-webkit-details-marker { display: none; }
+details.zh-frame-more > summary::before { content: '›'; display: inline-block; transition: transform .15s; color: var(--ink-3); font-size: 14px; }
+details.zh-frame-more[open] > summary::before { transform: rotate(90deg); }
+details.zh-frame-more > summary:hover { color: var(--ink); }
+
+/* v9.20.13 — note chips (they still upload): price capped / weight fixed */
+.temu-ready-item.note { color: var(--accent); border-color: var(--accent-line, rgba(34,211,238,.35)); background: var(--accent-soft, rgba(34,211,238,.08)); }
+.trs .temu-ready-item.note::before { background: var(--accent); }
