@@ -1,5 +1,17 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.21.1 (2026-10-24) — faster hunting of open tabs
+- A Walmart product page shows the product at ~10 s, but Chrome calls it "loaded" only at ~16 s because of ads and trackers. Tabs at the back take even longer, and the hunt waited up to 25 s per tab for that. Now, on every site, hunting starts once the product is on the page (title + price + images), without waiting for the rest.
+- Walmart / Sam's Club links (open tabs and the links queue) are read straight from the product's page data. The tab does not have to load or show anything. This takes ~1–4 s per product, up to 4 at once on top of "Tabs at once". In a test, 5 Walmart products took 3.3 s together, with title, price, all images, brand, description, bullets and weight (Sam's "Net Weight 71.17 oz" → 4.4 lb).
+- If the page data is missing (sold out with no price, "Robot or human?" page, or a site change), that link is hunted the normal way. After 2 misses in a row the site goes back to the normal way for the rest of that hunt.
+
+## 9.21.0 (2026-10-23) — auto pipeline: Titles → Images → Upload
+- Temu Export (and "Temu upload" after a hunt) opens a 3-step window over the Temu Export window. "Temu window" shows the normal window.
+- 1 Titles: tick the products (the ticked Temu list is the default). Choose the AI (Groq / Gemini / ChatGPT) and the prompt (Temu default, a saved prompt or your own). The last choice is remembered. Nothing ticked means titles stay as they are.
+- 2 Images: tick products, choose prompt + tool (Gemini / ChatGPT / Flow) + Main image / All images, press "Apply to ticked". Repeat for other products with another prompt or tool. Every product shows its plan, and × removes it. There is no "Image batch setup" window here. Pack prompts are left out because they need a quantity.
+- Start: titles change first, then the image groups run one after the other in the AI Image Studio. Failed images are tried again in a new tab. If they still fail, the original image stays.
+- 3 Review: "N products ready to upload", lists the titles and images that were not changed, then Upload opens the usual confirm sheet. Only the ticked products of the Temu list are uploaded.
+
 ## 9.20.20 (2026-10-23) — 3 images per product
 - Hunting keeps at most 3 images per product (was 7) — fewer images to fetch, faster hunts. The same number is used for the Temu sheet (main + 2). Set once for existing installs too (`migratedImg3`); Settings → "Max images to hunt" can still change it (1–15).
 

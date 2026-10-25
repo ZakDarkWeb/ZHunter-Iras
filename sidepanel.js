@@ -3691,6 +3691,7 @@ async function gptEnsureSlotInner(S, idx) {
   const acct = (u) => (/^https:\/\/gemini\.google\.com\/(u\/\d+)\//i.exec(u || '') || [])[1] || '';
   let pool = tabs;
   if (gem && refUrl) { const same = tabs.filter(t => acct(t.url) === acct(refUrl)); pool = same; }
+  if (S.freshTab) pool = [];   // v9.21 — retry pass: a new tab
   // v9.15.1 — Gemini / ChatGPT tabs run in the separate "ZHunter AI" window, so your own window never loses its tab
   const aiWin = await zhAiWindowId(false);
   let tab = pool.find(t => t.windowId === aiWin && t.active) || pool.find(t => t.windowId === aiWin) || pool.find(t => t.active) || pool[0];
@@ -3926,7 +3927,7 @@ async function flowEnsureSlot(S, idx) {
   const slot = S.gptSlots[idx];
   if (slot?.tabId && await alive(slot.tabId)) return slot;
   const used = new Set(S.gptSlots.filter((x, i) => x && i !== idx).map(x => x.tabId));
-  const free = (await chrome.tabs.query({ url: '*://flow.google.com/*' })).filter(t => !used.has(t.id));
+  const free = S.freshTab ? [] : (await chrome.tabs.query({ url: '*://flow.google.com/*' })).filter(t => !used.has(t.id));   // v9.21 — retry pass: a new Flow window
   let tab = free.find(t => t.active) || free[0] || null;
   // 21 Oct 2026 — back to "own window per Flow tab" in every mode: a tab behind another tab is never drawn, even with the
   // background switches, so the Flow page there stalls (same as Gemini / ChatGPT, see zhSlotOwnWindow)
@@ -7672,10 +7673,13 @@ async function huntWaitTabLoaded(tabId, prevUrl, timeoutMs = 60000) {
     await sleep(120);
   }
   const deadline = Date.now() + timeoutMs;
+  let nextProbe = Date.now() + 1000;
   while (Date.now() < deadline && !BulkState.isCancelled) {
     const t = await getTab();
     if (!t) return false;
     if (t.status === 'complete') return true;
+    // v9.21.1 — the product is already there: no need to wait for the ads to finish loading
+    if (t.status === 'loading' && t.url && t.url !== prevUrl && /^https?:/i.test(t.url) && Date.now() >= nextProbe) { nextProbe = Date.now() + 700; if (await huntProbeReady(tabId)) return true; }
     await sleep(250);
   }
   return false;
@@ -8066,8 +8070,12 @@ async function scrapeQueueItem(queueItem, workerTabId, opts = {}) {
   let errorCode = '';
   let guardFlags = null;
   let fewStable = false;   // v9.15 — product really has fewer than 3 images (page fully loaded, count did not grow)
-  try {
-    await huntWaitWhileHeld();
+  // v9.21.1 — Walmart / Sam's: straight from the page data, the worker tab does not open the link at all
+  await huntWaitWhileHeld();
+  const dKey = `${BulkState.currentBatchId}|${queueItem.url}`;   // once per link per hunt (queue items are saved, so no flag on them)
+  const direct = HuntDirectTried.has(dKey) ? null : (HuntDirectTried.add(dKey), await huntDirectTry(queueItem.url, fakeId));
+  if (direct) { scraped = direct; fewStable = true; }
+  else try {
     const curTab = await new Promise(res => chrome.tabs.get(workerTabId, t => res(chrome.runtime.lastError ? null : t)));
     if (!curTab) throw new Error('tab_closed');
     if (!curTab.url || curTab.url === 'about:blank' || curTab.url !== queueItem.url) {
@@ -8409,7 +8417,7 @@ async function startQueueHunt() {
   { const cb = $('bulkCancelBtn'); if (cb) { cb.disabled = false; cb.textContent = 'Cancel'; } const pb = $('bulkPauseBtn'); if (pb) { pb.disabled = false; pb.textContent = 'Pause'; } }
   BulkState.results = []; BulkState.pendingFlush = []; BulkState._flushActive = false;
   document.getElementById('bpLiveBadge')?.classList.remove('off');
-  BulkState.currentBatchId = `queue_${Date.now()}`; BulkState.huntStartTime = Date.now();
+  BulkState.currentBatchId = `queue_${Date.now()}`; BulkState.huntStartTime = Date.now(); HuntDirectOff.clear();   // v9.21.1 — every hunt tries the direct read again
   const fakeTabs = toHunt.map(i => ({ tabId: i.id, url: i.url, title: i.title || i.url,
     platform: typeof i.platform === 'string' ? { name: i.platform, tag: i.platform.substring(0,3).toUpperCase() } : (i.platform ? { name: i.platform, tag: String(i.platform).substring(0,3).toUpperCase() } : null) }));
   BulkState.huntTotal = fakeTabs.length;
@@ -8655,6 +8663,7 @@ async function startBulkHunt(tabsOverride) {
   BulkState.pendingFlush = [];
   BulkState._flushActive = false;
   BulkState.currentBatchId = `batch_${Date.now()}`;
+  HuntDirectOff.clear();   // v9.21.1 — every hunt tries the direct read again
   BulkState.huntStartTime  = Date.now();
   BulkState.batchLabel = ($('temuBatchNameInp')?.value?.trim()) || '';
 
@@ -8817,17 +8826,133 @@ function toggleFailedList() {
 
 // v9.11.0 — wait until a tab has really finished loading (sleeping tabs need a full load)
 async function huntWaitComplete(tabId, timeoutMs = 25000, onTick = null) {
-  const deadline = Date.now() + timeoutMs;
-  let sawLoading = false;
+  const deadline = Date.now() + timeoutMs, t0 = Date.now();
+  let sawLoading = false, nextProbe = t0 + 1000;
   while (Date.now() < deadline && !BulkState.isCancelled) {
     if (onTick) { try { await onTick(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const t = await new Promise(r => chrome.tabs.get(tabId, x => r(chrome.runtime.lastError ? null : x)));
     if (!t) return false;
     if (t.status === 'loading') sawLoading = true;
     if (t.status === 'complete' && !t.discarded && (sawLoading || Date.now() > deadline - timeoutMs + 600)) return true;
+    // v9.21.1 — still "loading" (ads / trackers keep a Walmart page loading ~6 s after the product is there): go on as soon as
+    // the product itself (title + price + images) is on the page
+    if (t.status === 'loading' && !t.discarded && Date.now() >= nextProbe) { nextProbe = Date.now() + 700; if (await huntProbeReady(tabId)) return true; }
     await sleep(200);
   }
   return false;
+}
+// v9.21.1 — is the product already on the page? Walmart / Sam's: the page data has name + price + images.
+// Other sites: title + a price + 3 big pictures. Runs even while the page is still loading (injectImmediately).
+async function huntProbeReady(tabId) {
+  try {
+    const run = chrome.scripting.executeScript({
+      target: { tabId }, injectImmediately: true,
+      func: () => {
+        try {
+          if (document.readyState === 'loading') return false;   // the page itself (title, price box) is read from the DOM too
+          const nd = document.getElementById('__NEXT_DATA__');
+          if (nd && /"priceInfo"/.test(nd.textContent || '')) {
+            const p = JSON.parse(nd.textContent)?.props?.pageProps?.initialData?.data?.product;
+            if (p?.name && p?.priceInfo?.currentPrice && (p?.imageInfo?.allImages || []).length && document.querySelector('h1')) return true;
+          }
+          const title = (document.querySelector('h1')?.innerText || '').trim();
+          if (title.length < 3) return false;
+          const pe = document.querySelector('[itemprop="price"], #corePrice_feature_div .a-offscreen, #corePriceDisplay_desktop_feature_div .a-offscreen, [data-testid*="price" i], [class*="price" i]');
+          if (!pe || !/\d/.test(pe.getAttribute('content') || pe.textContent || '')) return false;
+          return [...document.images].filter(i => i.complete && i.naturalWidth >= 200).length >= 3;
+        } catch (_) { return false; }
+      }
+    });
+    const [r] = await Promise.race([run, sleep(2500).then(() => [null])]);
+    return !!r?.result;
+  } catch (_) { return false; }
+}
+
+// ══ v9.21.1 — Walmart / Sam's Club: read the product straight from the page data (no tab has to load or draw) ══
+// The product page's HTML carries all of it (__NEXT_DATA__: name, price, every image, brand, description, specs).
+// ~1–4 s per product, several at once. Anything missing or blocked → the normal tab hunt does that product.
+const HUNT_DIRECT_RE = /^https?:\/\/(?:www\.)?(?:walmart\.com|samsclub\.com)\/ip\//i;
+const HuntDirectOff = new Map();   // host → misses in a row (2 = this host is hunted the normal way for the rest of the run)
+const HuntDirectTried = new Set(); // queue links already tried this hunt ("batchId|url")
+function huntDirectOk(url) { return HUNT_DIRECT_RE.test(url || '') && (HuntDirectOff.get(safeHost(url)) || 0) < 2; }
+function huntDirectText(html) {
+  const el = document.createElement('template');   // template: nothing inside is loaded or run
+  el.innerHTML = String(html || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<\/(p|li|div|br)>|<br\s*\/?>/gi, '$& ');
+  return (el.content.textContent || '').replace(/\s+/g, ' ').trim();
+}
+function huntDirectWeightLb(raw) {
+  const m = String(raw || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(pounds?|lbs?\.?|lb\.?|ounces?|oz\.?|kilograms?|kgs?\.?|grams?|g\b)/i);
+  if (!m) return '';
+  let v = parseFloat(m[1]); const u = m[2].toLowerCase();
+  if (/^(ounce|oz)/.test(u)) v /= 16; else if (/^(kilogram|kg)/.test(u)) v *= 2.20462; else if (/^(gram|g)/.test(u)) v /= 453.592;
+  return isFinite(v) && v > 0 ? String(Math.max(0.1, Math.round(v * 10) / 10)) : '';
+}
+function huntDirectDims(raw) {
+  const s = String(raw || '').replace(/,/g, '');
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(?:"|in(?:ch(?:es)?)?|cm|mm)?\s*[LlWwHhDd]?\s*[x×X]\s*(\d+(?:\.\d+)?)\s*(?:"|in(?:ch(?:es)?)?|cm|mm)?\s*[LlWwHhDd]?\s*[x×X]\s*(\d+(?:\.\d+)?)\s*("|in(?:ch(?:es)?)?|cm|mm)?/);
+  if (!m) return null;
+  const unit = (m[4] || (/\bcm\b/i.test(s) ? 'cm' : /\bmm\b/i.test(s) ? 'mm' : 'in')).toLowerCase();
+  const f = unit === 'cm' ? 0.393701 : unit === 'mm' ? 0.0393701 : 1;
+  const r1 = v => String(Math.max(0.1, Math.round(v * f * 10) / 10));
+  const [a, b, c] = [m[1], m[2], m[3]].map(parseFloat);
+  return [a, b, c].every(v => isFinite(v) && v > 0) ? { dimL: r1(a), dimW: r1(b), dimH: r1(c) } : null;
+}
+async function huntDirectRead(url) {
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store', signal: ctl.signal });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+    if (!m) return null;   // "Robot or human?" page or a changed site: the tab does it
+    const d = JSON.parse(m[1])?.props?.pageProps?.initialData?.data, p = d?.product;
+    if (!p?.name) return null;
+    // the page must be THIS product (the item id of the link)
+    const want = (String(url).match(/\/(\d{6,})(?:[/?#]|$)/) || [])[1];
+    const got = String(p.usItemId || p.primaryUsItemId || '');
+    if (want && got && got !== want && !String(res.url || '').includes(want)) return null;
+    const cp = p.priceInfo?.currentPrice;
+    const price = cp?.priceString || (cp?.price > 0 ? '$' + Number(cp.price).toFixed(2) : '');
+    const images = [];
+    for (const im of (p.imageInfo?.allImages || [])) {
+      const last = Array.isArray(im?.assetSizeList) && im.assetSizeList.length ? im.assetSizeList[im.assetSizeList.length - 1]?.url : '';
+      const u = String(last || im?.url || '').split('?')[0];
+      if (/^https?:/i.test(u) && !images.includes(u)) images.push(u);
+    }
+    const specs = (d.idml?.specifications || []).map(s => ({ name: String(s?.name || '').trim(), value: huntDirectText(s?.value) })).filter(s => s.name && s.value);
+    const spec = re => specs.find(s => re.test(s.name))?.value || '';
+    const specAll = specs.map(s => `${s.name}: ${s.value}`).join(' · ');
+    let weight = huntDirectWeightLb(spec(/^(item weight|product weight|weight|package weight|shipping weight|net weight|assembled product weight)$/i));
+    if (!weight) { const w = specAll.match(/(?:net\s+)?weight\s*[:\-]?\s*([\d.,]+\s*(?:pounds?|lbs?|ounces?|oz|kilograms?|kg|grams?|g)\b)/i); if (w) weight = huntDirectWeightLb(w[1]); }
+    const dims = huntDirectDims(spec(/^(?:(?:product|package|item|assembled product|parcel|box)\s+)?dimensions?(?:\s*\(?\s*l\s*x\s*w\s*x\s*h\s*\)?)?$/i)) || {};
+    const bullets = [];
+    const addLi = h => { (String(h || '').match(/<li[^>]*>[\s\S]*?<\/li>/gi) || []).forEach(li => { const t = huntDirectText(li); if (t.length > 5 && !bullets.includes(t)) bullets.push(t.slice(0, 700)); }); };
+    (Array.isArray(p.keyFeatures) ? p.keyFeatures : []).forEach(k => { const t = huntDirectText(typeof k === 'string' ? k : k?.text); if (t.length > 5) bullets.push(t.slice(0, 700)); });
+    addLi(d.idml?.longDescription); addLi(p.shortDescription || d.idml?.shortDescription);
+    let description = huntDirectText(p.detailedDescription || p.shortDescription || d.idml?.shortDescription || p.description || d.idml?.longDescription || '');
+    if (!description && bullets.length) description = bullets.join('. ');
+    const variants = [];
+    (p.variantCriteria || []).forEach(c => (c?.variantList || []).forEach(v => { const t = String(v?.name || '').trim(); if (t && !variants.includes(t)) variants.push(t); }));
+    return {
+      title: huntDirectText(p.name), price, images: images.slice(0, 15), videos: [], variants: variants.slice(0, 16),
+      brand: String(p.brand || '').trim().slice(0, 60), color: spec(/^(color|colour|actual color|color name)$/i).slice(0, 40),
+      weight, dimL: dims.dimL || '', dimW: dims.dimW || '', dimH: dims.dimH || '',
+      bullets: bullets.slice(0, 6), description: description.slice(0, 2000), url
+    };
+  } catch (_) { return null; }
+  finally { clearTimeout(to); }
+}
+// one try per link; a good answer = title + price + at least one image (the page data always has ALL images, so 1–2 is the real count)
+async function huntDirectTry(url, rowId) {
+  if (!huntDirectOk(url) || BulkState.isCancelled) return null;
+  setBulkRowMeta(rowId, 'Reading product data…');
+  await sleep(150 + Math.random() * 450);   // not all at the same moment
+  const r = await huntDirectRead(url);
+  const host = safeHost(url);
+  if (r && r.title && r.price && r.images.length) { HuntDirectOff.set(host, 0); return r; }
+  HuntDirectOff.set(host, (HuntDirectOff.get(host) || 0) + 1);
+  if ((HuntDirectOff.get(host) || 0) >= 2) console.log('[ZHunter] direct read off for', host, '— normal tab hunt');
+  return null;
 }
 // Sites that fill price/images late — a short settle after load
 const huntSettleMs = (url) => /walmart\.com|samsclub\.com|bjs\.com|amazon\.|faire\.com|target\.com/i.test(url || '') ? 900 : 400;
@@ -8846,6 +8971,11 @@ async function processSmartQueue(tabs) {
   const MAX_GLOBAL = WAKE_LIMIT;
   const MAX_PER_DOMAIN = WAKE_LIMIT;
   let waking = 0;
+  // v9.21.1 — Walmart / Sam's links are read from the page data (no tab load): up to DIRECT_MAX of them at once,
+  // on top of the "Tabs at once" tabs. If a host's direct read stops working, its links go back to the normal limits.
+  const DIRECT_MAX = 4;
+  let directRunning = 0;
+  const isDirect = t => !t._directTried && huntDirectOk(t.url);
   // Which tabs need a (re)load? Loaded ones go first so their data comes in immediately.
   await Promise.all(tabs.map(async t => {
     const d = await new Promise(r => chrome.tabs.get(t.tabId, x => r(chrome.runtime.lastError ? null : x)));
@@ -8855,28 +8985,36 @@ async function processSmartQueue(tabs) {
 
   // Returns true if there are any tabs not yet started
   const hasUnstarted = () => tabs.some(t => !t._started);
+  const normalRunning = () => running.size - directRunning;
 
   while (hasUnstarted() || running.size > 0) {
     if (BulkState.isCancelled) break;
     while (huntHeld() && !BulkState.isCancelled) await sleep(300);   // v9.14 — also pauses while a verification is open
 
-    // Fill up to MAX_GLOBAL slots with eligible tabs
+    // Fill up to MAX_GLOBAL slots with eligible tabs (+ DIRECT_MAX direct reads)
     let startedAny = true;
-    while (startedAny && running.size < MAX_GLOBAL && hasUnstarted()) {
+    while (startedAny && (normalRunning() < MAX_GLOBAL || directRunning < DIRECT_MAX) && hasUnstarted()) {
       startedAny = false;
       for (let i = 0; i < tabs.length; i++) {
         if (tabs[i]._started) continue;
-        if (running.size >= MAX_GLOBAL) break;
         const host = safeHost(tabs[i].url);
-        const isTemu = /temu\./i.test(host);
-        const domLimit = isTemu ? 1 : MAX_PER_DOMAIN;
-        if ((activeDomains[host] || 0) >= domLimit) continue;
-        if (tabs[i]._heavy && waking >= WAKE_LIMIT) continue;
+        const direct = isDirect(tabs[i]);
+        if (direct) {
+          if (directRunning >= DIRECT_MAX) continue;
+        } else {
+          if (normalRunning() >= MAX_GLOBAL) continue;
+          const isTemu = /temu\./i.test(host);
+          const domLimit = isTemu ? 1 : MAX_PER_DOMAIN;
+          if ((activeDomains[host] || 0) >= domLimit) continue;
+          if (tabs[i]._heavy && waking >= WAKE_LIMIT) continue;
+        }
 
         const tab = tabs[i];
         tab._started = true;
-        if (tab._heavy) waking++;
-        activeDomains[host] = (activeDomains[host] || 0) + 1;
+        const heavy = tab._heavy && !direct;
+        if (heavy) waking++;
+        if (direct) directRunning++;
+        else activeDomains[host] = (activeDomains[host] || 0) + 1;
         startedAny = true;
 
         const p = (async () => {
@@ -8926,8 +9064,9 @@ async function processSmartQueue(tabs) {
             }
           } finally {
             tab._done = true;
-            if (tab._heavy) waking--;
-            activeDomains[host]--;
+            if (heavy) waking--;
+            if (direct) directRunning--;
+            else activeDomains[host]--;
             running.delete(p);
           }
         })();
@@ -9177,7 +9316,10 @@ async function scrapeOneTab(tabInfo) {
   if (BulkState.isCancelled) { setBulkRowStatus(tabInfo.tabId, 'fail'); return; }
   await huntWaitWhileHeld();   // v9.14 — nobody starts while a verification hold is active
 
-  try {
+  // v9.21.1 — Walmart / Sam's: straight from the page data, the tab does not have to load at all
+  const direct = tabInfo._directTried ? null : (tabInfo._directTried = true, await huntDirectTry(tabInfo.url, tabInfo.tabId));
+  if (direct) { scraped = direct; tabInfo._direct = true; if (direct.images.length < 3) tabInfo._fewSeen = direct.images.length; }
+  else try {
     // ── Wait for tab to load / Wake discarded tabs ──
     let tabDetails = await new Promise(resolve => chrome.tabs.get((tabInfo.workTabId || tabInfo.tabId), t => resolve(chrome.runtime.lastError ? null : t)));
     if (tabDetails) {
@@ -9493,7 +9635,7 @@ async function scrapeOneTab(tabInfo) {
   }
 
   // v9.15 — problem link: open the same URL ONCE in a brand-new tab and close the old (stuck) one, instead of retrying in the same tab
-  if (!tabInfo._fresh && !BulkState.isCancelled && huntScrapeIncomplete(scraped)
+  if (!tabInfo._fresh && !direct && !BulkState.isCancelled && huntScrapeIncomplete(scraped)
       && !/^(cancelled|verification|unavailable|redirected_away|tab_closed)$/.test(String(error || ''))
       && !guardFlags?.unavailable) {
     tabInfo._fresh = true;
@@ -19411,7 +19553,7 @@ async function temuStartBulkImageEdit(opts = {}) {
     return;
   }
 
-  const engine = $('temuAiImgEngineSel')?.value || 'flow';
+  const engine = opts.engine || $('temuAiImgEngineSel')?.value || 'flow';
   const promptRaw = opts.prompt || ($('temuAiImgPromptInp')?.value || '').trim() || await getSavedAiImagePrompt();
   const prompt = promptRaw;
 
@@ -19420,9 +19562,9 @@ async function temuStartBulkImageEdit(opts = {}) {
   const seen = new Set();
   selRows.forEach(r => {
     const allImgs = _allImgUrls(r);
-    (opts.mainOnly ? [0] : temuImgTargetIndices(r)).forEach(idx => {
+    (opts.mainOnly ? [0] : opts.allImgs ? allImgs.map((_, i) => i) : temuImgTargetIndices(r)).forEach(idx => {
       const key = r.id + '#' + idx;
-      if (!allImgs[idx] || seen.has(key)) return;
+      if (!allImgs[idx] || seen.has(key) || (opts.only && !opts.only.has(key))) return;
       seen.add(key);
       queue.push({ product: r, imgUrl: allImgs[idx], origUrl: allImgs[idx], imgIndex: idx, jobId: null, status: 'wait' });
     });
@@ -19435,7 +19577,13 @@ async function temuStartBulkImageEdit(opts = {}) {
 
   if (engine === 'gemini' || /\{\{TEXT_RULE\}\}/.test(prompt)) queue.forEach(q => { q.prompt = zhLibResolveText(prompt, Math.max(0, zhProductOrdinal(queue, q.product))); });
   { const ae = zhLibGet(ZhLibActive); if (engine === 'gemini' && ae?.setup && prompt.trim() === ae.text.trim()) queue.forEach(q => { q.setup = zhSetupFor(ae.id); }); }   // Gemini: library prompt as it is; alternate text per product
-  if (!(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : engine === 'gemini' ? 'Gemini' : 'Auto (Gemini → Flow)'))) return;   // the setup window now opens for every engine (Flow, ChatGPT, Gemini)
+  if (opts.mode) {   // v9.21 — auto pipeline: the group's own prompt for every image, no setup window
+    const bg = opts.mode === 'background' ? await getSavedAiImagePrompt() : '';
+    queue.forEach(q => {
+      const stages = temuBatchStages(opts.mode, 2, bg, false, 'new', Math.max(0, zhProductOrdinal(queue, q.product)));
+      Object.assign(q, { batchMode: opts.mode, packQty: 0, stages, stageIndex: 0, prompt: stages[0], setup: String(opts.mode).startsWith('lib:') ? zhSetupFor(String(opts.mode).slice(4)) : null });
+    });
+  } else if (!(await temuConfigureBatch(queue, prompt, engine === 'flow' ? 'Flow' : engine === 'chatgpt' ? 'ChatGPT' : engine === 'gemini' ? 'Gemini' : 'Auto (Gemini → Flow)'))) return;   // the setup window now opens for every engine (Flow, ChatGPT, Gemini)
 
   TemuImgStepper = {
     queue,
@@ -19445,7 +19593,8 @@ async function temuStartBulkImageEdit(opts = {}) {
     activeJobId: null,
     running: true,
     startedAt: Date.now(),
-    stats: { done: 0, skipped: 0 }
+    stats: { done: 0, skipped: 0 },
+    freshTab: !!opts.freshTab   // v9.21 — 2nd try of failed images: open new AI tabs instead of the ones that failed
   };
   zhImgQueueSave(TemuImgStepper);   // v9.15 — so the rest can be continued after a reload / shutdown
   zhStepTimerStart();
@@ -20312,7 +20461,7 @@ function initTemuExport() {
     const tb = e.target.closest('#temuModal .temu-tab'); if (tb) { temuSwitchTab(tb.dataset.ttab); return; }
     if (e.target.closest('#temuReportClear')) { const r = $('temuReport'); if (r) r.textContent = ''; const wp = $('temuActivityWrap'); if (wp) wp.open = false; try { chrome.storage.local.remove('temuReportText'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     if (e.target.closest('#tcCancelBtn')) { temuCatFormReset(); temuCatMsg(''); }
-    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill') || e.target.closest('#settingsTemuOpenBtn')) { e.preventDefault(); openTemuModal(); } // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
+    if (e.target.closest('#bulkTemuBtn') || e.target.closest('#queueTemuBtn') || e.target.closest('#bulkTemuOpenBtn') || e.target.closest('#topTemuStorePill') || e.target.closest('#settingsTemuOpenBtn')) { e.preventDefault(); Promise.resolve(openTemuModal()).then(() => zhWizOpen()).catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); }); }   // v9.21 — the auto pipeline wizard opens on top // v9.5.3: Bulk tab ka 'Temu' button — bina hunt ke bhi
 
     // Categories & Catalog events
     const deptBtn = e.target.closest('#temuCatDeptBar .temu-cat-dept-btn');
@@ -23029,3 +23178,326 @@ async function temuLearnCategories(opts = {}) {
   setInterval(save, 4000);
   window.addEventListener('pagehide', () => { try { save(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } });
 })();
+
+// ══ v9.21.0 — Auto pipeline wizard (user's wish, 23 Oct 2026) ═══════════════════════════════════════════════
+// Temu Export opens this on top: 1 Titles (which products, which AI, which prompt) → 2 Images (groups: tick products,
+// choose prompt + tool + main/all, Apply; repeat) → Start → titles change, every group's images are made one group
+// after the other → 3 review ("30 products ready") → you press Upload (the normal upload with its confirm sheet).
+// A failed image is tried again in a new tab; if it still fails the original picture stays and the review names it.
+const ZhWiz = { step: 'titles', rows: [], titleIds: new Set(), imgPick: new Set(), imgPlan: new Map(), saved: [], running: false, stop: false, result: null, log: '' };
+const ZH_WIZ_TOOLS = { gemini: 'Gemini', chatgpt: 'ChatGPT', flow: 'Flow' };
+function zhWizLs(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } return null; }
+function zhWizPrompts() { return zhLibAll().filter(e => e.id !== 'pack' && e.id !== 'pack_background'); }   // pack prompts need a quantity (setup window) — not in the wizard
+function zhWizPromptName(id) { return (zhLibGet(id)?.name || id).replace(/\s*\(.*\)$/, ''); }
+function zhWizMode(id) { return id === 'improve' ? 'improve' : id === 'scene' ? 'background' : 'lib:' + id; }
+
+async function zhWizOpen() {
+  let el = $('zhWiz');
+  if (ZhWiz.running && el) { el.classList.remove('hidden'); return; }   // a run is going on: just show its progress
+  if (TemuUploadBusy || TemuImgStepper?.running || TemuRewriteBusy) return;   // something else runs: the normal window only
+  const rows = await temuGetQueuedRows().catch(() => []);
+  if (!rows.length) return;
+  ZhWiz.rows = rows;
+  ZhWiz.titleIds = new Set(rows.filter(r => !temuRvOff(r.id)).map(r => r.id));
+  ZhWiz.imgPick = new Set();
+  for (const id of [...ZhWiz.imgPlan.keys()]) if (!rows.some(r => r.id === id)) ZhWiz.imgPlan.delete(id);
+  try { ZhWiz.saved = (await chrome.storage.local.get([ZH_PROMPTS_KEY]))[ZH_PROMPTS_KEY] || []; } catch (_) { ZhWiz.saved = []; }
+  ZhWiz.titleAi = ['groq', 'gemini', 'chatgpt'].includes(zhWizLs('zhWizTitleAi')) ? zhWizLs('zhWizTitleAi') : 'groq';
+  ZhWiz.titlePrompt = zhWizLs('zhWizTitlePrompt') || '';
+  if (ZhWiz.titlePrompt !== '' && ZhWiz.titlePrompt !== 'own' && !ZhWiz.saved[Number(ZhWiz.titlePrompt)]) ZhWiz.titlePrompt = '';
+  ZhWiz.titleOwn = zhWizLs('zhWizTitleOwn') || '';
+  let im = {}; try { im = JSON.parse(zhWizLs('zhWizImg') || '{}') || {}; } catch (_) { im = {}; }
+  ZhWiz.imgPrompt = zhLibGet(im.prompt) && im.prompt !== 'pack' && im.prompt !== 'pack_background' ? im.prompt : (zhLibGet(ZhLibActive)?.mode?.startsWith('pack') ? 'scene' : ZhLibActive);
+  ZhWiz.imgTool = ZH_WIZ_TOOLS[im.tool] ? im.tool : 'gemini';
+  ZhWiz.imgAll = !!im.all;
+  ZhWiz.step = 'titles'; ZhWiz.result = null; ZhWiz.stop = false;
+  if (!el) {
+    el = document.createElement('div'); el.id = 'zhWiz'; el.className = 'modal-back zh-wiz';
+    document.body.appendChild(el);
+    el.addEventListener('click', zhWizClick);
+    el.addEventListener('change', zhWizChange);
+    el.addEventListener('input', e => { if (e.target.matches('[data-wz-k="titleOwn"]')) { ZhWiz.titleOwn = e.target.value; zhWizLs('zhWizTitleOwn', ZhWiz.titleOwn); } if (e.target.matches('.zh-wiz-search')) zhWizFilter(e.target.value); });
+  }
+  el.classList.remove('hidden');
+  zhWizRender();
+}
+function zhWizClose() { $('zhWiz')?.classList.add('hidden'); }
+
+function zhWizRowHtml(r, mode) {
+  const img = _allImgUrls(r)[0] || '';
+  const on = mode === 'titles' ? ZhWiz.titleIds.has(r.id) : ZhWiz.imgPick.has(r.id);
+  const p = mode === 'images' ? ZhWiz.imgPlan.get(r.id) : null;
+  const tag = p ? `<span class="zh-wiz-tag" title="This product's image plan">${esc(zhWizPromptName(p.prompt))} · ${ZH_WIZ_TOOLS[p.tool]} · ${p.all ? 'All images' : 'Main'}<button type="button" data-wz="untag" data-id="${esc(r.id)}" title="Remove (no image edit)">×</button></span>` : '';
+  return `<div class="zh-wiz-row${on ? ' on' : ''}" data-id="${esc(r.id)}"><label><input type="checkbox" data-wz-pick="${esc(r.id)}"${on ? ' checked' : ''}>${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : '<i class="zh-wiz-noimg"></i>'}<span class="t">${esc(r.title || '(no title)')}</span></label>${tag}</div>`;
+}
+function zhWizCount() {
+  const el = $('zhWiz'); if (!el) return;
+  const n = ZhWiz.rows.length;
+  const c = el.querySelector('.zh-wiz-count');
+  if (ZhWiz.step === 'titles') {
+    if (c) c.textContent = `${ZhWiz.titleIds.size} / ${n} titles will change`;
+    const a = el.querySelector('[data-wz="allT"]'); if (a) a.checked = ZhWiz.titleIds.size === n && n > 0;
+  } else if (ZhWiz.step === 'images') {
+    const groups = new Set([...ZhWiz.imgPlan.values()].map(p => `${p.tool}|${p.prompt}|${p.all}`)).size;
+    if (c) c.textContent = `${ZhWiz.imgPick.size} ticked · ${ZhWiz.imgPlan.size} with a plan${groups ? ` (${groups} group${groups > 1 ? 's' : ''})` : ''}`;
+    const a = el.querySelector('[data-wz="allI"]'); if (a) a.checked = ZhWiz.imgPick.size === n && n > 0;
+    const ap = el.querySelector('[data-wz="apply"]'); if (ap) ap.disabled = !ZhWiz.imgPick.size;
+  }
+}
+function zhWizFilter(q) {
+  q = String(q || '').trim().toLowerCase();
+  $('zhWiz')?.querySelectorAll('.zh-wiz-row').forEach(row => { row.hidden = !!q && !row.textContent.toLowerCase().includes(q); });
+}
+function zhWizRender() {
+  const el = $('zhWiz'); if (!el) return;
+  const st = ZhWiz.step, n = ZhWiz.rows.length;
+  const oldList = el.querySelector('.zh-wiz-list'), keepScroll = oldList ? oldList.scrollTop : 0;
+  const stepNo = { titles: 1, images: 2, run: 3, review: 3 }[st];
+  const steps = ['Titles', 'Images', 'Upload'].map((s, i) => `<span class="${i + 1 === stepNo ? 'on' : i + 1 < stepNo ? 'done' : ''}">${i + 1} ${s}</span>`).join('');
+  let body = '', foot = '';
+  if (st === 'titles') {
+    const own = ZhWiz.titlePrompt === 'own';
+    body = `<div class="zh-wiz-ctl">
+        <label>AI <select data-wz-k="titleAi"><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="chatgpt">ChatGPT</option></select></label>
+        <label>Prompt <select data-wz-k="titlePrompt"><option value="">Temu default</option>${ZhWiz.saved.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}<option value="own">My own…</option></select></label>
+      </div>
+      <textarea class="zh-wiz-own" data-wz-k="titleOwn" rows="2" placeholder="What should the AI do with the titles? e.g. remove the brand, max 120 characters"${own ? '' : ' hidden'}>${esc(ZhWiz.titleOwn)}</textarea>
+      <div class="zh-wiz-lh"><label><input type="checkbox" data-wz="allT"> All</label><input class="zh-wiz-search" type="search" placeholder="Search…"><span class="zh-wiz-count"></span></div>
+      <div class="zh-wiz-list">${ZhWiz.rows.map(r => zhWizRowHtml(r, 'titles')).join('')}</div>`;
+    foot = `<span class="zh-wiz-hint">Nothing ticked = titles stay as they are</span><button type="button" class="btn btn-primary" data-wz="next">Next →</button>`;
+  } else if (st === 'images') {
+    body = `<div class="zh-wiz-ctl">
+        <select data-wz-k="imgPrompt" title="Prompt">${zhWizPrompts().map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
+        <select data-wz-k="imgTool" title="Tool">${Object.entries(ZH_WIZ_TOOLS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+        <select data-wz-k="imgAll" title="Which images"><option value="0">Main image</option><option value="1">All images</option></select>
+        <button type="button" class="btn btn-primary btn-xs" data-wz="apply">Apply to ticked</button>
+      </div>
+      <div class="zh-wiz-lh"><label><input type="checkbox" data-wz="allI"> All</label><input class="zh-wiz-search" type="search" placeholder="Search…"><span class="zh-wiz-count"></span></div>
+      <div class="zh-wiz-list">${ZhWiz.rows.map(r => zhWizRowHtml(r, 'images')).join('')}</div>`;
+    foot = `<button type="button" class="btn btn-ghost" data-wz="back">← Back</button><span class="zh-wiz-hint">No plan = images stay as they are</span><button type="button" class="btn btn-primary" data-wz="start">Start ▶</button>`;
+  } else if (st === 'run') {
+    body = `<div class="zh-wiz-run"><div class="zh-wiz-spin"></div><div class="zh-wiz-log">${esc(ZhWiz.log || 'Starting…')}</div><p class="zh-wiz-hint">Images run in the AI Image Studio window. When everything is done this window comes back with the result.</p></div>`;
+    foot = `<button type="button" class="btn btn-ghost" data-wz="stop"${ZhWiz.stop ? ' disabled' : ''}>${ZhWiz.stop ? 'Stopping…' : '■ Stop'}</button>`;
+  } else {
+    const R = ZhWiz.result || {}, ready = R.ready || 0;
+    const list = (arr, fmt) => arr.length ? `<ul>${arr.slice(0, 60).map(x => `<li>${fmt(x)}</li>`).join('')}${arr.length > 60 ? `<li>… +${arr.length - 60} more</li>` : ''}</ul>` : '';
+    body = `<div class="zh-wiz-rev">
+        <div class="zh-wiz-big">${ready} product${ready === 1 ? '' : 's'} ready to upload</div>
+        ${R.stopped ? '<div class="zh-wiz-warn">■ Stopped — the rest was not done</div>' : ''}
+        ${R.error ? `<div class="zh-wiz-warn">⚠ ${esc(R.error)}</div>` : ''}
+        ${R.titlesTried ? `<div class="zh-wiz-line">✍ Titles: ${R.titlesOk} changed${R.titleFail.length ? ` · <b>${R.titleFail.length} kept the old title</b>` : ''}</div>${list(R.titleFail, x => `${esc(x.title.slice(0, 80))} <small>— ${esc(x.why)}</small>`)}` : ''}
+        ${R.imgTried ? `<div class="zh-wiz-line">🖼 Images: ${R.imgOk} edited${R.imgFail.length ? ` · <b>${R.imgFail.length} not edited (original image kept)</b>` : ''}</div>${list(R.imgFail, x => `${esc(x.title.slice(0, 80))} <small>— image ${x.n}</small>`)}` : ''}
+        <p class="zh-wiz-hint">Only the ticked products of the Temu list are uploaded. Upload opens the usual confirm sheet (store, batch name).</p>
+      </div>`;
+    foot = `<button type="button" class="btn btn-ghost" data-wz="old">Close</button><button type="button" class="btn btn-primary" data-wz="upload"${ready ? '' : ' disabled'}>Upload ${ready} →</button>`;
+  }
+  el.innerHTML = `<div class="modal-box zh-wiz-box" role="dialog" aria-label="Temu auto pipeline">
+    <div class="zh-wiz-head"><div class="zh-wiz-steps">${steps}</div><button type="button" class="btn btn-ghost btn-xs" data-wz="old" title="Show the normal Temu Export window">Temu window</button></div>
+    <div class="zh-wiz-body">${body}</div>
+    <div class="zh-wiz-foot">${foot}</div></div>`;
+  for (const [k, v] of [['titleAi', ZhWiz.titleAi], ['titlePrompt', ZhWiz.titlePrompt], ['imgPrompt', ZhWiz.imgPrompt], ['imgTool', ZhWiz.imgTool], ['imgAll', ZhWiz.imgAll ? '1' : '0']]) { const s = el.querySelector(`[data-wz-k="${k}"]`); if (s) s.value = v; }
+  const nl = el.querySelector('.zh-wiz-list'); if (nl) nl.scrollTop = keepScroll;
+  zhWizCount();
+}
+function zhWizSaveImgPrefs() { zhWizLs('zhWizImg', JSON.stringify({ prompt: ZhWiz.imgPrompt, tool: ZhWiz.imgTool, all: ZhWiz.imgAll })); }
+function zhWizChange(e) {
+  const t = e.target;
+  const pick = t.dataset?.wzPick;
+  if (pick) {
+    const set = ZhWiz.step === 'titles' ? ZhWiz.titleIds : ZhWiz.imgPick;
+    if (t.checked) set.add(pick); else set.delete(pick);
+    t.closest('.zh-wiz-row')?.classList.toggle('on', t.checked);
+    zhWizCount(); return;
+  }
+  if (t.dataset?.wz === 'allT' || t.dataset?.wz === 'allI') {
+    const set = ZhWiz.step === 'titles' ? ZhWiz.titleIds : ZhWiz.imgPick;
+    // "All" follows the search: only the products you can see
+    $('zhWiz').querySelectorAll('.zh-wiz-row').forEach(row => { if (row.hidden) return; const id = row.dataset.id; if (t.checked) set.add(id); else set.delete(id); const cb = row.querySelector('[data-wz-pick]'); if (cb) cb.checked = t.checked; row.classList.toggle('on', t.checked); });
+    zhWizCount(); return;
+  }
+  const k = t.dataset?.wzK; if (!k) return;
+  if (k === 'titleAi') { ZhWiz.titleAi = t.value; zhWizLs('zhWizTitleAi', t.value); }
+  if (k === 'titlePrompt') { ZhWiz.titlePrompt = t.value; zhWizLs('zhWizTitlePrompt', t.value); const ta = $('zhWiz').querySelector('.zh-wiz-own'); if (ta) { ta.hidden = t.value !== 'own'; if (!ta.hidden) ta.focus(); } }
+  if (k === 'imgPrompt') { ZhWiz.imgPrompt = t.value; zhWizSaveImgPrefs(); }
+  if (k === 'imgTool') { ZhWiz.imgTool = t.value; zhWizSaveImgPrefs(); }
+  if (k === 'imgAll') { ZhWiz.imgAll = t.value === '1'; zhWizSaveImgPrefs(); }
+}
+function zhWizClick(e) {
+  const b = e.target.closest('[data-wz]'); if (!b || b.tagName === 'INPUT') return;
+  const a = b.dataset.wz;
+  if (a === 'old') { zhWizClose(); return; }
+  if (a === 'next') {
+    if (ZhWiz.titleIds.size && ZhWiz.titlePrompt === 'own' && !ZhWiz.titleOwn.trim()) { toast('Write your title prompt first (or choose another prompt)', 'warn'); return; }
+    ZhWiz.step = 'images'; zhWizRender(); return;
+  }
+  if (a === 'back') { ZhWiz.step = 'titles'; zhWizRender(); return; }
+  if (a === 'apply') {
+    if (!ZhWiz.imgPick.size) { toast('Tick products first', 'warn'); return; }
+    for (const id of ZhWiz.imgPick) ZhWiz.imgPlan.set(id, { prompt: ZhWiz.imgPrompt, tool: ZhWiz.imgTool, all: ZhWiz.imgAll });
+    toast(`✓ ${ZhWiz.imgPick.size} products: ${zhWizPromptName(ZhWiz.imgPrompt)} · ${ZH_WIZ_TOOLS[ZhWiz.imgTool]}`, 'ok');
+    ZhWiz.imgPick = new Set(); zhWizRender(); return;
+  }
+  if (a === 'untag') { e.preventDefault(); ZhWiz.imgPlan.delete(b.dataset.id); zhWizRender(); return; }
+  if (a === 'start') { zhWizRun(); return; }
+  if (a === 'stop') { ZhWiz.stop = true; TemuRewriteStopReq = true; zhWizRender(); return; }
+  if (a === 'upload') { zhWizClose(); try { temuSwitchTab('upload'); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } temuStartUploadFlow(); }
+}
+function zhWizLog(t) { ZhWiz.log = t; const l = $('zhWiz')?.querySelector('.zh-wiz-log'); if (l) l.textContent = t; }
+
+async function zhWizRun() {
+  if (ZhWiz.running) return;
+  if (TemuUploadBusy || TemuImgStepper?.running || TemuRewriteBusy) { toast('Something else is running — wait for it to finish', 'warn'); return; }
+  ZhWiz.running = true; ZhWiz.stop = false; TemuRewriteStopReq = false;
+  const R = { titlesTried: 0, titlesOk: 0, titleFail: [], imgTried: 0, imgOk: 0, imgFail: [], stopped: false, error: '', ready: 0 };
+  ZhWiz.step = 'run'; ZhWiz.log = 'Starting…'; zhWizRender();
+  try {
+    if (ZhWiz.titleIds.size) await zhWizTitles(R);
+    if (!ZhWiz.stop && ZhWiz.imgPlan.size) await zhWizImages(R);
+  } catch (e) { R.error = e?.message || String(e); console.warn('[ZHunter wizard]', e); }
+  R.stopped = ZhWiz.stop;
+  try { await temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { const rows = await temuGetQueuedRows(); ZhWiz.rows = rows; R.ready = rows.filter(r => !temuRvOff(r.id)).length; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  ZhWiz.running = false; ZhWiz.result = R; ZhWiz.step = 'review';
+  // the images are done: only the wizard's own picks go away (the review says which ones failed)
+  for (const id of [...ZhWiz.imgPlan.keys()]) if (!R.imgFail.some(x => x.id === id)) ZhWiz.imgPlan.delete(id);
+  $('zhWiz')?.classList.remove('hidden');
+  zhWizRender();
+  toast(`Auto pipeline done — ${R.ready} products ready, press Upload`, R.titleFail.length || R.imgFail.length ? 'warn' : 'ok');
+}
+
+async function zhWizTitles(R) {
+  const rows = (await temuGetQueuedRows()).filter(r => ZhWiz.titleIds.has(r.id));
+  if (!rows.length) return;
+  R.titlesTried = rows.length;
+  const own = ZhWiz.titlePrompt === 'own' ? ZhWiz.titleOwn.trim() : ZhWiz.titlePrompt !== '' ? String(ZhWiz.saved[Number(ZhWiz.titlePrompt)]?.text || '').trim() : '';
+  const changes = [];
+  if (ZhWiz.titleAi === 'groq') {
+    let gk = null; try { gk = await getGroqConfig(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    if (!gk?.apiKeys?.length) { rows.forEach(r => R.titleFail.push({ title: r.title || '', why: 'No Groq key saved (Settings → Groq API Keys)' })); return; }
+    TemuRewriteBusy = true;
+    try {
+      const instruction = own || temuTitleActionInstruction('rewrite');
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i], old = r.title || '';
+        if (ZhWiz.stop) { rows.slice(i).forEach(x => R.titleFail.push({ title: x.title || '', why: 'Stopped' })); break; }
+        zhWizLog(`✍ Titles ${i + 1} / ${rows.length} (Groq)…`);
+        try {
+          const t = own ? await temuCustomEditTitle(old, own) : await rewriteValidatedTemuTitle(r, old, instruction, !temuTitlePreferences());
+          if (!t) throw new Error('AI did not return a title');
+          changes.push({ id: r.id, url: r.url, title: t, old, same: temuNormTitle(t) === temuNormTitle(old) });
+        } catch (e) {
+          R.titleFail.push({ title: old, why: e?.message || 'Rewrite failed' });
+          if (e?.rateLimit || /AI keys are cleared/i.test(e?.message || '')) { rows.slice(i + 1).forEach(x => R.titleFail.push({ title: x.title || '', why: 'Not tried (AI limit)' })); break; }
+        }
+      }
+    } finally { TemuRewriteBusy = false; }
+  } else {
+    zhWizLog(`✍ Sending ${rows.length} titles to ${ZhWiz.titleAi === 'gemini' ? 'Gemini' : 'ChatGPT'}…`);
+    const got = await zhWizChatTitles(ZhWiz.titleAi, rows, own);
+    if (got.error) { rows.forEach(r => R.titleFail.push({ title: r.title || '', why: got.error })); return; }
+    rows.forEach((r, i) => {
+      const t = String(got.titles[i] || '').slice(0, 500).trim(), old = r.title || '';
+      if (!t) { R.titleFail.push({ title: old, why: 'No answer for this line' }); return; }
+      changes.push({ id: r.id, url: r.url, title: t, old, same: temuNormTitle(t) === temuNormTitle(old) });
+    });
+  }
+  if (changes.length) {
+    await temuSaveTitles(changes);
+    TemuTitleUndo = changes.map(c => ({ ...c })); try { temuTitleUndoUi(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  }
+  R.titlesOk = changes.filter(c => !c.same).length;
+}
+
+// one numbered list → ChatGPT / Gemini in a NEW chat → the numbered answer back (same job the Titles "Send to" button uses)
+async function zhWizChatTitles(eng, rows, own) {
+  const E = eng === 'gemini'
+    ? { name: 'Gemini', home: 'https://gemini.google.com/app' }
+    : { name: 'ChatGPT', home: 'https://chatgpt.com/' };
+  const titles = rows.map(r => String(r.title || '').replace(/\s+/g, ' ').trim());
+  const list = titles.map((t, i) => `${i + 1}. ${t}`).join('\n');
+  let prompt = '', text = list;
+  if (own) text = `${own}\n\nApply this to every title below. Return ONLY the edited titles as a numbered list in the same order (1. 2. 3. …), nothing else.\n\n${list}`;
+  else { try { prompt = (await chrome.storage.local.get(['zhGptTitlePrompt']))?.zhGptTitlePrompt || ZH_GPT_DEFAULT_PROMPT; } catch (_) { prompt = ZH_GPT_DEFAULT_PROMPT; } }
+  const id = 'gt_' + Date.now().toString(36);
+  await chrome.storage.local.remove(['zhGptTitlesResult']);
+  await chrome.storage.local.set({ zhGptTitlesJob: { id, engine: eng, text, prompt, newChat: true, at: Date.now(), started: false } });
+  try { await chrome.tabs.create({ url: E.home, active: true }); }   // the new tab picks the job up by itself
+  catch (e) { return { error: `Could not open ${E.name}: ` + (e?.message || e) }; }
+  const res = await new Promise(resolve => {
+    const end = Date.now() + 12 * 60000;
+    const tick = setInterval(async () => {
+      if (ZhWiz.stop) { clearInterval(tick); resolve({ status: 'error', error: 'Stopped' }); return; }
+      if (Date.now() > end) { clearInterval(tick); resolve({ status: 'error', error: `${E.name} did not answer within 12 minutes` }); return; }
+      let r = null; try { r = (await chrome.storage.local.get(['zhGptTitlesResult']))?.zhGptTitlesResult; } catch (_) { return; }
+      if (!r || r.id !== id) return;
+      if (r.status === 'press_send') zhWizLog(`✍ Press Send in the ${E.name} tab — the answer is read by itself`);
+      else if (r.status === 'working') zhWizLog(`✍ ${E.name}: ${r.note || 'working…'}`);
+      if (r.status === 'done' || r.status === 'error') { clearInterval(tick); resolve(r); }
+    }, 1500);
+  });
+  if (res.status !== 'done') return { error: res.error || `${E.name} failed` };
+  // numbered lines → titles in the same order; a count mismatch changes nothing
+  const lines = String(res.text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const out = new Array(rows.length).fill('');
+  let numbered = 0;
+  for (const l of lines) { const m = l.match(/^(\d{1,4})\s*[.)\-:]\s*(.+)$/); if (m) { numbered++; const n = Number(m[1]); if (n >= 1 && n <= rows.length && !out[n - 1]) out[n - 1] = m[2].trim(); } }
+  if (!numbered) { const plain = lines.filter(l => !/^(ChatGPT said|You said|Gemini said|Show thinking|DONE)\s*:?$/i.test(l)); if (plain.length === rows.length) plain.forEach((t, i) => { out[i] = t.replace(/^[\-*•]\s*/, ''); }); }
+  if (!out.some(Boolean)) return { error: `${E.name} answer had no titles list` };
+  return { titles: out };
+}
+
+async function zhWizImages(R) {
+  const rows = await temuGetQueuedRows();
+  const groups = new Map();
+  for (const [id, p] of ZhWiz.imgPlan) {
+    if (!rows.some(r => r.id === id)) continue;
+    const k = `${p.tool}|${p.prompt}|${p.all ? 1 : 0}`;
+    if (!groups.has(k)) groups.set(k, { ...p, ids: [] });
+    groups.get(k).ids.push(id);
+  }
+  if (!groups.size) return;
+  const keepSel = new Set(TemuImgEditSelected), eSel = $('temuAiImgEngineSel'), keepEng = eSel?.value;
+  let gi = 0;
+  try {
+    for (const g of groups.values()) {
+      gi++;
+      const label = `🖼 Images group ${gi} / ${groups.size} · ${zhWizPromptName(g.prompt)} · ${ZH_WIZ_TOOLS[g.tool]} · ${g.ids.length} product${g.ids.length > 1 ? 's' : ''}`;
+      const name = id => rows.find(r => r.id === id)?.title || id;
+      if (ZhWiz.stop) { g.ids.forEach(id => R.imgFail.push({ id, title: name(id), n: 1 })); continue; }
+      zhWizLog(label);
+      const items = await zhWizImgPass(g, null, false);
+      if (!items) { g.ids.forEach(id => R.imgFail.push({ id, title: name(id), n: 1 })); continue; }
+      R.imgTried += items.length;
+      let bad = items.filter(q => q.status !== 'done');
+      if (bad.length && !ZhWiz.stop && !TemuImgStepper?.stopped) {
+        zhWizLog(`${label}\n↻ ${bad.length} failed — trying again in a new tab`);
+        const again = await zhWizImgPass(g, new Set(bad.map(q => q.product.id + '#' + q.imgIndex)), true);
+        if (again) bad = again.filter(q => q.status !== 'done');
+      }
+      if (TemuImgStepper?.stopped) ZhWiz.stop = true;   // you pressed Stop in the image window: the other groups are not started
+      R.imgOk += items.length - bad.length;
+      bad.forEach(q => R.imgFail.push({ id: q.product.id, title: q.product.title || q.product.id, n: (q.imgIndex || 0) + 1 }));
+    }
+  } finally {
+    TemuImgEditSelected.clear(); keepSel.forEach(id => TemuImgEditSelected.add(id));
+    if (eSel && keepEng) eSel.value = keepEng;
+    try { temuUpdateImgEditCount(await temuGetQueuedRows()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  }
+}
+// one run of the image studio for one group; resolves with its queue items when the run is over (null = did not start)
+async function zhWizImgPass(g, only, freshTab) {
+  TemuImgEditSelected.clear(); g.ids.forEach(id => TemuImgEditSelected.add(id));
+  const eSel = $('temuAiImgEngineSel'); if (eSel) eSel.value = g.tool;
+  const before = TemuImgStepper;
+  zhWizClose();
+  try { await temuStartBulkImageEdit({ mode: zhWizMode(g.prompt), engine: g.tool, mainOnly: !g.all, allImgs: g.all, only, freshTab }); }
+  catch (e) { console.warn('[ZHunter wizard] image start', e); }
+  const S = TemuImgStepper;
+  if (S === before || !S?.queue?.length) return null;
+  const items = [...S.queue];
+  // the run is over when no image run is going on for ~5 s (a Gemini → Flow handoff starts a new run in between)
+  let idle = 0;
+  while (idle < 2) { await sleepMs(2500); if (TemuImgStepper?.running) idle = 0; else idle++; }
+  $('temuImgStepperModal')?.classList.add('hidden');
+  return items;
+}
