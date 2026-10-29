@@ -310,6 +310,10 @@
             <button type="button" class="filter-chip" data-filter="ali">AliExpress</button>
             <button type="button" class="filter-chip filter-chip-star" data-filter="starred">★ Starred</button>
             <button type="button" class="filter-chip filter-chip-tag" data-filter="tagged" id="masterFilterTagged" title="Show only products that have at least one tag">🏷 Tagged</button>
+            <!-- v9.22.6 — how often a product was exported / uploaded -->
+            <button type="button" class="filter-chip filter-chip-exp" data-filter="exp1" title="1 dafa export ya upload hue products">⬇ 1x (<span id="masterExpCnt-exp1">0</span>)</button>
+            <button type="button" class="filter-chip filter-chip-exp" data-filter="exp2" title="2 dafa export ya upload hue products">⬇ 2x (<span id="masterExpCnt-exp2">0</span>)</button>
+            <button type="button" class="filter-chip filter-chip-exp" data-filter="exp3" title="3 ya zyada dafa export ya upload hue products">⬇ 3x+ (<span id="masterExpCnt-exp3">0</span>)</button>
           </div>
           <div class="filter-chips-tools">
             <button type="button" class="filter-chip filter-chip-warn" data-filter="problems" id="masterFilterProblems" title="Show only items with errors, missing price, or warnings">⚠️ Problems (<span id="masterProblemCount">0</span>)</button>
@@ -327,6 +331,11 @@
           </div>
         </div>
         <div id="masterBatchFilterBar" class="lib-filter-bar" hidden></div>
+        <!-- v9.22.6 — shown on the ⬇ 1x / 2x / 3x+ filters -->
+        <div id="masterExpBar" class="lib-exp-bar" hidden>
+          <span id="masterExpBarTxt" class="lib-exp-bar-txt"></span>
+          <button id="masterExpDelBtn" class="btn btn-ghost btn-xs lib-exp-del" type="button" title="Sirf yeh dikhne wale products Library se delete honge (pehle poochhega, Undo bhi milega)">🗑 Inhein delete karo</button>
+        </div>
         <div id="masterRowsList" class="tbl">
           <div class="empty lib-empty-onboard">
             <div class="lib-empty-steps">
@@ -422,7 +431,7 @@
             <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
           </select></div>
         <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Timeout / error par thora ruk kar ek dafa dobara try</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>AI images: pause when the screen is locked</b><span>ON (normal Chrome) = lock par run ruk jata hai, aur Gemini / ChatGPT tabs baari baari saamne laye jate hain. OFF (Chrome background switches ke saath) = lock / minimize mein bhi chalta hai, aur saare tabs ek saath kaam karte hain — koi tab switching nahi</span></div><label class="sw-wrap"><input type="checkbox" id="setLockPause" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>AI images: pause when the screen is locked</b><span>ON = lock par extension khud dekhta hai: Chrome Desktop ke "Chrome (ZHunter background)" shortcut se khula hai to kaam chalta rehta hai, warna run ruk kar unlock par dobara chalta hai. OFF = kabhi nahi rukta, aur saare tabs ek saath kaam karte hain (sirf us shortcut wale Chrome ke saath)</span></div><label class="sw-wrap"><input type="checkbox" id="setLockPause" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Flow: auto Generate click</b><span>ON = extension khud Generate dabata hai (Chrome debugger use hota hai). OFF = Generate aap khud dabayen; debugger ki patti nahi aati</span></div><label class="sw-wrap"><input type="checkbox" id="setFlowDbg" checked><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Fail hone wale tabs hamesha khule rehte hain</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Sirf image links; Master ZIP mein images nahi hongi. Hunt 3–4× tez</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
@@ -920,6 +929,7 @@
             <div class="temu-head-sub">Hunted products → Temu listing file → auto upload</div>
           </div>
         </div>
+        <button id="temuWizBtn" type="button" class="btn btn-ghost btn-xs temu-auto-btn" title="Open the auto wizard (Titles → Images → Upload)">⚡ Auto</button>
         <button id="temuModalClose" class="modal-close" aria-label="Close"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
@@ -1025,7 +1035,7 @@
                 <option value="sheet" hidden>Imported sheet</option>
               </select>
               <button id="temuSheetBtn" type="button">Import sheet</button>
-              <input id="temuSheetFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.json">
+              <input id="temuSheetFile" type="file" accept=".xlsx,.xls,.csv,.tsv,.json" multiple>
               <input id="tgPx" class="inp" inputmode="decimal" />
             </div>
             <div id="temuSrcInfo" class="temu-src-info-badge"></div>
@@ -1159,6 +1169,7 @@
                   <select id="temuAiImgEngineSel" class="temu-img-sel">
                     <option value="gemini" selected>✦ Gemini (recommended)</option>
                     <option value="chatgpt">🤖 ChatGPT (auto)</option>
+                    <option value="meta">◎ Meta AI (auto)</option>
                     <option value="flow">⚡ Flow (newest Nano Banana)</option>
                     <option value="auto">🔁 Auto (Gemini → Flow)</option>
                   </select>
@@ -1213,10 +1224,18 @@
             <div id="temuBatchChips" class="tb-chips" hidden></div>
             <!-- v9.15.1 — Ready checklist: what will be uploaded and what still needs you -->
             <div id="temuReadyBox" class="temu-ready" aria-live="polite"></div>
-            <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button">
-              <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt" class="temu-auto-txt">Export + Upload to Temu</span>
-            </button>
+            <!-- v9.22.5 — two separate buttons: file only (for another Chrome profile) / upload only (no download) -->
+            <div class="temu-main-acts">
+              <button id="temuExportBtn" class="btn temu-btn-export-only" type="button" title="Sirf file banao aur Downloads mein save karo — Temu par kuch nahi jata">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export only</span>
+              </button>
+              <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button" title="Sirf Temu par upload — file download nahi hoti">
+                <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt" class="temu-auto-txt">Upload only</span>
+              </button>
+            </div>
+            <div id="temuUploadStore" class="temu-upload-store"></div>
             <button id="temuCancelBtn" class="btn btn-ghost temu-cancel-btn" type="button" hidden title="Stop this export / upload">
               <svg class="i i-xs" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               <span>Cancel</span>
@@ -1224,11 +1243,12 @@
             <!-- v9.17 — result of the last upload as a card (numbers + next actions) -->
             <div id="temuResultCard" class="tru" hidden aria-live="polite"></div>
             <details class="temu-more-tools" id="temuMoreTools">
-              <summary><span>More tools</span><small>Export file only · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
+              <summary><span>More tools</span><small>Repack · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
             <div class="temu-actions-sub-bar">
-              <button id="temuExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Download the file only — upload to Temu yourself">
-                <svg class="i i-xs" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export file only
+              <!-- v9.22.7 — fewer packs for products already on Temu: new title + AI pack image -->
+              <button id="temuRepackBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Temu par list products ke packs kam karo: naya title aur nayi AI pack image">
+                <span aria-hidden="true">📦</span>
+                Repack
               </button>
               <button id="temuLearnCatBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Products with no category: Temu's own suggested categories are shown, you pick one, and it is saved for next time">
                 <svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg>
@@ -1310,20 +1330,13 @@
 
             <div class="tg-step" data-px-mode="gap">
               <div class="tg-step-h"><b>3</b><span>Kitna jodna hai (gap)</span></div>
+              <div class="tg-px-note">Kisi bhi number par click karke badlein. Misal: cost $10 tak ho to price = cost + $50.</div>
               <div id="tgGapTable" class="tg-gap-table"></div>
-              <div class="temu-settings-grid temu-grid-2 tg-compact-grid">
-                <div class="temu-setting-box tg-gap-edit">
-                  <div class="temu-setting-lbl">Gap list (badalne ke liye)</div>
-                  <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                    <input id="tgGap" class="inp" placeholder="10:50, 25:45, 60:40, 120:60, 40%" title="cost up to : gap in $. Example 10:50 = cost up to 10 → price = cost + 50 (cost 10 = 60). The last % is used above the last tier." /></div>
-                  <span class="temu-setting-sub">"10:50" = cost $10 tak → +$50 · aakhir mein "40%" = us se upar</span>
-                </div>
-                <div class="temu-setting-box">
-                  <div class="temu-setting-lbl">Frozen par extra</div>
-                  <div class="temu-input-with-affix"><span class="temu-prefix">+$</span>
-                    <input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
-                  <span class="temu-setting-sub">Frozen products par gap ke upar</span>
-                </div>
+              <button id="tgGapAdd" type="button" class="btn btn-ghost btn-xs tg-gap-add">+ Ek aur had (tier) jodo</button>
+              <input id="tgGap" type="hidden" />
+              <div class="tg-inline-field">
+                <div><b>Frozen par extra</b><small>Frozen products par upar wale gap ke saath ye bhi judta hai</small></div>
+                <div class="temu-input-with-affix"><span class="temu-prefix">+$</span><input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
               </div>
             </div>
 
@@ -1359,23 +1372,15 @@
 
             <div class="tg-step">
               <div class="tg-step-h"><b>4</b><span>Stock (quantity)</span></div>
-              <div class="temu-settings-grid temu-grid-2 tg-compact-grid">
-                <div class="temu-setting-box">
-                  <div class="temu-setting-lbl">Kam se kam</div>
-                  <div class="temu-input-with-affix">
-                    <input id="tgQtyMin" class="inp" placeholder="250" inputmode="numeric" />
-                    <span class="temu-affix">pcs</span>
-                  </div>
-                </div>
-                <div class="temu-setting-box">
-                  <div class="temu-setting-lbl">Zyada se zyada</div>
-                  <div class="temu-input-with-affix">
-                    <input id="tgQtyMax" class="inp" placeholder="500" inputmode="numeric" />
-                    <span class="temu-affix">pcs</span>
-                  </div>
-                </div>
-              </div>
               <div class="tg-px-note">Har product ko in dono ke beech koi bhi number milta hai.</div>
+              <div class="tg-inline-field">
+                <div><b>Kam se kam</b></div>
+                <div class="temu-input-with-affix"><input id="tgQtyMin" class="inp" placeholder="250" inputmode="numeric" /><span class="temu-affix">pcs</span></div>
+              </div>
+              <div class="tg-inline-field">
+                <div><b>Zyada se zyada</b></div>
+                <div class="temu-input-with-affix"><input id="tgQtyMax" class="inp" placeholder="500" inputmode="numeric" /><span class="temu-affix">pcs</span></div>
+              </div>
             </div>
 
             <details class="tg-adv" data-settings-fold="pricing-advanced">
@@ -2155,6 +2160,7 @@
   <script src="temu_categories.js"></script>
   <script src="title_optimizer_rules.js"></script>
   <script src="sidepanel.js"></script>
+  <script src="repack.js"></script>
   <script src="text_studio.js"></script>
   <script src="sourcing_panel.js"></script>
   <script src="temu_workspace_ui.js"></script>

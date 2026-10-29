@@ -1,5 +1,138 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.22.16 (2026-10-29) — Image batch setup: Start runs every image except "Skip"
+- Reported: 13 products selected for image editing; only the first image was edited, then the window closed back to the product list. The same had happened before.
+- Cause: Start ran only the images you had "touched" in the setup window (a tick, or, since 9.22.15, a changed chip). Touching one image meant a run of one image, and the window closes by itself when a run ends without failures.
+- Now (your choice): **Start runs every image whose task is not "Skip"**. Images you did not touch run with the task shown on them. Ticks are only for "Apply to selected". To leave an image out, set it to Skip.
+- The summary line and the help text in the window say this. The green "has its task" mark from 9.22.15 stays.
+- The window still closes by itself when everything is done (your choice). With failed images it stays open.
+
+## 9.22.15 (2026-10-29) — Image batch setup: mixed tasks (Background + Improve) all run
+- Reported: in Edit Images → Auto with Gemini, giving some images "Background" and others "Improve" (tick → "Apply to selected", tick the next ones → "Apply to selected", Start) ran only part of them. After the first result nothing else started.
+- Cause: Start ran only the images that were still ticked at that moment. The first group, already "applied", was left out.
+- Now:
+  - "Apply to selected" marks those images as **having their task** (green bar and ✓ on the line) and clears their ticks, so the next group can be ticked.
+  - At Start, every image that has a task runs: one set with "Apply to selected", or with its own chip / list. Images ticked right now also run.
+  - If you set nothing and tick nothing, every image runs with its task, as before. "Skip" never runs.
+- The summary line says "only the images you gave a task (or ticked) will run" when that applies.
+
+## 9.22.14 (2026-10-29) — Gemini robot check: the run waits for you instead of stopping
+- Reported: when Google showed "I'm not a robot" (google.com/sorry) in a Gemini tab, the image was marked failed and the whole run stopped ("1 failed", 0/13).
+- Now the run waits:
+  - That Gemini tab comes to the front (its window gets focus) and a toast plus the tab line say "🧩 solve it in this tab, the run waits (Ns)".
+  - You tick the check yourself. The extension never touches a CAPTCHA.
+  - As soon as the tab leaves the robot page, it goes back to Gemini if needed and starts a fresh chat. **The same image is sent again** (no try used, not counted as failed) and the run goes on.
+- If nobody solves it within 30 minutes, or you press Stop, it stops as before.
+- Works for the multi-tab Gemini run and for the one-image-at-a-time Gemini engine.
+
+## 9.22.13 (2026-10-28) — Repack: put the new images on Temu by itself
+- New button **⬆ Temu par badlo** on every Repack card (active once the product has edited images). It:
+  1. Opens that product's Temu edit page (direct link, `product-info.html?…goods_id=…`).
+  2. Goes to step 3 "Variations" and opens the first SKU's "N Images" window ("Upload SKU images").
+  3. Presses **Remove all** and confirms with **Remove**.
+  4. Uploads **only the edited images**, in order; the first becomes the main image. Each image is sent as a JPEG of at most 2000 px (Temu: up to 5 MB, 1:1, at least 480 px).
+  5. Waits until Temu counts them ("Uploaded images: N/10") and presses the window's own **Save**.
+- **The product is not submitted.** A green note on the Temu page says what was done; you check it and press Next → Submit yourself.
+- If the product has more than one SKU, only the first SKU's images are changed (the note says so).
+- On any problem the note turns red and says where it stopped (e.g. Temu did not take an image). Nothing is submitted.
+- Checked live on Temu (28 Oct 2026, product 610544547388746): the SKU image window, "Remove all" with its "No / Remove" confirm, uploading into the window (3/10 → 4/10), and Cancel bringing the old 3 images back. The test was cancelled; nothing was saved. The full button run itself is not tested live yet.
+
+## 9.22.12 (2026-10-28) — Repack: your own prompts, pick images, open on Temu
+- **Prompt for all products** at the top of the Repack window, with a list of your saved prompts (the Image Studio library). `{N}` in a prompt becomes the product's new pack count.
+- **Each product's own prompt** box. When filled, it is used instead of the one for all.
+- Without any prompt, the pack image is made from "Naye packs" as before.
+- **Pick the images to edit:** every image of the product shows as a small tile. Ticked tiles (blue border) are edited; the main image is ticked by default. An edited tile gets a green ✓, and the card says "✓ N nayi images".
+- **✨ Images banao** sends every ticked image of every ready product to the chosen AI in one bulk run, each with its own prompt. There is no setup window in between. The new images come back into the Repack cards by themselves.
+- **⬇ Nayi images** downloads all edited images of a product (Repack/<title>/image_N.png).
+- **↗ Temu par kholo:** presses that product's own "Edit" on the open Temu "Manage products" page, so its edit page opens. The row must be on the page that is open.
+- Still to come: the extension replacing the images on the Temu edit page by itself (it needs the DOM of that page).
+
+## 9.22.11 (2026-10-27) — real sourcing price across Chrome profiles, no doubled Temu price, faster reading from Temu
+- Reported: the Google Sheet showed sourcing price $69.15 for "Shepherd's Pie…" whose Walmart price is $20.95. The product was exported in one Chrome profile ("Export only") and uploaded from another. The Temu file holds only the Temu price, so the 2nd profile wrote that Temu price as the sourcing price.
+- **Sourcing file:** "Export only" now also saves `…_sourcing.json` next to the Temu file, with the real source price and link of each product.
+  - The Temu file stays as it was: no source link or price goes to Temu, so Temu cannot use them to suggest a lower price.
+  - In the 2nd profile, choose **both files at once** in "Import sheet" (the box now takes several files), or import the .json alone, before or after the sheet.
+  - The prices are remembered in that Chrome, so importing the same products again later still gives them.
+- Without a sourcing file, an imported sheet's products now get an **empty** sourcing price in the Google Sheet, not the Temu price. The import message reminds you to import the .json.
+- **Fix: Temu price was doubled** for products from an imported sheet (e.g. $69.15 → $139.52 at upload). The "at least 2× (Frozen 3×) the source price" rule used the Temu price itself as the source price. It now uses the real source price from the sourcing file, and with no sourcing file the sheet's own price is kept. The price shown on the review cards follows the same rule.
+- **Faster reading from Temu (Repack, Store export):** 3 products are read at the same time instead of one by one. Pressing "Copy Listing" on Manage products is still one at a time; the opened copy pages are read side by side. The progress line shows "(3 at once)".
+- Not tested live yet: the 3-at-once reading on Temu and the 2-file import.
+
+## 9.22.10 (2026-10-27) — Upload no longer hangs on "building the Temu file…"
+- Reported: an exported sheet (26 products, "Batch 2-26") imported in the 2nd Chrome profile and then "Upload only" stayed on "1 File · building the Temu file…". The same file, run through the same file building on a test page, builds 26 products, so the file itself is fine.
+- Before building, the upload asks the open Temu tab which store it shows. That question had no time limit: a Temu tab that does not answer (e.g. a tab left open from before an extension reload) held the upload for ever. It now gives up after 12 s (and the whole store check after 15 s) and goes on with the extension's store. The store is still checked again by the upload itself before anything is sent.
+- Saving the online links of edited images in the Library can no longer hold the upload either (20 s limit; the links are in the file already).
+- The "1 File" step now shows each stage: checking the store → reading the template → reading the products → edited images online n/m → building the sheet.
+- If the file step still runs after 2 minutes, Details says where it is and what to do (Cancel, F5 on the Temu tab, Upload only again).
+
+## 9.22.9 (2026-10-27) — AI images keep going on a locked screen
+- A new Desktop shortcut **"Chrome (ZHunter background)"** starts Chrome with the background switches (--disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling). This Chrome keeps the AI pages working when its window is covered, when you switch windows, and when the screen is locked.
+- On a screen lock the extension now checks this by itself, 3 s after the lock:
+  - If the AI tabs still count as visible (Chrome was opened with the shortcut), the run just goes on.
+  - Only in normal Chrome does it pause, as in 9.22.8, and continue on unlock.
+- **Keep awake**: while an image run, a hunt or an upload is going, the PC does not go to sleep (the screen may still turn off or lock). New permission "power".
+- Settings text for "AI images: pause when the screen is locked" explains this.
+- Not tested live with a locked screen yet.
+
+## 9.22.8 (2026-10-27) — AI images: clean pause on screen lock
+- Fix: locking the screen (Win+L) during a Gemini image run could leave it stuck for an hour after unlocking ("attaching image…" on every tab, 1/13 done). Before, the lock only stopped NEW images. The images already in a tab kept trying the whole time, and Chrome slows such pages to about one step per minute. The Gemini tabs then stayed "busy" with that old job after the unlock.
+- Now, when the screen locks, every image that is in progress stops at once and goes back in the line (it is not counted as failed).
+- On unlock, each Gemini tab gets a short "cancel": the old job stops, the tab is freed, the "+" menu closes and old attachments are removed. The front-tab order starts fresh, then the run goes on by itself.
+- The tab lines now say "waiting for its turn at the front… Ns" while a tab waits. Before, every tab showed "attaching image… Ns" even when only one tab was really attaching.
+- This works with Settings → "AI images: pause when the screen is locked" ON (the default).
+
+## 9.22.7 (2026-10-27) — Repack, app dialogs, code clean-up
+- **📦 Repack** (Temu Export → More tools): for products already on Temu whose pack count must go down.
+  1. Tick the products on Temu "Manage products", press **Temu se parho**. Each product's title, images and price are read through Temu's own Copy Listing page, like Store export.
+  2. Type **Naye packs** per product. The title changes by itself ("50 Pack" → "20 Pack", also "Pack of 50", "50 Count", "50 ct", "50-Pack"). With no count in the title, "N Pack - " goes in front. You can still edit the title.
+  3. **✨ Images banao**: the chosen AI (Flow / Gemini / Meta / ChatGPT) makes a new pack image of the main image with that product's count ("Pack only", up to 24). Above 24 the box turns red and no AI image is made; the title still changes.
+  4. **Copy title** and **⬇ Nayi image** per product, or **⬇ Sab nayi images** (one folder per product under Repack/, plus Repack/titles.txt). You edit Temu yourself.
+  - The Repack list is saved, so it is still there after closing the panel. Only the old price is shown.
+- The browser's grey "OK / Cancel" popups are replaced by the app's own confirm box in 11 places: delete all data, restore backup, interrupted upload, delete upload record, delete category, import catalog, mark listed, clear history, unmark last upload, clear listed history, stop download. The "Library above the limit" question during a hunt stays the browser popup (it comes in the middle of a Library save).
+- Fix: "Delete products shown by this filter" in Temu Export now also answers on Cancel (it used to wait forever).
+- Clean-up: 36 old functions that nothing used any more were removed from sidepanel.js (old Collect / Links / Folders / Export tabs, old progress bar, YouTube helpers, old CSV/XLSX helpers). sidepanel.js went from 23,669 to 22,844 lines. Nothing visible changes.
+
+## 9.22.6 (2026-10-27) — Library: how often a product went out
+- Every Library product that was sent out now shows a small badge, e.g. **⬇ 2x · 10-27**: how many times it was exported ("Export only") or uploaded, and the last date. ⬇ = last time was an export, ⬆ = an upload. Hover the badge to see each date and store. 2 or more turns the badge orange.
+- New filters in the Library: **⬇ 1x**, **⬇ 2x**, **⬇ 3x+**, each with its count.
+- On one of these filters, a bar shows **🗑 Inhein delete karo**. It deletes exactly the products shown, with the normal confirm and Undo. Use it once a product has gone to all your stores. The sourcing link stays in the Google Sheet ("Listed Products") after an upload.
+- The same product sent to the same store again within 30 minutes counts once (e.g. Export, then "Mark as listed").
+- The count is kept apart from the Library, so deleting a product does not lose it: if you hunt the same link again, its old count comes back.
+- Note: the count is per Chrome profile. An export in profile A counts in A; the upload in profile B counts in B.
+
+## 9.22.5 (2026-10-27) — Export only / Upload only buttons
+- Temu Export now has **two separate buttons** instead of "Export + Upload": **⬇ Export only** saves the sheet in Downloads and sends nothing to Temu (good for hunting in another Chrome profile, then importing the sheet in the main profile). **⬆ Upload only** sends the products to Temu without downloading a file. The uploaded file is still kept in History.
+- The store the upload goes to is shown on a small line under the buttons ("Upload → <store>").
+- "Export file only" was removed from More tools, because it is now the main button.
+- Fix: the head "⚡ Auto" button (9.22.3) had the same id as the main upload button. Pressing Upload could also open the wizard, and pressing ⚡ Auto could start an upload. They now have their own ids.
+
+## 9.22.4 (2026-10-26) — Temu Settings tab clean-up
+- **Gap table you can edit:** in "Kitna jodna hai (gap)", every row now has its own boxes: cost up to $… → add +$…, and the last row "+…%". You can remove a row (×) or add one ("+ Ek aur had jodo"). The hard-to-read "10:50, 25:45, …" text box is gone. It is still saved the same way, so old settings keep working.
+- **Frozen par extra** and **Stock (Kam se kam / Zyada se zyada)** are now one-line rows: name on the left, box on the right. Help text is shown in full, no more "…" cut-offs.
+- **Package (weight & size)**: one clear row per field (Weight, Length, Width, Height, Max weight) instead of 4 cramped columns.
+- **Multiplier mode** (Price × / Kam se kam / Zyada se zyada): one row each instead of 3 tight columns.
+- Every input box in Settings now has a clear border, the theme's input colour and a highlight when you type in it. Labels are easier to read (no tiny upper-case).
+
+## 9.22.3 (2026-10-26) — choose Auto or Manual upload
+- Temu Export now asks first: **⚡ Auto** (the wizard: titles → images → upload) or **✋ Manual** (the normal Temu Export window, every step by hand). Before, the wizard always opened on top.
+- "Remember my choice" skips the question next time.
+- You can switch any time: the Temu window has a new **⚡ Auto** button, and the wizard has its **Temu window** button. Switching by hand forgets the remembered choice, so the question comes back next time.
+- While a wizard run is going on, Temu Export goes straight to its progress, as before.
+
+## 9.22.2 (2026-10-26) — Temu wizard colours
+- In the Temu wizard (Titles / Images / Upload), the AI and Prompt dropdowns, the prompt box and the search box were plain white browser boxes with faded text. They now use the extension's theme (dark and light), with a clear border, a dropdown arrow and a highlight on focus.
+- Step tabs, the product list, hovered rows and ticked rows now use the theme colours too. Product thumbnails sit on white so they are easy to see.
+
+## 9.22.1 (2026-10-25) — floating card on Amazon /gp/aw/d/ links
+- The floating image card now shows on Amazon product pages opened through `/gp/aw/d/ASIN` or `/d/ASIN` links (sponsored and "shop the brand" links use these). Before, the card only knew `/dp/` and `/gp/product/` links, so these pages got no card.
+- The page scraper also reads the product ID from these links, so pictures from other products on the same page are kept out.
+
+## 9.22.0 (2026-10-25) — Meta AI image editing
+- New image engine **Meta AI (auto)** in AI Image Studio → Engine, and as a tool in the Temu wizard's Images step. It works like ChatGPT. ZHunter uses your open meta.ai tab, or opens one in the ZHunter AI window. It attaches the product photo, types the prompt, presses Send, waits for Meta's picture and puts it back on the product. The chat is reused, and a new chat starts every 5 images.
+- New page script `meta_automation.js` (meta.ai only). Meta's picture is a .webp on fbcdn.net, so the extension's worker fetches it (meta.ai tab + fbcdn.net only) and it is turned into a JPEG (95 %).
+- A limit message from Meta stops the run like the other engines, and finished images are kept. "Made today" counts Meta AI images too.
+- Checked live on meta.ai: the image attached, the prompt went in, Send worked, and a 1600×1600 picture was back in ~30 s. The full run inside the extension is not tested yet.
+
 ## 9.21.1 (2026-10-24) — faster hunting of open tabs
 - A Walmart product page shows the product at ~10 s, but Chrome calls it "loaded" only at ~16 s because of ads and trackers. Tabs at the back take even longer, and the hunt waited up to 25 s per tab for that. Now, on every site, hunting starts once the product is on the page (title + price + images), without waiting for the rest.
 - Walmart / Sam's Club links (open tabs and the links queue) are read straight from the product's page data. The tab does not have to load or show anything. This takes ~1–4 s per product, up to 4 at once on top of "Tabs at once". In a test, 5 Walmart products took 3.3 s together, with title, price, all images, brand, description, bullets and weight (Sam's "Net Weight 71.17 oz" → 4.4 lb).

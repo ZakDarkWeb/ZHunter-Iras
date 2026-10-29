@@ -727,10 +727,11 @@ async function fetchImageAsBase64(imageUrl, settings) {
 
 // 20 Oct 2026 — Gemini's finished picture lives on lh3.googleusercontent.com: the Gemini page cannot read it (CORS, tainted
 // canvas → "image found but could not be read", then retries = slow). The worker fetches it with your Google cookies instead.
-async function fetchGeminiImage(url) {
+// v9.22 — the same for Meta AI pictures (hostRe = fbcdn.net)
+async function fetchGeminiImage(url, hostRe = /(^|\.)googleusercontent\.com$/i) {
   try {
     const u = new URL(url);
-    if (u.protocol !== 'https:' || !/(^|\.)googleusercontent\.com$/i.test(u.hostname)) return { success: false, error: 'not_gemini_image' };
+    if (u.protocol !== 'https:' || !hostRe.test(u.hostname)) return { success: false, error: 'not_gemini_image' };
     let res = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(45000) });
     if (!res.ok) res = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(45000) });
     if (!res.ok) return { success: false, error: 'http_' + res.status };
@@ -1299,7 +1300,8 @@ const CONTENT_SCRIPT_ACTIONS = new Set([
   'ADD_TO_BULK_QUEUE',
   // v9.9.0 — Google Flow image studio (flow_automation.js / content.js lightbox)
   'ZH_CDP_CLICK', 'ZH_CDP_DETACH', 'OPEN_OR_FOCUS_FLOW', 'ZH_REPLACE_IMAGE_FROM_FLOW', 'ZH_FLOW_STATUS',
-  'FETCH_GEMINI_IMAGE'   // gemini_automation.js: read the finished Gemini picture (Gemini tab only, googleusercontent.com only)
+  'FETCH_GEMINI_IMAGE',  // gemini_automation.js: read the finished Gemini picture (Gemini tab only, googleusercontent.com only)
+  'FETCH_META_IMAGE'     // meta_automation.js: read the finished Meta AI picture (meta.ai tab only, fbcdn.net only)
 ]);
 
 function isAuthorizedMessage(msg, sender) {
@@ -1588,6 +1590,10 @@ async function handleMessage(msg, sender, queueLocked = false) {
     case 'FETCH_GEMINI_IMAGE': {
       if (sender?.tab && !/^https:\/\/gemini\.google\.com\//i.test(String(sender.tab.url || ''))) return { success: false, error: 'gemini_only' };
       return await fetchGeminiImage(msg.url);
+    }
+    case 'FETCH_META_IMAGE': {
+      if (sender?.tab && !/^https:\/\/(www\.)?meta\.ai\//i.test(String(sender.tab.url || ''))) return { success: false, error: 'meta_only' };
+      return await fetchGeminiImage(msg.url, /(^|\.)fbcdn\.net$/i);
     }
     case 'FETCH_BASE64': {
       const storedSettings = await zhSettingsCached();

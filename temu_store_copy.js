@@ -212,8 +212,100 @@
     return { ok: true, url, label: (item.textContent || '').trim() };
   }
 
+  // v9.22.12 — Repack "Temu par kholo": press the row's own "Edit" (its link is captured like Copy, a scripted click would be popup-blocked)
+  async function openEdit(gid) {
+    const tr = [...document.querySelectorAll('tr[data-testid="beast-core-table-body-tr"]')].find(r => new RegExp('Goods ID:\\s*' + gid).test(r.innerText || r.textContent || ''));
+    if (!tr) return { ok: false, error: 'row not found' };
+    const tds = tr.querySelectorAll(':scope > td');
+    const scope = tds[tds.length - 1] || tr;
+    const edit = [...scope.querySelectorAll('*')].find(e => ownText(e) === 'Edit');
+    if (!edit) return { ok: false, error: 'Edit button not found' };
+    const ah = edit.closest('a[href]')?.getAttribute('href');
+    if (ah && !/^(#|javascript:)/i.test(ah)) return { ok: true, url: ah };
+    const de = document.documentElement;
+    de.removeAttribute('data-zc-url'); de.setAttribute('data-zc-capture', '1');
+    await sleep(200);
+    ['mouseover', 'mouseenter', 'mousedown', 'mouseup'].forEach(ev => edit.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })));
+    edit.click();
+    const url = await waitFor(() => de.getAttribute('data-zc-url'), 5000, 150);
+    de.removeAttribute('data-zc-capture');
+    return url ? { ok: true, url } : { ok: false, error: 'Temu did not give an edit link', tabHint: true };
+  }
+
+  /* v9.22.13 — Repack "Temu par badlo", on the product's edit page: step 3 (Variations) → the SKU's "N Images" window →
+     "Remove all" (+ its "Remove" confirm) → the new images into the upload box → the window's own Save.
+     The product itself is NOT submitted: the person checks it and presses Submit. Checked live on 28 Oct 2026:
+     window "Upload SKU images", [class*=removeBtn] "Remove all", confirm popover (PP_withConfirmPopoverMain) No / Remove,
+     upload input inside [class*=UPD_outerWrapper] (multiple), counter "Uploaded images: N/ 10", buttons Cancel / Save. */
+  function hud(t, bad) {
+    let h = document.getElementById('zh-rp-hud');
+    if (!h) { h = document.createElement('div'); h.id = 'zh-rp-hud'; h.style.cssText = 'position:fixed;right:18px;bottom:90px;z-index:2147483646;max-width:360px;padding:12px 14px;border-radius:8px;font:13px/1.45 -apple-system,Segoe UI,Arial,sans-serif;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.35)'; document.body.appendChild(h); }
+    h.style.background = bad ? '#b91c1c' : '#0f766e'; h.textContent = t;
+  }
+  const skuModal = () => [...document.querySelectorAll('[data-testid="beast-core-modal"]')].find(x => vis(x) && /Upload SKU images/i.test(x.innerText || ''));
+  const upCount = mo => { const mm = ((mo && mo.innerText) || '').match(/Uploaded images:\s*(\d+)\s*\/\s*(\d+)/i); return mm ? +mm[1] : -1; };
+  function dataUrlFile(u, name) {
+    const [head, b64] = String(u).split(','); const mime = (head.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+    const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return new File([a], name + (/png/.test(mime) ? '.png' : '.jpg'), { type: mime });
+  }
+  async function replaceImages(images) {
+    const o = { warn: [] };
+    if (!Array.isArray(images) || !images.length) return { ok: false, error: 'no images' };
+    if (images.length > 10) images = images.slice(0, 10);
+    hud('ZHunter: opening the image step…');
+    const ready = await waitFor(() => { const i = byId('goodsBasic.goodsName'); const v = i && i.querySelector('input'); return v && v.value; }, 40000, 400);
+    if (!ready) return { ok: false, error: 'edit page did not load' };
+    await sleep(1500);
+    if (!/Variations/i.test(heading())) {
+      if (!/Product details/i.test(heading()) && !(await clickNext(o, 'Product details'))) return { ok: false, error: 'could not open step 2 (' + o.warn.join(', ') + ')' };
+      await sleep(800);
+      if (!(await clickNext(o, 'Variations'))) return { ok: false, error: 'could not open step 3 (' + o.warn.join(', ') + ')' };
+      await sleep(1500);
+    }
+    const tb = [...document.querySelectorAll('#publish-form-wrapper table')].find(x => x.querySelector('tbody tr'));
+    const trs = tb ? [...tb.querySelectorAll('tbody tr')].filter(tr => tr.querySelectorAll(':scope > td').length >= 5) : [];
+    if (!trs.length) return { ok: false, error: 'SKU table not found' };
+    const td = trs[0].querySelectorAll(':scope > td')[1];
+    const lab = td && [...td.querySelectorAll('div')].find(e => /^\d+\s*Images?$/i.test(e.textContent.trim()) && !e.children.length);
+    if (!lab) return { ok: false, error: '"N Images" not found in the first SKU' };
+    hud('ZHunter: removing the old images…');
+    lab.click();
+    let mo = await waitFor(skuModal, 8000, 250);
+    if (!mo) return { ok: false, error: 'image window did not open' };
+    await waitFor(() => upCount(skuModal()) >= 0, 5000, 250);
+    if (upCount(skuModal()) > 0) {
+      const ra = skuModal().querySelector('[class*="removeBtn"]');
+      if (!ra) return { ok: false, error: '"Remove all" not found' };
+      ra.click();
+      const yes = await waitFor(() => [...document.querySelectorAll('[class*="PP_withConfirmPopoverMain"] button, [class*="PP_popoverMain"] button')].find(b => vis(b) && /^Remove$/i.test(b.textContent.trim())), 5000, 200);
+      if (!yes) return { ok: false, error: 'remove confirm did not show' };
+      yes.click();
+      if (!(await waitFor(() => upCount(skuModal()) === 0, 8000, 250))) return { ok: false, error: 'old images were not removed' };
+    }
+    hud(`ZHunter: uploading ${images.length} new image${images.length === 1 ? '' : 's'}…`);
+    const inp = await waitFor(() => [...(skuModal() || document).querySelectorAll('input[type="file"]')].find(i => i.closest('[class*="UPD_outerWrapper"]')), 6000, 250);
+    if (!inp) return { ok: false, error: 'upload box not found' };
+    const dt = new DataTransfer();
+    images.forEach((u, i) => { const f = dataUrlFile(u, 'zh_repack_' + (i + 1)); if (f) dt.items.add(f); });
+    inp.files = dt.files;
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    const got = await waitFor(() => upCount(skuModal()) >= images.length, 90000, 500);
+    if (!got) return { ok: false, error: `Temu took ${Math.max(0, upCount(skuModal()))} of ${images.length} images (size / 1:1 / at least 480 px?) — the window is left open, check it` };
+    await sleep(1200);
+    const save = [...skuModal().querySelectorAll('button')].find(b => /^Save$/i.test(b.textContent.trim()) && vis(b));
+    if (!save) return { ok: false, error: 'Save button not found in the image window' };
+    save.click();
+    await waitFor(() => !skuModal(), 8000, 250);
+    const now = (td.innerText || '').trim();
+    hud(`ZHunter: ✓ ${images.length} new image${images.length === 1 ? '' : 's'} in (${now}). Check the product, then press Next → Submit yourself.` + (trs.length > 1 ? ` Only the 1st of ${trs.length} SKUs was changed.` : ''));
+    return { ok: true, n: images.length, skus: trs.length, now };
+  }
+
   chrome.runtime.onMessage.addListener((m, s, send) => {
     if (!m || typeof m.action !== 'string' || m.action.indexOf('ZC_') !== 0) return;
+    if (m.action === 'ZC_REPLACE_IMAGES') { replaceImages(m.images).then(r => { if (!r.ok) hud('ZHunter: ' + r.error, true); send(r); }).catch(e => { hud('ZHunter: ' + (e && e.message || e), true); send({ ok: false, error: String(e && e.message || e) }); }); return true; }
+    if (m.action === 'ZC_OPEN_EDIT') { openEdit(String(m.goodsId || '')).then(send).catch(e => send({ ok: false, error: String(e && e.message || e) })); return true; }
     if (!/seller\.temu\.com$/i.test(location.hostname)) { send({ success: false, error: 'not seller.temu.com' }); return true; }
     if (m.action === 'ZC_PING') { send({ ready: true, path: location.pathname }); return true; }
     if (m.action === 'ZC_LIST_SELECTED') { try { send({ success: true, rows: listSelected() }); } catch (e) { send({ success: false, error: String(e && e.message || e) }); } return true; }

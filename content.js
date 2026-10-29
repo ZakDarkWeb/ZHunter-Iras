@@ -650,7 +650,9 @@ async function harvestInlineJson() {
     // Amazon: /dp/ASIN or /gp/product/ASIN
     const dpIdx = pathParts.indexOf('dp');
     const gpIdx = pathParts.indexOf('product');
+    const awIdx = pathParts.indexOf('d');   // /gp/aw/d/ASIN or /d/ASIN
     if (dpIdx >= 0 && pathParts[dpIdx + 1]) productPathKey = pathParts[dpIdx + 1].toLowerCase();
+    else if (/amazon\./i.test(location.hostname) && awIdx >= 0 && /^[a-z0-9]{10}$/i.test(pathParts[awIdx + 1] || '')) productPathKey = pathParts[awIdx + 1].toLowerCase();
     else if (gpIdx >= 0 && pathParts[gpIdx + 1]) productPathKey = pathParts[gpIdx + 1].toLowerCase();
     // Walmart: /ip/product-name/ITEM_ID
     else if (/walmart/i.test(location.hostname)) {
@@ -4007,7 +4009,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     /\/ip\//,/\/dp\//,/\/gp\/product\//,/\/product\//,/\/itm\//,
     /\/listing\//,/\/item\//,/\/goods[-_]?(detail)?/,/-g-\d+/,/[?&]goods_id=/i,/\/p-/,
     /\/products?\//,/\/pd\//,/\/skuId=/,/[?&]sku[_-]?id=/i,
-    /\/prd\//,/\/buy\//,/[?&]itemid=/,/\/asin\//
+    /\/prd\//,/\/buy\//,/[?&]itemid=/,/\/asin\//,
+    /\/gp\/aw\/d\//,/\/d\/[a-z0-9]{10}(?:[\/?#]|$)/   // v9.22.1 — Amazon /gp/aw/d/ASIN and /d/ASIN links (sponsored / mobile-style)
   ];
   const NON_PRODUCT_PATTERNS = [
     /\/search[\/?]/,/\/s\?/,/\/browse\//,/\/category\//,/\/collection/,

@@ -212,7 +212,8 @@
 
 
   // ───────── Manual helpers (the person presses Send) ─────────
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // v9.22.8 — after a screen lock the panel sends ZH_AI_CANCEL: a job still running from before the lock stops at its next pause
+  const sleep = async (ms) => { await new Promise(r => setTimeout(r, ms)); if (window.__zhGemCancel) throw new Error('cancelled (screen was locked)'); };
   function composerEl() {
     return document.querySelector('rich-textarea .ql-editor[role="textbox"], rich-textarea .ql-editor, .ql-editor[role="textbox"], div[contenteditable="true"][role="textbox"]');
   }
@@ -479,11 +480,22 @@
 
   try {
     addGemListener((msg, _s, sendResponse) => {
+      if (msg?.action === 'ZH_AI_CANCEL') {
+        // v9.22.8 — stop the old job (it stops at its next pause), free the tab, close the "+" menu; the flag clears itself after 20 s
+        // and a new job waits for that, so the old job has finished its own clean-up before the new image goes in
+        window.__zhGemCancel = true; window.__zhGemBusy = 0;
+        clearTimeout(window.__zhGemCancelT); window.__zhGemCancelT = setTimeout(() => { window.__zhGemCancel = false; }, 20000);
+        closeMenus();
+        (async () => { try { await new Promise(r => setTimeout(r, 300)); await clearAttachments(); } catch (_) {} try { sendResponse({ ok: true }); } catch (_) {} })();
+        return true;
+      }
       if (msg?.action === 'ZH_GEM_MANUAL_ATTACH') {
         if (window.__zhGemBusy && Date.now() - window.__zhGemBusy < 6 * 60000) { try { sendResponse({ ok: false, error: 'Gemini tab is still busy with the previous image' }); } catch (_) {} return true; }
         window.__zhGemBusy = Date.now();
         (async () => {
           try {
+            if (window.__zhGemCancel) showGeminiHUD('ZHunter: clearing the old job from before the lock…', 'info');
+            while (window.__zhGemCancel) await new Promise(r => setTimeout(r, 300));   // v9.22.8 — see ZH_AI_CANCEL
             const imgs = (msg.imgs && msg.imgs.length) ? msg.imgs : (msg.imgBase64 ? [msg.imgBase64] : []);
             showGeminiHUD('ZHunter: attaching image…', 'info');
             let n = 0;

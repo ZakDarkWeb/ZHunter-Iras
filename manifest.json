@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZHunter Iras",
-  "version": "9.21.1",
+  "version": "9.22.16",
   "description": "Product research side panel: hunt product images, videos and details from Amazon, Walmart, Sam's Club, Alibaba, AliExpress and more; bulk-hunt open tabs or a background queue; export XLSX/CSV/HTML/PDF sheets and image ZIPs.",
   "author": "ZHunter",
   "permissions": [
@@ -19,7 +19,8 @@
     "sidePanel",
     "windows",
     "debugger",
-    "idle"
+    "idle",
+    "power"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -133,6 +134,16 @@
       ],
       "js": [
         "gpt_automation.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.meta.ai/*",
+        "https://meta.ai/*"
+      ],
+      "js": [
+        "meta_automation.js"
       ],
       "run_at": "document_idle"
     }
