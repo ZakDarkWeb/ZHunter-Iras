@@ -10013,9 +10013,9 @@ async function updateMasterStats() {
 
   $('masterWarning')?.classList.toggle('hidden', rows.length < 200);
 
-  renderMasterBatches(batches);
-  MasterUIState.allRows = rows;
+  MasterUIState.allRows = rows;   // v9.22 — state first, so the hunt cards count the products that are really in the Library
   MasterUIState.batches = batches;
+  renderMasterBatches(batches);
   filterAndRenderMasterRows();
 }
 
@@ -10561,7 +10561,8 @@ function zhRenderBatchFilterBar(shown) {
   const when = d ? `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'hunt';
   const total = (MasterUIState.allRows || []).length;
   bar.hidden = false;
-  bar.innerHTML = `<span class="lib-filter-txt">Showing hunt <b>${esc(when)}</b>${b?.label ? ' · ' + esc(b.label) : ''} — ${shown} of ${total} products</span><button type="button" class="lib-filter-clear">✕ Show all</button>`;
+  bar.innerHTML = `<span class="lib-filter-txt">Showing hunt <b>${esc(when)}</b>${b?.label ? ' · ' + esc(b.label) : ''} — ${shown} of ${total} products</span><button type="button" class="lib-filter-clear">✕ Show all</button><button type="button" class="lib-filter-del" title="Delete this hunt's products from the Library">🗑 Delete ${shown}</button>`;
+  bar.querySelector('.lib-filter-del').onclick = () => { if (b) zhHuntDeleteWithProducts(b); else toast('Hunt not found', 'warn'); };
   bar.querySelector('.lib-filter-clear').onclick = () => { MasterUIState.filterBatchId = null; filterAndRenderMasterRows(); renderMasterBatches(MasterUIState.batches || []); };
 }
 function zhSortBatches(list) { return list.sort((a, c) => (Date.parse(c.date) || 0) - (Date.parse(a.date) || 0)); }
@@ -10575,6 +10576,9 @@ async function zhHuntRemove(b) {
     if (!cur.some(x => x.id === b.id)) await setMasterBatches(zhSortBatches([...cur, b]));
     await updateMasterStats();
   });
+}
+function zhHuntRemoveAsk(b) {
+  showConfirm('Remove hunt from list', 'Remove this hunt from Recent Hunts? Your products stay in the Library. You can undo it for a few seconds.', 'Remove hunt', () => zhHuntRemove(b));
 }
 async function zhHuntDeleteWithProducts(b) {
   const lib = await getMasterRows(), batches = await getMasterBatches();
@@ -10651,6 +10655,7 @@ function renderMasterBatches(batches) {
     const firstPlat = plats[0] || '';
     const isLatest = (idx === 0);
     const count = b.count || 0;
+    let inLib = count; try { if ((MasterUIState.allRows || []).length) inLib = masterRowsForBatch(MasterUIState.allRows, b, MasterUIState.batches || batches).length; } catch (_) {}
 
     const card = document.createElement('div');
     card.className = 'rh-card' + (isLatest ? ' rh-card-latest' : '');
@@ -10667,34 +10672,21 @@ function renderMasterBatches(batches) {
           ${isLatest ? `<span class="rh-latest-chip">● Latest</span>` : `<span class="rh-ago">${timeAgo}</span>`}
         </div>
         <div class="rh-card-mid">
-          <span class="rh-count">${count}</span>
-          <span class="rh-count-lbl">product${count !== 1 ? 's' : ''}</span>
+          <span class="rh-count">${inLib}</span>
+          <span class="rh-count-lbl">product${inLib !== 1 ? 's' : ''}${inLib !== count ? ` <small style="opacity:.7">(of ${count} hunted)</small>` : ''}</span>
           <span class="rh-plat-tag">${esc(platLabel)}</span>
           ${b.label ? `<span class="rh-batch-lbl">${esc(b.label)}</span>` : ''}
         </div>
       </div>
-      <button class="rh-view-btn${MasterUIState.filterBatchId === b.id ? ' on' : ''}" type="button" title="${MasterUIState.filterBatchId === b.id ? 'Showing only this hunt — click to show all' : 'Show only these products in the Library'}">
+      <button class="rh-view-btn${MasterUIState.filterBatchId === b.id ? ' on' : ''}${inLib ? '' : ' off'}" type="button" title="${MasterUIState.filterBatchId === b.id ? 'Showing only this hunt — click to show all' : 'Show only these products in the Library'}">
         <svg viewBox="0 0 24 24"><polyline points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3"/></svg>
         <span>${MasterUIState.filterBatchId === b.id ? 'Filtered ✓' : 'Filter'}</span>
       </button>
-      <button class="rh-more-btn" type="button" title="More: remove / delete this hunt" aria-label="More actions">⋯</button>
-      <div class="rh-menu" hidden>
-        <button type="button" data-rh="remove">Remove from history<small>products stay in the Library</small></button>
-        <button type="button" data-rh="delete" class="danger">Delete hunt + its products<small>asks first · Undo for a few seconds</small></button>
-      </div>`;
+      <button class="rh-del-btn" type="button" title="Remove this hunt from the list (products stay in the Library)" aria-label="Remove hunt">
+        <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>`;
 
-    card.querySelector('.rh-more-btn')?.addEventListener('click', e => {
-      e.stopPropagation();
-      const m = card.querySelector('.rh-menu');
-      const open = m.hidden;
-      document.querySelectorAll('.rh-menu:not([hidden])').forEach(x => { x.hidden = true; });
-      m.hidden = !open;
-    });
-    card.querySelector('.rh-menu')?.addEventListener('click', e => {
-      const a = e.target.closest('button[data-rh]'); if (!a) return;
-      card.querySelector('.rh-menu').hidden = true;
-      if (a.dataset.rh === 'remove') zhHuntRemove(b); else zhHuntDeleteWithProducts(b);
-    });
+    card.querySelector('.rh-del-btn')?.addEventListener('click', e => { e.stopPropagation(); zhHuntRemoveAsk(b); });
 
     card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
       // Switch to Library tab
@@ -10702,7 +10694,7 @@ function renderMasterBatches(batches) {
       const clear = MasterUIState.filterBatchId === b.id;
       const matched = masterRowsForBatch(MasterUIState.allRows || [], b, MasterUIState.batches || batches);
       if (!clear && !matched.length) {
-        toast('No saved products found for this hunt. Library filter was not changed.', 'warn');
+        toast('None of this hunt\'s products are in the Library any more (deleted or exported). Use the bin to remove the hunt.', 'warn');
         return;
       }
       MasterUIState.filterBatchId = clear ? null : b.id;
