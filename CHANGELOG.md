@@ -234,6 +234,10 @@
   - A product with such an empty field is not submitted.
 - Checked on the pasted rows: Material = empty, Net Content Volume = empty, Alcohol Content = empty, "carbonated?" = Non-carbonated (filled).
 
+## 9.22.16 (follow-up) Recent Hunts fix
+- Recent Hunts: no more ⋯ menu — each hunt has a Filter button and a bin button (remove from list, Undo). The Library bar over a filtered hunt has "🗑 Delete N" (deletes that hunt's products, asks first, Undo).
+- Hunt cards show how many of the hunted products are really still in the Library; Filter is dimmed when none are left. Cards now count from fresh data (they used the previous list before).
+
 ## 9.22.16 (2026-10-29) — Image batch setup: Start runs every image except "Skip"
 - Reported: 13 products selected for image editing; only the first image was edited, then the window closed back to the product list. The same had happened before.
 - Cause: Start ran only the images you had "touched" in the setup window (a tick, or, since 9.22.15, a changed chip). Touching one image meant a run of one image, and the window closes by itself when a run ends without failures.
