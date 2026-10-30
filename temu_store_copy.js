@@ -249,7 +249,7 @@
     const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
     return new File([a], name + (/png/.test(mime) ? '.png' : '.jpg'), { type: mime });
   }
-  async function replaceImages(images) {
+  async function replaceImages(images, quiet) {
     const o = { warn: [] };
     if (!Array.isArray(images) || !images.length) return { ok: false, error: 'no images' };
     if (images.length > 10) images = images.slice(0, 10);
@@ -293,18 +293,199 @@
     const got = await waitFor(() => upCount(skuModal()) >= images.length, 90000, 500);
     if (!got) return { ok: false, error: `Temu took ${Math.max(0, upCount(skuModal()))} of ${images.length} images (size / 1:1 / at least 480 px?) — the window is left open, check it` };
     await sleep(1200);
-    const save = [...skuModal().querySelectorAll('button')].find(b => /^Save$/i.test(b.textContent.trim()) && vis(b));
+    // v9.22.23 — since 29 Oct 2026 the window's Save / Cancel are <div role="button"> (no <button>)
+    const save = [...skuModal().querySelectorAll('[role="button"], button')].find(b => /^Save$/i.test(b.textContent.trim()) && vis(b));
     if (!save) return { ok: false, error: 'Save button not found in the image window' };
     save.click();
     await waitFor(() => !skuModal(), 8000, 250);
     const now = (td.innerText || '').trim();
-    hud(`ZHunter: ✓ ${images.length} new image${images.length === 1 ? '' : 's'} in (${now}). Check the product, then press Next → Submit yourself.` + (trs.length > 1 ? ` Only the 1st of ${trs.length} SKUs was changed.` : ''));
+    if (!quiet) hud(`ZHunter: ✓ ${images.length} new image${images.length === 1 ? '' : 's'} in (${now}). Check the product, then press Next → Submit yourself.` + (trs.length > 1 ? ` Only the 1st of ${trs.length} SKUs was changed.` : ''));
     return { ok: true, n: images.length, skus: trs.length, now };
+  }
+
+  /* v9.22.19 — Repack "Temu par lagao": step 1 gets the new title, the description is emptied and every bullet point
+     deleted (the old text names the old quantity), then the images as above, then Next → … → Submit (the person asked
+     for the Submit). Checked live on 29 Oct 2026: title input in #goodsBasic.goodsName, description textarea in
+     #goodsExtensionInfo.goodsDesc, each bullet a textarea in #goodsExtensionInfo.bulletPoints with its own "Delete"
+     (no confirm), steps Product description → Product details → Variations → Offer → Safety and compliance (Submit). */
+  function setText(el, v) {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
+    ['input', 'change', 'blur', 'focusout'].forEach(ev => el.dispatchEvent(new Event(ev, { bubbles: true })));
+  }
+  /* v9.22.25 — package weight + size on step 3 (every SKU row). Checked live on 29 Oct 2026: weight = number box in
+     column 4 with its unit (lb) next to it; size = column 5 "7.50in x 5.20in x 1.50in", a click opens a popover with
+     "Longest side" / "Second longest side" / "Shortest side" boxes that take the value when the popover closes. */
+  async function goVariations() {
+    for (let i = 0; i < 4 && !/Variations/i.test(heading()); i++) {
+      const nx = await waitFor(() => stepBtn(/^Next$/i), 15000, 300); if (!nx) return false;
+      const h0 = heading(); nx.click();
+      if (!(await waitFor(() => heading() !== h0, 20000, 300))) return false;
+      await sleep(1200);
+    }
+    return /Variations/i.test(heading());
+  }
+  const fmt = n => String(Math.round(n * 100) / 100);
+  // v9.22.44 — listPrice: every SKU's "List price" (input in #skuList[N].marketPrice, column 7 of step 3; checked live 30 Oct 2026)
+  async function setPack(weight, dims, listPrice) {
+    const done = [];
+    if (!(await goVariations())) return { ok: false, error: 'could not open step 3 (Variations): "' + heading() + '"' };
+    const tb = [...document.querySelectorAll('#publish-form-wrapper table')].find(x => x.querySelector('tbody tr'));
+    const trs = tb ? [...tb.querySelectorAll('tbody tr')].filter(tr => tr.querySelectorAll(':scope > td').length >= 5) : [];
+    if (!trs.length) return { ok: false, error: 'SKU table not found' };
+    const closePop = () => ['mousedown', 'mouseup', 'click'].forEach(ev => document.body.dispatchEvent(new MouseEvent(ev, { bubbles: true, view: window })));
+    for (const tr of trs) {
+      const tds = tr.querySelectorAll(':scope > td');
+      if (weight) {
+        const wi = tds[3] && tds[3].querySelector('input');
+        if (!wi) return { ok: false, error: 'weight box not found' };
+        const unit = (tds[3].textContent || '').toLowerCase();
+        let w = Number(weight);   // the extension's value is in lb
+        if (/\boz\b/.test(unit)) w = w * 16; else if (/\bkg\b/.test(unit)) w = w / 2.20462; else if (/\bg\b/.test(unit) && !/\blb\b/.test(unit)) w = w * 453.592;
+        setText(wi, fmt(w)); await sleep(400);
+        if (Math.abs(parseFloat(wi.value) - Math.round(w * 100) / 100) > 0.011) return { ok: false, error: 'the weight did not take' };
+      }
+      if (Array.isArray(dims) && dims.length === 3) {
+        const wrap = tds[4] && tds[4].querySelector('[class*="dimensionWrapper"]');
+        const val = wrap && wrap.querySelector('[class*="value-"]');
+        if (!val) return { ok: false, error: 'size box not found' };
+        const cm = /cm/i.test(wrap.textContent || '');
+        const s = dims.map(Number).sort((a, b) => b - a).map(x => cm ? x * 2.54 : x);   // Temu asks longest side first
+        ['mousedown', 'mouseup', 'click'].forEach(ev => val.dispatchEvent(new MouseEvent(ev, { bubbles: true, view: window })));
+        const names = ['Longest side', 'Second longest side', 'Shortest side'];
+        const box = n => [...document.querySelectorAll('input')].find(i => i.placeholder === n && vis(i));
+        if (!(await waitFor(() => box(names[0]), 5000, 200))) return { ok: false, error: 'size window did not open' };
+        for (let i = 0; i < 3; i++) { setText(box(names[i]), fmt(s[i])); await sleep(250); }
+        closePop(); await sleep(900);
+        const got = ((wrap.textContent || '').match(/[\d.]+/g) || []).map(Number);
+        if (got.length < 3 || got.slice(0, 3).some((x, i) => Math.abs(x - Math.round(s[i] * 100) / 100) > 0.011)) return { ok: false, error: 'the size did not take (' + (wrap.textContent || '').trim() + ')' };
+      }
+      if (listPrice) {
+        const fi = tr.querySelector('[id$=".marketPrice"]'), li = fi && fi.querySelector('input');
+        if (!li) return { ok: false, error: 'list price box not found' };
+        const want = Number(listPrice).toFixed(2);
+        setText(li, want); await sleep(500);
+        if (Math.abs(parseFloat(li.value) - Number(want)) > 0.001) return { ok: false, error: 'the list price did not take' };
+        const ex = [...fi.querySelectorAll('[class*="Form_itemExplain"]')].map(e => (e.innerText || '').trim()).filter(Boolean)[0];
+        if (ex) return { ok: false, error: 'Temu does not accept list price ' + want + ': ' + ex.slice(0, 120) };
+      }
+    }
+    if (listPrice) done.push('list price $' + Number(listPrice).toFixed(2));
+    if (weight) done.push('weight ' + fmt(Number(weight)) + ' lb');
+    if (Array.isArray(dims) && dims.length === 3) done.push('size ' + dims.map(x => fmt(Number(x))).join('x') + ' in');
+    return { ok: true, done };
+  }
+  const stepBtn = re => [...document.querySelectorAll('#publish-form-wrapper [role="button"], #publish-form-wrapper button')].find(b => re.test((b.textContent || '').trim()) && vis(b));
+  async function applyEdit(m) {
+    const o = { warn: [] };
+    hud('ZHunter: opening the product…');
+    // v9.22.31 — some products open on the last step (Safety and compliance): there is no title box yet, so "loaded" is
+    // any step heading; then Previous back to step 1
+    const titleBox = () => { const i = byId('goodsBasic.goodsName'); const v = i && i.querySelector('input'); return v && v.value ? v : null; };
+    const ready = await waitFor(() => titleBox() || (/Product details|Variations|Offer|Safety and compliance/i.test(heading()) && stepBtn(/^Previous$/i)), 40000, 400);
+    if (!ready) return { ok: false, error: 'edit page did not load' };
+    await sleep(1500);
+    for (let i = 0; i < 6 && !/Product description/i.test(heading()); i++) {
+      const prev = await waitFor(() => stepBtn(/^Previous$/i), 10000, 300); if (!prev) break;
+      const h0 = heading(); hud('ZHunter: back to step 1 (from "' + h0 + '")…');
+      prev.click();
+      await waitFor(() => heading() !== h0, 15000, 300); await sleep(1000);
+    }
+    if (!/Product description/i.test(heading())) return { ok: false, error: 'could not go back to step 1 (stuck on "' + heading() + '")' };
+    if (!(await waitFor(titleBox, 20000, 400))) return { ok: false, error: 'step 1 opened but the title box did not load' };
+    await sleep(800);
+    const done = [];
+    if (m.title) {
+      const want = String(m.title).replace(/\s+/g, ' ').trim().slice(0, 500);
+      const box = () => byId('goodsBasic.goodsName') && byId('goodsBasic.goodsName').querySelector('input');
+      // v9.22.25 — set, wait, check again (and once more) so a late page refresh cannot put the old title back
+      for (let i = 0; i < 3 && box() && box().value !== want; i++) { setText(box(), want); await sleep(1500); }
+      if (!box() || box().value !== want) return { ok: false, error: 'the new title did not take (Temu kept: "' + ((box() && box().value) || '').slice(0, 60) + '")' };
+      done.push('title');
+    }
+    // v9.22.30 — no brand chosen (red "Please enter the brand" blocks Next): tick "This product does not have a brand"
+    const bi = byId('brand');
+    if (bi) {
+      const lab = re => [...bi.querySelectorAll('label')].find(l => re.test(l.textContent || ''));
+      const on = l => !!l && (l.getAttribute('data-checked') === 'true' || !!(l.querySelector('input') || {}).checked);
+      // the chosen brand is the value of the brand list's text box (a cascader, "TAYLORMADE / TAYLORMADE"); empty = no brand
+      const bx = bi.querySelector('input[type="text"]');
+      const empty = !!bx && !String(bx.value || '').trim();
+      const none = lab(/does not have a brand/i), later = lab(/fill in later/i);
+      if (empty && none && !on(none) && !on(later)) {
+        none.click(); await sleep(800);
+        if (!on(none)) return { ok: false, error: 'brand is empty and "This product does not have a brand" could not be ticked' };
+        done.push('no brand ticked');
+      }
+    }
+    if (m.clearText) {
+      const d = byId('goodsExtensionInfo.goodsDesc') && byId('goodsExtensionInfo.goodsDesc').querySelector('textarea');
+      if (d && d.value) { setText(d, ''); done.push('description'); }
+      const bp = byId('goodsExtensionInfo.bulletPoints');
+      let n = 0;
+      for (let i = 0; i < 30 && bp; i++) {
+        const del = [...bp.querySelectorAll('span')].find(s => s.textContent.trim() === 'Delete' && vis(s));
+        if (!del) break;
+        (del.closest('[class*="textButton"]') || del.parentElement).click(); n++; await sleep(350);
+      }
+      if (bp && bp.querySelector('textarea')) return { ok: false, error: 'bullet points could not all be deleted' };
+      if (n) done.push(n + ' bullet' + (n === 1 ? '' : 's') + ' deleted');
+    }
+    let img = null;
+    if (Array.isArray(m.images) && m.images.length) {
+      img = await replaceImages(m.images, true);
+      if (!img.ok) return Object.assign(img, { done });
+      done.push(img.n + ' images');
+    }
+    if (m.weight || (Array.isArray(m.dims) && m.dims.length === 3) || m.listPrice) {
+      const p = await setPack(m.weight, m.dims, m.listPrice);
+      if (!p.ok) return Object.assign(p, { done });
+      done.push(...p.done);
+    }
+    if (!m.submit) { hud('ZHunter: ✓ ' + done.join(', ') + '. Check it and press Submit yourself.'); return { ok: true, done, submitted: false, skus: img && img.skus }; }
+    // on to the last step
+    for (let i = 0; i < 5 && !/Safety and compliance/i.test(heading()); i++) {
+      const nx = await waitFor(() => stepBtn(/^Next$/i), 15000, 300);
+      if (!nx) return { ok: false, error: 'Next not found on "' + heading() + '"', done };
+      const h0 = heading(); nx.click();
+      if (!(await waitFor(() => heading() !== h0, 20000, 300))) return { ok: false, error: 'Temu stopped on "' + h0 + '" (a field there needs you)', done };
+      await sleep(1000);
+    }
+    const sub = await waitFor(() => stepBtn(/^Submit$/i), 15000, 300);
+    if (!sub) return { ok: false, error: 'Submit button not found', done };
+    hud('ZHunter: submitting…');
+    const url0 = location.href;
+    sub.click();
+    // done when Temu leaves the edit page or says so; a window / red field that stays means the person must look.
+    // v9.22.45 — a short Temu message (toast) is remembered even after it fades, and when nothing at all happened
+    // after 15 s while Submit is still there, Submit is pressed once more (a page in a window behind can miss the first)
+    let seen = '', again = false;
+    const t0 = Date.now();
+    const res = await waitFor(() => {
+      if (location.href !== url0 && !/product-info/i.test(location.href)) return 'left';
+      const t = [...document.querySelectorAll('[data-testid="beast-core-modal"], [class*="Toast"], [class*="toast"], [class*="MSG_"]')].filter(vis).map(x => (x.innerText || '').trim()).filter(Boolean).join(' ');
+      if (/success|submitted|under review/i.test(t)) return 'ok';
+      if (t) seen = t;
+      if (!again && !seen && Date.now() - t0 > 15000) {
+        const s2 = stepBtn(/^Submit$/i);
+        if (s2 && !s2.disabled && !/loading/i.test(s2.className || '')) { again = true; hud('ZHunter: submitting again…'); s2.click(); }
+      }
+      return '';
+    }, 60000, 500);
+    if (!res) {
+      const red = [...document.querySelectorAll('[data-testid="beast-core-modal"], [class*="Form_itemExplain"], [class*="error"]')].filter(vis).find(x => (x.innerText || '').trim());
+      if (red) { try { red.scrollIntoView({ block: 'center' }); } catch (_) { /* no scroll */ } }
+      const msg = (red && red.innerText.trim()) || seen;
+      return { ok: false, error: 'Submit pressed' + (again ? ' twice' : '') + ', but Temu did not confirm' + (msg ? ': ' + msg.replace(/\s+/g, ' ').slice(0, 160) : ' — check this tab'), done };
+    }
+    hud('ZHunter: ✓ submitted (' + done.join(', ') + ')');
+    return { ok: true, done, submitted: true, skus: img && img.skus };
   }
 
   chrome.runtime.onMessage.addListener((m, s, send) => {
     if (!m || typeof m.action !== 'string' || m.action.indexOf('ZC_') !== 0) return;
     if (m.action === 'ZC_REPLACE_IMAGES') { replaceImages(m.images).then(r => { if (!r.ok) hud('ZHunter: ' + r.error, true); send(r); }).catch(e => { hud('ZHunter: ' + (e && e.message || e), true); send({ ok: false, error: String(e && e.message || e) }); }); return true; }
+    if (m.action === 'ZC_APPLY_EDIT') { applyEdit(m).then(r => { if (!r.ok) hud('ZHunter: ' + r.error, true); send(r); }).catch(e => { hud('ZHunter: ' + (e && e.message || e), true); send({ ok: false, error: String(e && e.message || e) }); }); return true; }
     if (m.action === 'ZC_OPEN_EDIT') { openEdit(String(m.goodsId || '')).then(send).catch(e => send({ ok: false, error: String(e && e.message || e) })); return true; }
     if (!/seller\.temu\.com$/i.test(location.hostname)) { send({ success: false, error: 'not seller.temu.com' }); return true; }
     if (m.action === 'ZC_PING') { send({ ready: true, path: location.pathname }); return true; }

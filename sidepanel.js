@@ -3166,7 +3166,13 @@ async function gemRunOnTab(S, tabId, b64, text, onNote) {
         ]);
       });
     } finally { clearInterval(tick); clearInterval(lockW); clearTimeout(peekT); }
-    if (!r?.ok) throw new Error(r?.error || 'image not attached');
+    if (!r?.ok) {
+      // v9.22.46 — the tab may still be busy with its upload retries after we stopped waiting: stop that job, and the next
+      // image on this tab starts in a fresh chat (a chat with a red "!" upload kept failing — "the tab is not used any more")
+      manualSend(tabId, { action: 'ZH_AI_CANCEL' }, 'gemini_automation.js').catch(_zq => { typeof zhQuiet === 'function' && zhQuiet(_zq); });
+      if (S.gptSlots) S.gptSlots.forEach(x => { if (x?.tabId === tabId) x.n = Infinity; });
+      throw new Error(r?.error || 'image not attached');
+    }
     onNote?.(r.sent ? 'Gemini is creating the image…' : 'press Send in this Gemini tab');
     const end = Date.now() + 9 * 60000;
     let gemErr = false, rotated = false;
@@ -3417,6 +3423,15 @@ async function gptRunItem(S, idx, item) {
       S.pool.slotNote[idx] = `${label()} — screen was locked, will be done again`; gptPoolUi(true);
       return false;
     }
+    if (!result && !lastErr?.aborted && !lastErr?.limit && zhIsGem(S) && !item._gemRedo) {
+      // v9.22.46 — one more go for this image: the next free tab takes it (in a fresh chat); only a
+      // second failure counts as failed (nothing is skipped because one tab had a bad upload)
+      item._gemRedo = true; if (S.gptSlots?.[idx]) S.gptSlots[idx].n = Infinity;
+      (S.pool.redo = S.pool.redo || []).push(item); item.status = 'wait';
+      try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+      S.pool.slotNote[idx] = `${label()} — failed (${trunc(lastErr?.message || 'error', 50)}), will be tried again`; gptPoolUi(true);
+      return false;
+    }
     if (!result) {
       if (lastErr?.limit) { S.gptDown = true; S.pool.limitMsg = lastErr.message; if (lastErr.captcha) S.captchaDown = true; else if (zhIsGem(S)) S.gemDown = true; }
       S.stats.skipped++; item.status = 'failed'; try { temuStepResultsRender(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
@@ -3490,7 +3505,7 @@ async function gptPoolStart() {
   let awake = false;
   setInterval(() => {
     let busy = false;
-    try { busy = !!(TemuImgStepper?.running || (typeof BulkState !== 'undefined' && BulkState?.isHunting) || TemuUploadBusy); } catch (_) { busy = false; }
+    try { busy = !!(TemuImgStepper?.running || (typeof BulkState !== 'undefined' && BulkState?.isHunting) || TemuUploadBusy || (typeof Rp !== 'undefined' && Rp?.busy)); } catch (_) { busy = false; }
     if (busy === awake || !chrome.power) return;
     awake = busy;
     try { if (busy) chrome.power.requestKeepAwake('system'); else chrome.power.releaseKeepAwake(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
@@ -10013,9 +10028,9 @@ async function updateMasterStats() {
 
   $('masterWarning')?.classList.toggle('hidden', rows.length < 200);
 
-  renderMasterBatches(batches);
-  MasterUIState.allRows = rows;
+  MasterUIState.allRows = rows;   // v9.22 — state first, so the hunt cards count the products that are really in the Library
   MasterUIState.batches = batches;
+  renderMasterBatches(batches);
   filterAndRenderMasterRows();
 }
 
@@ -10561,7 +10576,8 @@ function zhRenderBatchFilterBar(shown) {
   const when = d ? `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'hunt';
   const total = (MasterUIState.allRows || []).length;
   bar.hidden = false;
-  bar.innerHTML = `<span class="lib-filter-txt">Showing hunt <b>${esc(when)}</b>${b?.label ? ' · ' + esc(b.label) : ''} — ${shown} of ${total} products</span><button type="button" class="lib-filter-clear">✕ Show all</button>`;
+  bar.innerHTML = `<span class="lib-filter-txt">Showing hunt <b>${esc(when)}</b>${b?.label ? ' · ' + esc(b.label) : ''} — ${shown} of ${total} products</span><button type="button" class="lib-filter-clear">✕ Show all</button><button type="button" class="lib-filter-del" title="Delete this hunt's products from the Library">🗑 Delete ${shown}</button>`;
+  bar.querySelector('.lib-filter-del').onclick = () => { if (b) zhHuntDeleteWithProducts(b); else toast('Hunt not found', 'warn'); };
   bar.querySelector('.lib-filter-clear').onclick = () => { MasterUIState.filterBatchId = null; filterAndRenderMasterRows(); renderMasterBatches(MasterUIState.batches || []); };
 }
 function zhSortBatches(list) { return list.sort((a, c) => (Date.parse(c.date) || 0) - (Date.parse(a.date) || 0)); }
@@ -10575,6 +10591,9 @@ async function zhHuntRemove(b) {
     if (!cur.some(x => x.id === b.id)) await setMasterBatches(zhSortBatches([...cur, b]));
     await updateMasterStats();
   });
+}
+function zhHuntRemoveAsk(b) {
+  showConfirm('Remove hunt from list', 'Remove this hunt from Recent Hunts? Your products stay in the Library. You can undo it for a few seconds.', 'Remove hunt', () => zhHuntRemove(b));
 }
 async function zhHuntDeleteWithProducts(b) {
   const lib = await getMasterRows(), batches = await getMasterBatches();
@@ -10651,6 +10670,7 @@ function renderMasterBatches(batches) {
     const firstPlat = plats[0] || '';
     const isLatest = (idx === 0);
     const count = b.count || 0;
+    let inLib = count; try { if ((MasterUIState.allRows || []).length) inLib = masterRowsForBatch(MasterUIState.allRows, b, MasterUIState.batches || batches).length; } catch (_) {}
 
     const card = document.createElement('div');
     card.className = 'rh-card' + (isLatest ? ' rh-card-latest' : '');
@@ -10667,34 +10687,21 @@ function renderMasterBatches(batches) {
           ${isLatest ? `<span class="rh-latest-chip">● Latest</span>` : `<span class="rh-ago">${timeAgo}</span>`}
         </div>
         <div class="rh-card-mid">
-          <span class="rh-count">${count}</span>
-          <span class="rh-count-lbl">product${count !== 1 ? 's' : ''}</span>
+          <span class="rh-count">${inLib}</span>
+          <span class="rh-count-lbl">product${inLib !== 1 ? 's' : ''}${inLib !== count ? ` <small style="opacity:.7">(of ${count} hunted)</small>` : ''}</span>
           <span class="rh-plat-tag">${esc(platLabel)}</span>
           ${b.label ? `<span class="rh-batch-lbl">${esc(b.label)}</span>` : ''}
         </div>
       </div>
-      <button class="rh-view-btn${MasterUIState.filterBatchId === b.id ? ' on' : ''}" type="button" title="${MasterUIState.filterBatchId === b.id ? 'Showing only this hunt — click to show all' : 'Show only these products in the Library'}">
+      <button class="rh-view-btn${MasterUIState.filterBatchId === b.id ? ' on' : ''}${inLib ? '' : ' off'}" type="button" title="${MasterUIState.filterBatchId === b.id ? 'Showing only this hunt — click to show all' : 'Show only these products in the Library'}">
         <svg viewBox="0 0 24 24"><polyline points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3"/></svg>
         <span>${MasterUIState.filterBatchId === b.id ? 'Filtered ✓' : 'Filter'}</span>
       </button>
-      <button class="rh-more-btn" type="button" title="More: remove / delete this hunt" aria-label="More actions">⋯</button>
-      <div class="rh-menu" hidden>
-        <button type="button" data-rh="remove">Remove from history<small>products stay in the Library</small></button>
-        <button type="button" data-rh="delete" class="danger">Delete hunt + its products<small>asks first · Undo for a few seconds</small></button>
-      </div>`;
+      <button class="rh-del-btn" type="button" title="Remove this hunt from the list (products stay in the Library)" aria-label="Remove hunt">
+        <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>`;
 
-    card.querySelector('.rh-more-btn')?.addEventListener('click', e => {
-      e.stopPropagation();
-      const m = card.querySelector('.rh-menu');
-      const open = m.hidden;
-      document.querySelectorAll('.rh-menu:not([hidden])').forEach(x => { x.hidden = true; });
-      m.hidden = !open;
-    });
-    card.querySelector('.rh-menu')?.addEventListener('click', e => {
-      const a = e.target.closest('button[data-rh]'); if (!a) return;
-      card.querySelector('.rh-menu').hidden = true;
-      if (a.dataset.rh === 'remove') zhHuntRemove(b); else zhHuntDeleteWithProducts(b);
-    });
+    card.querySelector('.rh-del-btn')?.addEventListener('click', e => { e.stopPropagation(); zhHuntRemoveAsk(b); });
 
     card.querySelector('.rh-view-btn')?.addEventListener('click', () => {
       // Switch to Library tab
@@ -10702,7 +10709,7 @@ function renderMasterBatches(batches) {
       const clear = MasterUIState.filterBatchId === b.id;
       const matched = masterRowsForBatch(MasterUIState.allRows || [], b, MasterUIState.batches || batches);
       if (!clear && !matched.length) {
-        toast('No saved products found for this hunt. Library filter was not changed.', 'warn');
+        toast('None of this hunt\'s products are in the Library any more (deleted or exported). Use the bin to remove the hunt.', 'warn');
         return;
       }
       MasterUIState.filterBatchId = clear ? null : b.id;
@@ -13676,11 +13683,42 @@ function temuDepartments(cfg) {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 // v9.15 — per-product category choice (Review card) wins over keyword matching
+// v9.22.18 (user's choices, 29 Oct 2026):
+//  • a food "Meal Bundle / Dinner Kit / Family Bundle …" (several foods in one) always goes to
+//    Grocery & Gourmet Food / Food & Beverage Gifts / Food Assortments & Variety Gifts
+//    ("Honey Nut Cheerios Meal Bundle" had been given "Snack Bowls" from a similar learned product → Temu: "Nut Bowls")
+//  • a FOOD title never gets a non-food category (bowls, serveware, Industrial …): the best Grocery one, else none (⚠ learn it)
+const TEMU_FOOD_RE = /\b(meal|meals|dinner|breakfast|lunch|brunch|supper|soup|chowder|stew|chili|chicken|beef|pork|turkey|ham|bacon|sausage|salmon|tuna|shrimp|seafood|fish|meatballs?|pasta|spaghetti|lasagna|ziti|noodles?|mac and cheese|pizza|taco|tacos|burrito|enchilada|fajita|quesadilla|rice|cereal|cheerios|oatmeal|granola|muffins?|waffles?|pancakes?|bagels?|bread|cheese|sauce|gravy|potato|potatoes|vegetables?|beans|lentil|curry|masala|tikka|jambalaya|stroganoff|sandwich|sub|burger|hot dog|nuggets|snacks?|cookies?|candy|chocolate|juice|soda|cocktail mixer|margarita|parfait|yogurt|grits|biscuits?|cupcakes?|desserts?)\b/i;
+// things that are NOT food even with a food word in the name (a "Snack Bowl", "Pizza Pan", "Cheese Grater", "Taco Holder", toy food)
+const TEMU_WARE_RE = /\b(plates?|bowls?|mugs?|cups?|platters?|utensils?|cutlery|trays?|containers?|dinnerware|serveware|napkins?|placemats?|tumblers?|dish(es)?|pans?|pots?|skillet|lunch ?box|bento|grater|slicer|cutter|knife|knives|boards?|maker|machine|dispenser|holders?|rack|storage|organizer|toys?|pretend|playset|costume|candles?|ornaments?|stickers?|shirt|socks|pillow|blanket|keychain|magnets?)\b/i;
+const TEMU_BUNDLE_RE = /\b(bundle|kit|meal box|variety box)\b/i;
+const TEMU_ASSORT_PATH = 'Grocery & Gourmet Food / Food & Beverage Gifts / Food Assortments & Variety Gifts';
+function temuIsFood(title) { const t = String(title || ''); return TEMU_FOOD_RE.test(t) && (!TEMU_WARE_RE.test(t) || /\b(bundle|kit|meal)\b/i.test(t)); }
+const temuIsGroceryProf = p => /^grocery\s*&\s*gourmet food\b/i.test(String(p?.full_path || ''));
+function temuAssortProfile(cfg) {
+  const own = Object.entries(cfg.category_profiles || {}).find(([, p]) => (p.full_path || '') === TEMU_ASSORT_PATH);
+  if (own) return own;
+  const off = typeof TEMU_OFFICIAL_CATEGORIES !== 'undefined' && TEMU_OFFICIAL_CATEGORIES.food_assortments_variety_gifts;
+  if (!off) return null;
+  cfg.category_profiles = cfg.category_profiles || {};
+  cfg.category_profiles.food_assortments_variety_gifts = { ...off };   // used from now on (saved with the next settings save)
+  return ['food_assortments_variety_gifts', cfg.category_profiles.food_assortments_variety_gifts];
+}
 function temuCatFor(url, title, cfg) {
   try {
     const ov = cfg.cat_overrides && url ? cfg.cat_overrides[temuSourceIdentity(url)] : '';
-    if (ov && cfg.category_profiles && cfg.category_profiles[ov]) return [ov, cfg.category_profiles[ov]];
+    if (ov && cfg.category_profiles && cfg.category_profiles[ov]) return [ov, cfg.category_profiles[ov]];   // your own choice for this product stays
   } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  const food = temuIsFood(title);
+  if (food && TEMU_BUNDLE_RE.test(String(title || ''))) { const a = temuAssortProfile(cfg); if (a) return a; }
+  const r = temuCatForAuto(url, title, cfg);
+  if (!food || !r[0] || temuIsGroceryProf(r[1])) return r;
+  // food title, non-food category: the best-scoring Grocery category instead, else none (the card shows ⚠ → Learn categories)
+  try { const g = temuScoreProfiles(title, cfg).find(x => temuIsGroceryProf(x.prof)); if (g) return [g.name, g.prof]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  try { const lm = temuLeafMatches(title, cfg).find(x => temuIsGroceryProf(x.prof)); if (lm) return [lm.key, lm.prof]; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  return ['', {}];
+}
+function temuCatForAuto(url, title, cfg) {
   const byTitle = temuProfileFor(title, cfg);
   if (byTitle[0]) return byTitle;
   // v9.20.16 — nothing matched by words: the category of the most similar product you ALREADY learned (same smart-word
@@ -13874,6 +13912,7 @@ function temuProductPhrases(title) {
 // a match is "doubtful" when the category's own name has no word in common with the title (e.g. Chili → "Garbanzo")
 function temuCatDoubtful(title, prof) {
   if (!prof || !prof.category_keyword) return true;
+  if ((prof.full_path || '') === TEMU_ASSORT_PATH && temuIsFood(title) && TEMU_BUNDLE_RE.test(String(title || ''))) return false;   // v9.22.18 — food bundles: chosen on purpose
   // a title you taught the extension for exactly this category is never doubtful
   try { const cf = temuGetCfg();
     // v9.15 — the taught title may have been stored as typed OR cleaned: accept either form
@@ -14243,6 +14282,44 @@ function temuFillTemplate(wb, items, cfg) {
   return r - 4;
 }
 
+// v9.22.42 — Temu work pages (reading ticked products, Repack "Temu par lagao") open in their own Chrome window behind
+// the one you work in. An empty tab keeps that window alive between pages; when the last job ends and no page is left
+// in it the window closes (a page that stopped with a problem stays open there).
+const ZhWork = { win: 0, blank: 0, jobs: 0, making: null };
+async function zhWorkWin() {
+  if (ZhWork.win) {
+    try {
+      await chrome.windows.get(ZhWork.win);
+      if (!ZhWork.blank) ZhWork.blank = (await chrome.tabs.create({ windowId: ZhWork.win, url: 'about:blank', active: false })).id;
+      return ZhWork.win;
+    } catch (_) { ZhWork.win = 0; ZhWork.blank = 0; }
+  }
+  if (!ZhWork.making) ZhWork.making = (async () => {
+    let cur = null; try { cur = await chrome.windows.getCurrent(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    const box = cur && [cur.left, cur.top, cur.width, cur.height].every(Number.isFinite) ? { left: cur.left, top: cur.top, width: cur.width, height: cur.height } : {};
+    const w = await chrome.windows.create({ url: 'about:blank', focused: false, ...box });
+    ZhWork.win = w.id; ZhWork.blank = w.tabs?.[0]?.id || 0;
+    if (cur?.id) { try { await chrome.windows.update(cur.id, { focused: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
+    return w.id;
+  })().finally(() => { ZhWork.making = null; });
+  return ZhWork.making;
+}
+async function zhWorkTab(url) { return chrome.tabs.create({ windowId: await zhWorkWin(), url, active: true }); }
+async function zhWorkMove(tab) {
+  try { await chrome.tabs.move(tab.id, { windowId: await zhWorkWin(), index: -1 }); await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  return tab;
+}
+function zhWorkBegin() { ZhWork.jobs++; }
+async function zhWorkEnd() {
+  ZhWork.jobs = Math.max(0, ZhWork.jobs - 1);
+  if (ZhWork.jobs || !ZhWork.win) return;
+  try {
+    const tabs = await chrome.tabs.query({ windowId: ZhWork.win });
+    if (tabs.every(t => t.id === ZhWork.blank)) { await chrome.windows.remove(ZhWork.win); ZhWork.win = 0; ZhWork.blank = 0; }
+    else if (ZhWork.blank) { const b = ZhWork.blank; ZhWork.blank = 0; await chrome.tabs.remove(b); }   // pages with a problem stay: only the empty tab goes
+  } catch (_) { ZhWork.win = 0; ZhWork.blank = 0; }
+}
+
 // ── v9.15 Store export: ticked products on Temu "Manage products" → Temu bulk sheet (import it in another Chrome) ──
 async function temuCloseCopyTab(id) {
   try { await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', func: () => { try { document.documentElement.setAttribute('data-zc-closing', '1'); window.onbeforeunload = null; window.addEventListener('beforeunload', e => { e.stopImmediatePropagation(); }, true); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } } }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
@@ -14326,7 +14403,7 @@ async function temuReadTicked(say) {
     // but the opened copy pages are read side by side (that wait was the slow part, ~20–40 s each)
     const AT_ONCE = Math.min(3, picks.length);
     let openChain = Promise.resolve(), next = 0, finished = 0;
-    const tell = () => say(`Reading ${Math.min(finished + 1, picks.length)}/${picks.length} (${AT_ONCE} at once)…\n(the pages open in the background and close by themselves)`);
+    const tell = () => say(`Reading ${Math.min(finished + 1, picks.length)}/${picks.length} (${AT_ONCE} at once)…\n(the pages open in a separate window behind this one and close by themselves)`);
     const readOne = async (i) => {
       const p = picks[i];
       let t2 = null, data = null;
@@ -14341,9 +14418,9 @@ async function temuReadTicked(say) {
             op = await send(tab.id, { action: 'ZC_OPEN_COPY', goodsId: p.goodsId }, 14000);
           } finally { chrome.tabs.onCreated.removeListener(_onNew); }
           let t = null;
-          if (!op?.ok && _newTab) { t = _newTab; op = { ok: true, url: null, viaTab: true }; }   // Temu opened the copy page itself — use that tab
+          if (!op?.ok && _newTab) { t = await zhWorkMove(_newTab); op = { ok: true, url: null, viaTab: true }; }   // Temu opened the copy page itself — use that tab (moved to the work window)
           if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button was not pressed (${op?.error || 'no answer'})`);
-          else if (!op.viaTab) t = await chrome.tabs.create({ url: new URL(op.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId });
+          else if (!op.viaTab) t = await zhWorkTab(new URL(op.url, 'https://seller.temu.com').href);
           await sleep(1200 + Math.random() * 900);   // the copy page starts loading before the next row is clicked
           return t;
         });
@@ -14356,7 +14433,9 @@ async function temuReadTicked(say) {
       finished++; tell();
     };
     tell();
-    await Promise.all(Array.from({ length: AT_ONCE }, async () => { while (next < picks.length) { const i = next++; await readOne(i); } }));
+    zhWorkBegin();
+    try { await Promise.all(Array.from({ length: AT_ONCE }, async () => { while (next < picks.length) { const i = next++; await readOne(i); } })); }
+    finally { await zhWorkEnd(); }
     try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const done = res.filter(Boolean);   // in the order of the Manage page
     return { done, problems };
@@ -19147,7 +19226,9 @@ async function zhImgQueueRemaining() {
   try {
     const st = (await chrome.storage.local.get([ZH_IMGQ_KEY]))?.[ZH_IMGQ_KEY];
     if (!st?.items?.length) return null;
-    const rows = await temuGetQueuedRows();
+    const rows = (await temuGetQueuedRows()).slice();
+    // v9.22.37 — a Repack image run works on the Repack list's products (ids "rp_…"), not on the Temu queue
+    if (st.items.some(it => /^rp_/.test(it.pid || '')) && typeof rpLoad === 'function') { try { rows.push(...await rpLoad()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     const J = await zhEditsLoad();
     const left = [];
     for (const it of st.items) {
@@ -19850,6 +19931,7 @@ async function temuAutoSyncActiveStoreFromTab(promptIfNew = false) {
 }
 
 async function openTemuModal() {
+  if (!document.body.classList.contains('zh-temu-on')) return;   // v9.22.33 — locked (temu_lock.js)
   const m = $('temuModal'); if (!m) return;
   m.style.zIndex = '1000';
   if ($('temuDrawer') && !$('temuDrawer').hidden) temuDrawerClose(true);   // v9.16 — never reopen on a stale product sheet
@@ -22737,6 +22819,7 @@ function zhWizClose() { $('zhWiz')?.classList.add('hidden'); }
 // v9.22.3 — Temu Export asks first: Auto (this wizard) or Manual (the normal Temu window). "Remember" skips the
 // question; switching by hand (⚡ Auto in the Temu window, "Temu window" in the wizard) forgets it, so it asks again.
 async function zhWizChoose() {
+  if (!document.body.classList.contains('zh-temu-on')) return;   // v9.22.33 — locked (temu_lock.js)
   if (ZhWiz.running) return zhWizOpen();
   if (TemuUploadBusy || TemuImgStepper?.running || TemuRewriteBusy) return;   // something else runs: the normal window only
   const saved = zhWizLs('zhTemuMode');

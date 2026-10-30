@@ -84,7 +84,9 @@
       let n = bstr.length;
       const u8arr = new Uint8Array(n);
       while (n--) u8arr[n] = bstr.charCodeAt(n);
-      return new File([u8arr], filename, { type: mime });
+      // v9.22.46 — the name's ending must match the real picture type (a WEBP / JPEG called ".png" can come back red "!")
+      const ext = /jpe?g/i.test(mime) ? '.jpg' : /webp/i.test(mime) ? '.webp' : /gif/i.test(mime) ? '.gif' : '.png';
+      return new File([u8arr], String(filename).replace(/\.(png|jpe?g|webp|gif)$/i, '') + ext, { type: mime });
     } catch (e) {
       console.warn('[ZHunter Gemini] dataUrlToFile error:', e);
       return null;
@@ -275,9 +277,21 @@
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true })); } catch (_) {}
   }
   // attach one or several images (data URLs) to the composer
+  // v9.22.46 — anything that is not a plain JPEG / PNG (WEBP, AVIF, GIF…) goes up as a JPEG, the type Gemini always takes
+  async function toPlainImage(u) {
+    const mime = (/^data:([^;,]+)/.exec(String(u)) || [])[1] || '';
+    if (/^image\/(jpeg|png)$/i.test(mime)) return u;
+    try {
+      const bmp = await createImageBitmap(await (await fetch(u)).blob());
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0);
+      return c.toDataURL('image/jpeg', 0.95);
+    } catch (_) { return u; }
+  }
   async function attachOnce(imgs) {
     const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);   // Gemini refuses a second file with the same name in one chat
-    const files = imgs.map((u, i) => dataUrlToFile(u, 'zhunter_' + stamp + '_' + (i + 1) + '.png')).filter(Boolean);
+    const plain = []; for (const u of imgs) plain.push(await toPlainImage(u));
+    const files = plain.map((u, i) => dataUrlToFile(u, 'zhunter_' + stamp + '_' + (i + 1) + '.png')).filter(Boolean);
     if (!files.length) throw new Error('image could not be read');
     const editor = await waitForEl('rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]', 15000);
     if (!editor) throw new Error('Gemini composer not found — open a chat first');

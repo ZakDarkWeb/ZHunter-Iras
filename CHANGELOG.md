@@ -1,5 +1,239 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.22.46 (2026-10-30) — Gemini with several tabs: a red "!" upload no longer puts a tab out of use
+- Reported: with several Gemini tabs, some tabs show the red "!" on the uploaded image (zhunter_….png), and after that the extension did not use those tabs any more.
+- Why:
+  - The side panel stops waiting after 120 s, but the tab was still busy with its own upload retries. For minutes every next image sent to it was turned away ("still busy").
+  - The tab also stayed in the same chat with the failed upload.
+  - Pictures that were really WEBP / JPEG were uploaded under a ".png" name.
+- Now:
+  - When an upload fails or times out, that tab's job is stopped, and its next image starts in a **fresh chat**.
+  - A failed image gets **one more go** on the next free tab. Only a second failure counts as "failed".
+  - The file name always matches the picture type. WEBP / AVIF / GIF pictures go up as JPEG.
+
+## 9.22.45 (2026-10-30) — Repack: sturdier Submit
+- Recent Hunts: no more ⋯ menu — each hunt has a Filter button and a bin button (remove from list, Undo). The Library bar over a filtered hunt has "🗑 Delete N" (deletes that hunt's products, asks first, Undo). Hunt cards show how many of the hunted products are really still in the Library; Filter is dimmed when none are left.
+- Reported: once, with 3 tabs at once, one product stopped on "Safety and compliance" with "Submit pressed, but Temu did not confirm". The other two went through.
+- After Submit, the extension now waits up to 60 s (before: 40 s).
+- If after 15 s Temu has shown nothing at all and the Submit button is still there, Submit is pressed **once more**. A page in a window behind can miss the first click.
+- A short Temu message that fades away is remembered, so it can be named in the error.
+- If Temu still does not confirm:
+  - the page scrolls to the first red field;
+  - before calling it a problem, the side panel looks at the tab once more (a late "Submission successful" still counts as done).
+
+## 9.22.44 (2026-10-30) — Repack: list price switch
+- Asked: an option in Repack to update the list price; when it is on, the list price becomes 99.99.
+- New switch in Step 3, **"List price update karo → $99.99"**. It is off by default and is remembered.
+- When the switch is on, "Temu par lagao" puts **$99.99** in the **List price** box of every SKU, on step 3 (Variations).
+  - It is always $99.99, whatever the price was before.
+  - If Temu refuses the price (a red message under the box), that tab stays open and the reason is shown.
+- The confirm question and the result line also mention the list price.
+- Checked live on 30 Oct 2026 (left with Cancel, nothing saved):
+  - the box is `#skuList[N].marketPrice`;
+  - 99.99 stays after Next → Previous;
+  - Temu showed no error.
+
+## 9.22.43 (2026-10-30) — Repack card: cleaner image box and AI button
+- Asked: make the product card's image box and the AI button better.
+- Image box:
+  - The big picture on the left of an open card is gone, because it repeated the main image. The images now have the full width, in their own framed box.
+  - Image tiles are bigger (72 px), on white, with the whole product visible.
+  - Each tile is marked: **Main** in amber, **AI** in purple, **Apni** in green. A removed image shows greyed out and crossed.
+- Buttons under each image form one even row of line icons: ★ main, copy, AI, ✕.
+  - **AI on** = a purple button plus an "AI" badge on the image (before, it was an orange sparkle that could hardly be seen).
+  - ✕ turns red on hover; a removed image shows ↺ in green.
+- "Apni image" and "Paste image" are tiles of the same size, with icons.
+
+## 9.22.42 (2026-10-30) — Temu pages in their own window; Repack redesigned in steps
+- Asked: the Temu pages should open in a new window, and the Repack window should look more professional.
+- Reading ticked products (Repack "Products add karo" and Store export) and "Temu par lagao" now open their Temu pages in **one separate Chrome window behind yours**. Your window stays in front.
+  - The window closes by itself when the work is done.
+  - A page that stopped with a problem stays open there, so you can look at it.
+- Repack window: three numbered steps.
+  1. **Products lao** gets a ✓ once products are in the list.
+  2. **Badlo** has the Titles and AI images tools.
+  3. **Temu par lagao** has the switches and the big button.
+  - Steps 2 and 3 stay faded until products are in the list.
+  - Line icons replace the emoji, the buttons have cleaner text, and the status box shows a progress bar while products are read or put on Temu.
+
+## 9.22.41 (2026-10-30) — Lock: small signs on the secret spots
+- Asked: an animation on the dots, so you can tell whether the clicks / typing worked.
+- On the status dot, the ⋯ and the • (all three together):
+  - each click: a tiny "pop";
+  - after 3 quick clicks: they **glow softly in blue** while the extension waits for your code (stops after 20 s, Esc or Enter);
+  - each typed key: a short flash;
+  - wrong code: a short **red** shake;
+  - right code (or the backup code): **green**, then the Temu window (or the "Naya code" box).
+- Still no box and no text: someone who does not know will at most see a dot blink.
+
+## 9.22.40 (2026-10-30) — Lock: nothing on screen gives it away
+- Asked: when someone clicks the dot, the code box shows up and makes them curious; nothing should appear.
+- Your choices: **3 quick clicks** (within 1 second) on a secret spot (status dot, ⋯, • after "What next?"); one or two clicks do nothing. Then **no box at all**: type the code blind and press **Enter**.
+  - Right code → the Temu window opens.
+  - Wrong code → nothing happens (no message), still locked.
+  - Your **backup code** typed the same way → the "Naya code" box (code forgotten).
+  - The typed keys never land in a box on the page; after 20 s without Enter the typing is forgotten.
+- While open: 3 quick clicks open the Temu window; one click does nothing.
+- A profile with no code yet: 3 quick clicks show the "Naya code banao" box once (setting it up).
+- The secret spots no longer change on mouse-over.
+
+## 9.22.39 (2026-10-30) — Lock: full check, two fixes
+- Asked: check the lock everywhere again (Library, Hunt, bottom line …). A test of 42 points passed after these fixes:
+  - **Library + dot**: with products ticked in the Library, the dot / ⋯ opened only the plain Temu window. Now it opens their upload ("Library — selected", like the old Library button).
+  - **Image editing**: while locked, the image editing window and its "✨" chip in the bottom line are hidden too (a run keeps going behind); before, a Lock during a run left them open.
+- Checked: locked — "Temu upload" (Library bar, Library menu, after a hunt) shown but dead; header pill, Settings row, Bulk / Queue Temu buttons, export marks and job chips hidden; no Temu window from any of them. The 3 ways in (status dot, ⋯, • after "What next?") each open the code box. First time: code + backup code. Unlocked: decoys still dead, the 3 ways open Temu without a code, Settings shows Code badlo / 🔒 Lock. Lock closes every Temu window. Next time only the code; a wrong code is refused. The unlock is saved nowhere, the code and backup code only as hashes.
+
+## 9.22.38 (2026-10-30) — Lock: a dot in the "Hunt complete" window
+- Reported with a screenshot: the "Hunt complete" window covers the bottom line, so the status dot / ⋯ could not be clicked.
+- A faint **•** now sits right after **"WHAT NEXT?"** in that window: click → code box → the Temu window (the same as the status dot). The "Temu upload" card there still opens nothing.
+
+## 9.22.37 (2026-10-30) — Resume after the code; "⋯" in the bottom line
+- Asked: a resume option so nothing is skipped when the panel / Chrome was closed during editing, and 3 dots in the bottom line to open the Temu page.
+- **⋯** (faint) at the right end of the bottom line ("Library — 84 products … Updated 02:22 AM"): same as the status dot — code box, then the Temu window.
+- **Resume**: an image run already remembered its plan (v9.15, "Continue (N left)" inside the Temu window). Now, right after the code, the extension asks **"Adhoora kaam — N images baqi … Resume?"**; ▶ Resume opens the Temu window and continues only the images that are not edited yet (finished ones are kept). Cancel = the normal Temu window.
+- Repack image runs (products of the Repack list) are now part of this too; before, they were not found again after a reload.
+- Repack "Sab Temu par lagao" needs no resume: products that were not submitted stay in the Repack list, run it again and only they are done.
+
+## 9.22.36 (2026-10-30) — Lock: "Temu upload" stays on screen but opens nothing; the status dot is the way in
+- Asked (with a screenshot): after the code the "Temu upload" button showed and worked openly. Wanted: keep the "Temu upload" buttons on screen (removing them looks suspicious) but they must open nothing; a hidden dot opens the code box and then the Temu page; the code again every time the extension / Chrome is opened.
+- "Temu upload" in the Library selection bar, "Upload to Temu store…" in the Library menu and "Temu upload" after a hunt are back, locked or not — a click does **nothing** (no window, no message), also after the code.
+- **The way in**: the small status dot at the very bottom-left of the panel (next to "Local · … MB"). One click → code box → right code → the Temu window opens (with products ticked in the Library: their upload, like the Library button did). While open, the dot opens the Temu window directly.
+- The code is kept only while the panel is open: close the panel or Chrome = locked again. The 🔒 buttons of 9.22.33–34 are gone. Header pill, Settings "Open Temu Export", Bulk / Queue Temu buttons stay hidden; Settings shows "Code badlo" / "🔒 Lock" only while open.
+- Work that is running keeps running when you press Lock; closing the panel stops runs as before (not because of the lock).
+
+## 9.22.35 (2026-10-30) — Lock: you choose the backup code (same in every profile)
+- Asked: the extension is used in 5–6 Chrome profiles; a different random backup code for each is too much to remember.
+- The backup code is no longer random: after the code (twice) the box asks **"Backup code banao"** — type your own (at least 6 letters / numbers, twice, not the same as the code). Use the same code and the same backup code in every profile.
+- A profile that already has a code (also with the random backup code of 9.22.34): the next time you open with the code, it asks once for your own backup code; after that only the code.
+- "Code bhool gaya?" → your backup code (capitals / spaces / dashes do not matter) → new code → backup code again.
+
+## 9.22.34 (2026-10-30) — Lock: Library 🔒 and a backup code
+- Asked (with a screenshot): how to upload to Temu from the Library while locked (the export menu still showed an empty "TEMU" heading), and what to do if the code is forgotten.
+- Library export menu: while locked the "TEMU" heading is hidden and a faint 🔒 sits at the bottom of the menu → code → "Upload to Temu store…" is there again.
+- **Backup code** (your choice): when a code is made (or changed) the extension shows a backup code once, like `K7Q2-9XMP-4TRA`, with ⧉ Copy and "Maine likh liya". Code forgotten → in the code box press **"Code bhool gaya?"** → type the backup code (capitals / dashes do not matter) → make a new code (and get a new backup code). The old code stops working.
+- A code made with 9.22.33 gets its backup code the next time you open with the code.
+- Only hashes of the code and the backup code are saved.
+
+## 9.22.33 (2026-10-30) — Temu part hidden behind your own code
+- Asked: someone else opening the extension in this Chrome must not find the Temu upload / editing parts; a secret place where you type your own code opens them. Your choices: a small 🔒 where "Temu upload" was after a hunt; open until Chrome is closed; you make the code the first time.
+- **Locked** (normal state): hidden are the header "Temu Export" pill, the Settings row "Temu Export", Bulk / Queue / Library Temu buttons, the Temu Export window, Repack, the wizard, the Library export marks (⬆/⬇ Nx) and the "1x / 2x / 3x" filter chips. After a hunt, only a faint 🔒 sits next to "Master ZIP".
+- **🔒 → code**: the first time it asks for a new code (twice, at least 4 characters); after that it asks for the code. Wrong code = "Galat code". Right code = everything comes back until Chrome is closed.
+- **Unlocked**: Settings → Temu Export row has **🔒 Lock** (hide again now) and **Code badlo** (old code, then the new one twice).
+- The code itself is not saved, only a salted SHA-256 of it. New file `temu_lock.js`.
+
+## 9.22.32 (2026-10-30) — Repack: cleaner, more professional window
+- Asked (with a screenshot): make the Repack page more professional, a good prompt box; the buttons looked bad (the "＋ Products add karo" text even vanished after a click).
+- New layout, top to bottom:
+  - Header: 📦 Repack with a short line and a round ✕.
+  - One big **＋ Products add karo** button with a hint under it; "Kaise kaam karta hai?" opens a short numbered guide.
+  - **✨ AI images** (folded, open only when needed): AI choice, a large prompt box with saved prompts, a note for {N}, "Images banao" / "Sab nayi images".
+  - **📝 Titles — sab ek saath** (folded): copy, paste box, "Titles lagao".
+  - **⬆ Temu par lagao**: two on/off switches (description + bullets, Submit), "Ek saath" tabs, one big "Sab Temu par lagao" button.
+  - The run's messages as a list: ✓ lines green, ✗ lines red, the first line bold.
+  - **Products** header with the count, "Sab kholo" and "List khaali karo" next to it.
+- Buttons keep their colour after a click or on focus (the add button's text no longer disappears).
+
+## 9.22.31 (2026-10-30) — Repack: products that open on the last step
+- Reported with a screenshot: some products open on step 5 "Safety and compliance" when Edit is pressed; Repack stopped there.
+- Cause: the extension waited for the title box of step 1 to know the page had loaded, and on step 5 there is no title box, so it gave up.
+- Now any step heading counts as loaded; the extension presses **Previous** back to step 1 (the message box on the Temu page says "back to step 1"), waits for the title box, does its work, then Next … Submit as before.
+- When a Temu tab gives no answer at all, the Repack message now says on which step it stopped.
+- Checked live on 30 Oct 2026 (page closed without saving): product …7065 opens on "Safety and compliance" with no title box; Previous → Offer → Variations → Product details → Product description, then the title box is there.
+
+## 9.22.30 (2026-10-30) — Repack: empty brand no longer blocks
+- Reported with a screenshot: on a product with no brand chosen, Temu showed "Please enter the brand" and Repack stopped with "could not open step 2 (STEP_BLOCKED: Product details)".
+- Now on step 1, when the brand box is empty and neither "Fill in later" nor "This product does not have a brand" is ticked, the extension ticks **"This product does not have a brand"** and goes on (the result says "no brand ticked"). A product that has a brand is not touched.
+- Checked live on 29–30 Oct 2026 (page closed without saving): the brand box is a list whose text box holds the brand ("TAYLORMADE / TAYLORMADE" = has a brand, empty = none); ticking the box makes Next go to "Product details".
+
+## 9.22.29 (2026-10-30) — Repack works in the background
+- Asked: "Temu par lagao" should keep working in the background; the Temu tab must not jump to the front while you work in another tab.
+- Every Temu tab of "Temu par lagao" / "Sab Temu par lagao" now opens **behind** (also with 1 tab); the tab you are on stays in front. Done tabs close by themselves; a tab with a problem stays open behind, the Repack message says which.
+- The PC is kept awake while Repack works on Temu (like image runs and uploads).
+- Checked earlier on Temu in a tab behind another one: the image window, the size window, Next / Previous all worked. For runs of many products, starting Chrome with the "Chrome (ZHunter background)" desktop shortcut keeps background tabs at full speed.
+
+## 9.22.28 (2026-10-30) — Repack: Submit is seen, the tab closes; 1–3 tabs at once
+- Reported with a screenshot: after Submit, Temu shows Manage products with "Submission successful", but the tab stayed open and Repack said "Temu page ne jawab nahi diya" for every product.
+- Cause: Submit takes Temu to another page (Manage products, address with `listing_commit_id`), so the edit page's script was gone before it could answer.
+- Now, when no answer comes after Submit, the extension looks at the tab: Manage products with that address, or "Submission successful" on the page = submitted. The tab closes and the product leaves the Repack list.
+- **Ek saath: 1 / 2 / 3 tabs** next to "Sab Temu par lagao": that many Temu tabs work at the same time. With 2 or 3 the tabs open in the background.
+- Products from the reported run that showed ✗ were most likely submitted: check them on Temu ("New version updated") and remove them from the list with ✕.
+
+## 9.22.27 (2026-10-30) — Repack: click an image to see it big
+- Asked: clicking an image in a Repack card should show it big, like elsewhere in the extension, to see it clearly.
+- Clicking any image (Temu image or your own) now opens the extension's big image view; ← / → go through that product's images, Download works there too.
+- Marking an image for the AI edit ("Images banao") moved to its own **✨** button under the image (lit = the AI edits it).
+
+## 9.22.26 (2026-10-30) — Repack: a submitted product leaves the list
+- Reported with a screenshot: the product was edited and submitted from the extension (Temu shows "New version updated" and the new title), but it still showed in the Repack list.
+- Now a product that "Temu par lagao" submitted is taken off the Repack list right away (the message says "Repack list se hat gaya"). With "Aakhir mein Submit bhi dabao" off, the product stays, marked ✓, until you remove it.
+- Products already submitted with an older version leave the list the next time Repack opens.
+
+## 9.22.25 (2026-10-29) — Repack: new weight + size, safer title
+- Reported: a new title pasted into the card's box did not replace the Temu title; and the package weight must change too (full box 1.4 lb → 0.3 lb), the size sometimes as well.
+- **Title**: checked live on two products — a title set by the extension stays, also after a fresh page load and Next / Previous. The product from the report was not submitted yet (title, description and bullets on Temu were still the old ones), so the exact cause could not be seen. Now the title is set, checked again after 1.5 s and set again if Temu put the old one back; if it still does not take, the run stops with the title Temu kept. The question before the run now says "naya title" or "title wahi (nahi badlega)", and the card says when its title is the same as the old one.
+- **Weight + size** in each card: "Weight __ lb" and "Size __ × __ × __ in". Empty = Temu's value stays (the light text in the box is Temu's value when the product was added; products added before this version show "—"). On Temu (step 3, every SKU row) the weight box gets the new weight (changed to oz / kg / g if Temu shows that unit), and the size window gets the 3 sides (longest first, as Temu asks). The run stops if a value does not take.
+- Checked live on 29 Oct 2026 (values set and put back, page Cancelled, nothing saved): weight box in column 4 with "lb", size "7.50in x 5.20in x 1.50in" opens "Longest side / Second longest side / Shortest side" and takes the values when it closes.
+
+## 9.22.24 (2026-10-29) — Repack: remove a product from the list, clear "add products" button
+- Reported with a screenshot: with the products folded, there was no way to remove a product from the extension's list or to add new ones.
+- Each product line now has a red **✕**: the product leaves the Repack list (nothing changes on Temu). The ✕ inside the open card is gone (the line's ✕ does it).
+- "⬇ Temu se parho" is now **"＋ Products add karo (Temu par tick karke)"**: tick products on Temu Manage products, press it, they join the list (ones already there are refreshed).
+
+## 9.22.23 (2026-10-29) — Temu update: image window's Save button
+- Asked: check Temu again after its new update. Checked live on 29 Oct 2026 (nothing saved: "No" on the remove confirm, Cancel on the image window and the page).
+- **Changed by Temu**: in the "Upload SKU images" window, Save and Cancel are no longer real buttons (now `div role="button"`). The extension could not find Save, so "Temu par lagao" would have stopped with "Save button not found". Fixed: it finds the new Save.
+- **Same as before** (no change needed): Manage products rows, tick boxes, Goods ID, title, Edit / More; edit page steps 1–5 with Next / Previous / Submit; title box; description box; bullet points with "Delete"; "N Images" in the SKU table; "Remove all" + its No / Remove confirm; upload box; "Uploaded images: N/ 10" counter.
+
+## 9.22.22 (2026-10-29) — Repack: numbered + folded products, image copy / paste, no own-prompt box
+- Asked for (with Flow screenshots): a copy option to paste images into Flow / GPT / Gemini, a paste option for images, numbers and collapse for the products, and no "own prompt" box per product (you mostly edit in GPT / Gemini / Flow yourself).
+- **Numbers + folded**: every product is one line (number, small image, title, state). Click the line to open its card, click again to close. "▾ Sab kholo / ▸ Sab band karo" opens or closes all.
+- **⧉ under each image** copies that image; then press Ctrl+V in Flow / GPT / Gemini. Chrome's clipboard holds one image at a time, so copy them one by one.
+- **📋 Paste image** on the card (or Ctrl+V while the card is open) adds the copied image (e.g. from Flow: right-click → Copy image) as your own image, first on Temu.
+- The "Is product ka apna prompt" box is removed; only the prompt for all is used (an own prompt saved earlier is no longer used).
+
+## 9.22.21 (2026-10-29) — Repack: delete / main / own image show at once
+- Reported with a screenshot: no way to delete an image was visible, and after "+ Apni image" the toast said "1 apni image" but the new image did not appear on the card.
+- Cause: a card was not redrawn while something inside it had the focus (meant for typing in the title box). A clicked button (✕, ★, + Apni image) also keeps the focus, so its card stayed old.
+- Now only a text box keeps its card from redrawing: ✕ / ★ / your own image show at once.
+- The delete button is now a clear red **✕** under each image (the 🗑 sign was almost invisible); a removed image turns grey and its button becomes a green **↺** (keep it again).
+
+## 9.22.20 (2026-10-29) — Repack window scrolls as one page
+- Reported with a screenshot: the product list was squeezed into a tiny scroll box at the bottom, the rest of the window did not move.
+- Now the whole Repack window scrolls (mouse wheel anywhere); the "📦 Repack ✕" header stays on top.
+- The 6 help steps are folded into "Kaise kaam karta hai?" (click to open), so the products start higher.
+
+## 9.22.19 (2026-10-29) — Repack: choose images, own images, all titles, apply on Temu + Submit
+- Asked for: when a product's quantity is made smaller, see all its images in the extension and decide per image (keep / delete), put in your own image (made in Google Flow), update all titles at once, and let the extension do the Temu part.
+- Each image in a Repack card now has **🗑** (remove from Temu, click again to keep) and **★** (main / first image). Clicking the image itself still marks it for the AI edit.
+- **+ Apni image** (or drag files onto the card): your own image files go first on Temu (main), ✕ removes one. The card shows how many images will go (Temu takes at most 10).
+- **Titles — sab ek saath**: "Copy all titles" copies a numbered list for GPT / Gemini; paste the answer and press "Titles lagao". The count must match, or nothing changes. Each card's title box can still be edited by hand.
+- **⬆ Temu par lagao** (per card) and **⬆ Sab Temu par lagao** (all, one by one) open the product's edit page and:
+  1. put in the new title,
+  2. empty the old description and delete every bullet point (box "Purani description + bullet points hatao", on by default),
+  3. replace the SKU images with the chosen list (only when the images changed),
+  4. press Next up to the last step and **Submit** (box "Aakhir mein Submit bhi dabao", on by default — you asked for it). A tab that submitted closes; a tab with a problem stays open with the reason.
+- Checked live on 29 Oct 2026 (nothing saved, Cancel pressed): title box, description box, bullet point "Delete" (no confirm), steps up to "Safety and compliance" with Submit. Submit itself was not pressed in the test.
+- The old "Temu par badlo" (images only, no Submit) is replaced by "Temu par lagao".
+
+## 9.22.18 (2026-10-29) — Food bundles get a food category, never bowls
+- Reported: "Honey Nut Cheerios Meal Bundle" and "Blueberry Muffins Meal Bundle" got "Snack Bowls" (Home & Kitchen tableware), and Temu turned it into "Industrial … Nut Bowls". "All American Half Sub Meal Bundle" also went to bowls. Such titles have no category word, so the category came from a similar product learned before.
+- Your choices:
+  - **Food bundles** ("Meal Bundle", "Dinner Bundle", "Pizza Kit Bundle", "Family Bundle" … with food words) always get **Grocery & Gourmet Food / Food & Beverage Gifts / Food Assortments & Variety Gifts**. The category is added from Temu's list if it is not in yours, and it shows without ⚠.
+  - **A food title never gets a non-food category** (bowls, serveware, Industrial …). The best Grocery category is used instead; if there is none, the product has no category (⚠ → Learn categories).
+- Real tableware and other non-food items keep their category even with a food word in the name ("Snack Bowls Set", "Pizza Pan", "Taco Holder", "Tea Light Candles", "Coffee Table").
+- A category you chose yourself for a product (Learn categories / the card) still wins.
+- Already-uploaded products keep their Temu category: fix those on Temu ("Request category change").
+
+## 9.22.17 (2026-10-29) — Fix drafts: empty number + unit fields are seen as empty
+- Reported with the "Product action required" DOM: "Margarita Cocktail Mixer Drink Bundle" had **Net Content Volume** and **Alcohol Content** empty (red "Required field"). Fix drafts still said "all required fields are filled" and submitted it.
+- Cause: these fields are a number box plus a unit list. The unit list shows its placeholder "Enter" in a hidden mirror text, and that was read as a value.
+- Now:
+  - A placeholder ("Enter", "Select", "Please select" …) never counts as a value.
+  - A number + unit field counts as filled only when the number (and its unit) is set.
+  - Such a field is filled only from a rule value that has its unit (e.g. "750 ml", "0 %"); otherwise it says "NEEDS YOU (number + unit, e.g. "750 ml")".
+  - A product with such an empty field is not submitted.
+- Checked on the pasted rows: Material = empty, Net Content Volume = empty, Alcohol Content = empty, "carbonated?" = Non-carbonated (filled).
+
 ## 9.22.16 (2026-10-29) — Image batch setup: Start runs every image except "Skip"
 - Reported: 13 products selected for image editing; only the first image was edited, then the window closed back to the product list. The same had happened before.
 - Cause: Start ran only the images you had "touched" in the setup window (a tick, or, since 9.22.15, a changed chip). Touching one image meant a run of one image, and the window closes by itself when a run ends without failures.

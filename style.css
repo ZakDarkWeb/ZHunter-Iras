@@ -6153,3 +6153,10 @@ body.light-mode .temu-rv-pricechip.low .temu-rv-price-badge,body.light-mode .tem
 .temu-last-batch{display:inline-flex;align-items:center;gap:4px;margin-top:4px;height:20px;padding:0 7px;border-radius:4px;border:1px dashed var(--line-2);background:transparent;color:var(--ink-3);font:500 10.5px/1 var(--font);cursor:pointer}
 .temu-last-batch:hover{color:var(--ink);border-color:var(--accent-line)}
 .temu-last-batch[hidden]{display:none}
+/* v9.22 — Recent hunts: direct Filter + bin buttons (no ⋯ menu) */
+.rh-del-btn{flex-shrink:0;width:30px;height:30px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.rh-del-btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none}
+.rh-del-btn:hover{border-color:var(--bad);color:var(--bad);background:var(--bad-soft)}
+.rh-view-btn.off{opacity:.45}
+.lib-filter-del{margin-left:6px;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);font:700 11px/1 var(--font);cursor:pointer}
+.lib-filter-del:hover{background:var(--bad);color:#fff}

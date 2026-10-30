@@ -3163,12 +3163,21 @@ function temuVisible(el) {
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0;
 }
+// v9.22.17 — placeholders are no value: the unit list next to "Net Content Volume" showed its placeholder "Enter" (in the
+// input's mirror div), so an EMPTY required field counted as filled ("all required fields are filled" + Submit)
+const TEMU_PH_RE = /^(select|enter|please (select|enter)|choose|-+)$/i;
 function temuSelectCurrent(sel) {
   const inp = sel.querySelector('input');
-  if (inp && inp.value && !/^select$/i.test(inp.value.trim())) return inp.value.trim();
-  const val = sel.querySelector('.ST_selectValueSingle_123, [class*="selectValue"], [class*="inputItemRenderer"]');
-  const txt = (val?.textContent || '').trim();
-  if (txt && !/^select$/i.test(txt)) return txt;
+  if (inp && inp.value && !TEMU_PH_RE.test(inp.value.trim())) return inp.value.trim();
+  const rend = sel.querySelector('[class*="inputItemRenderer"]');
+  if (rend && rend.textContent.trim() && !TEMU_PH_RE.test(rend.textContent.trim())) return rend.textContent.trim();
+  const val = sel.querySelector('.ST_selectValueSingle_123, [class*="selectValue"]');
+  if (val) {
+    const c = val.cloneNode(true);
+    c.querySelectorAll('[class*="IPT_mirror"], input').forEach(x => x.remove());   // the mirror repeats the placeholder
+    const txt = (c.textContent || '').trim();
+    if (txt && !TEMU_PH_RE.test(txt)) return txt;
+  }
   return '';
 }
 // All option-like nodes that appeared for an open dropdown (rendered in a portal at body level)
@@ -3277,6 +3286,18 @@ function temuRowFields(row) {
     const label = lb.textContent.replace(/\*/g, '').trim();
     if (!label || /^variant\s*\d/i.test(label)) continue;
     const required = !!fi.querySelector('[class*="Form_itemRequired"]') || lb.textContent.includes('*');
+    // v9.22.17 — a number + unit field ("Net Content Volume [ ] [ml ▾]", "Alcohol Content"): the NUMBER decides if it is filled;
+    // its unit list is part of it (it is not a dropdown field of its own)
+    const numBox = fi.querySelector('[data-testid="beast-core-inputNumber"]');
+    if (numBox) {
+      const ninp = numBox.querySelector('input[data-testid="beast-core-inputNumber-htmlInput"]') || numBox.querySelector('input');
+      if (!ninp || seenControls.has(ninp)) continue;
+      const unitSel = numBox.querySelector('[data-testid="beast-core-select"]') || fi.querySelector('[data-testid="beast-core-select"]');
+      seenControls.add(ninp); if (unitSel) seenControls.add(unitSel);
+      const v = (ninp.value || '').trim(), unit = unitSel ? temuSelectCurrent(unitSel) : '';
+      out.push({ fi, label, required, sel: null, inp: ninp, unitSel, kind: 'number', current: v ? (v + (unit ? ' ' + unit : '')) : '', empty: !v || (!!unitSel && !unit) });
+      continue;
+    }
     const sel = fi.querySelector('[data-testid="beast-core-select"], [class*="ST_outerWrapper"], [role="combobox"]');
     const inp = sel ? null : fi.querySelector('input:not([type="hidden"]), textarea');
     const ctrl = sel || inp;
@@ -3429,6 +3450,16 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
           if (!done) { notes.push(`${f.label}: (${res}) — tried ${cands.join(' / ')}`); stillEmpty++; }
         }
         await temuSleep(temuRand(700, 1600));
+      } else if (f.kind === 'number') {
+        // v9.22.17 — only a value WITH its unit is used ("750 ml", "0 %" from your rules); otherwise it is left for you
+        const m = String(cands[0]).trim().match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+        if (!m || (f.unitSel && !m[2])) { notes.push(`${f.label}: NEEDS YOU (number + unit, e.g. "750 ml")`); stillEmpty++; continue; }
+        temuSetNativeValue(f.inp, m[1]);
+        let unitOk = !f.unitSel;
+        if (f.unitSel) { const r = await temuPickSelectValue(f.unitSel, m[2].trim()); unitOk = r === 'set' || r === 'already'; }
+        if (unitOk) { changed++; notes.push(`${f.label}=${m[1]}${m[2] ? ' ' + m[2].trim() : ''} (typed)`); }
+        else { notes.push(`${f.label}: unit "${m[2].trim()}" not in Temu's list — NEEDS YOU`); stillEmpty++; }
+        await temuSleep(temuRand(500, 1100));
       } else if (f.inp) {
         want = cands[0];
         temuSetNativeValue(f.inp, want); changed++; notes.push(`${f.label}=${want} (typed)`);
