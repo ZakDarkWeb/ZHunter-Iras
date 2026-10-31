@@ -3377,6 +3377,48 @@ async function temuPickByRegex(sel, re) {
   await temuHumanClick(opt); await temuSleep(temuRand(400, 800));
   return { text: opt.textContent.trim(), names };
 }
+// v9.22.49 — the user asked for guesses where nothing sure is known (title / category / rules had no value):
+// a dropdown gets the most fitting option from Temu's OWN list, a number + unit field a value read from the title or a
+// plain default. Every guess is named "(guessed)" in the report so it can be checked on Temu.
+const TEMU_ELECTRIC_RE = /\b(battery|batteries|electric|electronic|rechargeable|cordless|usb|plug[- ]?in|led|motor|powered)\b/i;
+async function temuDraftGuessSelect(sel, lbl, title) {
+  const t = String(title || '').toLowerCase(), elec = TEMU_ELECTRIC_RE.test(t);
+  const prefs = [];
+  if (lbl === 'material') {
+    if (/\b(meal|bundle|kit|snack|cereal|food|pizza|sub|sandwich|cheerios|cookies?|candy|grocery)\b/.test(t)) prefs.push(/^paper/i, /^plastic/i);
+    prefs.push(/^plastic/i, /^other/i, /^mixed/i);
+  } else if (/power/.test(lbl)) {
+    // Temu's list (30 Oct 2026): Dry Battery Power / Use Without Electricity / Plug Powered / USB Charging (built-in Battery) / Solar Charging (built-in Battery) / USB Powered
+    // (Dry Battery Power only for AA / AAA / "dry" titles — it must match Battery Properties, which picks Rechargeable otherwise)
+    prefs.push(...(elec ? (/\b(aa|aaa|dry)\b/.test(t) ? [/^dry battery/i] : []).concat([/^usb charging/i, /recharg/i, /^plug/i, /battery/i]) : [/without electricity|no power|not applicable|none/i]));
+  } else if (/battery/.test(lbl)) {
+    // Rechargeable Battery / Non-rechargeable Battery / Solar Battery / Without Battery
+    prefs.push(...(elec ? (/\b(aa|aaa|dry)\b/.test(t) ? [/^non-rechargeable/i] : []).concat([/^rechargeable/i, /^lithium/i, /battery/i]) : [/^(without battery|no battery|battery not included|not included|none|no)/i]));
+  }
+  prefs.push(/^(other|others|none|not applicable|n\/a)$/i);
+  for (const re of prefs) { const r = await temuPickByRegex(sel, re); if (r.text) return r.text; if (!r.names.length) break; await temuSleep(temuRand(300, 600)); }
+  const r = await temuPickByRegex(sel, /\S/);   // nothing fitting: Temu's first option
+  return r.text;
+}
+// number + unit: from the title ("750 ml", "64 fl oz", "1.75 L", "12% ABV") or a plain default
+function temuDraftGuessNumber(lbl, title) {
+  const t = String(title || '').toLowerCase();
+  if (/alcohol/.test(lbl)) {
+    const m = t.match(/(\d+(?:\.\d+)?)\s*%\s*(?:abv|alc|alcohol)?/);
+    return m ? { n: m[1], unit: '%' } : { n: '0', unit: '%' };
+  }
+  // the units as Temu writes them (30 Oct 2026: Net Content Volume = mL / L / ounce / cl)
+  const unitOf = u => /oz|ounce/.test(u) ? 'ounce' : /^ml|millilit/.test(u) ? 'mL' : /^cl/.test(u) ? 'cl' : /^(l|lit)/.test(u) ? 'L' : /^kg/.test(u) ? 'kg' : /^(lb|pound)/.test(u) ? 'lb' : /^g/.test(u) ? 'g' : u;
+  if (/volume|capacity/.test(lbl)) {
+    const m = t.match(/(\d+(?:\.\d+)?)\s*(fl\.?\s*oz|ounces?|oz|ml|millilit\w*|cl|l|lit\w*)\b/);
+    return m ? { n: m[1], unit: unitOf(m[2]) } : { n: '1', unit: 'L' };
+  }
+  if (/weight|net content/.test(lbl)) {
+    const m = t.match(/(\d+(?:\.\d+)?)\s*(ounces?|oz|lbs?|pounds?|kg|grams?|g)\b/);
+    if (m) return { n: m[1], unit: unitOf(m[2]) };
+  }
+  return { n: '1', unit: '' };
+}
 async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true, expectStore } = {}) {
   const report = [];
   const ok = m => report.push('✓ ' + m);
@@ -3403,7 +3445,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   const zhS = (t, st = 'working') => { try { zhFrame(st, 'ZHunter · ' + t); } catch (_) {} };
   zhS('fixing draft — waiting for the page');
   await temuWaitRowsSettled(rows);
-  let changed = 0, stillEmpty = 0, submitted = 0;
+  let changed = 0, stillEmpty = 0, submitted = 0, guessed = 0;
   const pick = (attrs, label) => {
     const want = label.trim().toLowerCase();
     for (const k of Object.keys(attrs || {})) if (k.trim().toLowerCase() === want && attrs[k] !== '' && attrs[k] != null) return attrs[k];
@@ -3433,7 +3475,27 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
       if (sm.explicit) cands.push(sm.explicit);
       if (sm.dept) cands.push(sm.dept);
       { const dv = pick(defaults, f.label); if (dv != null) cands.push(dv); if (want == null) want = dv ?? sm.explicit ?? sm.dept ?? null; }
-      if (!cands.length) { notes.push(f.label + ': NEEDS YOU (no value from title / category / your rules)'); stillEmpty++; continue; }
+      if (!cands.length) {
+        // v9.22.49 — nothing sure: guess (see temuDraftGuessSelect / temuDraftGuessNumber)
+        zhS(`fixing draft — ${f.label} (guess)`);
+        let got = '';
+        if (f.sel) got = await temuDraftGuessSelect(f.sel, lbl, name);
+        else if (f.kind === 'number') {
+          const g = temuDraftGuessNumber(lbl, name);
+          temuSetNativeValue(f.inp, g.n);
+          let unit = '';
+          if (f.unitSel) {
+            if (g.unit) { const r = await temuPickSelectValue(f.unitSel, g.unit); if (r === 'set' || r === 'already') unit = temuSelectCurrent(f.unitSel) || g.unit; }
+            if (!unit && g.unit) unit = (await temuPickByRegex(f.unitSel, g.unit === '%' ? /%/ : new RegExp('^' + g.unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'))).text;
+            if (!unit) unit = (await temuPickByRegex(f.unitSel, /\S/)).text;
+          }
+          got = g.n && (!f.unitSel || unit) ? `${g.n}${unit ? ' ' + unit : ''}` : '';
+        } else if (f.inp) { temuSetNativeValue(f.inp, 'N/A'); got = 'N/A'; }
+        if (got) { changed++; guessed++; notes.push(`${f.label}=${got} (guessed)`); }
+        else { notes.push(f.label + ': NEEDS YOU (no value, and no option could be chosen)'); stillEmpty++; }
+        await temuSleep(temuRand(600, 1200));
+        continue;
+      }
       zhS(`fixing draft — ${f.label}`);
       if (f.sel) {
         let res = 'no_option';
@@ -3482,7 +3544,27 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
     const btnOff = b => b.disabled || b.getAttribute('aria-disabled') === 'true' || /\bdisable/i.test(b.className || '');
     const bottomBtn = [...document.querySelectorAll('[role="button"], button')]
       .filter(b => /^submit$/i.test((b.textContent || '').trim()) && !b.closest('tr') && temuVisible(b) && !btnOff(b)).pop() || null;
-    if (!incomplete.length && bottomBtn) {
+    // v9.22.49 — "Product action required": a row's own Submit makes Temu redraw the list, and the values typed into the
+    // OTHER rows are lost (only 1 of 5 was submitted). So tick every complete product and press the bottom "Submit (N)" once
+    // (seen live 30 Oct 2026: the bottom Submit is off until rows are ticked, then reads "Submit (1)").
+    const completeRows = liveRows().filter(tr => /Goods ID:/i.test(tr.textContent || '') && rowDone(tr));
+    let bulkDone = false;
+    if (completeRows.length) {
+      for (const tr of completeRows) {
+        const cb = tr.querySelector('input[type="checkbox"]');
+        if (cb && !cb.checked) { (cb.closest('label') || cb).click(); await temuSleep(temuRand(250, 550)); }
+      }
+      await temuSleep(temuRand(700, 1200));
+      const bulk = [...document.querySelectorAll('[role="button"], button')]
+        .filter(b => /^submit\s*\(\d+\)$/i.test((b.textContent || '').trim()) && !b.closest('tr') && temuVisible(b) && !btnOff(b)).pop();
+      if (bulk) {
+        const label = (bulk.textContent || '').trim();
+        await temuHumanClick(bulk); submitted += completeRows.length; bulkDone = true;
+        ok(`Ticked ${completeRows.length} complete product(s) and pressed "${label}" — check the result on Temu!`);
+      }
+    }
+    if (bulkDone) { /* done above */ }
+    else if (!incomplete.length && bottomBtn) {
       await temuHumanClick(bottomBtn); submitted++;
       ok('Pressed the main Submit button — check the result on Temu!');
     } else {
@@ -3502,7 +3584,7 @@ async function temuPageFixDrafts({ rules = [], defaults = {}, autoSubmit = true,
   }
   zhS(stillEmpty ? `${stillEmpty} field(s) need you` : 'draft fixed ✓', stillEmpty ? 'error' : 'done');
   const nProducts = rows.filter(r => /Goods ID:/i.test(r.textContent || '')).length || rows.length;   // products, not product + variant rows
-  report.unshift(`${nProducts} drafts, ${changed} fields set, ${stillEmpty} still empty`);
+  report.unshift(`${nProducts} drafts, ${changed} fields set${guessed ? ` (${guessed} guessed — check them on Temu)` : ''}, ${stillEmpty} still empty`);
   return { success: stillEmpty === 0, report, changed, total: nProducts, stillEmpty, submitted, confirmed: false };
 }
 
@@ -3627,7 +3709,7 @@ async function temuPageReadFailed({ uploadId, expectStore } = {}) {
   }
   const total = ((modal.innerText || '').match(/Total\s+(\d+)\s+items?/i) || [])[1];
   try { (modal.querySelector('[class*="modalCloseButton"]') || modal.querySelector('[role="button"]'))?.click(); } catch (_) {}
-  report.push(`✓ Failed details parhe: ${failed.length}${total && +total > failed.length ? ` (Temu total ${total} — sirf pehla page)` : ''}`);
+  report.push(`✓ Failed details read: ${failed.length}${total && +total > failed.length ? ` (Temu total ${total} — first page only)` : ''}`);
   return { success: true, failed, total: total ? +total : failed.length, report };
 }
 
@@ -5207,8 +5289,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const wrap = document.createElement('div');
         wrap.className = 'img-wrap' + (selected.has(i) ? ' selected' : '');
         wrap.innerHTML = `
-          <img src="${url}" loading="lazy" alt="img ${i+1}" title="Double-click to preview HD"
-               onerror="this.style.opacity='0.2';this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text y=\\'.9em\\' font-size=\\'90\\'>\u{1F5BC}</text></svg>'">
+          <img src="${url}" loading="lazy" alt="img ${i+1}" title="Double-click to preview HD">
           <div class="img-check"></div>
           <div class="img-res" id="res-${i}">...</div>
           ${i === 0 ? '<div class="img-main-badge" title="Hero / Primary Image">★ MAIN</div>' : ''}
@@ -5220,6 +5301,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         `;
 
         const imgEl = wrap.querySelector('img');
+        // v9.22.53 — a listener, not an inline onerror="…": sites with a strict Content Security Policy (Walmart) block
+        // inline handlers and Chrome lists that as an extension error
+        imgEl.addEventListener('error', () => {
+          if (imgEl.dataset.zhBroken) return;
+          imgEl.dataset.zhBroken = '1'; imgEl.style.opacity = '0.2';
+          imgEl.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">\u{1F5BC}</text></svg>');
+        });
         const resEl = wrap.querySelector('.img-res');
         const checkRes = () => {
           const w = imgEl.naturalWidth;

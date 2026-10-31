@@ -2032,7 +2032,7 @@ function openSaveAllPanel() {
 }
 async function closeSaveAllPanel() {
   if (_saveAllRunning) {
-    if (!(await zhAsk('Download chal raha hai', 'A download is in progress. Stop and close?', 'Stop and close'))) return;
+    if (!(await zhAsk('A download is running', 'A download is in progress. Stop and close?', 'Stop and close'))) return;
     _saveAllStop = true;
   }
   document.getElementById('saveAllPanel').classList.add('hidden');
@@ -5323,9 +5323,9 @@ function initSettingsPanel() {
       const t = $('zhFramePreviewTxt'); if (t) t.textContent = on ? txt : 'Page frame is OFF';
       box.dataset.pv = _zhPv;
       const note = $('zhFramePreviewNote');
-      if (note) note.textContent = !on ? 'Off: pages par koi border / label nahi'
-        : auto ? 'Auto: har site / har Temu store ka apna rang · kaam ke dauran cyan → hara · error laal'
-        : 'My colour: border hamesha aap ka rang · status sirf label aur dot mein';
+      if (note) note.textContent = !on ? 'Off: no border / label on any page'
+        : auto ? 'Auto: each site / each Temu store has its own colour · cyan → green while working · red on error'
+        : 'My colour: the border is always your colour · the status shows only in the label and the dot';
     });
   }
 
@@ -5531,7 +5531,7 @@ function initSettingsPanel() {
   $('spRestoreFile')?.addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) doImport(f); });
   initSettingsGroups();
   $('spWipeAllBtn')?.addEventListener('click', async () => {
-    if (!(await zhAsk('Sab data delete karo?', 'Delete all products, queue, history, edits and pending sourcing records? Store configuration and connection keys remain.', 'Delete all'))) return;
+    if (!(await zhAsk('Delete all data?', 'Delete all products, queue, history, edits and pending sourcing records? Store configuration and connection keys remain.', 'Delete all'))) return;
     try { const result = await msg({ action: 'MASTER_RESET', wipe: true }); if (!result?.success) throw new Error(result?.error || 'Wipe failed'); MasterUIState.allRows = []; MasterUIState.selectedIds.clear(); BulkState.results = []; TemuLast = null; await updateMasterStats(); await loadBulkQueue(); await refresh(); toast('Data cleared', 'ok'); } catch (e) { toast(e.message, 'err'); }
   });
 
@@ -6837,7 +6837,7 @@ function onQueueAddUrl() {
     const ta = $('bulkPasteTextarea'); if (ta) { ta.value = list.map(i => i.url).join('\n'); ta.dispatchEvent(new Event('input', { bubbles: true })); }
     const rw = $('bulkCopyRemoveWrap'); if (rw) rw.hidden = false;
     const nt = list.filter(i => /temu\.com/.test(i.url)).length, no = list.length - nt;
-    if (typeof say === 'function') say(`✓ Store Copy: ${list.length} products (${fileName}) — ${nt} Temu live page se (exact copy: edited images/title)${no ? `, ${no} source page se` : ''}. Added to the queue — go to Bulk → "Hunt all". Base price / variation / category come from the Temu sheet.`, 'ok');
+    if (typeof say === 'function') say(`✓ Store Copy: ${list.length} products (${fileName}) — ${nt} from the Temu live page (exact copy: edited images/title)${no ? `, ${no} from the source page` : ''}. Added to the queue — go to Bulk → "Hunt all". Base price / variation / category come from the Temu sheet.`, 'ok');
     try { renderBulkPastePreview(parsePastedLinks()); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     try { document.querySelector('[data-tab="bulk"]')?.click(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     try { await addBulkPastedLinks(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
@@ -9387,7 +9387,7 @@ function markBulkRowClosed(tabId) {
   const row = document.querySelector(`.bulk-prog-row[data-tab-id="${tabId}"]`);
   if (!row) return;
   row.classList.add('tab-closed');
-  row.title = 'Tab band kar diya (link complete)';
+  row.title = 'Tab closed (link complete)';
 }
 
 function bpPinRowsTop(ids) {
@@ -10152,7 +10152,7 @@ function filterAndRenderMasterRows() {
   MasterUIState.visibleRows = rows; // v9.7.3
   // v9.22.6 — on an "Exported" filter: one button deletes exactly the products shown
   { const bar = $('masterExpBar'), on = /^exp[123]$/.test(plat) && rows.length > 0;
-    if (bar) { bar.hidden = !on; const t = $('masterExpBarTxt'); if (t && on) t.textContent = `${rows.length} product${rows.length === 1 ? '' : 's'} ${plat === 'exp3' ? '3 ya zyada' : plat.slice(3)} dafa export/upload ho chuke`; } }
+    if (bar) { bar.hidden = !on; const t = $('masterExpBarTxt'); if (t && on) t.textContent = `${rows.length} product${rows.length === 1 ? '' : 's'} ${plat === 'exp3' ? '3 or more' : plat.slice(3)} time${plat === 'exp1' ? '' : 's'} exported/uploaded`; } }
   renderMasterRows(rows);
   if (typeof updateTopTemuStorePill === 'function') updateTopTemuStorePill();
 }
@@ -11336,7 +11336,7 @@ async function parseImportFile(file) {
 async function doImport(file) {
   if (/\.json$/i.test(file.name || '')) {
     try { const backup = JSON.parse(await file.text()); if (backup.format === 'zhunter-backup') {
-      if (!(await zhAsk('Backup restore karo?', 'Restore this complete backup? This replaces products, queue, history and store settings. Private connection keys stay unchanged.', 'Restore'))) return;
+      if (!(await zhAsk('Restore the backup?', 'Restore this complete backup? This replaces products, queue, history and store settings. Private connection keys stay unchanged.', 'Restore'))) return;
       const result = await msg({ action: 'BACKUP_RESTORE', backup }); if (!result?.success) throw new Error(result?.error || 'Restore failed'); await refresh(); await updateMasterStats(); await loadBulkQueue(); toast('Backup restored', 'ok'); return;
     } } catch (e) { toast('Restore failed: ' + e.message, 'err'); return; }
   }
@@ -14285,39 +14285,54 @@ function temuFillTemplate(wb, items, cfg) {
 // v9.22.42 — Temu work pages (reading ticked products, Repack "Temu par lagao") open in their own Chrome window behind
 // the one you work in. An empty tab keeps that window alive between pages; when the last job ends and no page is left
 // in it the window closes (a page that stopped with a problem stays open there).
-const ZhWork = { win: 0, blank: 0, jobs: 0, making: null };
-async function zhWorkWin() {
-  if (ZhWork.win) {
+// v9.22.57 — list price for Store export and Repack: a random $79.99 … $99.99 per product (always .99), never below the
+// base price (Temu wants list ≥ base): a base above that range keeps a list just over the base; 0 = leave it as it is
+const ZH_LIST_MIN = 79, ZH_LIST_MAX = 99;
+function zhRandListPrice(base) {
+  const b = parseFloat(base) || 0;
+  const lo = Math.max(ZH_LIST_MIN, Math.ceil(b));
+  if (lo > ZH_LIST_MAX) return 0;
+  return lo + Math.floor(Math.random() * (ZH_LIST_MAX - lo + 1)) + 0.99;
+}
+// v9.22.56 — one work window PER page that runs at the same time ("slot"): Chrome only runs the front tab of a window, so
+// 3 pages as 3 tabs of one window went one by one. Each slot window keeps an empty tab so it survives between pages.
+const ZhWork = { wins: [], jobs: 0, making: [] };   // wins[slot] = { win, blank }
+async function zhWorkWin(slot = 0) {
+  const w0 = ZhWork.wins[slot];
+  if (w0?.win) {
     try {
-      await chrome.windows.get(ZhWork.win);
-      if (!ZhWork.blank) ZhWork.blank = (await chrome.tabs.create({ windowId: ZhWork.win, url: 'about:blank', active: false })).id;
-      return ZhWork.win;
-    } catch (_) { ZhWork.win = 0; ZhWork.blank = 0; }
+      await chrome.windows.get(w0.win);
+      if (!w0.blank) w0.blank = (await chrome.tabs.create({ windowId: w0.win, url: 'about:blank', active: false })).id;
+      return w0.win;
+    } catch (_) { ZhWork.wins[slot] = null; }
   }
-  if (!ZhWork.making) ZhWork.making = (async () => {
+  if (!ZhWork.making[slot]) ZhWork.making[slot] = (async () => {
     let cur = null; try { cur = await chrome.windows.getCurrent(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
-    const box = cur && [cur.left, cur.top, cur.width, cur.height].every(Number.isFinite) ? { left: cur.left, top: cur.top, width: cur.width, height: cur.height } : {};
+    const box = cur && [cur.left, cur.top, cur.width, cur.height].every(Number.isFinite) ? { left: cur.left + slot * 24, top: cur.top + slot * 24, width: cur.width, height: cur.height } : {};
     const w = await chrome.windows.create({ url: 'about:blank', focused: false, ...box });
-    ZhWork.win = w.id; ZhWork.blank = w.tabs?.[0]?.id || 0;
+    ZhWork.wins[slot] = { win: w.id, blank: w.tabs?.[0]?.id || 0 };
     if (cur?.id) { try { await chrome.windows.update(cur.id, { focused: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); } }
     return w.id;
-  })().finally(() => { ZhWork.making = null; });
-  return ZhWork.making;
+  })().finally(() => { ZhWork.making[slot] = null; });
+  return ZhWork.making[slot];
 }
-async function zhWorkTab(url) { return chrome.tabs.create({ windowId: await zhWorkWin(), url, active: true }); }
-async function zhWorkMove(tab) {
-  try { await chrome.tabs.move(tab.id, { windowId: await zhWorkWin(), index: -1 }); await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+async function zhWorkTab(url, slot = 0) { return chrome.tabs.create({ windowId: await zhWorkWin(slot), url, active: true }); }
+async function zhWorkMove(tab, slot = 0) {
+  try { await chrome.tabs.move(tab.id, { windowId: await zhWorkWin(slot), index: -1 }); await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   return tab;
 }
 function zhWorkBegin() { ZhWork.jobs++; }
 async function zhWorkEnd() {
   ZhWork.jobs = Math.max(0, ZhWork.jobs - 1);
-  if (ZhWork.jobs || !ZhWork.win) return;
-  try {
-    const tabs = await chrome.tabs.query({ windowId: ZhWork.win });
-    if (tabs.every(t => t.id === ZhWork.blank)) { await chrome.windows.remove(ZhWork.win); ZhWork.win = 0; ZhWork.blank = 0; }
-    else if (ZhWork.blank) { const b = ZhWork.blank; ZhWork.blank = 0; await chrome.tabs.remove(b); }   // pages with a problem stay: only the empty tab goes
-  } catch (_) { ZhWork.win = 0; ZhWork.blank = 0; }
+  if (ZhWork.jobs) return;
+  for (let i = 0; i < ZhWork.wins.length; i++) {
+    const w = ZhWork.wins[i]; if (!w?.win) continue;
+    try {
+      const tabs = await chrome.tabs.query({ windowId: w.win });
+      if (tabs.every(t => t.id === w.blank)) { await chrome.windows.remove(w.win); ZhWork.wins[i] = null; }
+      else if (w.blank) { const b = w.blank; w.blank = 0; await chrome.tabs.remove(b); }   // pages with a problem stay: only the empty tab goes
+    } catch (_) { ZhWork.wins[i] = null; }
+  }
 }
 
 // ── v9.15 Store export: ticked products on Temu "Manage products" → Temu bulk sheet (import it in another Chrome) ──
@@ -14337,8 +14352,13 @@ async function temuStoreExport() {
     const got = await temuReadTicked(say); if (!got) return;
     const { done, problems } = got;
     if (!done.length) { say('✗ No product could be read.\n' + problems.map(x => '• ' + x).join('\n')); return; }
+    // v9.22.55 — the products read from Temu no longer go straight into a downloaded sheet: they become review cards
+    // (the same rows an imported "Store export" sheet gives, see temuZcParse), so titles / images / AI can be checked first,
+    // then "Export only" (sheet) or "Upload only". The category is Temu's own one; only when it is not in your category list
+    // is the title matcher asked (and when that finds nothing, Temu's category is added to the list).
     const cfg = temuGetCfg();
-    const items = [], notes = [];
+    const rows = [], notes = [];
+    const known = leaf => Object.values(cfg.category_profiles || {}).some(p => String(p.category_keyword || '').toLowerCase() === String(leaf || '').toLowerCase());
     for (const { p, d } of done) {
       const s0 = (d.skus && d.skus[0]) || {};
       const nm = (p.title || d.title || p.goodsId).slice(0, 40);
@@ -14348,32 +14368,33 @@ async function temuStoreExport() {
       if ((d.skus || []).length > 1) notes.push(nm + `: ${d.skus.length} variations — only the first one was copied`);
       const color = String(s0.name || '').trim();
       let leaf = String(d.catPath || '').split(' / ').pop().trim();
-      { // The category on an old / incomplete listing is often wrong (e.g. breakfast sandwiches under "Ice Cream Sandwiches") —
-        // so choose by the product title from your category list (same matcher as normal hunts); keep the copied one only if nothing matches.
+      if (leaf && !known(leaf)) {
         const best = temuScoreProfiles(temuCleanTitle(d.title || nm, cfg), cfg)[0];
-        if (best?.prof?.category_keyword) {
-          if (String(best.prof.category_keyword).toLowerCase() !== leaf.toLowerCase()) notes.push(nm + `: category "${leaf}" → "${best.prof.category_keyword}" (matched from the title)`);
-          leaf = best.prof.category_keyword;
-        } else notes.push(nm + `: no category matched the title — kept "${leaf}" (check it)`);
-      }
-      items.push({
-        // v9.18 — never the exact Temu Goods ID as code: a fresh 4-letter tag after it (import still reads "ZC-<goods id>-")
-        ...(() => { const tg = temuGetCfg().sku_fresh === false ? '' : '-' + temuSkuTag(); return { goods: `ZC-${p.goodsId}${tg}`, sku: `ZC-${p.goodsId}${tg}-${color.replace(/[^A-Za-z0-9]+/g, '') || 'Std'}` }; })(),
-        title: d.title, category_keyword: leaf, brand: d.brand, trademark: d.trademark,
-        keyword_attributes: (d.attrs || []).map(a => a.values.join(' ')).join(', '),
-        bullets: d.bullets || [], description: d.description || '', vtype: d.vtype || 'Color', color, images: d.images,
-        base, list: list > 0 ? list : null, qty: parseInt(s0.qty, 10) > 0 ? parseInt(s0.qty, 10) : cfg.quantity_min,
-        dimL: s0.dims?.[0], dimW: s0.dims?.[1], dimH: s0.dims?.[2], weight: s0.weight || ''
+        if (best?.prof?.category_keyword) { notes.push(nm + `: Temu category "${leaf}" is not in your list → "${best.prof.category_keyword}" (matched from the title)`); leaf = best.prof.category_keyword; }
+        else notes.push(nm + `: Temu category "${leaf}" added to your category list`);
+      } else if (!leaf) notes.push(nm + ': Temu showed no category — choose one on the card');
+      const imgs = (d.images || []).filter(Boolean);
+      rows.push({
+        id: 'zc_' + p.goodsId, title: d.title || p.title || '', url: `https://www.temu.com/goods.html?goods_id=${p.goodsId}`, platform: 'temu',
+        brand: d.brand || '', color, copyColor: color,
+        weight: s0.weight || '', dimL: s0.dims?.[0] ?? '', dimW: s0.dims?.[1] ?? '', dimH: s0.dims?.[2] ?? '',
+        bullets: d.bullets || [], description: d.description || '',
+        // v9.22.57 — list price: a random $79.99 … $99.99 (Temu's own one only when the base price is above that range)
+        price: base.toFixed(2), temuBase: base.toFixed(2), temuList: (zhRandListPrice(base) || (list > 0 ? list : 0)).toFixed(2).replace(/^0\.00$/, ''),
+        images: imgs, imageCount: imgs.length, videos: [], copyCat: leaf, copyKw: (d.attrs || []).map(a => a.values.join(' ')).join(', '),
+        status: 'ok', scrapedAt: new Date().toISOString()
       });
     }
-    if (!items.length) { say('✗ Nothing left to export.\n' + problems.map(x => '• ' + x).join('\n')); return; }
-    const b64 = temuActiveStore()?.templateB64 || await temuBuiltinTemplateB64();
-    const wb = XLSX.read(b64, { type: 'base64', cellStyles: true });
-    const n = temuFillTemplate(wb, items, cfg);
-    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
-    zhSaveBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), temuBatchFile(n));
-    say(`✓ ${n} products → sheet download (Temu bulk template)\nDusre Chrome me: Upload page → "Import sheet" se yehi file daalein.\n` + [...notes, ...problems].map(x => '• ' + x).join('\n'));
-    toast(`Store export ready — ${n} products`, 'ok');
+    if (!rows.length) { say('✗ Nothing could be taken over.\n' + problems.map(x => '• ' + x).join('\n')); return; }
+    TemuSheetRows = rows; TemuLast = null;
+    const nc = await temuZcApplyCategories(rows);
+    { const mb = $('temuMarkListedBtn'); if (mb) mb.hidden = true; }
+    const sel = $('temuSource');
+    if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = `Store export — ${temuActiveStoreName() || 'Temu'} (${rows.length})`; } sel.value = 'sheet'; }
+    temuUpdateSrcInfo();
+    try { temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+    say(`✓ Store export: ${rows.length} products read from Temu (${nc} categories set) — they are in "Review & Customize Products" now.\nCheck titles / images there, then "Export only" for the sheet or "Upload only".\n` + [...notes, ...problems].map(x => '• ' + x).join('\n'));
+    toast(`${rows.length} products from Temu — review them, then Export / Upload`, 'ok');
   } catch (e) { say('✗ ' + (e?.message || e)); toast('Store export failed', 'err'); }
 }
 // v9.22.7 — the products ticked on Temu "Manage products", read one by one through Temu's own "Copy Listing" page.
@@ -14404,7 +14425,7 @@ async function temuReadTicked(say) {
     const AT_ONCE = Math.min(3, picks.length);
     let openChain = Promise.resolve(), next = 0, finished = 0;
     const tell = () => say(`Reading ${Math.min(finished + 1, picks.length)}/${picks.length} (${AT_ONCE} at once)…\n(the pages open in a separate window behind this one and close by themselves)`);
-    const readOne = async (i) => {
+    const readOne = async (i, slot = 0) => {
       const p = picks[i];
       let t2 = null, data = null;
       try {
@@ -14418,9 +14439,9 @@ async function temuReadTicked(say) {
             op = await send(tab.id, { action: 'ZC_OPEN_COPY', goodsId: p.goodsId }, 14000);
           } finally { chrome.tabs.onCreated.removeListener(_onNew); }
           let t = null;
-          if (!op?.ok && _newTab) { t = await zhWorkMove(_newTab); op = { ok: true, url: null, viaTab: true }; }   // Temu opened the copy page itself — use that tab (moved to the work window)
+          if (!op?.ok && _newTab) { t = await zhWorkMove(_newTab, slot); op = { ok: true, url: null, viaTab: true }; }   // Temu opened the copy page itself — use that tab (moved to the work window)
           if (!op?.ok) problems.push(`${(p.title || p.goodsId).slice(0, 40)}: Copy button was not pressed (${op?.error || 'no answer'})`);
-          else if (!op.viaTab) t = await zhWorkTab(new URL(op.url, 'https://seller.temu.com').href);
+          else if (!op.viaTab) t = await zhWorkTab(new URL(op.url, 'https://seller.temu.com').href, slot);
           await sleep(1200 + Math.random() * 900);   // the copy page starts loading before the next row is clicked
           return t;
         });
@@ -14434,7 +14455,7 @@ async function temuReadTicked(say) {
     };
     tell();
     zhWorkBegin();
-    try { await Promise.all(Array.from({ length: AT_ONCE }, async () => { while (next < picks.length) { const i = next++; await readOne(i); } })); }
+    try { await Promise.all(Array.from({ length: AT_ONCE }, async (_, slot) => { while (next < picks.length) { const i = next++; await readOne(i, slot); } })); }   // v9.22.56 — each worker its own window
     finally { await zhWorkEnd(); }
     try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
     const done = res.filter(Boolean);   // in the order of the Manage page
@@ -14779,10 +14800,10 @@ function temuConfirmUpload() {
         <div class="tuc-h">Upload to Temu?</div>
         <div class="tuc-store"><small>Store</small><b>${e2(store)}</b></div>
         <div class="tuc-rows">
-          <div class="tuc-row ok"><span>Jayenge</span><b>${R.ok ?? '?'} products</b></div>
+          <div class="tuc-row ok"><span>Will go</span><b>${R.ok ?? '?'} products</b></div>
           ${leftN ? `<div class="tuc-row warn"><span>Bahar rahenge</span><b>${leftN}</b></div><ul class="tuc-left">${left.map(g => `<li>${g.ids.length} · ${e2(g.label.replace(/\s*—\s*left out$/i, ''))}</li>`).join('')}</ul>` : ''}
-          ${live.length ? `<div class="tuc-row bad"><span>⚠ Pehle se live</span><b>${live.length}</b></div><ul class="tuc-left">${Object.entries(liveBy).map(([s, n]) => `<li>${n} · ${e2(s === 'default' ? 'store' : s)} par</li>`).join('')}</ul>
-            <button type="button" class="btn btn-ghost tuc-newonly" data-tuc="newonly" title="Untick the ${live.length} products that are already live, then press Upload again">Sirf naye bhejo — ${live.length} untick karo</button>` : ''}
+          ${live.length ? `<div class="tuc-row bad"><span>⚠ Already live</span><b>${live.length}</b></div><ul class="tuc-left">${Object.entries(liveBy).map(([s, n]) => `<li>${n} · on ${e2(s === 'default' ? 'store' : s)}</li>`).join('')}</ul>
+            <button type="button" class="btn btn-ghost tuc-newonly" data-tuc="newonly" title="Untick the ${live.length} products that are already live, then press Upload again">Send only new ones — untick ${live.length}</button>` : ''}
         </div>
         <label class="tuc-batch"><small>Batch name (optional)</small><input class="inp" type="text" maxlength="60" value="${e2(batchInp?.value || '')}" placeholder="e.g. Frozen Oct 20" /></label>
         <div class="tuc-acts"><button type="button" class="btn btn-ghost" data-tuc="no">Cancel</button><button type="button" class="btn btn-primary" data-tuc="yes">⬆ Upload ${R.ok ?? ''}</button></div>
@@ -14852,8 +14873,8 @@ async function temuResultCard(opt = {}) {
   const el = $('temuResultCard'); if (!el) return;
   if (opt.histId !== undefined) TemuResult.histId = opt.histId;
   const e2 = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  if (opt.state === 'run') { TemuResult.histId = ''; el.hidden = false; el.dataset.tone = 'run'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">⏳</span><b>Uploading…</b><span class="tru-sub">steps neeche dikh rahe hain</span></div>`; return; }
-  if (opt.state === 'fail') { el.hidden = false; el.dataset.tone = 'bad'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">✗</span><b>Upload nahi hua</b><span class="tru-sub">${e2(opt.msg || 'Details dekhein — file chahiye to "Export only" dabayein')}</span></div><div class="tru-acts"><button type="button" class="tru-btn" data-tru="details">Details</button><button type="button" class="tru-x" data-tru="close" aria-label="Close">✕</button></div>`; return; }
+  if (opt.state === 'run') { TemuResult.histId = ''; el.hidden = false; el.dataset.tone = 'run'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">⏳</span><b>Uploading…</b><span class="tru-sub">the steps are shown below</span></div>`; return; }
+  if (opt.state === 'fail') { el.hidden = false; el.dataset.tone = 'bad'; el.innerHTML = `<div class="tru-h"><span class="tru-ico">✗</span><b>Upload failed</b><span class="tru-sub">${e2(opt.msg || 'See Details — for the file, press "Export only"')}</span></div><div class="tru-acts"><button type="button" class="tru-btn" data-tru="details">Details</button><button type="button" class="tru-x" data-tru="close" aria-label="Close">✕</button></div>`; return; }
   const h = TemuResult.histId ? (await temuHistGet()).find(x => x.id === TemuResult.histId) : null;
   if (!h) { if (opt.state === 'cancel') el.hidden = true; return; }
   // v9.17.9 — Temu's "Contribution SKU duplicated" errors are no drafts: those products already are in this store
@@ -14861,11 +14882,11 @@ async function temuResultCard(opt = {}) {
   const n = h.n || 0, added = h.added ?? null, drafts = h.confirmed ? (h.fixedAt ? 0 : Math.max(0, (h.errors || 0) - dups)) : 0;
   const failed = h.confirmed && added != null ? Math.max(0, n - added - (h.errors || 0)) : 0;
   const tone = !h.confirmed ? (h.uploadId ? 'run' : 'bad') : drafts || failed || dups ? 'warn' : 'ok';
-  const head = !h.confirmed ? (h.uploadId ? ['⏳', 'Temu processing…', 'ZHunter dekh raha hai — mukammal hote hi yahan number aa jayenge'] : ['✗', 'Upload confirm nahi hua', 'Temu tab mein Upload history dekhein'])
-    : drafts || failed ? ['⚠', 'Upload ho gaya — kuch kaam baqi', h.store || '']
-    : dups ? ['⚠', `${dups} product${dups === 1 ? '' : 's'} pehle se ${h.store || 'is store'} par`, h.store || ''] : ['✓', 'Sab upload ho gaya', h.store || ''];
+  const head = !h.confirmed ? (h.uploadId ? ['⏳', 'Temu processing…', 'ZHunter is watching — the numbers show here once it is done'] : ['✗', 'Upload not confirmed', 'Check Upload history in the Temu tab'])
+    : drafts || failed ? ['⚠', 'Uploaded — some work left', h.store || '']
+    : dups ? ['⚠', `${dups} product${dups === 1 ? '' : 's'} already on ${h.store || 'this store'}`, h.store || ''] : ['✓', 'All uploaded', h.store || ''];
   const why = [];
-  if (dups) why.push(`Temu: "Contribution SKU duplicated" — ${dups} product${dups === 1 ? '' : 's'} add nahi ${dups === 1 ? 'hua' : 'hue'} (SKU purana tha). ${dups === 1 ? 'Yeh' : 'Yeh'} "Not listed" filter mein hain — tick kar ke dobara upload karein, naya SKU khud lagega.`);
+  if (dups) why.push(`Temu: "Contribution SKU duplicated" — ${dups} product${dups === 1 ? ' was' : 's were'} not added (the SKU was old). ${dups === 1 ? 'It is' : 'They are'} in the "Not listed" filter — tick and upload again, a new SKU is set by itself.`);
   if (drafts && h.failWhy) why.push(`Temu: ${h.failWhy}`);
   el.hidden = false; el.dataset.tone = tone;
   el.innerHTML = `<div class="tru-h"><span class="tru-ico">${head[0]}</span><b>${e2(head[1])}</b><span class="tru-sub">${e2(head[2])}${h.batch ? ' · ' + e2(h.batch) : ''}</span></div>
@@ -14873,7 +14894,7 @@ async function temuResultCard(opt = {}) {
     ${why.length ? `<div class="tru-why">${why.map(w => `<p>${e2(w)}</p>`).join('')}</div>` : ''}
     <div class="tru-acts">
       ${drafts ? '<button type="button" class="tru-btn warn" data-tru="fix">Fix drafts</button>' : ''}
-      <button type="button" class="tru-btn" data-tru="temu" title="Temu ka Manage products page kholo">View on Temu</button>
+      <button type="button" class="tru-btn" data-tru="temu" title="Open Temu's Manage products page">View on Temu</button>
       <button type="button" class="tru-btn" data-tru="details">Details</button>
       <button type="button" class="tru-x" data-tru="close" aria-label="Close">✕</button>
     </div>`;
@@ -14983,7 +15004,7 @@ async function temuAutoUploadJob() {
       const q = pv.stale
         ? `The upload ${what} was interrupted more than 30 minutes ago and is no longer running.\n\nOK = I checked it on Temu, continue (this file is NOT sent now — press Upload only again).`
         : `The upload ${what} was interrupted.\n\nCheck it in Temu's Upload history first. Have you reviewed its result? OK unlocks future uploads (this file is NOT sent now).`;
-      if (await zhAsk('Pichhla upload adhoora hai', q, 'Maine check kar liya')) {
+      if (await zhAsk('The last upload is unfinished', q, 'I have checked it')) {
         const acknowledged = await msg({action:'TEMU_UPLOAD_REVIEWED'});
         if (!acknowledged?.success) throw new Error(acknowledged?.error || 'Could not unlock upload');
         say('Previous upload review saved. Select only products that still need uploading.');
@@ -15357,7 +15378,7 @@ async function temuFixDrafts() {
     if (!tab) {
       say('"Product action required" or "Complete product details" page is not open.\n\n1) On the Temu tab, press "Complete product information" or "Edit and submit"\n2) Then press "Fix drafts" here again.');
       await chrome.tabs.create({ url: 'https://seller.temu.com/upload-goods-multiple.html', active: true });
-      toast('Temu upload page khol diya — "Complete product information" dabayen', 'warn');
+      toast('Temu upload page opened — press "Complete product information"', 'warn');
       return;
     }
     await chrome.tabs.update(tab.id, { active: true });
@@ -15657,9 +15678,9 @@ async function temuRenderHistory() {
 
   const stat = $('temuProgressStatus');
   if (stat) {
-    stat.textContent = finalListed === 0 ? 'Aaj abhi kuch list nahi hua'
-      : finalListed >= dailyTarget ? `✓ Target poora — ${finalListed} listed (${dailyTarget} target)`
-      : `${finalListed} / ${dailyTarget} listed (${pct}%) · ${remaining} baqi`;
+    stat.textContent = finalListed === 0 ? 'Nothing listed today yet'
+      : finalListed >= dailyTarget ? `✓ Target reached — ${finalListed} listed (${dailyTarget} target)`
+      : `${finalListed} / ${dailyTarget} listed (${pct}%) · ${remaining} left`;
   }
   bar?.classList.toggle('done', finalListed >= dailyTarget && finalListed > 0);
 
@@ -15677,7 +15698,7 @@ async function temuRenderHistory() {
     weekBox.innerHTML = days.map(x => {
       const h = x.listed ? Math.max(8, Math.round(x.listed / max * 100)) : 0;
       const tip = `${x.d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}: ${x.listed} listed · ${x.ups} upload${x.ups === 1 ? '' : 's'}`;
-      return `<div class="th-day${x.cur ? ' today' : ''}${x.listed >= dailyTarget ? ' hit' : ''}" title="${esc(tip)}"><span class="th-day-n">${x.listed || ''}</span><div class="th-day-track"><i style="height:${h}%"></i></div><span class="th-day-l">${x.cur ? 'Aaj' : x.d.toLocaleDateString('en-US', { weekday: 'short' })}</span></div>`;
+      return `<div class="th-day${x.cur ? ' today' : ''}${x.listed >= dailyTarget ? ' hit' : ''}" title="${esc(tip)}"><span class="th-day-n">${x.listed || ''}</span><div class="th-day-track"><i style="height:${h}%"></i></div><span class="th-day-l">${x.cur ? 'Today' : x.d.toLocaleDateString('en-US', { weekday: 'short' })}</span></div>`;
     }).join('');
     weekBox.style.setProperty('--goal', Math.round(dailyTarget / max * 100) + '%');   // dashed target line in every day's track
     const tot = $('temuWeekTotal'); if (tot) tot.textContent = `${days.reduce((n, x) => n + x.listed, 0)} listed`;
@@ -15717,7 +15738,7 @@ async function temuRenderHistory() {
   box.innerHTML = '';
   if (!filtered.length) {
     const none = !list.length;
-    box.innerHTML = `<div class="th-empty"><div class="th-empty-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><b>${none ? 'Abhi koi upload nahi' : 'Is filter mein kuch nahi'}</b><span>${none ? 'Upload tab se "Upload only" karein — har upload yahan dikhega.' : 'Search saaf karein ya "All" chunein.'}</span>${none ? '' : '<button type="button" class="btn btn-ghost btn-xs" data-hreset>Show all</button>'}</div>`;
+    box.innerHTML = `<div class="th-empty"><div class="th-empty-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><b>${none ? 'No uploads yet' : 'Nothing in this filter'}</b><span>${none ? 'Press "Upload only" on the Upload tab — every upload shows here.' : 'Clear the search or choose "All".'}</span>${none ? '' : '<button type="button" class="btn btn-ghost btn-xs" data-hreset>Show all</button>'}</div>`;
     box.querySelector('[data-hreset]')?.addEventListener('click', () => { TemuHistFilter = 'all'; const s = $('temuHistSearch'); if (s) s.value = ''; const st = $('temuHistStoreFilter'); if (st) st.value = ''; temuRenderHistory(); });
     return;
   }
@@ -15727,13 +15748,13 @@ async function temuRenderHistory() {
     const when = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
     // v9.17 — readable record card: status · time / name · store · numbers / actions; products + skipped open below
-    const st = h.kind === 'export' ? ['file', 'File banai', 'Export file (upload nahi hui)']
-      : h.kind === 'manual' ? ['ok', 'Listed', 'Aap ne listed mark kiya']
-      : h.fixedAt ? ['ok', 'Fixed & listed', 'Drafts theek kar ke list hue']
+    const st = h.kind === 'export' ? ['file', 'File made', 'Export file (not uploaded)']
+      : h.kind === 'manual' ? ['ok', 'Listed', 'You marked it as listed']
+      : h.fixedAt ? ['ok', 'Fixed & listed', 'Drafts fixed and listed']
       : h.confirmed && !h.errors ? ['ok', 'Uploaded', 'Temu ne sab le liye']
-      : h.confirmed && h.errors ? ['warn', `${h.errors} need fix`, 'Temu par draft ban gaye — Fix drafts chalayein']
-      : h.uploadId ? ['warn', 'Sent — check', 'Temu ne file li, nateeja confirm nahi hua — Temu history dekhein']
-      : ['bad', 'Not uploaded', 'Upload nahi hua'];
+      : h.confirmed && h.errors ? ['warn', `${h.errors} need fix`, 'They became drafts on Temu — run Fix drafts']
+      : h.uploadId ? ['warn', 'Sent — check', 'Temu took the file, the result is not confirmed — check the Temu history']
+      : ['bad', 'Not uploaded', 'The upload did not happen'];
     const name = h.batch || (h.fileName && h.fileName !== 'temu_upload.xlsx' ? h.fileName.replace(/^temu_upload_/i, '').replace(/\.xlsx$/i, '').replace(/_/g, ' ') : '')
       || (h.kind === 'export' ? 'Export file' : h.kind === 'manual' ? 'Marked as listed' : 'Upload');
     const stats = [
@@ -15755,13 +15776,13 @@ async function temuRenderHistory() {
       <div class="th-rec-stats">${stats}</div>
       ${its.length || skl.length ? `<details class="th-rec-more"><summary>${its.length ? `Products (${h.items.length})` : ''}${its.length && skl.length ? ' · ' : ''}${skl.length ? `Skipped (${h.skippedList.length})` : ''}</summary>
         ${its.length ? `<ol class="th-items">${its.map(it => `<li><span title="${esc(it.title || '')}">${esc(it.title || it.sku || '—')}</span>${it.base ? `<b>$${esc(String(it.base))}</b>` : ''}</li>`).join('')}</ol>` : ''}
-        ${skl.length ? `<div class="th-skip-h">Skipped (upload mein nahi gaye)</div><ul class="th-items skip">${skl.map(s => `<li><span>${esc(typeof s === 'string' ? s : (s?.t || s?.title || JSON.stringify(s)))}</span></li>`).join('')}</ul>` : ''}
+        ${skl.length ? `<div class="th-skip-h">Skipped (not in the upload)</div><ul class="th-items skip">${skl.map(s => `<li><span>${esc(typeof s === 'string' ? s : (s?.t || s?.title || JSON.stringify(s)))}</span></li>`).join('')}</ul>` : ''}
       </details>` : ''}
       <div class="th-acts">
-        ${needsMark ? '<button class="th-act" type="button" data-act="mark" title="Temu par ye upload mukammal ho gaya — products ko listed mark karo">✓ Mark listed</button>' : ''}
-        ${h.kind === 'upload' && h.uploadId && (h.errors > 0 || !h.confirmed) ? '<button class="th-act" type="button" data-act="errors" title="Temu tab se is upload ke failed products aur wajah parho (Activity mein dikhega)">Read errors</button>' : ''}
-        ${h.fileName ? `<button class="th-act" type="button" data-act="xlsx" title="Upload wali file download karo (${esc(h.fileName)}${h.fileSize ? ', ' + Math.max(1, Math.round(h.fileSize / 1024)) + ' KB' : ''})">⬇ File</button>` : ''}
-        <button class="th-act temu-hist-csv-btn" type="button" data-act="csv" title="Is record ke products CSV mein">CSV</button>
+        ${needsMark ? '<button class="th-act" type="button" data-act="mark" title="This upload finished on Temu — mark the products as listed">✓ Mark listed</button>' : ''}
+        ${h.kind === 'upload' && h.uploadId && (h.errors > 0 || !h.confirmed) ? '<button class="th-act" type="button" data-act="errors" title="Read the failed products of this upload and reasons from the Temu tab (shown in Activity)">Read errors</button>' : ''}
+        ${h.fileName ? `<button class="th-act" type="button" data-act="xlsx" title="Download the uploaded file (${esc(h.fileName)}${h.fileSize ? ', ' + Math.max(1, Math.round(h.fileSize / 1024)) + ' KB' : ''})">⬇ File</button>` : ''}
+        <button class="th-act temu-hist-csv-btn" type="button" data-act="csv" title="This record's products in a CSV">CSV</button>
         <span class="th-sp"></span>
         <button class="th-act danger temu-hist-del-btn" type="button" data-act="del" title="Ye record mitao" aria-label="Delete record"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
       </div>
@@ -15796,7 +15817,7 @@ async function temuRenderHistory() {
     });
 
     el.querySelector('[data-act="del"]').addEventListener('click', async () => {
-      if (!(await zhAsk('Upload record delete karo?', `Delete this upload record (${when} · ${h.store || 'store'} · ${h.n} products)?`, 'Delete'))) return;
+      if (!(await zhAsk('Delete the upload record?', `Delete this upload record (${when} · ${h.store || 'store'} · ${h.n} products)?`, 'Delete'))) return;
       await temuHistSerial(async () => {
         const allHist = await temuHistGet();
         const nextHist = allHist.filter(x => (h.id ? x.id !== h.id : x.t !== h.t));
@@ -15999,7 +16020,7 @@ async function temuImportSheet(file) {
   if (sel) { const o = sel.querySelector('option[value="sheet"]'); if (o) { o.hidden = false; o.textContent = `Imported sheet — ${file.name} (${TemuSheetRows.length})`; } sel.value = 'sheet'; }
   temuUpdateSrcInfo();
   if (rep) rep.textContent = `✓ Sheet import: ${file.name} — ${TemuSheetRows.length} products. Check the store, then "Upload only".`;
-  toast(`${TemuSheetRows.length} products sheet se — ab Upload only`, 'ok');
+  toast(`${TemuSheetRows.length} products from the sheet — now press Upload only`, 'ok');
 }
 
 // v9.15 - ONE built-in Temu general template (identical for every store; only the hidden brand list differed). Own .xlsx per store stays optional.
@@ -16443,7 +16464,7 @@ function temuRenderProfiles() {
 
     item.querySelector('[data-del]').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!(await zhAsk('Category delete karo?', `Delete category "${displayName}"?`, 'Delete'))) return;
+      if (!(await zhAsk('Delete the category?', `Delete category "${displayName}"?`, 'Delete'))) return;
       const cfg2 = temuGetCfg(); delete cfg2.category_profiles[name];
       const r = await temuSaveCfg(cfg2);
       if (r === true) { temuRenderProfiles(); temuCatMsg(`Category "${displayName}" removed`, 'ok'); }
@@ -16560,7 +16581,7 @@ function temuRenderCatalogGrid() {
 }
 
 async function temuImportAllCatalog() {
-  if (!(await zhAsk('Categories import karo?', 'Import all 50+ catalog categories?', 'Import'))) return;
+  if (!(await zhAsk('Import categories?', 'Import all 50+ catalog categories?', 'Import'))) return;
   const cfg = temuGetCfg();
   cfg.category_profiles = cfg.category_profiles || {};
   let count = 0;
@@ -16679,8 +16700,8 @@ async function temuSaveProfileFromForm() {
   const name = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const match = ($('tcMatch')?.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   const exclude = ($('tcExclude')?.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  if (!name) { temuCatMsg('Name likhein (e.g. cat_food)', 'bad'); $('tcName')?.focus(); return; }
-  if (!match.length) { temuCatMsg('Kam az kam ek title keyword likhein', 'bad'); $('tcMatch')?.focus(); return; }
+  if (!name) { temuCatMsg('Write a name (e.g. cat_food)', 'bad'); $('tcName')?.focus(); return; }
+  if (!match.length) { temuCatMsg('Write at least one title keyword', 'bad'); $('tcMatch')?.focus(); return; }
   if (!temuActiveStoreName()) { temuCatMsg('Add or select a store in the Upload tab first', 'bad'); return; }
   const num = v => { const x = parseFloat(v); return isFinite(x) && x > 0 ? x : undefined; };
   const cfg = temuGetCfg();
@@ -16802,12 +16823,12 @@ function temuRenderGapTable(t) {
   tb.innerHTML = `<div class="tg-gap-row tg-gap-th"><span>Source cost</span><span>Temu par jodo</span><span></span></div>`
     + t.steps.map(([upTo, gap], i) => {
       const s = `<div class="tg-gap-row" data-gap-i="${i}">
-        <span class="tg-gap-cost">${from ? `$${from} se` : 'Shuru se'} <span class="tg-gap-inp"><i>$</i><input class="inp" data-gap="up" inputmode="decimal" value="${upTo}" aria-label="Cost up to"></span> tak</span>
+        <span class="tg-gap-cost">${from ? `From $${from}` : 'From $0'} <span class="tg-gap-inp"><i>$</i><input class="inp" data-gap="up" inputmode="decimal" value="${upTo}" aria-label="Cost up to"></span></span>
         <span class="tg-gap-inp"><i>+$</i><input class="inp" data-gap="gap" inputmode="decimal" value="${gap}" aria-label="Add"></span>
         <button type="button" class="tg-gap-del" data-gap-del="${i}" title="Remove this tier"${t.steps.length > 1 ? '' : ' disabled'}>×</button></div>`;
       from = upTo; return s;
     }).join('')
-    + `<div class="tg-gap-row tg-gap-last"><span class="tg-gap-cost">$${from} se zyada</span><span class="tg-gap-inp"><i>+</i><input class="inp" data-gap="pct" inputmode="decimal" value="${Math.round(t.pct * 100)}" aria-label="Percent above the last tier"><i>%</i></span><span></span></div>`;
+    + `<div class="tg-gap-row tg-gap-last"><span class="tg-gap-cost">Above $${from}</span><span class="tg-gap-inp"><i>+</i><input class="inp" data-gap="pct" inputmode="decimal" value="${Math.round(t.pct * 100)}" aria-label="Percent above the last tier"><i>%</i></span><span></span></div>`;
 }
 function temuGapFromTable() {
   const tb = $('tgGapTable'); if (!tb) return;
@@ -16862,7 +16883,7 @@ async function temuUpdateSrcInfo() {
     const source = $('temuSource')?.value || 'bulk';
     // v9.17 — one line: source · count · price ratio (added by the ready check) · listed warning. The store name lives in the setup card only.
     let auto = false; try { auto = source === 'master' && TemuSrcAutoLib && !TemuSrcUserPicked; } catch (_) { /* not set up yet */ }
-    const label = source === 'bulk' ? '🗂 Last hunt' : source === 'library_sel' ? '📚 Library (selected)' : source === 'sheet' ? '📄 Imported sheet' : auto ? '📚 Library (last hunt khaali)' : '📚 Library';    TemuSrcLine.warn = '';
+    const label = source === 'bulk' ? '🗂 Last hunt' : source === 'library_sel' ? '📚 Library (selected)' : source === 'sheet' ? (TemuSheetRows?.length && TemuSheetRows.every(r => /^zc_/.test(r.id || '')) ? '🏬 Store export (from Temu)' : '📄 Imported sheet') : auto ? '📚 Library (last hunt empty)' : '📚 Library';    TemuSrcLine.warn = '';
     if (source === 'sheet' && TemuLast?.asIs) { TemuSrcLine.base = `📄 ${TemuLast.name} · ${TemuLast.n} products (Temu file as-is)`; TemuSrcLine.px = ''; temuRenderSrcLine(); return; }
     let rows = [];
     if (source === 'bulk') rows = (BulkState?.results || []).filter(x => x.status !== 'fail');
@@ -16870,7 +16891,7 @@ async function temuUpdateSrcInfo() {
     else if (source === 'sheet' && TemuSheetRows) rows = TemuSheetRows;
     else rows = await getMasterRows();
     const n = rows.length;
-    if (!n) { TemuSrcLine.base = source === 'bulk' ? `${label} · 0 products — pehle Bulk → Hunt chalayein` : `${label} · 0 products`; TemuSrcLine.px = ''; temuRenderSrcLine(); return; }
+    if (!n) { TemuSrcLine.base = source === 'bulk' ? `${label} · 0 products — run Bulk → Hunt first` : `${label} · 0 products`; TemuSrcLine.px = ''; temuRenderSrcLine(); return; }
     const cfg = temuGetCfg();
     const store = temuActiveStoreName() || 'default';
     const skipOn = $('tgSkipListed') ? !!$('tgSkipListed').checked : cfg.skip_listed !== false; // v9.7.4: export ki tarah live checkbox
@@ -16937,7 +16958,7 @@ function temuUploadBtnText() {
   if (TemuUploadBusy) { t.textContent = 'Uploading...'; return; }
   const st = (temuActiveStoreName() || '').trim();
   t.textContent = 'Upload only';
-  const s = $('temuUploadStore'); if (s) s.textContent = st ? `Upload → ${st}` : 'Upload ke liye pehle store chunein';
+  const s = $('temuUploadStore'); if (s) s.textContent = st ? `Upload → ${st}` : 'Choose a store first to upload';
   const b = $('temuAutoBtn'); if (b) b.setAttribute('aria-label', st ? `Upload to Temu store ${st}` : 'Upload to Temu');
 }
 async function temuUpdateReady() {
@@ -18354,7 +18375,7 @@ function temuLimitTitle(title, max = 500) {
   chrome.storage.local.get(['zhunterTitleOptimizerInstruction']).then(saved => {
     if (!inp || inp.value.trim()) return;
     inp.value = saved.zhunterTitleOptimizerInstruction || '';
-    const legacy = ['Brand name hata do, generic Temu style title','Short aur clear title, max 60 characters','SEO keywords add karo, brand + product type + size shuru mein','Target audience aur use case add karo'];
+    const legacy = ['Remove the brand name, generic Temu style title','Short and clear title, max 60 characters','Add SEO keywords, brand + product type + size first','Add the target audience and use case'];
     for (const phrase of legacy) inp.value = inp.value.split(phrase).join('');
     inp.value = inp.value.replace(/^[\s;]+|[\s;]+$/g, '').replace(/;\s*;/g, ';');
     save();
@@ -18420,15 +18441,18 @@ async function temuLoadSavedPrompts() {
 (function initTemuTitleTabs() {
   const show = k => {
     document.querySelectorAll('.tt-tabs [data-tt]').forEach(b => { const on = b.dataset.tt === k; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
-    document.querySelectorAll('[data-tt-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.ttPane !== k));
+    const pane = k === 'chatgpt' || k === 'gemini' ? 'gpt' : k;
+    document.querySelectorAll('[data-tt-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.ttPane !== pane));
   };
   document.addEventListener('click', e => {
     const b = e.target.closest('.tt-tabs [data-tt]'); if (!b) return;
     show(b.dataset.tt);
+    // v9.22.47 — ChatGPT / Gemini are tabs of their own now; the (hidden) engine buttons still do the switching
+    if (b.dataset.tt === 'chatgpt' || b.dataset.tt === 'gemini') document.querySelector(`.tt-eng [data-teng="${b.dataset.tt}"]`)?.click();
     try { localStorage.setItem('zhTitleTab', b.dataset.tt); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
   });
-  let k = 'ai'; try { k = localStorage.getItem('zhTitleTab') || 'ai'; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
-  show(['ai', 'mine', 'gpt'].includes(k) ? k : 'ai');
+  let k = 'ai'; try { k = localStorage.getItem('zhTitleTab') || 'ai'; if (k === 'gpt') k = localStorage.getItem('zhTitleChatEngine') === 'gemini' ? 'gemini' : 'chatgpt'; } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
+  show(['ai', 'mine', 'chatgpt', 'gemini'].includes(k) ? k : 'ai');
 })();
 (function initTemuCustomPrompt() {
   const ta = $('temuTitleCustomPrompt');
@@ -18600,7 +18624,8 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
       const a = words(old), b = words(title); let common = 0; a.forEach(w => { if (b.has(w)) common++; });
       return { id, url: ZhGptBatch.urls?.[i] || '', old, title, warn: a.size > 2 && common === 0, on: true };
     });
-    pv.innerHTML = ZhGptPending.map((c, i) => `<label class="temu-gpt-row${c.warn ? ' warn' : ''}"><input type="checkbox" data-i="${i}" checked><div><div class="old">${i + 1}. ${esc(c.old)}</div><div class="new">→ ${esc(c.title)} <small>(${c.title.length})</small>${c.warn ? ' <span class="temu-gpt-bad">⚠ shares no word with the old title — please check</span>' : ''}</div></div></label>`).join('');
+    // v9.22.47 — old and new one under the other, labelled, with the length as a coloured chip (same limits as the card badge)
+    pv.innerHTML = ZhGptPending.map((c, i) => { const l = c.title.length; return `<label class="temu-gpt-row${c.warn ? ' warn' : ''}"><input type="checkbox" data-i="${i}" checked><span class="tgr-no">${i + 1}</span><div class="tgr-txt"><div class="old"><em>Old</em>${esc(c.old)}</div><div class="new"><em>New</em>${esc(c.title)}</div>${c.warn ? '<span class="temu-gpt-bad">⚠ shares no word with the old title — please check</span>' : ''}</div><span class="tgr-len ${l <= 240 ? 'ok' : l <= 500 ? 'warn' : 'over'}" title="Characters">${l}</span></label>`; }).join('');
     pv.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { ZhGptPending[Number(cb.dataset.i)].on = cb.checked; }));
     ap?.classList.remove('hidden');
   });
@@ -18633,6 +18658,56 @@ let ZhGptPending = null; // [{id, url, old, title, warn}]
       ZhGptPending = null; btn.classList.add('hidden'); $('temuGptPreview').innerHTML = ''; $('temuGptPaste').value = '';
     } catch (e) { toast('Titles were not applied: ' + (e?.message || e), 'warn'); }
     finally { btn.disabled = false; }
+  });
+})();
+// v9.22.47 — the ChatGPT / Gemini answer is checked in its own window: old vs new per product, ticks, length chips and an
+// Apply button that always stays in view. The existing preview box and Apply button are MOVED in (ids and handlers unchanged).
+(function initTemuTitleReview() {
+  const pv = $('temuGptPreview'), ap = $('temuGptApplyBtn'), sel = $('temuGptAutoMode');
+  // "Open tab" / "New chat" pills drive the hidden select the sender reads
+  const modeUi = () => document.querySelectorAll('.tt-mode [data-ttmode]').forEach(b => b.classList.toggle('active', b.dataset.ttmode === (sel?.value || 'tab')));
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.tt-mode [data-ttmode]'); if (!b || !sel) return;
+    sel.value = b.dataset.ttmode; sel.dispatchEvent(new Event('change', { bubbles: true })); modeUi();
+  });
+  modeUi();
+  if (!pv || !ap) return;
+  const m = document.createElement('div');
+  m.id = 'zhTtReview'; m.className = 'modal-back zh-ttr hidden';
+  m.innerHTML = `<div class="modal-box zh-ttr-box" role="dialog" aria-label="Check the titles">
+    <div class="zh-ttr-head"><div class="zh-ttr-t"><b>Check the titles</b><small class="zh-ttr-sub"></small></div>
+      <button type="button" class="zh-ttr-x" data-ttr="close" aria-label="Close">✕</button></div>
+    <div class="zh-ttr-tools"><button type="button" data-ttr="all">Tick all</button><button type="button" data-ttr="none">Untick all</button><span class="zh-ttr-legend"><i class="ok"></i>≤240 <i class="warn"></i>≤500 <i class="over"></i>500+</span></div>
+    <div class="zh-ttr-body"></div>
+    <div class="zh-ttr-foot"><button type="button" class="btn btn-ghost" data-ttr="close">Later</button><span class="zh-ttr-flex"></span></div>
+  </div>`;
+  document.body.appendChild(m);
+  m.querySelector('.zh-ttr-body').appendChild(pv);
+  m.querySelector('.zh-ttr-foot').appendChild(ap);
+  ap.classList.add('zh-ttr-apply');
+  const reopen = $('temuGptReopenBtn');
+  const count = () => {
+    const n = (ZhGptPending || []).filter(c => c.on).length, all = (ZhGptPending || []).length;
+    m.querySelector('.zh-ttr-sub').textContent = all ? `${n} / ${all} ticked · each line: old → new` : '';
+    ap.textContent = `Apply ${n} title${n === 1 ? '' : 's'}`; ap.disabled = !n;
+  };
+  const open = () => { count(); m.classList.remove('hidden'); reopen?.classList.add('hidden'); };
+  const close = () => { m.classList.add('hidden'); reopen?.classList.toggle('hidden', !ZhGptPending); };
+  // after the preview is drawn (its own click handler runs first) → show it in the window
+  $('temuGptPreviewBtn')?.addEventListener('click', () => { if (pv.innerHTML.trim()) open(); });
+  // after Apply: done → close (ZhGptPending is cleared by the Apply handler)
+  ap.addEventListener('click', () => setTimeout(() => { if (!ZhGptPending) { m.classList.add('hidden'); reopen?.classList.add('hidden'); } }, 0));
+  pv.addEventListener('change', () => count());
+  reopen?.addEventListener('click', open);
+  m.addEventListener('click', e => {
+    if (e.target === m) { close(); return; }
+    const b = e.target.closest('[data-ttr]'); if (!b) return;
+    if (b.dataset.ttr === 'close') close();
+    else if (b.dataset.ttr === 'all' || b.dataset.ttr === 'none') {
+      const on = b.dataset.ttr === 'all';
+      pv.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = on; if (ZhGptPending?.[Number(cb.dataset.i)]) ZhGptPending[Number(cb.dataset.i)].on = on; });
+      count();
+    }
   });
 })();
 async function temuAiBulkRewrite(action = 'rewrite') {
@@ -20304,7 +20379,7 @@ function initTemuExport() {
     if (e.target.closest('#temuExportBtn')) temuRunExport({ forUpload: false });
     if (e.target.closest('#temuMarkListedBtn')) (async () => {
       if (!TemuLast?.items?.length) return;
-      if (!(await zhAsk('Listed mark karo?', `${TemuLast.items.length} products as "listed"? (Only if you uploaded this file to Temu yourself)`, 'Mark listed'))) return;
+      if (!(await zhAsk('Mark as listed?', `${TemuLast.items.length} products as "listed"? (Only if you uploaded this file to Temu yourself)`, 'Mark listed'))) return;
       await temuMarkListed(TemuLast.items); TemuLast.marked = true;
       try {
         const queued = await msg({ action: 'SOURCING_QUEUE', snapshot: temuSourcingSnapshot() });
@@ -20332,13 +20407,13 @@ function initTemuExport() {
       try { temuUpdateSrcInfo(); temuSyncSrcSeg(); temuRenderReview(); } catch (_) { typeof zhQuiet === 'function' && zhQuiet(_); }
       toast('Loaded sheet removed — pick a source or import a new sheet', 'ok');
     }
-    if (e.target.closest('#temuHistClear')) (async () => { if (!(await zhAsk('History saaf karo?', 'Clear Temu upload history?', 'Clear'))) return; await temuHistSerial(() => new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r))); temuRenderHistory(); })();
+    if (e.target.closest('#temuHistClear')) (async () => { if (!(await zhAsk('Clear the history?', 'Clear Temu upload history?', 'Clear'))) return; await temuHistSerial(() => new Promise(r => chrome.storage.local.set({ temuUploadHistory: [] }, r))); temuRenderHistory(); })();
     if (e.target.closest('#tcSaveBtn')) temuSaveProfileFromForm();
     if (e.target.closest('#tgUnmarkLast')) (async () => {
       const lm = await new Promise(r => chrome.storage.local.get('temuLastMarked', x => r(x?.temuLastMarked || null)));
       if (!lm || !lm.sids?.length) { temuSaveMsg('No last upload record', 'warn'); return; }
       const when = new Date(lm.t).toLocaleString();
-      if (!(await zhAsk('Aakhri upload unmark karo?', `Remove ${lm.n} products (${when}) from the listed history of store "${lm.store}"?`, 'Unmark'))) return;
+      if (!(await zhAsk('Unmark the last upload?', `Remove ${lm.n} products (${when}) from the listed history of store "${lm.store}"?`, 'Unmark'))) return;
       const m = { ...temuListedMap() }; let n = 0;
       lm.sids.forEach(sid => { const k = lm.store + '|' + sid; if (m[k]) { delete m[k]; n++; } });
       const ok2 = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: m } });
@@ -20346,7 +20421,7 @@ function initTemuExport() {
       else temuSaveMsg('Unmark fail', 'warn');
     })();
     if (e.target.closest('#tgClearListed')) (async () => {
-      if (!(await zhAsk('Listed history saaf karo?', 'Clear listed history? (The extension will forget which products were uploaded before)', 'Clear'))) return;
+      if (!(await zhAsk('Clear the listed history?', 'Clear listed history? (The extension will forget which products were uploaded before)', 'Clear'))) return;
       const ok2 = await msg({ action: 'UPDATE_SETTINGS', settings: { temuListed: {} } });
       if (ok2?.success) { State.data.settings.temuListed = {}; toast('Listed history cleared', 'ok'); }
     })();
@@ -21421,8 +21496,8 @@ function zhStudioRender(dir = 0) {
             <button type="button" data-pm="pack" class="${it.promptMode === 'pack' ? 'on' : ''}">Pack prompt${it.pack > 1 ? ` (${it.pack})` : ''}</button>
           </div>
           ${it.promptMode === 'pack' ? `<div class="zs-seg" title="If the image is not good, try the other pack prompt">
-            <button type="button" data-ps="new" class="${it.packStyle === 'new' ? 'on' : ''}">Naya</button>
-            <button type="button" data-ps="old" class="${it.packStyle === 'old' ? 'on' : ''}">Purana (white bg)</button>
+            <button type="button" data-ps="new" class="${it.packStyle === 'new' ? 'on' : ''}">New</button>
+            <button type="button" data-ps="old" class="${it.packStyle === 'old' ? 'on' : ''}">Old (white bg)</button>
           </div>` : ''}
           <select id="zsLibSel" class="zs-sel" title="Use a prompt from your library for THIS product"><option value="">📚 Library…</option>${zhLibAll().filter(e => e.text).map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
           <button type="button" class="zs-btn" id="zsCopyPrompt">📝 Copy prompt</button>

@@ -1507,3 +1507,84 @@ body:not(.zh-temu-on) :is(#temuImgStepperModal, .zh-job-chip[data-job="img"]) { 
 .rp-legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; text-align: left; }
 .rp-legend .rp-svg { width: 12px; height: 12px; color: var(--ink-2); }
 .rp-legend + .rp-legend { margin-top: -6px; }
+
+/* v9.22.47 — Temu Export: Title Optimizer (4 ways, chat pills, a window to check the answer) */
+.tt-tabs.tt-tabs4 { grid-template-columns: repeat(4, 1fr); }
+.tt-tabs button { font-size: 11.5px; }
+.tt-tabs button.active { color: #04141c; background: var(--accent); border-color: var(--accent); }
+.tt-pane { gap: 10px; }
+.tt-help { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.tt-mode { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line-2); }
+.tt-mode-lbl { padding: 0 8px 0 6px; font: 700 10px var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--ink-3); }
+.tt-mode button { flex: 1; height: 28px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-2); font: 600 11.5px var(--font); cursor: pointer; }
+.tt-mode button:hover { color: var(--ink); background: var(--surface); }
+.tt-mode button.active { color: var(--ink); background: var(--surface); border-color: var(--accent); }
+.tt-pane .temu-title-main { height: 38px; border-radius: 9px; font-weight: 700; }
+.tt-reopen { align-self: stretch; height: 30px; font: 600 11.5px var(--font); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px dashed var(--accent); border-radius: 8px; cursor: pointer; }
+.tt-reopen.hidden { display: none; }
+.tt-more { padding-top: 10px; }
+.tt-more summary { list-style: none; color: var(--ink-2); }
+.tt-more summary::-webkit-details-marker { display: none; }
+.tt-more summary::before { content: '▸'; display: inline-block; width: 12px; color: var(--ink-3); transition: transform .15s; }
+.tt-more[open] > summary::before { transform: rotate(90deg); }
+.tt-steps { padding: 10px 10px 10px 26px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; }
+.temu-ai-bar-inp-row > .temu-title-help:last-child { font-size: 10.5px; color: var(--ink-3); text-align: center; }
+
+.zh-ttr { z-index: 1600 !important; align-items: stretch; }
+.zh-ttr.hidden { display: none !important; }
+.zh-ttr-box { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 640px !important; max-height: calc(100vh - 24px); margin: auto; padding: 0 !important; overflow: hidden; border-radius: 14px !important; color: var(--ink); background: var(--surface); }
+.zh-ttr-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-2); }
+.zh-ttr-t { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.zh-ttr-t b { font-size: 15px; }
+.zh-ttr-sub { font-size: 11.5px; color: var(--ink-3); }
+.zh-ttr-x { flex: none; width: 30px; height: 30px; padding: 0; cursor: pointer; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line-3); border-radius: 8px; }
+.zh-ttr-tools { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line-2); }
+.zh-ttr-tools button { height: 26px; padding: 0 10px; font: 600 11px var(--font); color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line-3); border-radius: 7px; cursor: pointer; }
+.zh-ttr-tools button:hover { color: var(--ink); border-color: var(--accent); }
+.zh-ttr-legend { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--ink-3); }
+.zh-ttr-legend i { display: inline-block; width: 8px; height: 8px; margin-left: 4px; border-radius: 2px; }
+.zh-ttr-legend i.ok, .tgr-len.ok { background: #16a34a; }
+.zh-ttr-legend i.warn, .tgr-len.warn { background: #d97706; }
+.zh-ttr-legend i.over, .tgr-len.over { background: #dc2626; }
+.zh-ttr-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px; }
+.zh-ttr-body .temu-gpt-preview { max-height: none; overflow: visible; margin: 0; font-size: 12px; }
+.zh-ttr-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line-2); background: var(--surface); }
+.zh-ttr-flex { flex: 1; }
+.zh-ttr-foot .zh-ttr-apply { height: 36px; padding: 0 18px; font-size: 13px; font-weight: 700; border-radius: 9px; }
+.zh-ttr-foot .zh-ttr-apply.hidden { display: none; }
+.zh-ttr .temu-gpt-row { display: grid; grid-template-columns: 18px 22px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 10px 6px; border-bottom: 1px solid var(--line-2); border-radius: 6px; cursor: pointer; }
+.zh-ttr .temu-gpt-row:hover { background: var(--surface-2); }
+.zh-ttr .temu-gpt-row input { margin: 2px 0 0; accent-color: var(--accent); }
+.zh-ttr .temu-gpt-row:has(input:not(:checked)) .tgr-txt { opacity: .45; }
+.tgr-no { display: grid; place-items: center; height: 20px; font-size: 10.5px; font-weight: 700; color: var(--ink-2); background: var(--surface-3); border-radius: 10px; }
+.tgr-txt { display: flex; flex-direction: column; gap: 4px; min-width: 0; line-height: 1.45; }
+.zh-ttr .temu-gpt-row .old { opacity: 1; text-decoration: none; font-size: 11.5px; color: var(--ink-3); }
+.zh-ttr .temu-gpt-row .new { font-weight: 600; color: var(--ink); }
+.tgr-txt em { display: inline-block; min-width: 46px; margin-right: 6px; padding: 0 5px; font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; line-height: 16px; text-align: center; text-transform: uppercase; border-radius: 4px; vertical-align: 1px; }
+.tgr-txt .old em { color: var(--ink-3); background: var(--surface-3); }
+.tgr-txt .new em { color: #04141c; background: var(--accent); }
+.tgr-len { min-width: 30px; padding: 0 6px; font-size: 10.5px; font-weight: 700; line-height: 18px; text-align: center; color: #fff; border-radius: 9px; }
+.zh-ttr .temu-gpt-row.warn { background: rgba(245, 158, 11, .08); }
+.zh-ttr .temu-gpt-bad { font-size: 11px; color: #f59e0b; }
+
+/* v9.22.47 — Temu Export: steps strip, store / source cards, Image Studio and the bottom part */
+.temu-flow { gap: 6px !important; }
+.temu-flow .tf-step { border-radius: 10px !important; }
+.temu-src-seg button { border-radius: 9px !important; }
+.temu-src-info-badge { border-radius: 9px !important; }
+.temu-img-bar-controls { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px 10px !important; }
+.temu-img-bar-controls .temu-img-sel-wrap { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.temu-img-bar-controls .temu-img-sel { width: 100%; min-width: 0; height: 34px; border-radius: 8px; }
+.temu-img-sel-label { font-size: 10px !important; font-weight: 700 !important; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-3) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.temu-img-bar-controls .temu-img-edit-btn { grid-column: 1 / -1; height: 40px; border-radius: 10px; font-size: 13px; font-weight: 700; }
+.temu-img-pick-row { border-radius: 9px; }
+.temu-main-acts { gap: 10px !important; }
+.temu-main-acts .btn { height: 46px; border-radius: 11px; font-size: 14px; font-weight: 700; }
+.temu-batch-name-row .inp { height: 34px; border-radius: 9px; }
+.temu-ready { border-radius: 10px !important; }
+.temu-more-tools { border-radius: 10px; }
+.temu-more-tools > summary { display: flex; align-items: center; gap: 8px; }
+.temu-more-tools > summary small { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.temu-more-tools[open] > summary small { visibility: hidden; }
+.temu-more-tools .temu-actions-sub-bar { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
+.temu-more-tools .temu-sub-act-btn { justify-content: center; height: 32px; padding: 0 6px; border-radius: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

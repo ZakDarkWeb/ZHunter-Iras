@@ -75,7 +75,7 @@
               </svg>
             </div>
             <h3 class="img-tab-empty-title">No product images yet</h3>
-            <p class="img-tab-empty-sub">Koi product page kholein, phir <b>Hunt images</b> dabayen.</p>
+            <p class="img-tab-empty-sub">Open a product page, then press <b>Hunt images</b>.</p>
           </div>
         </div>
         <div id="imgScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
@@ -110,7 +110,7 @@
           <div class="empty" id="vidEmptyState">
             <div class="empty-ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></div>
             <h3 class="img-tab-empty-title">No videos yet</h3>
-            <p class="img-tab-empty-sub">Video wala product page kholein, phir Hunt videos dabayen.</p>
+            <p class="img-tab-empty-sub">Open a product page with a video, then press Hunt videos.</p>
           </div>
         </div>
         <div id="vidScanningState" class="scanning hidden"><span class="spinner"></span><span>Scanning page…</span></div>
@@ -313,7 +313,7 @@
             <!-- v9.22.6 — how often a product was exported / uploaded -->
             <button type="button" class="filter-chip filter-chip-exp" data-filter="exp1" title="1 dafa export ya upload hue products">⬇ 1x (<span id="masterExpCnt-exp1">0</span>)</button>
             <button type="button" class="filter-chip filter-chip-exp" data-filter="exp2" title="2 dafa export ya upload hue products">⬇ 2x (<span id="masterExpCnt-exp2">0</span>)</button>
-            <button type="button" class="filter-chip filter-chip-exp" data-filter="exp3" title="3 ya zyada dafa export ya upload hue products">⬇ 3x+ (<span id="masterExpCnt-exp3">0</span>)</button>
+            <button type="button" class="filter-chip filter-chip-exp" data-filter="exp3" title="Products exported or uploaded 3 or more times">⬇ 3x+ (<span id="masterExpCnt-exp3">0</span>)</button>
           </div>
           <div class="filter-chips-tools">
             <button type="button" class="filter-chip filter-chip-warn" data-filter="problems" id="masterFilterProblems" title="Show only items with errors, missing price, or warnings">⚠️ Problems (<span id="masterProblemCount">0</span>)</button>
@@ -334,7 +334,7 @@
         <!-- v9.22.6 — shown on the ⬇ 1x / 2x / 3x+ filters -->
         <div id="masterExpBar" class="lib-exp-bar" hidden>
           <span id="masterExpBarTxt" class="lib-exp-bar-txt"></span>
-          <button id="masterExpDelBtn" class="btn btn-ghost btn-xs lib-exp-del" type="button" title="Sirf yeh dikhne wale products Library se delete honge (pehle poochhega, Undo bhi milega)">🗑 Inhein delete karo</button>
+          <button id="masterExpDelBtn" class="btn btn-ghost btn-xs lib-exp-del" type="button" title="Only the products shown here are deleted from the Library (it asks first, and Undo is offered)">🗑 Delete these</button>
         </div>
         <div id="masterRowsList" class="tbl">
           <div class="empty lib-empty-onboard">
@@ -354,7 +354,7 @@
                 <span class="lib-step-txt">Products appear here — export XLSX or upload to Temu</span>
               </div>
             </div>
-            <p class="lib-empty-hint">Library abhi khaali hai. Shuru karne ke liye upar wale steps karein.</p>
+            <p class="lib-empty-hint">The Library is empty. Do the steps above to start.</p>
           </div>
         </div>
         <div class="batch-bar hidden" id="masterBulkBar">
@@ -376,7 +376,7 @@
           </div>
         </div>
         <div class="rh-header"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Recent Hunts</span><button id="rhClearBtn" class="rh-clear-btn" type="button" title="Remove every hunt from this history (products stay in the Library)">Clear history</button></div>
-        <div id="masterBatchList" class="rh-list"><div class="rh-empty"><p>Abhi koi hunt nahi — pehle kuch tabs hunt karein.</p></div></div>
+        <div id="masterBatchList" class="rh-list"><div class="rh-empty"><p>No hunts yet — hunt some tabs first.</p></div></div>
         <div class="card-actions">
           <div class="dd" style="flex:1">
             <button id="masterExportMenuBtn" class="btn btn-primary btn-lg" type="button" aria-haspopup="menu">
@@ -394,7 +394,7 @@
               <div class="sep"></div>
               <button id="masterDlZipBtn" type="button" disabled>ZIP — sheet + images<small>selected or all</small></button>
               <div class="mh">Temu</div>
-              <button id="masterTemuBtn" type="button" disabled>Upload to Temu store…<small>selected or all</small></button>
+              <button id="masterTemuBtn" type="button" disabled>Upload to Temu store…<small>selected or all</small></button>
             </div>
           </div>
           <button id="masterImportBtn" class="btn btn-ghost" type="button" title="Import CSV, XLSX or JSON">Import</button>
@@ -414,34 +414,34 @@
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Visible Tabs</span>
       <div class="set" id="visibleTabsSet">
-        <div class="it"><div class="l"><b>Temu Export</b><span>Upload, Temu settings aur categories wali window</span></div><button id="settingsTemuOpenBtn" class="btn btn-primary btn-xs" type="button">Open Temu Export</button></div>
-        <div class="it"><div class="l"><b>Hunt tab</b><span>Ek page ki images aur videos hunt karne wala tab dikhao</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabHunt" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Bulk tab</b><span>Kai tabs ek saath hunt karne wala tab dikhao</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabBulk" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Library tab</b><span>Hunt kiye products aur export wala tab dikhao</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabLibrary" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Settings tab</b><span>Upar Settings ka tab dikhao</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabSettings" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Temu Export</b><span>The window with upload, Temu settings and categories</span></div><button id="settingsTemuOpenBtn" class="btn btn-primary btn-xs" type="button">Open Temu Export</button></div>
+        <div class="it"><div class="l"><b>Hunt tab</b><span>Show the tab that hunts one page's images and videos</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabHunt" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Bulk tab</b><span>Show the tab that hunts many tabs at once</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabBulk" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Library tab</b><span>Show the tab with hunted products and export</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabLibrary" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Settings tab</b><span>Show the Settings tab at the top</span></div><label class="sw-wrap"><input type="checkbox" data-setting="showTabSettings" checked><span class="sw"></span></label></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Bulk hunt</span>
       <div class="set" id="spQuickSettings">
-        <div class="it"><div class="l"><b>Tabs hunted at once</b><span>Kitne background / load hote tabs ek saath load hon. Pehle se khule tabs foran parhe jate hain. Zyada = tez, lekin computer par zyada bojh</span></div>
+        <div class="it"><div class="l"><b>Tabs hunted at once</b><span>How many background / loading tabs load at the same time. Tabs that are already open are read at once. More = faster, but more load on the computer</span></div>
           <select class="sel" data-setting="bulkParallelTabs" style="width:auto;min-width:74px;">
             <option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="12">12</option>
           </select></div>
-        <div class="it"><div class="l"><b>Queue links at once</b><span>Queue hunt itne links ek saath kholta hai. 2 tez aur mehfooz; 1 sab se dheema lekin sab se naram. Load hota link saamne laya jata hai taake jaldi load ho</span></div>
+        <div class="it"><div class="l"><b>Queue links at once</b><span>Queue hunt opens this many links at once. 2 is fast and safe; 1 is the slowest but the gentlest. A loading link is brought to the front so it loads quickly</span></div>
           <select class="sel" data-setting="queueParallelTabs" style="width:auto;min-width:74px;">
             <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
           </select></div>
-        <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>Timeout / error par thora ruk kar ek dafa dobara try</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>AI images: pause when the screen is locked</b><span>ON = lock par extension khud dekhta hai: Chrome Desktop ke "Chrome (ZHunter background)" shortcut se khula hai to kaam chalta rehta hai, warna run ruk kar unlock par dobara chalta hai. OFF = kabhi nahi rukta, aur saare tabs ek saath kaam karte hain (sirf us shortcut wale Chrome ke saath)</span></div><label class="sw-wrap"><input type="checkbox" id="setLockPause" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Flow: auto Generate click</b><span>ON = extension khud Generate dabata hai (Chrome debugger use hota hai). OFF = Generate aap khud dabayen; debugger ki patti nahi aati</span></div><label class="sw-wrap"><input type="checkbox" id="setFlowDbg" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Fail hone wale tabs hamesha khule rehte hain</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Sirf image links; Master ZIP mein images nahi hongi. Hunt 3–4× tez</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Har download (sheet, ZIP, images) Downloads → <b>ZHunter Export</b> → aaj ki date wale folder mein jata hai (jaise ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>Sirf us tab par patli border + label jahan ZHunter kaam kar raha ho ("ZHunter · Hunting…", "ZHunter · Uploading to Temu · 45%") — kaam khatam hone ke kuch second baad hat jati hai. Baaki Temu / Walmart / Sam's pages par koi border nahi. Off = kahin bhi nahi.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Auto-retry failed tabs</b><span>On a timeout / error: wait a little, then try once more</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoRetry" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>AI images: pause when the screen is locked</b><span>ON = on a lock the extension checks by itself: if Chrome was opened with the desktop shortcut "Chrome (ZHunter background)", the work goes on, otherwise the run pauses and starts again after unlock. OFF = never pauses, and all tabs work at the same time (only with Chrome opened from that shortcut)</span></div><label class="sw-wrap"><input type="checkbox" id="setLockPause" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Flow: auto Generate click</b><span>ON = the extension presses Generate itself (it uses the Chrome debugger). OFF = you press Generate yourself; no debugger bar appears</span></div><label class="sw-wrap"><input type="checkbox" id="setFlowDbg" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Close tabs after a successful hunt</b><span>Tabs that fail always stay open</span></div><label class="sw-wrap"><input type="checkbox" data-setting="bulkAutoCloseTabs"><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Fast mode — skip image downloads</b><span>Image links only; the Master ZIP will have no images. Hunting is 3–4× faster</span></div><label class="sw-wrap"><input type="checkbox" id="zhFastModeToggle" data-setting="bulkSkipImageDownload"><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Export folder — ZHunter Export</b><span>Every download (sheet, ZIP, images) goes to Downloads → <b>ZHunter Export</b> → a folder with today's date (e.g. ZHunter Export/2026-09-07/)</span></div><label class="sw-wrap"><input type="checkbox" id="zhExportFolderToggle" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Page frame — coloured border</b><span>A thin border + label only on the tab where ZHunter is working ("ZHunter · Hunting…", "ZHunter · Uploading to Temu · 45%") — it goes away a few seconds after the work ends. No border on other Temu / Walmart / Sam's pages. Off = nowhere.</span></div><label class="sw-wrap"><input type="checkbox" id="zhPageFrameToggle" checked><span class="sw"></span></label></div>
         <!-- v9.20.12 — the border look settings fold away (they were a long block) -->
         <details class="zh-frame-more">
         <summary>Border look — colour, style, speed, thickness</summary>
         <div class="it zh-frame-setting-row" id="zhFramePreviewRow">
-          <div class="l"><b>Preview</b><span id="zhFramePreviewNote">Auto: har site / har Temu store ka apna rang · kaam ke dauran cyan → hara · error laal</span></div>
+          <div class="l"><b>Preview</b><span id="zhFramePreviewNote">Auto: each site / each Temu store has its own colour · cyan → green while working · red on error</span></div>
           <div class="zh-fprev-wrap">
             <div id="zhFramePreview" class="zh-fprev"><div class="zh-fprev-beam"></div>
               <div class="zh-fprev-page"><i></i><i></i><i></i></div>
@@ -456,7 +456,7 @@
           </div>
         </div>
         <div class="it zh-frame-setting-row" id="zhFrameColorRow">
-          <div class="l"><b>Border Shine Color</b><span>Auto = ZHunter khud rang chunta hai · My colour = hamesha aap ka rang (koi preset ya picker dabayein)</span></div>
+          <div class="l"><b>Border Shine Color</b><span>Auto = ZHunter picks the colour · My colour = always your colour (press a preset or the picker)</span></div>
           <div class="seg zh-seg-sm" id="zhFrameColorModeSeg" style="margin-bottom:8px">
             <button type="button" class="zh-cmode-btn active" data-cmode="auto">Auto</button>
             <button type="button" class="zh-cmode-btn" data-cmode="custom">My colour</button>
@@ -476,7 +476,7 @@
           </div>
         </div>
         <div class="it zh-frame-setting-row" id="zhFrameStyleRow">
-          <div class="l"><b>Border Thickness &amp; Glow</b><span>Frame ki motai, roshni aur animation</span></div>
+          <div class="l"><b>Border Thickness &amp; Glow</b><span>The frame's thickness, glow and animation</span></div>
           <div class="zh-frame-controls-stack">
             <div class="zh-frame-sub-row">
               <span class="zh-sub-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m13 2-8 12h6l-1 8 9-13h-6z"/></svg> Moving / Animated Border:</span>
@@ -529,17 +529,17 @@
           </div>
         </div>
         </details>
-        <div class="it"><div class="l"><b>Auto-skip duplicates</b><span>Jo complete products pehle se Library mein hain, unke tabs ka tick hata do</span></div><label class="sw-wrap"><input type="checkbox" data-setting="autoSkipDuplicates"><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Auto-skip duplicates</b><span>Untick the tabs of complete products that are already in the Library</span></div><label class="sw-wrap"><input type="checkbox" data-setting="autoSkipDuplicates"><span class="sw"></span></label></div>
         <div class="it"><div class="l"><b>Sheet filename prefix</b></div><input class="inp" style="width:120px;font-family:var(--mono)" data-setting="bulkFilenamePrefix" maxlength="40" placeholder="zhunter_"></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><rect x="3" y="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg> Images</span>
       <div class="set">
         <div class="it"><div class="l"><b>Format</b></div><select class="sel" style="width:120px" data-setting="imageFormat"><option value="original">Original</option><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WebP</option></select></div>
-        <div class="it"><div class="l"><b>Ratio</b><span>Temu aur marketplaces ke liye 1:1 square (kam az kam 800x800)</span></div><select class="sel" style="width:120px" data-setting="imageRatio"><option value="original">Original</option><option value="1:1">1:1 square (Temu)</option><option value="3:4">3:4</option><option value="4:3">4:3</option></select></div>
-        <div class="it"><div class="l"><b>Padding colour</b><span>Image ke khaali kinaron ka rang</span></div><select class="sel" style="width:120px" data-setting="imageBg"><option value="original">Transparent</option><option value="white">White</option></select></div>
-        <div class="it"><div class="l"><b>Keep files under 5 MB</b><span>Bari images ko chhota kar ke save karo</span></div><label class="sw-wrap"><input type="checkbox" data-setting="imageMax5MB" checked><span class="sw"></span></label></div>
-        <div class="it"><div class="l"><b>Max images to hunt (Temu upload)</b><span>Har product ki zyada se zyada images (hunt aur upload). 3 = tez hunt</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="1" max="15" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="maxHuntImages" placeholder="3" value="3"><span class="hint">imgs</span></div></div>
-        <div class="it"><div class="l"><b>Minimum size</b><span>Is se chhoti images chhor do (0 = sab)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="0" max="4000" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="imageMinSize" placeholder="0"><span class="hint">px</span></div></div>
+        <div class="it"><div class="l"><b>Ratio</b><span>1:1 square for Temu and marketplaces (at least 800x800)</span></div><select class="sel" style="width:120px" data-setting="imageRatio"><option value="original">Original</option><option value="1:1">1:1 square (Temu)</option><option value="3:4">3:4</option><option value="4:3">4:3</option></select></div>
+        <div class="it"><div class="l"><b>Padding colour</b><span>The colour of the image's empty edges</span></div><select class="sel" style="width:120px" data-setting="imageBg"><option value="original">Transparent</option><option value="white">White</option></select></div>
+        <div class="it"><div class="l"><b>Keep files under 5 MB</b><span>Save big images smaller</span></div><label class="sw-wrap"><input type="checkbox" data-setting="imageMax5MB" checked><span class="sw"></span></label></div>
+        <div class="it"><div class="l"><b>Max images to hunt (Temu upload)</b><span>The most images per product (hunt and upload). 3 = fast hunt</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="1" max="15" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="maxHuntImages" placeholder="3" value="3"><span class="hint">imgs</span></div></div>
+        <div class="it"><div class="l"><b>Minimum size</b><span>Skip images smaller than this (0 = all)</span></div><div style="display:flex;align-items:center;gap:4px;"><input class="inp" type="number" min="0" max="4000" style="width:80px;text-align:center;font-family:var(--mono);" data-setting="imageMinSize" placeholder="0"><span class="hint">px</span></div></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg> Data</span>
       <div class="set">
@@ -550,21 +550,21 @@
           <div class="zh-store-foot"><span id="spStorageFree" class="zh-store-free"></span><button class="btn btn-secondary btn-xs" type="button" id="spCleanBtn" disabled>Clean up…</button></div>
         </div>
         <!-- error log: real code problems that used to be hidden (error_log.js) -->
-        <div class="it"><div class="l"><b>Error log</b><span>Extension ke andar ki asli ghaltiyan (pehle chhupi rehti thin). Koi kaam theek na chale to "Copy" kar ke bhej dein</span></div><span id="zhErrLogCount" class="zh-elog-count">No problems</span></div>
+        <div class="it"><div class="l"><b>Error log</b><span>The real errors inside the extension (they used to stay hidden). If something does not work, press "Copy" and send it</span></div><span id="zhErrLogCount" class="zh-elog-count">No problems</span></div>
         <div class="zh-elog" id="zhErrLogBox">
           <div id="zhErrLogList" class="zh-elog-list"><div class="zh-elog-empty">Loading…</div></div>
           <div class="zh-elog-foot"><button class="btn btn-ghost btn-xs" type="button" id="zhErrLogCopy">Copy</button><button class="btn btn-ghost btn-xs" type="button" id="zhErrLogClear">Clear</button></div>
         </div>
-        <div class="it"><div class="l"><b>Backup everything</b><span>Saara data aur settings ek JSON file mein download</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
-        <div class="it"><div class="l"><b>Restore backup</b><span>ZHunter backup file (.json) wapas lao. Products, queue aur history is se badal jayenge</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRestoreBtn">Restore</button><input id="spRestoreFile" type="file" accept=".json" style="display:none"></div>
-        <div class="it"><div class="l"><b>Reset Library</b><span>Hunt kiye products aur history mit jayegi</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
-        <div class="it"><div class="l"><b>Wipe everything</b><span>Products, queue aur history sab mit jayega</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spWipeAllBtn">Wipe all</button></div>
+        <div class="it"><div class="l"><b>Backup everything</b><span>Download all data and settings in one JSON file</span></div><button class="btn btn-ghost btn-xs" type="button" id="spBackupDataBtn">Backup</button></div>
+        <div class="it"><div class="l"><b>Restore backup</b><span>Bring back a ZHunter backup file (.json). Products, queue and history are replaced by it</span></div><button class="btn btn-ghost btn-xs" type="button" id="spRestoreBtn">Restore</button><input id="spRestoreFile" type="file" accept=".json" style="display:none"></div>
+        <div class="it"><div class="l"><b>Reset Library</b><span>Hunted products and history are deleted</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spResetLibraryBtn">Reset</button></div>
+        <div class="it"><div class="l"><b>Wipe everything</b><span>Products, queue and history are all deleted</span></div><button class="btn btn-ghost btn-xs btn-danger" type="button" id="spWipeAllBtn">Wipe all</button></div>
       </div>
       <span class="lbl settings-lbl"><svg class="i i-xs" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg> AI Engine</span>
       <div class="set" id="spGroqSettings">
         <div class="it">
           <div style="width:100%;display:grid;gap:9px;">
-            <div class="l"><b>Groq API Keys</b><span>Save karne se purani keys ki jagah yeh keys aa jati hain</span></div>
+            <div class="l"><b>Groq API Keys</b><span>Saving replaces the old keys with these keys</span></div>
             <select id="groqKeyMode" class="sel" aria-label="API key mode"><option value="single">Single key</option><option value="multiple">Multiple keys</option></select>
             <input type="password" id="groqApiKeyInput" class="inp" autocomplete="off" spellcheck="false" placeholder="gsk_… Groq · sk-or-… OpenRouter · AIza…/AQ.… Gemini" aria-label="Single AI API key" />
             <textarea id="groqApiKeysInput" class="inp keys-masked hidden" rows="4" autocomplete="off" spellcheck="false" placeholder="Paste one API key per line" aria-label="Multiple Groq API keys" style="width:100%;resize:vertical;font-family:var(--mono);"></textarea>
@@ -579,7 +579,7 @@
           </div>
         </div>
         <div class="it">
-          <div class="l"><b>AI Model</b><span>Groq par chalne wala AI model</span></div>
+          <div class="l"><b>AI Model</b><span>The AI model that runs on Groq</span></div>
           <select id="groqModelSel" class="sel" style="width:160px">
             <option value="qwen/qwen3.8-27b" selected>Qwen 3.8 27B (Fast & Accurate)</option>
             <option value="openai/gpt-oss-20b">GPT OSS 20B — Balanced</option>
@@ -961,7 +961,7 @@
               <div class="tsc-item"><span class="tsc-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10V6l2-3h14l2 3v4M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 13v8h14v-8M9 21v-6h6v6"/></svg></span><div class="tsc-txt"><b id="tscStore">—</b><small class="tsc-tpl">📄 <span id="tscTpl">—</span> · ready</small></div></div>
               <div class="tsc-actions">
                 <button type="button" class="tsc-btn" id="tscTestBtn" title="Temu Seller Center connection test"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Test</button>
-                <button type="button" class="tsc-btn" id="tscChangeBtn" title="Store / template badlein">Change</button>
+                <button type="button" class="tsc-btn" id="tscChangeBtn" title="Change store / template">Change</button>
               </div>
             </div>
             <div class="temu-setup-header">
@@ -1069,17 +1069,19 @@
               </div>
               <div class="temu-ai-bar-inp-row temu-coll-body" data-coll-body="ai">
                 <!-- 19 Oct 2026 — one way at a time: 3 tabs, each with one line of help and one main button (all ids unchanged) -->
-                <div class="tt-tabs" role="tablist" aria-label="How to change the titles">
-                  <button type="button" role="tab" data-tt="ai" class="active">⚡ AI rewrite</button>
-                  <button type="button" role="tab" data-tt="mine">✏️ My prompt</button>
-                  <button type="button" role="tab" data-tt="gpt" title="Send the titles to ChatGPT or Gemini">💬 GPT / Gemini</button>
+                <!-- v9.22.47 — four ways in one row: ChatGPT and Gemini are their own tabs (both use the "gpt" pane) -->
+                <div class="tt-tabs tt-tabs4" role="tablist" aria-label="How to change the titles">
+                  <button type="button" role="tab" data-tt="ai" class="active">AI rewrite</button>
+                  <button type="button" role="tab" data-tt="mine">My prompt</button>
+                  <button type="button" role="tab" data-tt="chatgpt" title="Send the titles to ChatGPT">ChatGPT</button>
+                  <button type="button" role="tab" data-tt="gemini" title="Send the titles to Gemini">Gemini</button>
                 </div>
 
                 <!-- 1 · AI rewrite (Groq) -->
                 <div class="tt-pane" data-tt-pane="ai">
-                  <p class="tt-help">AI har <b>ticked</b> product ka title aap ke Temu format mein dobara likhta hai. (Groq key: Settings → Groq API Keys)</p>
+                  <p class="tt-help">The AI rewrites the title of every <b>ticked</b> product in your Temu format. (Groq key: Settings → Groq API Keys)</p>
                   <button id="temuAiBulkRewriteBtn" class="btn btn-primary temu-title-main" type="button" title="Rewrite the checked products' titles in your Temu title format">AI Title Rewrite</button>
-                  <div class="tt-sub-lbl">Ya sirf ek chhota kaam:</div>
+                  <div class="tt-sub-lbl">Or just one small job:</div>
                   <div class="temu-title-tools">
                     <button id="temuTitleShortenBtn" class="btn btn-secondary" type="button" title="Shorten checked titles to 60 characters">Shorten Title <span>60 max</span></button>
                     <button id="temuTitleRemoveBrandBtn" class="btn btn-secondary" type="button" title="Remove brand names from checked titles while preserving other wording">Remove Brand</button>
@@ -1089,7 +1091,7 @@
 
                 <!-- 2 · My prompt (only your instruction, no Temu format) -->
                 <div class="tt-pane hidden" data-tt-pane="mine">
-                  <p class="tt-help">Apna hukam likhein — AI har ticked title par <b>sirf wahi</b> badlega jo aap ne likha.</p>
+                  <p class="tt-help">Write your instruction — on every ticked title the AI changes <b>only</b> what you wrote.</p>
                   <textarea id="temuTitleCustomPrompt" class="inp tt-ta" rows="3" placeholder="e.g. Put the brand first, remove the size, end with 'Golf Balls'. Max 120 characters."></textarea>
                   <button id="temuTitleCustomBtn" class="btn btn-primary temu-title-main" type="button" title="Edit the checked products' titles with your prompt (the default Temu format is skipped)">AI Edit with my prompt</button>
                   <div class="tt-saved">
@@ -1102,26 +1104,31 @@
                 <!-- 3 · ChatGPT (auto first, manual copy / paste folded) -->
                 <div class="tt-pane hidden" data-tt-pane="gpt">
                   <div class="temu-gpt" id="temuGptBox">
-                    <div class="tt-eng" role="radiogroup" aria-label="Which AI chat">
+                    <div class="tt-eng" role="radiogroup" aria-label="Which AI chat" hidden>
                       <button type="button" data-teng="chatgpt" class="active">ChatGPT</button>
                       <button type="button" data-teng="gemini">Gemini</button>
                     </div>
-                    <p class="tt-help">Ticked titles <b id="temuTitleEngName">ChatGPT</b> ko bhejo, jawab khud wapas aata hai — phir <b>Apply titles</b> dabayein.</p>
-                    <div class="tt-saved">
-                      <select id="temuGptAutoMode" class="temu-img-sel" aria-label="Which chat">
-                        <option value="tab">My open chat (tab must be open)</option>
-                        <option value="new">New chat + send prompt first</option>
-                      </select>
+                    <p class="tt-help">The ticked titles go to <b id="temuTitleEngName">ChatGPT</b> and the answer comes back by itself. Then check old and new titles in a window and press <b>Apply</b>.</p>
+                    <div class="tt-mode" role="radiogroup" aria-label="Which chat">
+                      <span class="tt-mode-lbl">Chat</span>
+                      <button type="button" data-ttmode="tab" class="active" title="Your open chat tab is used (it must be open)">Open tab</button>
+                      <button type="button" data-ttmode="new" title="A new chat opens and gets the title prompt first">New chat</button>
                     </div>
+                    <select id="temuGptAutoMode" class="temu-img-sel" aria-label="Which chat" hidden>
+                      <option value="tab">My open chat (tab must be open)</option>
+                      <option value="new">New chat + send prompt first</option>
+                    </select>
                     <button id="temuGptAutoBtn" class="btn btn-primary temu-title-main" type="button" title="Sends the checked products' titles to the chosen AI chat and reads the answer back">Send to ChatGPT</button>
                     <small class="temu-title-help" id="temuGptAutoStatus"></small>
+                    <button id="temuGptReopenBtn" class="tt-reopen hidden" type="button">Open the title check window again</button>
+                    <!-- v9.22.47 — the answer is checked in its own window (preview + Apply move into #zhTtReview at start-up) -->
                     <div id="temuGptPreview" class="temu-gpt-preview"></div>
                     <button id="temuGptApplyBtn" class="btn btn-primary btn-xs hidden" type="button">Apply titles</button>
-                    <details class="tt-more"><summary>Manual (copy / paste) <span>if Auto does not work</span></summary>
+                    <details class="tt-more"><summary>Copy / paste yourself <span>if auto does not work</span></summary>
                       <ol class="tt-steps">
-                        <li><button id="temuGptCopyPromptBtn" class="btn btn-secondary btn-xs" type="button">Copy prompt</button> → ChatGPT / Gemini mein paste</li>
-                        <li><button id="temuGptCopyTitlesBtn" class="btn btn-secondary btn-xs" type="button" title="Copy a numbered list of the checked products' titles">Copy titles</button> → wahin paste <small class="temu-title-help" id="temuGptBatchInfo">No list copied yet.</small></li>
-                        <li>Jawab yahan paste → <button id="temuGptPreviewBtn" class="btn btn-secondary btn-xs" type="button">Preview</button>
+                        <li><button id="temuGptCopyPromptBtn" class="btn btn-secondary btn-xs" type="button">Copy prompt</button> → paste into ChatGPT / Gemini</li>
+                        <li><button id="temuGptCopyTitlesBtn" class="btn btn-secondary btn-xs" type="button" title="Copy a numbered list of the checked products' titles">Copy titles</button> → paste it there too <small class="temu-title-help" id="temuGptBatchInfo">No list copied yet.</small></li>
+                        <li>Paste the answer here → <button id="temuGptPreviewBtn" class="btn btn-secondary btn-xs" type="button">Check</button>
                           <textarea id="temuGptPaste" class="inp" rows="3" spellcheck="false" placeholder="Paste the updated titles list here"></textarea></li>
                       </ol>
                       <details class="tt-more tt-more-in"><summary>Edit the title prompt</summary>
@@ -1138,7 +1145,7 @@
                   <div class="temu-title-run-row"><span id="temuTitleProgTxt">0 / 0</span><button id="temuTitleStopBtn" class="temu-title-stop" type="button" title="Stop after the current title. Titles already done are kept.">■ Stop</button></div>
                 </div>
                 <button id="temuTitleUndoBtn" class="btn btn-secondary temu-title-undo hidden" type="button" title="Put the previous titles back">↶ Undo last rewrite <span id="temuTitleUndoN"></span></button>
-                <small class="temu-title-help">Sirf ticked products par lagta hai · har badlav "↶ Undo" se wapas</small>
+                <small class="temu-title-help">Only ticked products are changed · every change can be reverted with "↶ Undo"</small>
               </div>
             </div>
 
@@ -1226,11 +1233,11 @@
             <div id="temuReadyBox" class="temu-ready" aria-live="polite"></div>
             <!-- v9.22.5 — two separate buttons: file only (for another Chrome profile) / upload only (no download) -->
             <div class="temu-main-acts">
-              <button id="temuExportBtn" class="btn temu-btn-export-only" type="button" title="Sirf file banao aur Downloads mein save karo — Temu par kuch nahi jata">
+              <button id="temuExportBtn" class="btn temu-btn-export-only" type="button" title="Only make the file and save it in Downloads — nothing goes to Temu">
                 <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span>Export only</span>
               </button>
-              <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button" title="Sirf Temu par upload — file download nahi hoti">
+              <button id="temuAutoBtn" class="btn btn-primary temu-btn-main-upload" type="button" title="Only upload to Temu — no file is downloaded">
                 <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <span id="temuAutoBtnSpinner" class="temu-btn-spinner hidden"></span><span id="temuAutoBtnTxt" class="temu-auto-txt">Upload only</span>
               </button>
@@ -1246,7 +1253,7 @@
               <summary><span>More tools</span><small>Repack · Learn categories · Fix drafts · Learn attributes · Upload errors</small></summary>
             <div class="temu-actions-sub-bar">
               <!-- v9.22.7 — fewer packs for products already on Temu: new title + AI pack image -->
-              <button id="temuRepackBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Temu par list products ke packs kam karo: naya title aur nayi AI pack image">
+              <button id="temuRepackBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="Change products already listed on Temu: new title, images, weight and list price">
                 <span aria-hidden="true">📦</span>
                 Repack
               </button>
@@ -1262,7 +1269,7 @@
                 <svg class="i i-xs" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
                 Learn attributes
               </button>
-              <button id="temuStoreExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="On Temu 'Manage products' tick the products you want, then press this: their full details are read and saved as a Temu bulk sheet you can import in another Chrome / store">
+              <button id="temuStoreExportBtn" class="btn btn-ghost btn-xs temu-sub-act-btn" type="button" title="On Temu 'Manage products' tick the products you want, then press this: their full details (title, images, category, weight, price) are read from Temu and shown here in Review &amp; Customize Products — then Export only (sheet) or Upload only">
                 <svg class="i i-xs" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Store export
               </button>
@@ -1308,40 +1315,40 @@
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M17 6H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H6"/></svg>
                 <div>
                   <div class="temu-card-title">Price &amp; stock</div>
-                  <div class="temu-card-subtitle">Temu par price kitni lagegi, aur kitna stock dikhega</div>
+                  <div class="temu-card-subtitle">What price goes on Temu, and how much stock is shown</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
 
             <!-- v9.17 — simple view: 1) how the price is made  2) live example  3) the few numbers that matter; the rest under "Advanced" -->
             <div class="tg-step">
-              <div class="tg-step-h"><b>1</b><span>Price kaise banegi?</span></div>
+              <div class="tg-step-h"><b>1</b><span>How is the price made?</span></div>
               <select id="tgPriceStrategy" class="inp" aria-label="Pricing strategy">
                 <option value="gap">Cost + gap — source price par ek fix raqam jodo (recommended)</option>
-                <option value="legacy">Multiplier — source price × number (Min / Max ke saath)</option>
+                <option value="legacy">Multiplier — source price × number (with Min / Max)</option>
               </select>
             </div>
 
             <div class="tg-step">
-              <div class="tg-step-h"><b>2</b><span>Misaal — in settings se price</span></div>
+              <div class="tg-step-h"><b>2</b><span>Example — the price with these settings</span></div>
               <div id="tgPxExample" class="tg-px-example" aria-live="polite"></div>
-              <div class="tg-px-note">Har product ki cents alag hoti hain. Kabhi source ke 2× se kam nahi (Frozen 3×). "N Pack -" title par source × N.</div>
+              <div class="tg-px-note">Every product gets different cents. Never below 2× the source (Frozen 3×). With an "N Pack -" title: source × N.</div>
             </div>
 
             <div class="tg-step" data-px-mode="gap">
-              <div class="tg-step-h"><b>3</b><span>Kitna jodna hai (gap)</span></div>
-              <div class="tg-px-note">Kisi bhi number par click karke badlein. Misal: cost $10 tak ho to price = cost + $50.</div>
+              <div class="tg-step-h"><b>3</b><span>How much to add (gap)</span></div>
+              <div class="tg-px-note">Click any number to change it. Example: cost up to $10 → price = cost + $50.</div>
               <div id="tgGapTable" class="tg-gap-table"></div>
-              <button id="tgGapAdd" type="button" class="btn btn-ghost btn-xs tg-gap-add">+ Ek aur had (tier) jodo</button>
+              <button id="tgGapAdd" type="button" class="btn btn-ghost btn-xs tg-gap-add">+ Add another tier</button>
               <input id="tgGap" type="hidden" />
               <div class="tg-inline-field">
-                <div><b>Frozen par extra</b><small>Frozen products par upar wale gap ke saath ye bhi judta hai</small></div>
+                <div><b>Extra for Frozen</b><small>For Frozen products this is added on top of the gap above</small></div>
                 <div class="temu-input-with-affix"><span class="temu-prefix">+$</span><input id="tgGapFz" class="inp" placeholder="35" inputmode="decimal" title="Frozen products: this extra is added to the tier gap (cost 10 → 95)" /></div>
               </div>
             </div>
 
             <div class="tg-step" data-px-mode="legacy">
-              <div class="tg-step-h"><b>3</b><span>Multiplier aur had (limit)</span></div>
+              <div class="tg-step-h"><b>3</b><span>Multiplier and limits</span></div>
               <div class="temu-settings-grid temu-grid-3 tg-compact-grid">
                 <div class="temu-setting-box">
                   <div class="temu-setting-lbl">Price ×</div>
@@ -1352,15 +1359,15 @@
                   <span class="temu-setting-sub">Source × ye number</span>
                 </div>
                 <div class="temu-setting-box">
-                  <div class="temu-setting-lbl">Kam se kam</div>
+                  <div class="temu-setting-lbl">Minimum</div>
                   <div class="temu-input-with-affix">
                     <span class="temu-prefix">$</span>
-                    <input id="tgMinPx" class="inp" placeholder="80" inputmode="decimal" title="Har product ki kam se kam Temu price" />
+                    <input id="tgMinPx" class="inp" placeholder="80" inputmode="decimal" title="The lowest Temu price of any product" />
                   </div>
                   <span class="temu-setting-sub">Lowest Temu price</span>
                 </div>
                 <div class="temu-setting-box">
-                  <div class="temu-setting-lbl">Zyada se zyada</div>
+                  <div class="temu-setting-lbl">Maximum</div>
                   <div class="temu-input-with-affix">
                     <span class="temu-prefix">$</span>
                     <input id="tgMaxPx" class="inp" placeholder="999" inputmode="decimal" title="Maximum Temu price per product" />
@@ -1372,13 +1379,13 @@
 
             <div class="tg-step">
               <div class="tg-step-h"><b>4</b><span>Stock (quantity)</span></div>
-              <div class="tg-px-note">Har product ko in dono ke beech koi bhi number milta hai.</div>
+              <div class="tg-px-note">Every product gets some number between these two.</div>
               <div class="tg-inline-field">
-                <div><b>Kam se kam</b></div>
+                <div><b>Minimum</b></div>
                 <div class="temu-input-with-affix"><input id="tgQtyMin" class="inp" placeholder="250" inputmode="numeric" /><span class="temu-affix">pcs</span></div>
               </div>
               <div class="tg-inline-field">
-                <div><b>Zyada se zyada</b></div>
+                <div><b>Maximum</b></div>
                 <div class="temu-input-with-affix"><input id="tgQtyMax" class="inp" placeholder="500" inputmode="numeric" /><span class="temu-affix">pcs</span></div>
               </div>
             </div>
@@ -1402,14 +1409,14 @@
               <summary class="tg-dept-head">
                 <div>
                   <div class="temu-field-title">Department pricing</div>
-                  <div class="temu-field-hint">Har department ka apna Price ×, Min aur Max. Khaali box = upar wala store default.</div>
+                  <div class="temu-field-hint">Each department has its own Price ×, Min and Max. An empty box = the store default above.</div>
                 </div>
                 <span class="temu-badge-soft" id="tgDeptCount">0 set</span>
               </summary>
               <div class="tg-dept-table" id="tgDeptTable">
                 <div class="tg-dept-row tg-dept-th"><span>Department</span><span>Price ×</span><span>Min $</span><span>Max $</span></div>
               </div>
-              <div class="temu-field-hint">Ek category ki alag price chahiye? <b>Categories</b> tab → category Edit → "Price ×". Tarteeb: Category → Department → Store default.</div>
+              <div class="temu-field-hint">A different price for one category? <b>Categories</b> tab → Edit the category → "Price ×". Order: Category → Department → Store default.</div>
             </details>
           </div></details>
 
@@ -1419,15 +1426,15 @@
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/></svg>
                 <div>
                   <div class="temu-card-title">Description &amp; bullets</div>
-                  <div class="temu-card-subtitle">Temu file mein product ki details (6 points tak)</div>
+                  <div class="temu-card-subtitle">Product details in the Temu file (up to 6 points)</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
             <div class="temu-switches-list">
               <label class="temu-switch-row" for="tgDescOn">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Description + bullets file mein daalo</div>
-                  <div class="temu-switch-desc">On = details bhi upload hongi. Links, emojis, "Add to cart", Amazon/Walmart jaise naam khud hat jate hain.</div>
+                  <div class="temu-switch-title">Put description + bullets in the file</div>
+                  <div class="temu-switch-desc">On = the details are uploaded too. Links, emojis, "Add to cart" and names like Amazon/Walmart are removed by themselves.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgDescOn" class="temu-toggle-chk" checked />
@@ -1436,15 +1443,15 @@
               </label>
             </div>
             <details class="tg-adv" data-settings-fold="avoid-words">
-              <summary><span>Advanced</span><small>Mana lafz (in wali line hat jati hai)</small></summary>
+              <summary><span>Advanced</span><small>Banned words (a line with one is removed)</small></summary>
               <div class="temu-field-block">
                 <label class="temu-field-header" for="tgAvoidWords">
-                  <span class="temu-field-title">Ye lafz hon to line hata do</span>
-                  <span class="temu-badge-soft">comma se alag</span>
+                  <span class="temu-field-title">Remove a line that has these words</span>
+                  <span class="temu-badge-soft">comma separated</span>
                 </label>
                 <textarea id="tgAvoidWords" class="inp temu-full-inp tg-avoid-inp" rows="3" placeholder="e.g. Best Seller, Guaranteed, FDA approved, Cure, Free shipping"></textarea>
                 <div class="tg-avoid-foot">
-                  <div class="temu-field-hint">Jis line mein in mein se koi lafz ho, woh poori line hat jati hai (jumla adhoora nahi rehta).</div>
+                  <div class="temu-field-hint">A line with any of these words is removed completely (no half sentences are left).</div>
                   <button id="tgAvoidReset" class="btn btn-ghost btn-xs" type="button">↺ Default list</button>
                 </div>
               </div>
@@ -1457,7 +1464,7 @@
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/></svg>
                 <div>
                   <div class="temu-card-title">Package (weight &amp; size)</div>
-                  <div class="temu-card-subtitle">Jab product ka weight / size na mile, to ye lagega</div>
+                  <div class="temu-card-subtitle">Used when a product's weight / size is not found</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
@@ -1469,7 +1476,7 @@
                   <input id="tgW" class="inp" placeholder="1.4" inputmode="decimal" />
                   <span class="temu-affix">lb</span>
                 </div>
-                <span class="temu-setting-sub">Agar na mile</span>
+                <span class="temu-setting-sub">If not found</span>
               </div>
               <div class="temu-setting-box">
                 <div class="temu-setting-lbl">Length</div>
@@ -1498,29 +1505,29 @@
               <div class="temu-setting-box">
                 <div class="temu-setting-lbl">Max weight</div>
                 <div class="temu-input-with-affix">
-                  <input id="tgMaxW" class="inp" placeholder="8" inputmode="decimal" title="Is se bhari product export se skip ho jayega" />
+                  <input id="tgMaxW" class="inp" placeholder="8" inputmode="decimal" title="A product heavier than this is skipped in the export" />
                   <span class="temu-affix">lb</span>
                 </div>
-                <span class="temu-setting-sub">Is se bhari = skip</span>
+                <span class="temu-setting-sub">Heavier = skip</span>
               </div>
             </div>
 
             <div class="temu-hint-pill">
               <span>⚖️</span>
-              <div>Weight pehle hunt se, phir category se, phir title se ("24 oz"), aakhir mein yahan wala. "N Pack -" par weight × N.</div>
+              <div>The weight comes from the hunt first, then the category, then the title ("24 oz"), and last from here. With "N Pack -": weight × N.</div>
             </div>
           </div></details>
 
           <!-- v9.17 — everything below is rarely changed -->
-          <div class="tg-sec-lbl"><span>Advanced</span><small>kam badalne wali settings</small></div>
+          <div class="tg-sec-lbl"><span>Advanced</span><small>settings you rarely change</small></div>
 
           <!-- 3. Automation & Rules -->
           <details class="temu-card temu-settings-card" data-settings-fold="automation"><summary class="temu-card-header temu-settings-summary">
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6z"/></svg>
                 <div>
-                  <div class="temu-card-title">Automatic kaam</div>
-                  <div class="temu-card-subtitle">Duplicate rokna, rang / pack pehchanna, weight, tab focus</div>
+                  <div class="temu-card-title">Automatic work</div>
+                  <div class="temu-card-subtitle">Stop duplicates, find colour / pack, weight, tab focus</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
@@ -1529,8 +1536,8 @@
               <!-- v9.20 — no auto skip any more: the tick in the product list decides (filter "Listed" / "Not listed") -->
               <label class="temu-switch-row" for="tgSkipListed" hidden style="display:none">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Pehle se listed product dobara nahi</div>
-                  <div class="temu-switch-desc">Jo product is store par upload ho chuka, woh dobara upload nahi hoga.</div>
+                  <div class="temu-switch-title">Never list a product twice</div>
+                  <div class="temu-switch-desc">A product already uploaded to this store is not uploaded again.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgSkipListed" class="temu-toggle-chk" checked />
@@ -1540,8 +1547,8 @@
 
               <label class="temu-switch-row" for="tgSmartVar">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Variation khud pehchano</div>
-                  <div class="temu-switch-desc">Asli rang → Color, kai pack → Multipack, ek → 1 Pack; warna neeche wali saaf value.</div>
+                  <div class="temu-switch-title">Find the variation by itself</div>
+                  <div class="temu-switch-desc">A real colour → Color, several packs → Multipack, one → 1 Pack; otherwise the plain value below.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgSmartVar" class="temu-toggle-chk" checked />
@@ -1551,7 +1558,7 @@
 
               <label class="temu-switch-row" for="tgSmartWeight">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Title se weight nikalo</div>
+                  <div class="temu-switch-title">Read the weight from the title</div>
                   <div class="temu-switch-desc">"24 oz" → 1.7 lb, "3.15 Lb" → 3.5 lb, "2 oz × 6" → 0.9 lb.</div>
                 </div>
                 <div class="temu-toggle-wrap">
@@ -1562,8 +1569,8 @@
 
               <label class="temu-switch-row" for="tgBgUpload">
                 <div class="temu-switch-content">
-                  <div class="temu-switch-title">Upload ke baad apne tab par wapas</div>
-                  <div class="temu-switch-desc">Upload ke dauran Temu tab saamne rehta hai (tez), 100% par aap ka tab wapas aa jata hai.</div>
+                  <div class="temu-switch-title">Back to your tab after the upload</div>
+                  <div class="temu-switch-desc">During the upload the Temu tab stays in front (faster); at 100% your tab comes back.</div>
                 </div>
                 <div class="temu-toggle-wrap">
                   <input type="checkbox" id="tgBgUpload" class="temu-toggle-chk" checked />
@@ -1578,28 +1585,28 @@
               <div class="temu-card-title-group">
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v15M8 20h8"/></svg>
                 <div>
-                  <div class="temu-card-title">Title ke lafz &amp; variation</div>
-                  <div class="temu-card-subtitle">Title se kaunse lafz hatane hain, aur khaali variation ki value</div>
+                  <div class="temu-card-title">Title words &amp; variation</div>
+                  <div class="temu-card-subtitle">Which words to remove from titles, and the value for an empty variation</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
 
             <div class="temu-field-block">
               <label class="temu-field-header" for="tgWords">
-                <span class="temu-field-title">Title se ye lafz hatao</span>
+                <span class="temu-field-title">Remove these words from titles</span>
                 <span class="temu-badge-soft">Comma-separated</span>
               </label>
               <input id="tgWords" class="inp temu-full-inp" placeholder="e.g. Amazon, Walmart, Sam's Club, Prime, Kirkland..." />
-              <div class="temu-field-hint">Temu policy ke khilaf brand/platform ke lafz yahan likhein; titles se khud hat jayenge.</div>
+              <div class="temu-field-hint">Write brand / platform words that are against Temu policy here; they are removed from titles by themselves.</div>
             </div>
 
             <div class="temu-field-block">
               <label class="temu-field-header" for="tgVarValues">
-                <span class="temu-field-title">Variation ki saaf values</span>
+                <span class="temu-field-title">Plain variation values</span>
                 <span class="temu-badge-soft">Comma-separated</span>
               </label>
               <input id="tgVarValues" class="inp temu-full-inp" placeholder="e.g. Standard, Special, New, Classic" />
-              <div class="temu-field-hint">Jab product ka rang ya pack size na mile, to in mein se ek saaf value lag jati hai.</div>
+              <div class="temu-field-hint">When a product's colour or pack size is not found, one of these plain values is used.</div>
             </div>
           </div></details>
 
@@ -1609,7 +1616,7 @@
                 <svg class="i temu-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/></svg>
                 <div>
                   <div class="temu-card-title">Listed history (duplicate list)</div>
-                  <div class="temu-card-subtitle">Is store ke "pehle se listed" products ki list theek karo</div>
+                  <div class="temu-card-subtitle">Fix this store's list of "already listed" products</div>
                 </div>
               </div>
             </summary><div class="temu-setting-content">
@@ -1668,14 +1675,14 @@
               <div class="th-head-l">
                 <div class="th-ico"><svg viewBox="0 0 24 24" class="i"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
                 <div>
-                  <div class="th-title">Aaj</div>
+                  <div class="th-title">Today</div>
                   <div id="temuTodayDate" class="th-sub">—</div>
                 </div>
               </div>
-              <label class="th-target" title="Roz kitne products list karne hain">
+              <label class="th-target" title="How many products to list each day">
                 <span>Target</span>
                 <input id="temuDailyTarget" type="number" min="1" max="999" value="50" class="inp" />
-                <span>/ din</span>
+                <span>/ day</span>
               </label>
             </div>
 
@@ -1683,14 +1690,14 @@
               <div class="th-tile ok"><b id="temuMetricListed">0</b><span>Listed</span></div>
               <div class="th-tile up"><b id="temuMetricUploads">0</b><span>Uploads</span></div>
               <div class="th-tile bad"><b id="temuMetricErrors">0</b><span>Errors</span></div>
-              <div class="th-tile rem"><b id="temuMetricRemaining">50</b><span>Baqi</span></div>
+              <div class="th-tile rem"><b id="temuMetricRemaining">50</b><span>Left</span></div>
             </div>
 
             <div class="th-bar"><div id="temuProgressBar" class="th-bar-fill" style="width:0%"></div></div>
-            <div id="temuProgressStatus" class="th-status">Aaj abhi kuch list nahi hua</div>
+            <div id="temuProgressStatus" class="th-status">Nothing listed today yet</div>
 
             <div class="th-week">
-              <div class="th-week-h"><span>Pichle 7 din</span><small id="temuWeekTotal"></small></div>
+              <div class="th-week-h"><span>Last 7 days</span><small id="temuWeekTotal"></small></div>
               <div id="temuWeekDays" class="th-week-days"></div>
             </div>
           </div>
@@ -1699,7 +1706,7 @@
             <div class="th-log-h">
               <div>
                 <div class="temu-card-title">Upload history</div>
-                <div class="temu-card-subtitle">Har upload / file ka record — file dobara lo, products dekho, errors parho</div>
+                <div class="temu-card-subtitle">A record of every upload / file — get the file again, see the products, read the errors</div>
               </div>
             </div>
 
@@ -1723,7 +1730,7 @@
             <div id="temuHistList" class="th-list"></div>
 
             <div class="th-foot">
-              <button id="temuHistExportAll" class="btn btn-ghost btn-xs" type="button" title="Saare records ke products ek CSV mein">
+              <button id="temuHistExportAll" class="btn btn-ghost btn-xs" type="button" title="The products of all records in one CSV">
                 <svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Export all (CSV)
               </button>
@@ -2005,7 +2012,7 @@
           </div>
           <div class="tsp-row2">
             <button id="temuStepGrabFlowBtn" class="btn btn-ghost" type="button" title="Take the newest generated image from the Flow project and put it in this product">⬇ Latest from Flow</button>
-            <button id="temuStepDeviceBtn" class="btn btn-ghost" type="button" title="Computer se image chunein">Image from device</button>
+            <button id="temuStepDeviceBtn" class="btn btn-ghost" type="button" title="Choose an image from the computer">Image from device</button>
             <input id="temuStepDeviceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
           </div>
         </div>

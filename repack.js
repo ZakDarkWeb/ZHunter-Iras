@@ -1,15 +1,16 @@
 /* v9.22.7 — Repack: products already on Temu get a new (smaller) pack count or new pictures.
    Tick products on Temu "Manage products" → 📦 Repack reads them → per product: new pack count, your own prompt,
-   which images to edit → the AI edits them in bulk → copy the title, download the images, "Temu par kholo".
+   which images to edit → the AI edits them in bulk → copy the title, download the images, "Open on Temu".
    Loaded after sidepanel.js and uses its helpers (temuReadTicked, temuStartBulkImageEdit, zhApplyImgEdits, zhImageToPngBlob, zhSaveBlob, zhLibAll).
    v9.22.12 — one prompt for all + each product's own prompt, saved prompts, image ticks per product, open the product on Temu.
-   v9.22.19 — per image 🗑 / ★, your own image files, all titles at once (copy / paste back), and "Temu par lagao":
+   v9.22.19 — per image 🗑 / ★, your own image files, all titles at once (copy / paste back), and "Apply on Temu":
    title + description / bullets cleared + images + Submit on the product's edit page. */
 'use strict';
 
 const RP_KEY = 'zhRepack', RP_PROMPT_KEY = 'zhRepackPrompt', RP_OPT_KEY = 'zhRepackOpts';
 const RP_MAX_AI = 24;   // the AI pack prompt cannot draw more units than this reliably
-const RP_LIST_PRICE = 99.99;   // v9.22.44 — the Step 3 switch puts this list price on every SKU
+// v9.22.44 — the Step 3 switch sets every SKU's list price; v9.22.57 — a random $79.99 … $99.99 per product (zhRandListPrice)
+const RP_LIST_TXT = '$79.99 – $99.99';
 const Rp = { items: [], prompt: '', loaded: false, timer: 0, clearText: true, submit: true, listPrice: false, ttIds: null, busy: false, open: new Set(), lastId: '' };
 
 // "50 Pack", "50-Pack", "50 Count", "50 ct", "50 pcs", "Pack of 50"
@@ -106,69 +107,69 @@ function rpModal() {
   m.innerHTML = `<div class="modal-box rp-box" role="dialog" aria-label="Repack">
     <div class="rp-head">
       <span class="rp-logo" aria-hidden="true">${RP_IC.box}</span>
-      <div class="rp-head-t"><b>Repack</b><span class="rp-sub">Temu par list products ka title, images aur weight badlo</span></div>
+      <div class="rp-head-t"><b>Repack</b><span class="rp-sub">Change the title, images and weight of products listed on Temu</span></div>
       <button type="button" class="rp-x" data-rp="close" aria-label="Close">${RP_IC.x}</button>
     </div>
     <ol class="rp-flow">
       <li class="rp-step" data-step="1">
         <span class="rp-step-n">1</span>
-        <div class="rp-step-h"><b>Products lao</b><small>Temu <i>Manage products</i> par products tick karo, phir yeh dabao</small></div>
-        <button type="button" class="btn btn-primary rp-btn-block" data-rp="read" title="Temu Manage products par jo products tick hain woh is list mein aa jate hain (pehle se hon to taaza ho jate hain)">${RP_IC.plus}<span>Products add karo</span></button>
-        <details class="rp-steps"><summary>Kaise kaam karta hai?</summary>
+        <div class="rp-step-h"><b>Add products</b><small>Tick products on Temu <i>Manage products</i>, then press this</small></div>
+        <button type="button" class="btn btn-primary rp-btn-block" data-rp="read" title="The products ticked on Temu Manage products come into this list (ones already here are refreshed)">${RP_IC.plus}<span>Add products</span></button>
+        <details class="rp-steps"><summary>How does it work?</summary>
           <ol>
-            <li>Temu par products tick karo → <b>Products add karo</b>. Line par <b>✕</b> = list se hatao.</li>
-            <li>Line par click = card khulta hai. Image par click = bari dekho, <b>★</b> main, <b>⧉</b> copy, <b>✕</b> hatao (↺ wapas), <b>✨</b> AI edit.</li>
-            <li>Flow wali image: <b>Paste image</b>, <b>+ Apni image</b> ya card par drag — sab se aage jati hai.</li>
-            <li>Title card mein likho, ya <b>Titles — sab ek saath</b>. Weight / size khaali = Temu wala rahega.</li>
-            <li><b>Temu par lagao</b>: title, description + bullets saaf, images, weight / size, phir Submit. Temu pages alag window mein peeche chalte hain; Submit hua product list se hat jata hai.</li>
+            <li>Tick products on Temu → <b>Add products</b>. <b>✕</b> on a line = remove it from the list.</li>
+            <li>Click a line = open its card. Click an image = see it big, <b>★</b> main, <b>⧉</b> copy, <b>✕</b> remove (↺ undo), <b>✨</b> AI edit.</li>
+            <li>An image from Flow: <b>Paste image</b>, <b>My image</b> or drag it onto the card — it goes first.</li>
+            <li>Write the title in the card, or use <b>All titles at once</b>. Empty weight / size = Temu's value stays.</li>
+            <li><b>Apply on Temu</b>: title, description + bullets cleared, images, weight / size, then Submit. Temu pages run in a separate window behind yours; a submitted product leaves the list.</li>
           </ol>
         </details>
       </li>
       <li class="rp-step" data-step="2">
         <span class="rp-step-n">2</span>
-        <div class="rp-step-h"><b>Badlo</b><small>Neeche har product ka card kholo — ya yeh tools sab par ek saath</small></div>
+        <div class="rp-step-h"><b>Edit</b><small>Open each product's card below — or use these tools on all at once</small></div>
         <details class="rp-sec rp-tt">
-          <summary><span class="rp-ico">${RP_IC.text}</span><span class="rp-sum-t"><b>Titles — sab ek saath</b><small>Copy → GPT / Gemini → jawab paste</small></span></summary>
+          <summary><span class="rp-ico">${RP_IC.text}</span><span class="rp-sum-t"><b>All titles at once</b><small>Copy → GPT / Gemini → paste the answer</small></span></summary>
           <div class="rp-sec-body">
-            <div class="rp-btns"><button type="button" class="btn btn-ghost btn-xs" data-rp="ttcopy">Copy all titles</button><small class="rp-tt-info rp-help">Numbered list copy hoti hai.</small></div>
-            <textarea class="rp-tt-paste rp-in" rows="4" placeholder="GPT / Gemini ka jawab yahan paste karo (1. … 2. …)" aria-label="New titles"></textarea>
-            <div class="rp-btns"><button type="button" class="btn btn-primary btn-xs" data-rp="ttapply">Titles lagao</button></div>
+            <div class="rp-btns"><button type="button" class="btn btn-ghost btn-xs" data-rp="ttcopy">Copy all titles</button><small class="rp-tt-info rp-help">A numbered list is copied.</small></div>
+            <textarea class="rp-tt-paste rp-in" rows="4" placeholder="Paste the GPT / Gemini answer here (1. … 2. …)" aria-label="New titles"></textarea>
+            <div class="rp-btns"><button type="button" class="btn btn-primary btn-xs" data-rp="ttapply">Apply titles</button></div>
           </div>
         </details>
         <details class="rp-sec rp-ai">
-          <summary><span class="rp-ico">${RP_IC.spark}</span><span class="rp-sum-t"><b>AI images</b><small>Zaroorat ho to — AI se pack image banwao</small></span></summary>
+          <summary><span class="rp-ico">${RP_IC.spark}</span><span class="rp-sum-t"><b>AI images</b><small>If needed — let the AI make a pack image</small></span></summary>
           <div class="rp-sec-body">
             <div class="rp-field"><label class="rp-lbl">AI</label><select class="rp-eng-sel rp-in" aria-label="AI image engine"></select></div>
             <div class="rp-field">
-              <div class="rp-field-head"><label class="rp-lbl">Prompt — sab products ke liye</label><select class="rp-lib rp-in" aria-label="Saved prompts"><option value="">Saved prompt…</option></select></div>
-              <textarea class="rp-gprompt rp-in" rows="4" placeholder="Jaise: Make one sleeve with 3 golf balls, combined in one clean product image, white background"></textarea>
-              <small class="rp-help"><b>{N}</b> = naye packs · khaali chhodo = sirf pack image (card ke "Naye packs" se)</small>
+              <div class="rp-field-head"><label class="rp-lbl">Prompt — for all products</label><select class="rp-lib rp-in" aria-label="Saved prompts"><option value="">Saved prompt…</option></select></div>
+              <textarea class="rp-gprompt rp-in" rows="4" placeholder="e.g. Make one sleeve with 3 golf balls, combined in one clean product image, white background"></textarea>
+              <small class="rp-help"><b>{N}</b> = new pack count · leave empty = pack image only (from the card's "New packs")</small>
             </div>
-            <div class="rp-btns"><button type="button" class="btn btn-primary btn-xs" data-rp="ai">Images banao</button><button type="button" class="btn btn-ghost btn-xs" data-rp="dlall">Sab nayi images download</button></div>
+            <div class="rp-btns"><button type="button" class="btn btn-primary btn-xs" data-rp="ai">Make images</button><button type="button" class="btn btn-ghost btn-xs" data-rp="dlall">Download all new images</button></div>
           </div>
         </details>
       </li>
       <li class="rp-step" data-step="3">
         <span class="rp-step-n">3</span>
-        <div class="rp-step-h"><b>Temu par lagao</b><small>${RP_IC.win} Temu pages alag window mein peeche khulte hain, khud band hote hain</small></div>
+        <div class="rp-step-h"><b>Apply on Temu</b><small>${RP_IC.win} Temu pages open in a separate window behind yours and close by themselves</small></div>
         <div class="rp-apply-box">
-          <label class="rp-switch"><input type="checkbox" class="rp-opt-clear"><span class="rp-sw" aria-hidden="true"></span>Purani description + bullet points hatao</label>
-          <label class="rp-switch"><input type="checkbox" class="rp-opt-list"><span class="rp-sw" aria-hidden="true"></span>List price update karo → <b>$${RP_LIST_PRICE.toFixed(2)}</b></label>
-          <label class="rp-switch"><input type="checkbox" class="rp-opt-submit"><span class="rp-sw" aria-hidden="true"></span>Aakhir mein Submit bhi dabao</label>
-          <div class="rp-field rp-inline"><label class="rp-lbl">Ek saath</label><select class="rp-opt-par rp-in" aria-label="Tabs at once" title="Kitne Temu tabs ek saath chalein (alag window mein peeche)"><option value="1">1 tab</option><option value="2">2 tabs</option><option value="3">3 tabs</option></select></div>
-          <button type="button" class="btn btn-primary rp-btn-block" data-rp="applyall">Sab Temu par lagao</button>
+          <label class="rp-switch"><input type="checkbox" class="rp-opt-clear"><span class="rp-sw" aria-hidden="true"></span>Remove the old description + bullet points</label>
+          <label class="rp-switch"><input type="checkbox" class="rp-opt-list"><span class="rp-sw" aria-hidden="true"></span>Set the list price → <b>${RP_LIST_TXT}</b> <small>(random)</small></label>
+          <label class="rp-switch"><input type="checkbox" class="rp-opt-submit"><span class="rp-sw" aria-hidden="true"></span>Press Submit at the end</label>
+          <div class="rp-field rp-inline"><label class="rp-lbl">At once</label><select class="rp-opt-par rp-in" aria-label="Tabs at once" title="How many Temu tabs run at the same time (in a separate window behind yours)"><option value="1">1 tab</option><option value="2">2 tabs</option><option value="3">3 tabs</option></select></div>
+          <button type="button" class="btn btn-primary rp-btn-block" data-rp="applyall">Apply all on Temu</button>
         </div>
       </li>
     </ol>
     <div class="rp-status" aria-live="polite"></div>
-    <div class="rp-listhead"><b>Products</b><span class="rp-count">0</span><span class="rp-flex"></span><button type="button" class="btn btn-ghost btn-xs" data-rp="openall">▾ Sab kholo</button><button type="button" class="btn btn-ghost btn-xs rp-clear" data-rp="clear">List khaali karo</button></div>
+    <div class="rp-listhead"><b>Products</b><span class="rp-count">0</span><span class="rp-flex"></span><button type="button" class="btn btn-ghost btn-xs" data-rp="openall">▾ Open all</button><button type="button" class="btn btn-ghost btn-xs rp-clear" data-rp="clear">Clear list</button></div>
     <div class="rp-list"></div>
     <input type="file" class="rp-file" accept="image/*" multiple hidden>
   </div>`;
   document.body.appendChild(m);
   m.addEventListener('click', rpClick);
   m.addEventListener('input', rpInput);
-  // your own images: a card's "+ Apni image", or files dropped on the card
+  // your own images: a card's "My image", or files dropped on the card
   m.addEventListener('dragover', e => { if (e.target.closest('.rp-card') && [...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.target.closest('.rp-card').classList.add('drop'); } });
   m.addEventListener('dragleave', e => e.target.closest('.rp-card')?.classList.remove('drop'));
   m.addEventListener('drop', e => {
@@ -235,54 +236,54 @@ function rpLibFill() {
 
 function rpWarn(it) {
   const n = Number(it.newN) || 0, own = !!rpPromptOf(it);
-  if (n > RP_MAX_AI && !own) return `${RP_MAX_AI} se zyada: AI pack image nahi banegi (prompt likho, ya image khud banao). Title badal gaya hai.`;
-  if (n === 1 && !own) return '1 pack: AI pack image nahi banegi — prompt likho agar image badalni hai.';
+  if (n > RP_MAX_AI && !own) return `More than ${RP_MAX_AI}: no AI pack image (write a prompt, or make the image yourself). The title was changed.`;
+  if (n === 1 && !own) return '1 pack: no AI pack image — write a prompt if the image should change.';
   return '';
 }
 function rpCard(it, idx) {
   const n = Number(it.newN) || 0, imgs = rpImgs(it), picks = new Set(rpPicks(it)), w = rpWarn(it);
   const ed = rpEditedIdx(it).length, drop = rpDrop(it), fin = rpFinalKeys(it), main = fin[0], own = rpOwn(it);
   const no = (idx >= 0 ? idx : Rp.items.indexOf(it)) + 1, open = Rp.open.has(it.id);
-  const state = it.temuDoneAt ? `<span class="rp-state ok">✓ Temu par lag gaya${it.temuSubmitted ? ' + Submit' : ''}</span>`
-    : ed ? `<span class="rp-state ok">✓ ${ed} nayi image${ed === 1 ? '' : 's'}</span>` : rpCanRun(it) ? '<span class="rp-state">Images baqi</span>' : '';
+  const state = it.temuDoneAt ? `<span class="rp-state ok">✓ Applied on Temu${it.temuSubmitted ? ' + Submit' : ''}</span>`
+    : ed ? `<span class="rp-state ok">✓ ${ed} new image${ed === 1 ? '' : 's'}</span>` : rpCanRun(it) ? '<span class="rp-state">Images to do</span>' : '';
   // v9.22.43 — each image: a bigger tile, then one even row of icon buttons (★ main, copy, AI, remove)
-  const acts = k => `<div class="rp-tw-acts"><button type="button" data-rp="main" data-k="${k}" title="Main (pehli) image banao"${k === main ? ' class="on"' : ''}>${RP_IC.star}</button><button type="button" data-rp="cpimg" data-k="${k}" title="Image copy karo — phir Flow / GPT / Gemini mein Ctrl+V">${RP_IC.copy}</button>${k[0] === 'i' ? `<button type="button" data-rp="pick" data-i="${k.slice(1)}" title="${picks.has(+k.slice(1)) ? 'AI is image ko edit karega (Images banao) — click: mat karo' : 'Click: AI is image ko edit kare (Images banao)'}"${picks.has(+k.slice(1)) ? ' class="on"' : ''}>${RP_IC.spark}<b>AI</b></button>` : ''}${k[0] === 'o'
-    ? `<button type="button" data-rp="owndel" data-i="${k.slice(1)}" title="Yeh apni image hatao">${RP_IC.x}</button>`
-    : `<button type="button" data-rp="drop" data-i="${k.slice(1)}" title="${drop.has(+k.slice(1)) ? 'Hat jayegi — click: rakho' : 'Click: Temu se hatao'}"${drop.has(+k.slice(1)) ? ' class="on"' : ''}>${drop.has(+k.slice(1)) ? RP_IC.undo : RP_IC.x}</button>`}</div>`;
-  const ownHtml = own.map((u, i) => `<div class="rp-tw own${'o' + i === main ? ' main' : ''}"><button type="button" class="rp-th" data-rp="view" data-k="o${i}" title="Click: bari image dekho"><img src="${rpEsc(u)}" alt="" loading="lazy"><span>Apni</span>${'o' + i === main ? '<em class="rp-mb">Main</em>' : ''}</button>${acts('o' + i)}</div>`).join('');
-  const over = fin.length > RP_MAX_TEMU ? `<p class="rp-warn">Temu par ${RP_MAX_TEMU} images tak jati hain — ${fin.length} chuni hain, aakhri ${fin.length - RP_MAX_TEMU} nahi jayengi (✕ lagao).</p>` : '';
+  const acts = k => `<div class="rp-tw-acts"><button type="button" data-rp="main" data-k="${k}" title="Make this the main (first) image"${k === main ? ' class="on"' : ''}>${RP_IC.star}</button><button type="button" data-rp="cpimg" data-k="${k}" title="Copy the image — then Ctrl+V in Flow / GPT / Gemini">${RP_IC.copy}</button>${k[0] === 'i' ? `<button type="button" data-rp="pick" data-i="${k.slice(1)}" title="${picks.has(+k.slice(1)) ? 'The AI will edit this image (Make images) — click: don\'t' : 'Click: let the AI edit this image (Make images)'}"${picks.has(+k.slice(1)) ? ' class="on"' : ''}>${RP_IC.spark}<b>AI</b></button>` : ''}${k[0] === 'o'
+    ? `<button type="button" data-rp="owndel" data-i="${k.slice(1)}" title="Remove this image of yours">${RP_IC.x}</button>`
+    : `<button type="button" data-rp="drop" data-i="${k.slice(1)}" title="${drop.has(+k.slice(1)) ? 'Will be removed — click: keep it' : 'Click: remove from Temu'}"${drop.has(+k.slice(1)) ? ' class="on"' : ''}>${drop.has(+k.slice(1)) ? RP_IC.undo : RP_IC.x}</button>`}</div>`;
+  const ownHtml = own.map((u, i) => `<div class="rp-tw own${'o' + i === main ? ' main' : ''}"><button type="button" class="rp-th" data-rp="view" data-k="o${i}" title="Click: see it big"><img src="${rpEsc(u)}" alt="" loading="lazy"><span>Mine</span>${'o' + i === main ? '<em class="rp-mb">Main</em>' : ''}</button>${acts('o' + i)}</div>`).join('');
+  const over = fin.length > RP_MAX_TEMU ? `<p class="rp-warn">Temu takes up to ${RP_MAX_TEMU} images — ${fin.length} are chosen, the last ${fin.length - RP_MAX_TEMU} will not go (press ✕).</p>` : '';
   // the line itself opens / closes the card; its ✕ takes the product off this list (9.22.24)
-  const head = `<div class="rp-chw"><button type="button" class="rp-ch" data-rp="tog" aria-expanded="${open}"><span class="rp-no">${no}</span><img src="${rpEsc(main ? rpKeyUrl(it, main) : rpImg(it))}" alt="" loading="lazy"><span class="rp-ch-t">${rpEsc(it.title || it.oldTitle)}</span>${state}<span class="rp-chev">${open ? '▾' : '▸'}</span></button><button type="button" class="rp-ch-del" data-rp="del" title="List se hatao (Temu par kuch nahi badlega)" aria-label="Remove">✕</button></div>`;
+  const head = `<div class="rp-chw"><button type="button" class="rp-ch" data-rp="tog" aria-expanded="${open}"><span class="rp-no">${no}</span><img src="${rpEsc(main ? rpKeyUrl(it, main) : rpImg(it))}" alt="" loading="lazy"><span class="rp-ch-t">${rpEsc(it.title || it.oldTitle)}</span>${state}<span class="rp-chev">${open ? '▾' : '▸'}</span></button><button type="button" class="rp-ch-del" data-rp="del" title="Remove from the list (nothing changes on Temu)" aria-label="Remove">✕</button></div>`;
   if (!open) return `<div class="rp-card" data-id="${rpEsc(it.id)}">${head}</div>`;
   return `<div class="rp-card open" data-id="${rpEsc(it.id)}">${head}
    <div class="rp-cb">
     <img class="rp-img" src="${rpEsc(main ? rpKeyUrl(it, main) : rpImg(it))}" alt="" loading="lazy">
     <div class="rp-body">
-      <div class="rp-old" title="${rpEsc(it.oldTitle)}">Purana: ${rpEsc(it.oldTitle)}</div>
+      <div class="rp-old" title="${rpEsc(it.oldTitle)}">Old: ${rpEsc(it.oldTitle)}</div>
       <div class="rp-row">
-        <span class="rp-meta">Purane packs: <b>${it.oldN || '?'}</b></span>
-        <label class="rp-n-lbl">Naye packs <input class="rp-n${n > RP_MAX_AI ? ' bad' : ''}" type="number" min="1" max="999" value="${n || ''}" placeholder="—" aria-label="New pack count"></label>
+        <span class="rp-meta">Old packs: <b>${it.oldN || '?'}</b></span>
+        <label class="rp-n-lbl">New packs <input class="rp-n${n > RP_MAX_AI ? ' bad' : ''}" type="number" min="1" max="999" value="${n || ''}" placeholder="—" aria-label="New pack count"></label>
         <span class="rp-meta">Price: <b>${it.price ? '$' + rpEsc(it.price) : '—'}</b></span>
       </div>
       <p class="rp-warn"${w ? '' : ' hidden'}>${rpEsc(w)}</p>
-      <div class="rp-thumbs" role="group" aria-label="Images">${ownHtml}${imgs.map((u, i) => `<div class="rp-tw${drop.has(i) ? ' gone' : ''}${'i' + i === main ? ' main' : ''}${picks.has(i) ? ' ai' : ''}"><button type="button" class="rp-th${rpEditedAt(it, i) ? ' done' : ''}" data-rp="view" data-k="i${i}" title="Click: bari image dekho"><img src="${rpEsc(u)}" alt="" loading="lazy"><span>${i + 1}</span>${'i' + i === main ? '<em class="rp-mb">Main</em>' : ''}${picks.has(i) ? '<em class="rp-ab">AI</em>' : ''}</button>${acts('i' + i)}</div>`).join('')}
-        <button type="button" class="rp-add" data-rp="own" title="Apni image file chuno (jaise Google Flow wali) — ya file card par drag karo">${RP_IC.upload}<span>Apni image</span></button>
-        <button type="button" class="rp-add" data-rp="paste" title="Copy ki hui image yahan paste karo (ya card khula ho to Ctrl+V)">${RP_IC.clip}<span>Paste image</span></button></div>
-      <p class="rp-hint rp-legend">Temu par jayengi: <b>${Math.min(fin.length, RP_MAX_TEMU)}</b> image${fin.length === 1 ? '' : 's'} · image par click = bari dekho</p>
-      <p class="rp-hint rp-legend">${RP_IC.star} main · ${RP_IC.copy} copy · ${RP_IC.spark} AI edit · ${RP_IC.x} hatao</p>${over}
+      <div class="rp-thumbs" role="group" aria-label="Images">${ownHtml}${imgs.map((u, i) => `<div class="rp-tw${drop.has(i) ? ' gone' : ''}${'i' + i === main ? ' main' : ''}${picks.has(i) ? ' ai' : ''}"><button type="button" class="rp-th${rpEditedAt(it, i) ? ' done' : ''}" data-rp="view" data-k="i${i}" title="Click: see it big"><img src="${rpEsc(u)}" alt="" loading="lazy"><span>${i + 1}</span>${'i' + i === main ? '<em class="rp-mb">Main</em>' : ''}${picks.has(i) ? '<em class="rp-ab">AI</em>' : ''}</button>${acts('i' + i)}</div>`).join('')}
+        <button type="button" class="rp-add" data-rp="own" title="Choose your own image file (e.g. from Google Flow) — or drag the file onto the card">${RP_IC.upload}<span>My image</span></button>
+        <button type="button" class="rp-add" data-rp="paste" title="Paste a copied image here (or Ctrl+V while the card is open)">${RP_IC.clip}<span>Paste image</span></button></div>
+      <p class="rp-hint rp-legend">Going to Temu: <b>${Math.min(fin.length, RP_MAX_TEMU)}</b> image${fin.length === 1 ? '' : 's'} · click an image to see it big</p>
+      <p class="rp-hint rp-legend">${RP_IC.star} main · ${RP_IC.copy} copy · ${RP_IC.spark} AI edit · ${RP_IC.x} remove</p>${over}
       <textarea class="rp-title" rows="2" aria-label="New title">${rpEsc(it.title)}</textarea>
-      <p class="rp-tsame"${rpTitleChanged(it) ? ' hidden' : ''}>Title purane jaisa hai — Temu par nahi badlega.</p>
+      <p class="rp-tsame"${rpTitleChanged(it) ? ' hidden' : ''}>The title is the same as before — it will not change on Temu.</p>
       <div class="rp-pack">
         <label>Weight <input class="rp-w" type="number" min="0" step="0.01" value="${rpEsc(it.newW || '')}" placeholder="${rpEsc(it.oldW || '—')}" aria-label="New weight in lb"> lb</label>
         <label>Size <input class="rp-d" data-d="0" type="number" min="0" step="0.01" value="${rpEsc((it.newDims || [])[0] || '')}" placeholder="${rpEsc((it.oldDims || [])[0] || 'L')}" aria-label="Length in inch">×<input class="rp-d" data-d="1" type="number" min="0" step="0.01" value="${rpEsc((it.newDims || [])[1] || '')}" placeholder="${rpEsc((it.oldDims || [])[1] || 'W')}" aria-label="Width in inch">×<input class="rp-d" data-d="2" type="number" min="0" step="0.01" value="${rpEsc((it.newDims || [])[2] || '')}" placeholder="${rpEsc((it.oldDims || [])[2] || 'H')}" aria-label="Height in inch"> in</label>
-        <small>Khaali = Temu wala hi rahega (halki likhai = abhi Temu par)</small>
+        <small>Empty = Temu's value stays (grey text = what Temu has now)</small>
       </div>
       <div class="rp-acts">
         <button type="button" class="btn btn-ghost btn-xs" data-rp="copy">Copy title</button>
-        <button type="button" class="btn btn-ghost btn-xs" data-rp="dl"${ed ? '' : ' disabled'}>Nayi images download</button>
-        <button type="button" class="btn btn-ghost btn-xs" data-rp="temu" title="Is product ka Temu edit page kholo (Manage products page khula ho)">Temu par kholo ↗</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-rp="dl"${ed ? '' : ' disabled'}>Download new images</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-rp="temu" title="Open this product's Temu edit page (Manage products must be open)">Open on Temu ↗</button>
         <span class="rp-flex"></span>
-        <button type="button" class="btn btn-primary btn-xs" data-rp="apply" title="Temu edit page par (alag window mein peeche): naya title, purani description + bullets saaf, images badlo (agar badli hain), phir Submit (agar upar tick hai)">Temu par lagao</button>
+        <button type="button" class="btn btn-primary btn-xs" data-rp="apply" title="On the Temu edit page (in a separate window behind yours): new title, old description + bullets cleared, images replaced (if changed), then Submit (if ticked above)">Apply on Temu</button>
       </div>
     </div>
    </div>
@@ -293,7 +294,7 @@ function rpCard(it, idx) {
   const b = m.querySelector('[data-rp="ai"]'); if (b) { b.disabled = !ready.length; b.textContent = ready.length ? `Images banao (${imgs})` : 'Images banao'; }
   const d = m.querySelector('[data-rp="dlall"]'); if (d) d.disabled = !Rp.items.some(rpEdited);
   const n = Rp.items.filter(rpHasWork).length, ap = m.querySelector('[data-rp="applyall"]');
-  if (ap) { ap.disabled = !n || Rp.busy; ap.textContent = Rp.busy ? 'Temu par lag raha…' : `Sab Temu par lagao${n ? ` (${n})` : ''}${Rp.submit ? ' + Submit' : ''}`; }
+  if (ap) { ap.disabled = !n || Rp.busy; ap.textContent = Rp.busy ? 'Applying on Temu…' : `Apply all on Temu${n ? ` (${n})` : ''}${Rp.submit ? ' + Submit' : ''}`; }
   // v9.22.42 — the steps: 1 is ticked once products are in the list; 2 and 3 wait for them
   const has = Rp.items.length > 0;
   m.querySelectorAll('.rp-step').forEach(s => {
@@ -304,13 +305,13 @@ function rpCard(it, idx) {
   });
 }
 const rpHasWork = it => !it.temuDoneAt && (rpTitleChanged(it) || rpImgsChanged(it) || !!rpNewW(it) || !!rpNewDims(it) || Rp.clearText || Rp.listPrice);
-// what "Temu par lagao" will do for this product, in words (for the question before it starts)
+// what "Apply on Temu" will do for this product, in words (for the question before it starts)
 function rpPlanText(it) {
   const p = [];
-  p.push(rpTitleChanged(it) ? 'naya title' : 'title wahi (nahi badlega)');
-  if (Rp.clearText) p.push('description + bullets saaf');
+  p.push(rpTitleChanged(it) ? 'new title' : 'same title (no change)');
+  if (Rp.clearText) p.push('description + bullets cleared');
   if (rpImgsChanged(it)) p.push(`${Math.min(rpFinalKeys(it).length, RP_MAX_TEMU)} images`);
-  if (Rp.listPrice) p.push(`list price $${RP_LIST_PRICE.toFixed(2)}`);
+  if (Rp.listPrice) p.push(`list price ${RP_LIST_TXT} (random)`);
   if (rpNewW(it)) p.push(`weight ${rpNewW(it)} lb`);
   if (rpNewDims(it)) p.push(`size ${rpNewDims(it).join(' × ')} in`);
   return p.join(', ');
@@ -326,7 +327,7 @@ function rpRender() {
       if (c.dataset.id === keepId) return;
       const it = Rp.items.find(x => x.id === c.dataset.id); if (it) c.outerHTML = rpCard(it, Rp.items.indexOf(it));
     });
-  } else list.innerHTML = Rp.items.length ? Rp.items.map(rpCard).join('') : '<p class="rp-empty">Abhi koi product nahi. Temu par products tick karo, phir "＋ Products add karo".</p>';
+  } else list.innerHTML = Rp.items.length ? Rp.items.map(rpCard).join('') : '<p class="rp-empty">No products yet. Tick products on Temu, then press "Add products".</p>';
   const cnt = m.querySelector('.rp-count'); if (cnt) cnt.textContent = String(Rp.items.length);
   rpUpdateAiBtn();
 }
@@ -357,7 +358,7 @@ function rpClose() { $('rpModal')?.classList.add('hidden'); clearInterval(Rp.tim
 async function rpRead() {
   const m = $('rpModal'), btn = m?.querySelector('[data-rp="read"]'), lbl = btn?.querySelector('span');
   if (btn) btn.disabled = true;
-  if (lbl) lbl.textContent = 'Products aa rahe hain…';
+  if (lbl) lbl.textContent = 'Adding products…';
   try {
     const got = await temuReadTicked(rpSay);
     if (!got) return;
@@ -380,14 +381,14 @@ async function rpRead() {
     }
     await rpSave();
     rpRender();
-    rpSay(`✓ ${added} product${added === 1 ? '' : 's'} Repack list mein.` + (problems.length ? '\n' + problems.map(x => '• ' + x).join('\n') : ''));
+    rpSay(`✓ ${added} product${added === 1 ? '' : 's'} in the Repack list.` + (problems.length ? '\n' + problems.map(x => '• ' + x).join('\n') : ''));
   } catch (e) { rpSay('✗ ' + (e?.message || e)); }
-  finally { if (btn) btn.disabled = false; if (lbl) lbl.textContent = 'Products add karo'; }
+  finally { if (btn) btn.disabled = false; if (lbl) lbl.textContent = 'Add products'; }
 }
 
 async function rpMakeImages() {
   const go = Rp.items.filter(rpCanRun);
-  if (!go.length) { toast('Pehle prompt likho, ya "Naye packs" (2 se ' + RP_MAX_AI + ' tak)', 'warn'); return; }
+  if (!go.length) { toast('Write a prompt first, or set "New packs" (2 to ' + RP_MAX_AI + ')', 'warn'); return; }
   const only = new Set();
   go.forEach(it => {
     it._repackPrompt = rpPromptOf(it);
@@ -398,13 +399,13 @@ async function rpMakeImages() {
   rpEngineSet($('rpModal')?.querySelector('.rp-eng-sel')?.value || 'flow');
   // the progress window opens over this one: hide it until the images are done
   rpClose();
-  toast(`${only.size} image${only.size === 1 ? '' : 's'} (${go.length} product${go.length === 1 ? '' : 's'}) — mukammal hone par 📦 Repack dobara kholein`, 'info');
+  toast(`${only.size} image${only.size === 1 ? '' : 's'} (${go.length} product${go.length === 1 ? '' : 's'}) — open 📦 Repack again when they are done`, 'info');
   await temuStartBulkImageEdit({ rows: go, repack: true, allImgs: true, only });
 }
 
 async function rpDownload(items) {
   const list = items.filter(rpEdited);
-  if (!list.length) { toast('Abhi koi nayi image nahi bani', 'warn'); return; }
+  if (!list.length) { toast('No new image made yet', 'warn'); return; }
   let ok = 0;
   for (const it of list) {
     const imgs = rpImgs(it);
@@ -417,7 +418,7 @@ async function rpDownload(items) {
     }
   }
   if (list.length > 1) {   // all new titles in one file, next to the images
-    const txt = list.map(it => `${it.title}\n  Purana: ${it.oldTitle}\n  Packs: ${it.oldN || '?'} → ${it.newN || '-'}${it.price ? `   Price (purani): $${it.price}` : ''}\n`).join('\n');
+    const txt = list.map(it => `${it.title}\n  Old: ${it.oldTitle}\n  Packs: ${it.oldN || '?'} → ${it.newN || '-'}${it.price ? `   Price (old): $${it.price}` : ''}\n`).join('\n');
     await zhSaveBlob(new Blob([txt], { type: 'text/plain;charset=utf-8' }), 'Repack/titles.txt');
   }
   toast(`⬇ ${ok} image${ok === 1 ? '' : 's'} → Downloads/…/Repack`, ok ? 'ok' : 'warn');
@@ -429,7 +430,7 @@ async function rpOpenTemu(it) {
   try {
     const tabs = (await chrome.tabs.query({ url: 'https://seller.temu.com/*' })).filter(t => /\/products\.html/.test(t.url || ''));
     const tab = tabs.find(t => t.active) || tabs[0];
-    if (!tab) { toast('Pehle Temu "Manage products" page kholo', 'warn'); return; }
+    if (!tab) { toast('Open the Temu "Manage products" page first', 'warn'); return; }
     let ping = await send(tab.id, { action: 'ZC_PING' }, 1500);
     if (!ping?.ready) { try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['temu_store_copy.js'] }); } catch (_) { /* page not ready */ } }
     let created = null; const onNew = nt => { if (nt.openerTabId === tab.id || /seller\.temu\.com/.test(nt.pendingUrl || nt.url || '')) created = nt; };
@@ -437,11 +438,11 @@ async function rpOpenTemu(it) {
     let r; try { await chrome.tabs.update(tab.id, { active: true }); r = await send(tab.id, { action: 'ZC_OPEN_EDIT', goodsId: it.goodsId }, 9000); } finally { chrome.tabs.onCreated.removeListener(onNew); }
     if (r?.ok && r.url) { await chrome.tabs.create({ url: new URL(r.url, 'https://seller.temu.com').href, active: true, windowId: tab.windowId }); return; }
     if (created) { await chrome.tabs.update(created.id, { active: true }); return; }
-    toast(r?.error === 'row not found' ? 'Yeh product Manage products ke khule page par nahi — us page par le aao (search / page number), phir dobara' : 'Temu edit page nahi khula: ' + (r?.error || 'no answer — Temu page F5 karo'), 'warn');
-  } catch (e) { toast('Temu edit page nahi khula: ' + (e?.message || e), 'warn'); }
+    toast(r?.error === 'row not found' ? 'This product is not on the open Manage products page — bring it there (search / page number), then try again' : 'The Temu edit page did not open: ' + (r?.error || 'no answer — press F5 on the Temu page'), 'warn');
+  } catch (e) { toast('The Temu edit page did not open: ' + (e?.message || e), 'warn'); }
 }
 
-// v9.22.19 — "Temu par lagao": the product's edit page opens; the new title goes in, the old description and every
+// v9.22.19 — "Apply on Temu": the product's edit page opens; the new title goes in, the old description and every
 // bullet point go out (they name the old quantity), the SKU images become the chosen list (your own first, ★ main,
 // no 🗑 ones), and Submit is pressed when that box is ticked. A tab that submitted closes; one with a problem stays open.
 const rpSend = (tabId, msg, ms) => new Promise(res => { const tm = setTimeout(() => res(null), ms || 10000); try { chrome.tabs.sendMessage(tabId, msg, x => { void chrome.runtime.lastError; clearTimeout(tm); res(x); }); } catch (_) { clearTimeout(tm); res(null); } });
@@ -469,7 +470,7 @@ async function rpSubmittedTab(tabId) {
   }
   return false;
 }
-async function rpApplyOnTemu(it, btn, quiet, bg) {
+async function rpApplyOnTemu(it, btn, quiet, bg, slot = 0) {
   const say = t => { if (btn) btn.textContent = t; };
   const old = btn?.textContent; if (btn) btn.disabled = true;
   const name = rpSafeName(it.title).slice(0, 34);
@@ -477,26 +478,26 @@ async function rpApplyOnTemu(it, btn, quiet, bg) {
     let images = null;
     if (rpImgsChanged(it)) {
       const keys = rpFinalKeys(it).slice(0, RP_MAX_TEMU);
-      if (!keys.length) return { ok: false, error: 'saari images ✕ (hatao) par hain — kam se kam ek rakho' };
-      say('⏳ Images tayyar…'); images = [];
+      if (!keys.length) return { ok: false, error: 'all images are marked ✕ (remove) — keep at least one' };
+      say('⏳ Preparing images…'); images = [];
       for (const k of keys) images.push(await rpToJpeg(rpKeyUrl(it, k)));
     }
     const title = rpTitleChanged(it) ? String(it.title).trim() : '';
     const weight = rpNewW(it), dims = rpNewDims(it);
-    if (!dims && (it.newDims || []).some(x => String(x).trim())) return { ok: false, error: 'size ke teeno box bharo (L × W × H) ya teeno khaali chhodo' };
-    const listPrice = Rp.listPrice ? RP_LIST_PRICE : 0;
-    if (!images && !title && !weight && !dims && !Rp.clearText && !listPrice) return { ok: false, error: 'kuch badla nahi (title, images, weight, size, list price ya description)' };
-    say('⏳ Temu khul raha…');
+    if (!dims && (it.newDims || []).some(x => String(x).trim())) return { ok: false, error: 'fill all three size boxes (L × W × H) or leave all three empty' };
+    const listPrice = Rp.listPrice ? zhRandListPrice(it.price) : 0;
+    if (!images && !title && !weight && !dims && !Rp.clearText && !listPrice) return { ok: false, error: 'nothing changed (title, images, weight, size, list price or description)' };
+    say('⏳ Opening Temu…');
     // v9.22.42 — in the separate work window behind yours (9.22.29: a background tab in your own window)
-    const tab = await zhWorkTab(`https://seller.temu.com/product-info.html?add_method=1&click_type=1&goods_id=${encodeURIComponent(it.goodsId)}&tab=1`);
+    const tab = await zhWorkTab(`https://seller.temu.com/product-info.html?add_method=1&click_type=1&goods_id=${encodeURIComponent(it.goodsId)}&tab=1`, slot);
     let ok = false;
     for (let i = 0; i < 40 && !ok; i++) {
       await new Promise(r => setTimeout(r, 1000));
       ok = !!(await rpSend(tab.id, { action: 'ZC_PING' }, 1500))?.ready;
       if (!ok && (i === 10 || i === 25)) { try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['temu_store_copy.js'] }); } catch (_) { /* still loading */ } }
     }
-    if (!ok) return { ok: false, error: 'Temu edit page se raabta nahi hua — page F5 kar ke dobara dabao' };
-    say('⏳ Temu par lag raha…');
+    if (!ok) return { ok: false, error: 'Could not reach the Temu edit page — press F5 on it and try again' };
+    say('⏳ Applying on Temu…');
     let r = await rpSend(tab.id, { action: 'ZC_APPLY_EDIT', title, clearText: Rp.clearText, images, weight, dims, listPrice, submit: Rp.submit }, 300000);
     if (!r && Rp.submit && await rpSubmittedTab(tab.id)) r = { ok: true, done: ['Temu: Submission successful'], submitted: true };
     // v9.22.45 — "did not confirm" can be a late Temu: look at the tab once more before calling it a problem
@@ -505,23 +506,23 @@ async function rpApplyOnTemu(it, btn, quiet, bg) {
       // v9.22.31 — no answer and not submitted: say on which step the tab stopped
       let where = '';
       try { const [x] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => ((document.querySelector('#publish-form-wrapper h2') || {}).textContent || '') + ' | ' + ((document.getElementById('zh-rp-hud') || {}).textContent || '') }); where = x?.result || ''; } catch (_) { /* tab gone */ }
-      return { ok: false, error: 'Temu page ne jawab nahi diya' + (where.replace(/[\s|]/g, '') ? ` (ruka: ${where.slice(0, 140)})` : '') + ' — tab peeche wali Temu window mein khula hai, wahan dekho' };
+      return { ok: false, error: 'The Temu page did not answer' + (where.replace(/[\s|]/g, '') ? ` (stopped at: ${where.slice(0, 140)})` : '') + ' — the tab is open in the Temu window behind yours, look there' };
     }
-    if (!r?.ok) return { ok: false, error: (r?.error || 'Temu page ne jawab nahi diya') + (r?.done?.length ? ` (ho chuka: ${r.done.join(', ')})` : '') + ' — tab peeche wali Temu window mein khula hai, wahan dekho' };
+    if (!r?.ok) return { ok: false, error: (r?.error || 'The Temu page did not answer') + (r?.done?.length ? ` (already done: ${r.done.join(', ')})` : '') + ' — the tab is open in the Temu window behind yours, look there' };
     it.temuDoneAt = Date.now(); it.temuSubmitted = !!r.submitted;
     // v9.22.26 — a product that was submitted is done: it leaves the Repack list (without Submit it stays, marked ✓)
     if (r.submitted) { Rp.items = Rp.items.filter(x => x !== it); Rp.open.delete(it.id); }
     rpSave();
     if (r.submitted) { try { await chrome.tabs.remove(tab.id); } catch (_) { /* already closed */ } }
-    const msg = `✓ ${name}: ${r.done.join(', ') || 'done'}${r.submitted ? ' → Submit (Repack list se hat gaya)' : ' — Submit khud dabao'}` + (r.skus > 1 ? ` (images sirf pehle SKU par, kul ${r.skus})` : '');
+    const msg = `✓ ${name}: ${r.done.join(', ') || 'done'}${r.submitted ? ' → Submit (removed from the Repack list)' : ' — press Submit yourself'}` + (r.skus > 1 ? ` (images on the first SKU only, ${r.skus} in all)` : '');
     if (!quiet) toast(msg, 'ok');
     return { ok: true, msg };
   } catch (e) { return { ok: false, error: e?.message || String(e) }; }
-  finally { if (btn) { btn.disabled = false; btn.textContent = old || 'Temu par lagao'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old || 'Apply on Temu'; } }
 }
 async function rpApplyOne(it, btn) {
-  if (Rp.busy) { toast('Pehle wala kaam chal raha hai', 'warn'); return; }
-  if (Rp.submit && !(await zhAsk('Temu par lagao', `"${rpSafeName(it.title)}": ${rpPlanText(it)} — phir Submit dabega.`, 'Haan, lagao'))) return;
+  if (Rp.busy) { toast('The previous job is still running', 'warn'); return; }
+  if (Rp.submit && !(await zhAsk('Apply on Temu', `"${rpSafeName(it.title)}": ${rpPlanText(it)} — then Submit is pressed.`, 'Yes, apply'))) return;
   Rp.busy = true; rpUpdateAiBtn(); zhWorkBegin();
   try {
     const r = await rpApplyOnTemu(it, btn);
@@ -531,19 +532,19 @@ async function rpApplyOne(it, btn) {
 async function rpApplyAll() {
   if (Rp.busy) return;
   const list = Rp.items.filter(rpHasWork);
-  if (!list.length) { toast('Koi product baqi nahi', 'warn'); return; }
+  if (!list.length) { toast('No product left to do', 'warn'); return; }
   const par = Math.min(3, Math.max(1, Number(Rp.par) || 1));
-  if (!(await zhAsk('Sab Temu par lagao', `${list.length} product, ${par === 1 ? 'ek ek kar ke' : `${par} tabs ek saath`}, Temu par: naya title${Rp.clearText ? ', description + bullets saaf' : ''}${Rp.listPrice ? `, list price $${RP_LIST_PRICE.toFixed(2)}` : ''}, badli hui images${Rp.submit ? ', phir Submit' : ' (Submit aap khud)'}. Masla aaye to woh tab khula rahega aur baqi chalte rahenge.`, 'Haan, shuru karo'))) return;
+  if (!(await zhAsk('Apply all on Temu', `${list.length} product${list.length === 1 ? '' : 's'}, ${par === 1 ? 'one by one' : `${par} tabs at once`}, on Temu: new title${Rp.clearText ? ', description + bullets cleared' : ''}${Rp.listPrice ? `, list price ${RP_LIST_TXT} (random)` : ''}, changed images${Rp.submit ? ', then Submit' : ' (you press Submit)'}. If one has a problem, its tab stays open and the others go on.`, 'Yes, start'))) return;
   Rp.busy = true; rpUpdateAiBtn(); zhWorkBegin();
   const lines = [], now = new Set();
   let next = 0, fin = 0;
-  const show = () => rpSay(`Temu par lag raha: ${fin} / ${list.length} ho gaye` + (now.size ? `\nAbhi: ${[...now].join(' | ')}` : '') + (lines.length ? '\n' + lines.join('\n') : ''));
+  const show = () => rpSay(`Applying on Temu: ${fin} / ${list.length} done` + (now.size ? `\nNow: ${[...now].join(' | ')}` : '') + (lines.length ? '\n' + lines.join('\n') : ''));
   // v9.22.28 — 1 to 3 Temu tabs at once (since 9.22.42 in their own window behind yours)
-  const worker = async () => {
+  const worker = async (_, slot) => {
     while (next < list.length) {
       const it = list[next++], nm = rpSafeName(it.title).slice(0, 24);
       now.add(nm); show();
-      const r = await rpApplyOnTemu(it, null, true, par > 1);
+      const r = await rpApplyOnTemu(it, null, true, par > 1, slot);
       now.delete(nm); fin++;
       lines.push(r.ok ? r.msg : `✗ ${rpSafeName(it.title).slice(0, 34)}: ${r.error}`);
       rpRender(); show();
@@ -552,13 +553,13 @@ async function rpApplyAll() {
   try { await Promise.all(Array.from({ length: Math.min(par, list.length) }, worker)); }
   finally { Rp.busy = false; rpRender(); await zhWorkEnd(); }
   const bad = lines.filter(l => l.startsWith('✗')).length;
-  rpSay(`${list.length - bad} / ${list.length} Temu par lag gaye.\n` + lines.join('\n'));
+  rpSay(`${list.length - bad} / ${list.length} applied on Temu.\n` + lines.join('\n'));
 }
 
 // your own image files (Google Flow etc.) for one product: kept as JPEGs of at most 2000 px
 async function rpAddOwn(it, files) {
   const list = [...(files || [])].filter(f => /^image\//.test(f.type));
-  if (!list.length) { toast('Image file chuno (JPG / PNG / WEBP)', 'warn'); return; }
+  if (!list.length) { toast('Choose an image file (JPG / PNG / WEBP)', 'warn'); return; }
   it.own = rpOwn(it).slice();
   for (const f of list) {
     try {
@@ -569,7 +570,7 @@ async function rpAddOwn(it, files) {
   }
   delete it.temuDoneAt;
   await rpSave(); rpRender();
-  toast(`✓ ${list.length} apni image${list.length === 1 ? '' : 's'} — sab se aage Temu par jayegi`, 'ok');
+  toast(`✓ ${list.length} image${list.length === 1 ? '' : 's'} of yours — ${list.length === 1 ? 'it goes' : 'they go'} first on Temu`, 'ok');
 }
 
 // v9.22.22 — ⧉ copies one image (Chrome's clipboard holds one image at a time) to paste into Flow / GPT / Gemini;
@@ -578,8 +579,8 @@ async function rpCopyImage(url) {
   try {
     const blob = await zhImageToPngBlob(url);
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    toast('Image copy ho gayi — Flow / GPT / Gemini mein Ctrl+V karo', 'ok');
-  } catch (e) { toast('Image copy nahi hui: ' + (e?.message || e), 'warn'); }
+    toast('Image copied — press Ctrl+V in Flow / GPT / Gemini', 'ok');
+  } catch (e) { toast('The image was not copied: ' + (e?.message || e), 'warn'); }
 }
 async function rpPasteImage(it) {
   try {
@@ -588,9 +589,9 @@ async function rpPasteImage(it) {
       const t = ci.types.find(x => /^image\//.test(x));
       if (t) { const bl = await ci.getType(t); files.push(new File([bl], 'pasted.' + (t.split('/')[1] || 'png'), { type: t })); }
     }
-    if (!files.length) { toast('Clipboard mein koi image nahi — pehle image copy karo (Flow mein right-click → Copy image)', 'warn'); return; }
+    if (!files.length) { toast('No image on the clipboard — copy an image first (in Flow: right-click → Copy image)', 'warn'); return; }
     await rpAddOwn(it, files);
-  } catch (e) { toast('Paste nahi hua: ' + (e?.message || e) + ' — card khol kar Ctrl+V try karo', 'warn'); }
+  } catch (e) { toast('Paste failed: ' + (e?.message || e) + ' — open the card and try Ctrl+V', 'warn'); }
 }
 document.addEventListener('paste', e => {
   const m = $('rpModal'); if (!m || m.classList.contains('hidden')) return;
@@ -598,25 +599,25 @@ document.addEventListener('paste', e => {
   const files = [...(e.clipboardData?.files || [])].filter(f => /^image\//.test(f.type));
   if (!files.length) return;
   const it = Rp.items.find(x => x.id === Rp.lastId && Rp.open.has(x.id)) || (Rp.open.size === 1 ? Rp.items.find(x => Rp.open.has(x.id)) : null);
-  if (!it) { toast('Pehle jis product mein image chahiye uska card kholo, phir Ctrl+V', 'warn'); return; }
+  if (!it) { toast('First open the card of the product that should get the image, then Ctrl+V', 'warn'); return; }
   e.preventDefault();
   rpAddOwn(it, files);
 });
 
 // all titles at once: a numbered list out, the AI's numbered answer back (the ids are remembered at copy time)
 async function rpTitlesCopy() {
-  if (!Rp.items.length) { toast('List khaali hai', 'warn'); return; }
+  if (!Rp.items.length) { toast('The list is empty', 'warn'); return; }
   Rp.ttIds = Rp.items.map(it => it.id);
   const txt = Rp.items.map((it, i) => `${i + 1}. ${String(it.title || it.oldTitle || '').replace(/\s+/g, ' ').trim()}`).join('\n');
-  try { await navigator.clipboard.writeText(txt); toast(`${Rp.items.length} titles copy ho gaye (numbered)`, 'ok'); }
-  catch (_) { toast('Copy nahi hua — dobara dabao', 'warn'); return; }
+  try { await navigator.clipboard.writeText(txt); toast(`${Rp.items.length} titles copied (numbered)`, 'ok'); }
+  catch (_) { toast('Copy failed — press again', 'warn'); return; }
   rpSave();
-  const inf = $('rpModal')?.querySelector('.rp-tt-info'); if (inf) inf.textContent = `${Rp.items.length} titles copy hue — jawab isi list par lagega.`;
+  const inf = $('rpModal')?.querySelector('.rp-tt-info'); if (inf) inf.textContent = `${Rp.items.length} titles copied — the answer goes onto exactly this list.`;
 }
 function rpTitlesApply() {
   const ta = $('rpModal')?.querySelector('.rp-tt-paste');
   const ids = Rp.ttIds || [];
-  if (!ids.length) { toast('Pehle "Copy all titles" dabao', 'warn'); return; }
+  if (!ids.length) { toast('Press "Copy all titles" first', 'warn'); return; }
   const lines = String(ta?.value || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     .filter(l => !/^(ChatGPT said|You said|Gemini said|Show thinking)\s*:?$/i.test(l));
   const got = new Array(ids.length).fill('');
@@ -624,11 +625,11 @@ function rpTitlesApply() {
   if (numbered.length) numbered.forEach(l => { const mm = l.match(/^(\d{1,4})\s*[.)\-:]\s*(.+)$/); const n = +mm[1]; if (n >= 1 && n <= ids.length) got[n - 1] = mm[2].trim(); });
   else lines.forEach((l, i) => { if (i < ids.length) got[i] = l.replace(/^[\-*•]\s*/, ''); });
   const n = got.filter(Boolean).length;
-  if (n !== ids.length) { rpSay(`✗ ${ids.length} titles bheje the, ${n} wapas aaye — kuch nahi lagaya. AI se poori list dobara mango.`); return; }
+  if (n !== ids.length) { rpSay(`✗ ${ids.length} titles were sent, ${n} came back — nothing was applied. Ask the AI for the full list again.`); return; }
   let set = 0;
   ids.forEach((id, i) => { const it = Rp.items.find(x => x.id === id); if (it) { it.title = got[i].slice(0, 500); delete it.temuDoneAt; set++; } });
   rpSave(); rpRender();
-  rpSay(`✓ ${set} naye titles lag gaye — har card par dekh lo, phir "Temu par lagao".`);
+  rpSay(`✓ ${set} new titles applied — check each card, then "Apply on Temu".`);
 }
 
 function rpInput(e) {
@@ -669,12 +670,12 @@ async function rpClick(e) {
   else if (a === 'applyall') rpApplyAll();
   else if (a === 'clear') {
     if (!Rp.items.length) return;
-    showConfirm('Repack list khaali karo', `${Rp.items.length} product Repack list se hat jayenge (Temu par kuch nahi badlega).`, 'Khaali karo', async () => { Rp.items = []; await rpSave(); rpRender(); rpSay(''); });
+    showConfirm('Clear the Repack list', `${Rp.items.length} product${Rp.items.length === 1 ? '' : 's'} will leave the Repack list (nothing changes on Temu).`, 'Clear', async () => { Rp.items = []; await rpSave(); rpRender(); rpSay(''); });
   }
   else if (a === 'openall') {
     const all = Rp.items.length && Rp.open.size < Rp.items.length;
     Rp.open = new Set(all ? Rp.items.map(x => x.id) : []);
-    b.textContent = all ? '▸ Sab band karo' : '▾ Sab kholo';
+    b.textContent = all ? '▸ Close all' : '▾ Open all';
     rpRender();
   }
   else if (!it) return;
@@ -697,8 +698,8 @@ async function rpClick(e) {
     if (typeof openLightbox === 'function') openLightbox(rpKeyUrl(it, b.dataset.k), `${Rp.items.indexOf(it) + 1}. ${String(it.title || it.oldTitle || '').slice(0, 60)}`, list, keys.indexOf(b.dataset.k));
   }
   else if (a === 'copy') {
-    try { await navigator.clipboard.writeText(it.title); toast('Title copy ho gaya', 'ok'); }
-    catch (_) { card.querySelector('.rp-title')?.select(); document.execCommand('copy'); toast('Title copy ho gaya', 'ok'); }
+    try { await navigator.clipboard.writeText(it.title); toast('Title copied', 'ok'); }
+    catch (_) { card.querySelector('.rp-title')?.select(); document.execCommand('copy'); toast('Title copied', 'ok'); }
   }
   else if (a === 'dl') rpDownload([it]);
   else if (a === 'temu') rpOpenTemu(it);
@@ -712,7 +713,7 @@ async function rpClick(e) {
     delete it.temuDoneAt;
     rpSave(); rpRender();
   }
-  else if (a === 'del') { Rp.items = Rp.items.filter(x => x !== it); Rp.open.delete(it.id); await rpSave(); rpRender(); toast('List se hat gaya (Temu par kuch nahi badla)', 'ok'); }
+  else if (a === 'del') { Rp.items = Rp.items.filter(x => x !== it); Rp.open.delete(it.id); await rpSave(); rpRender(); toast('Removed from the list (nothing changed on Temu)', 'ok'); }
 }
 
 document.addEventListener('click', e => { if (e.target.closest('#temuRepackBtn')) rpOpen(); });

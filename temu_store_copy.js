@@ -168,6 +168,10 @@
     await sleep(1500);
     { const pn = document.querySelector('[class*="pageName"]'); o.mode = pn ? pn.textContent.trim() : ''; if (/^Edit/i.test(o.mode)) o.warn.push('EDIT_MODE'); }
     readStep1(o);
+    // v9.22.51 — an empty brand blocks Next on this copy page too (it is never saved, the tab is closed after reading)
+    // v9.22.56 — with the title: Temu often only SUGGESTS a brand here ("GREAT VALUE / GREAT VALUE" + "Please enter the brand"),
+    // so the approved brand is really chosen from the list, otherwise "no brand" (same as Apply on Temu)
+    try { const br = await ensureBrand(o.title || ((byId('goodsBasic.goodsName') && byId('goodsBasic.goodsName').querySelector('input')) || {}).value || ''); if (!br.ok) o.warn.push('BRAND_EMPTY'); else if (br.ticked) o.brand = ''; else if (br.brand) o.brand = br.brand; } catch (_) { o.warn.push('BRAND_EMPTY'); }
     let net = readNet();
     if (await clickNext(o, 'Product details')) { await sleep(600); readStep2(o); } else o.attrs = [];
     if (await clickNext(o, 'Variations')) { await sleep(1200); readStep3(o); try { await readSkuImages(o); } catch (_) { o.skuImgs = []; } } else o.skus = [];
@@ -376,6 +380,72 @@
     return { ok: true, done };
   }
   const stepBtn = re => [...document.querySelectorAll('#publish-form-wrapper [role="button"], #publish-form-wrapper button')].find(b => re.test((b.textContent || '').trim()) && vis(b));
+  // v9.22.30 — no brand chosen (red "Please enter the brand" blocks Next): tick "This product does not have a brand".
+  // v9.22.51 — shared by "Apply on Temu" and the reading of ticked products (the Copy listing page is blocked the same way)
+  // v9.22.52 — with a title ("Apply on Temu"): the brand named in the title is chosen when it is in Temu's brand list (that
+  // list holds only the brands this store is approved for); a brand that is not approved → "This product does not have a brand".
+  // Checked live on 30 Oct 2026: brand = a cascader; focus + click on its text box opens column 1 (ul > li, e.g. 43 brands:
+  // GREAT VALUE, TAYLORMADE, CALLAWAY …); a click on a brand shows column 2 ("CALLAWAY 1234…(Serial Number)"); a click there sets it.
+  const brandWords = s => ' ' + String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim() + ' ';
+  const brandSquash = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const brandInTitle = (brand, title) => {
+    const b = brandWords(brand).trim(); if (!b) return false;
+    return brandWords(title).includes(' ' + b + ' ') || (brandSquash(brand).length >= 6 && brandSquash(title).includes(brandSquash(brand)));
+  };
+  async function pickBrandFromTitle(bi, bx, title) {
+    const visEl = e => !!e && e.getClientRects().length > 0;
+    const lists = () => [...document.querySelectorAll('ul')].filter(u => visEl(u) && [...u.children].some(c => c.tagName === 'LI') && !bi.contains(u));
+    bx.focus(); bx.click(); await sleep(1000);
+    let col1 = null;
+    for (let i = 0; i < 6 && !col1; i++) { col1 = lists().sort((a, b) => b.children.length - a.children.length)[0] || null; if (!col1) await sleep(400); }
+    const close = () => { try { bx.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); document.body.click(); } catch (_) { /* closed */ } };
+    if (!col1) { close(); return { found: false, why: 'brand list did not open' }; }
+    const hit = [...col1.children].filter(li => li.tagName === 'LI').map(li => ({ li, n: (li.textContent || '').trim() }))
+      .filter(x => brandInTitle(x.n, title)).sort((a, b) => b.n.length - a.n.length)[0];
+    if (!hit) { close(); await sleep(400); return { found: false }; }
+    hit.li.click(); await sleep(900);
+    const col2 = lists().find(u => u !== col1 && ![...u.children].some(c => c === hit.li));
+    const mark = col2 && ([...col2.children].find(li => brandSquash(li.textContent).startsWith(brandSquash(hit.n))) || col2.querySelector('li'));
+    if (!mark) { close(); return { found: false, why: 'no trademark under ' + hit.n }; }
+    mark.click(); await sleep(1000);
+    close();
+    return { found: true, brand: hit.n, ok: brandInTitle(String(bx.value || '').split('/')[0], hit.n) };
+  }
+  async function ensureBrand(title) {
+    const bi = byId('brand');
+    if (!bi) return { ok: true, ticked: false };
+    const lab = re => [...bi.querySelectorAll('label')].find(l => re.test(l.textContent || ''));
+    const on = l => !!l && (l.getAttribute('data-checked') === 'true' || !!(l.querySelector('input') || {}).checked);
+    // the chosen brand is the value of the brand list's text box (a cascader, "TAYLORMADE / TAYLORMADE"); empty = no brand
+    const bx = bi.querySelector('input[type="text"]');
+    const none = lab(/does not have a brand/i), later = lab(/fill in later/i);
+    // v9.22.54 — Temu sometimes only SUGGESTS a brand: the box shows "TAYLORMADE / TAYLORMADE" with "The brand has been matched
+    // automatically" and the red "Please enter the brand" — it is not chosen and Next stays blocked, so it counts as not set
+    const unconfirmed = () => /please enter the brand|matched automatically/i.test(bi.innerText || '');
+    if (title && bx && !on(later)) {
+      const cur = String(bx.value || '').split('/')[0].trim();
+      if (cur && brandInTitle(cur, title) && !unconfirmed()) return { ok: true, ticked: false, brand: cur, kept: true };   // already the title's brand
+      if (on(none)) { none.click(); await sleep(800); }   // the brand box is closed while "no brand" is ticked
+      const r = await pickBrandFromTitle(bi, bx, title);
+      if (r.found && r.ok && !/please enter the brand/i.test(bi.innerText || '')) return { ok: true, ticked: false, brand: r.brand };
+      if (r.found && r.ok) { await sleep(800); if (!/please enter the brand/i.test(bi.innerText || '')) return { ok: true, ticked: false, brand: r.brand }; }
+      // a suggestion that could not be confirmed: clear it so "no brand" can be ticked below
+      if (unconfirmed() && String(bx.value || '').trim()) {
+        const clr0 = bi.querySelector('[data-testid="beast-core-input-iconClear"]');
+        if (clr0) { ['mousedown', 'mouseup', 'click'].forEach(ev => clr0.dispatchEvent(new MouseEvent(ev, { bubbles: true, view: window }))); await sleep(700); }
+      }
+      // not approved / not in the title: an old brand that is not in the new title must not stay
+      if (String(bx.value || '').trim() && !brandInTitle(String(bx.value).split('/')[0], title)) {
+        const clr = bi.querySelector('[data-testid="beast-core-input-iconClear"]');
+        if (clr) { ['mousedown', 'mouseup', 'click'].forEach(ev => clr.dispatchEvent(new MouseEvent(ev, { bubbles: true, view: window }))); await sleep(700); }
+      }
+    }
+    const empty = !!bx && !String(bx.value || '').trim();
+    if (!(empty && none && !on(none) && !on(later))) return { ok: true, ticked: false };
+    none.click(); await sleep(800);
+    if (!on(none)) return { ok: false, error: 'brand is empty and "This product does not have a brand" could not be ticked' };
+    return { ok: true, ticked: true };
+  }
   async function applyEdit(m) {
     const o = { warn: [] };
     hud('ZHunter: opening the product…');
@@ -403,21 +473,10 @@
       if (!box() || box().value !== want) return { ok: false, error: 'the new title did not take (Temu kept: "' + ((box() && box().value) || '').slice(0, 60) + '")' };
       done.push('title');
     }
-    // v9.22.30 — no brand chosen (red "Please enter the brand" blocks Next): tick "This product does not have a brand"
-    const bi = byId('brand');
-    if (bi) {
-      const lab = re => [...bi.querySelectorAll('label')].find(l => re.test(l.textContent || ''));
-      const on = l => !!l && (l.getAttribute('data-checked') === 'true' || !!(l.querySelector('input') || {}).checked);
-      // the chosen brand is the value of the brand list's text box (a cascader, "TAYLORMADE / TAYLORMADE"); empty = no brand
-      const bx = bi.querySelector('input[type="text"]');
-      const empty = !!bx && !String(bx.value || '').trim();
-      const none = lab(/does not have a brand/i), later = lab(/fill in later/i);
-      if (empty && none && !on(none) && !on(later)) {
-        none.click(); await sleep(800);
-        if (!on(none)) return { ok: false, error: 'brand is empty and "This product does not have a brand" could not be ticked' };
-        done.push('no brand ticked');
-      }
-    }
+    const br = await ensureBrand(m.title || ((byId('goodsBasic.goodsName') && byId('goodsBasic.goodsName').querySelector('input')) || {}).value || '');
+    if (!br.ok) return { ok: false, error: br.error };
+    if (br.ticked) done.push('no brand ticked');
+    else if (br.brand && !br.kept) done.push('brand ' + br.brand);
     if (m.clearText) {
       const d = byId('goodsExtensionInfo.goodsDesc') && byId('goodsExtensionInfo.goodsDesc').querySelector('textarea');
       if (d && d.value) { setText(d, ''); done.push('description'); }

@@ -1,5 +1,122 @@
 # ZHunter Iras — CHANGELOG
 
+## 9.22.57 (2026-10-30) — Random list price $79.99 – $99.99
+- Paste-links queue: rows no longer overlap or squash when the queue is long (117 links). Clean one-line rows — platform badge, product/link, status chip, ✕ at the right — and the list scrolls inside its own box.
+- Asked: the list price should be a random one between 79.99 and 99.99, not always 99.99, in Repack and in Store export.
+- One shared helper (zhRandListPrice) gives every product its own list price: a whole dollar 79 … 99 plus .99 (e.g. 84.99, 92.99).
+  - It is never below the base price (Temu wants list ≥ base).
+  - If the base is above $99, the price is not changed (Repack) / Temu's own list price stays (Store export).
+- **Repack:** the switch reads "Set the list price → $79.99 – $99.99 (random)", and each product gets its own value at "Apply on Temu".
+- **Store export:** every review card / exported row gets its own random list price.
+
+## 9.22.56 (2026-10-30) — Reading products: brand suggestion + really 3 at once
+- Reported: Store export got stuck on the copy page. Temu showed "GREAT VALUE / GREAT VALUE" with "Please enter the brand", so Next was blocked. The pages also went one by one.
+- **Brand:** reading products now uses the same brand check as Apply on Temu (9.22.52 / 9.22.54).
+  - The brand in the title is chosen from the approved brand list. Otherwise the suggestion is cleared and "This product does not have a brand" is ticked.
+  - The card gets that brand, or none.
+- **3 at once for real:**
+  - The 3 pages that are read at the same time were 3 tabs of one work window, and Chrome only runs the front tab of a window.
+  - Now every page that runs at the same time has its own work window behind yours (slightly offset). The windows close by themselves at the end.
+  - The same applies to Repack "Apply on Temu" with 2 or 3 tabs.
+
+## 9.22.55 (2026-10-30) — Store export: products come into the review list
+- Asked: Store export should read the ticked products from Temu (title, images, category, weight …) and put them up for review, then sheet export or upload.
+- Store export no longer downloads a sheet straight away.
+  - The products read from Temu become **review cards** in "Review & Customize Products". These are the same cards an imported Store export sheet gives.
+  - Source line: "🏬 Store export (from Temu) · N products".
+  - Titles, images, Title Optimizer and AI Image Studio all work there.
+  - Then **Export only** (the sheet) or **Upload only**.
+- **Category = Temu's own one.** Only when that category is not in your category list does the title matcher pick one. When it finds nothing, Temu's category is added to the list. The report names every such case.
+- Also kept from Temu: brand, colour, weight, size, base / list price, bullets, description and keyword attributes.
+
+## 9.22.54 (2026-10-30) — Apply on Temu: Temu's brand suggestion is really chosen
+- Reported: "Apply on Temu" got stuck on step 1 ("could not open step 2 (STEP_BLOCKED: Product details)").
+- Why:
+  - After the new TaylorMade title goes in, Temu fills the brand box with "TAYLORMADE / TAYLORMADE" and says "The brand has been matched automatically".
+  - That is only a suggestion. Temu still says "Please enter the brand", and Next stays blocked.
+  - The extension saw TAYLORMADE in the box and thought the brand was set.
+- Now a brand counts as set only without those two messages. A suggested brand is chosen properly from the brand list (brand → trademark).
+  - If that does not work, the suggestion is cleared and "This product does not have a brand" is ticked.
+- Checked live on 30 Oct 2026 (left without saving): new title → suggestion → chosen from the list → the message is gone and Next opens "Product details".
+
+## 9.22.53 (2026-10-30) — No more CSP error on Walmart pages
+- Reported: Chrome's Errors page listed "Executing inline event handler violates the following Content Security Policy directive…". It came from a Walmart product page (content.js).
+- The image panel on product pages wrote `onerror="…"` into every image. Walmart's Content Security Policy blocks such inline handlers, and Chrome counts that as an extension error.
+- It is now a normal listener. A broken image still turns faint and shows 🖼, but no inline code is used.
+- No other inline handlers were left in the page scripts.
+
+## 9.22.52 (2026-10-30) — Apply on Temu: the brand from the title, if approved
+- Asked: an old product had "This product does not have a brand" because the store had no approval for it. Now it gets a TaylorMade title, so the extension should check: is the brand approved → choose it; otherwise → no brand.
+- "Apply on Temu" now looks at the new title (or the current one):
+  - **The brand in the title is in Temu's brand list** (the list only holds the brands this store is approved for; Cloverhill: 43, e.g. TAYLORMADE, CALLAWAY, GREAT VALUE):
+    - "no brand" is unticked;
+    - the brand and its trademark are chosen;
+    - the result line says "brand TAYLORMADE".
+  - **The brand is already the title's brand** → it stays.
+  - **No approved brand in the title** → an old brand that does not fit the new title is cleared, and "This product does not have a brand" is ticked.
+- Reading products (Add products / Store export) still only ticks "no brand" when the brand is empty.
+- Checked live on 30 Oct 2026 (left without saving):
+  - TaylorMade → Callaway by title;
+  - clear + "no brand";
+  - "no brand" ticked → TaylorMade.
+
+## 9.22.51 (2026-10-30) — Reading products: an empty brand no longer blocks
+- Reported: Repack "Add products" got stuck on "Reading 1/3". The Copy listing page had no brand ("Please enter the brand"), and Temu does not allow Next until one is chosen.
+- The "This product does not have a brand" tick (since 9.22.30 on "Apply on Temu") is now also done on that copy page before Next.
+  - That page is never saved; its tab closes after reading.
+- One shared helper (ensureBrand) does it in both places. Repack "Add products" and Store export both read products this way.
+
+## 9.22.50 (2026-10-30) — Fix drafts: all complete products submitted at once
+- Reported: all 8 fields were filled (guessed), but only 1 of 5 products was submitted.
+  - Pressing one row's own Submit makes Temu redraw the list, and the values typed into the other rows are lost.
+- Now every complete product is **ticked**, and the bottom **"Submit (N)"** is pressed once.
+  - Checked live on 30 Oct 2026: that button is off until rows are ticked, and a filled value stays when its row is ticked.
+  - The old one-by-one Submit is kept only as a fallback.
+- Power Supply and Battery Properties guesses now match each other:
+  - an electric product → "USB Charging (built-in Battery)" + "Rechargeable Battery";
+  - "Dry Battery Power" only for AA / AAA / "dry" titles. Before, "Cordless … battery" got Dry Battery + Rechargeable.
+
+## 9.22.49 (2026-10-30) — Fix drafts: guesses where nothing sure is known
+- Reported: on "Product action required", Fix drafts left 8 fields empty ("8 field(s) need you") on 5 old products:
+  - Material on 2 food bundles that Temu put under Serveware / Bowls;
+  - Net Content Volume + Alcohol Content on a margarita mixer;
+  - Power Supply + Battery Properties on 2 electric spin scrubbers.
+- Asked: the extension should make a guess. Since 9.15.1 a field was filled only from the title, the category or your rules.
+- Now a field with no sure value gets a guess:
+  - **Dropdowns** take the best fitting option from Temu's own list (seen live on 30 Oct 2026):
+    - Material: food / meal / bundle titles → Paper, otherwise Plastic / Other.
+    - Power Supply: electric titles → USB Charging (built-in Battery), then Rechargeable / Plug Powered; others → Use Without Electricity.
+    - Battery Properties: electric → Rechargeable Battery (AA / AAA titles → Non-rechargeable); others → Without Battery.
+    - Anything else → Other / None, or else Temu's first option.
+  - **Number + unit:**
+    - Alcohol Content = the % in the title, otherwise 0 %vol.
+    - Net Content Volume = the amount in the title (fl oz → ounce, ml → mL, L), otherwise 1 L.
+- Every guess shows as "(guessed)" in the report, and the first line counts them: "N guessed — check them on Temu".
+
+## 9.22.48 (2026-10-30) — The extension speaks English
+- Asked: use the extension in English, not Urdu.
+- All Roman Urdu text on screen is now English:
+  - buttons, hints, tooltips, messages (toasts), questions and empty-list texts;
+  - Repack, the Temu lock (code / backup code boxes), Temu Export (Title Optimizer, Upload, Settings, History), Library, Settings and the Bulk tab.
+- Code comments were left as they are; they are not shown in the extension.
+
+## 9.22.47 (2026-10-30) — Temu Export: new Title Optimizer, cleaner layout
+- Asked: a better UI/UX for the Temu Export window, above all the AI title part.
+- **Title Optimizer**
+  - The ways are in one row: **AI rewrite · Mera prompt · ChatGPT · Gemini**. ChatGPT and Gemini are their own tabs now, no second switch inside.
+  - The chat choice is two buttons, **Khuli tab / Nayi chat**, instead of a dropdown.
+  - The answer opens in its own window, **"Titles check karo"**:
+    - each product shows PURANA and NAYA one under the other;
+    - a coloured length chip: green ≤240, amber ≤500, red above;
+    - a tick per line, plus Sab tick / Sab hatao;
+    - **"Apply N titles"** always stays in view at the bottom.
+  - "Baad mein" closes the window; "Titles check window dobara kholo" brings it back.
+  - The small list with its own scroll inside the panel is gone.
+  - Manual copy / paste is folded under "Khud copy / paste".
+- **AI Image Studio:** the four choices are an even 2 × 2 grid with clear labels, and a full-width Edit Images button.
+- **Bottom part:** bigger Export only / Upload only buttons. More tools is an even 3-column grid of buttons.
+- Rounder, consistent corners on the steps strip, the source buttons and the cards.
+
 ## 9.22.46 (2026-10-30) — Gemini with several tabs: a red "!" upload no longer puts a tab out of use
 - Reported: with several Gemini tabs, some tabs show the red "!" on the uploaded image (zhunter_….png), and after that the extension did not use those tabs any more.
 - Why:
